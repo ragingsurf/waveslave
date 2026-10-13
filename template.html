@@ -643,9 +643,10 @@ const WS = (() => {
   // Full screen: the map panel fills the screen (and the browser goes full screen when it allows it). The map only shows full screen:
   // ✕, Esc or leaving the browser's full screen all go back to Forecast.
   let FS = false;
-  function setFs(on) { if (on === FS) return; FS = on; const sec = document.getElementById("viewWs"), b = document.getElementById("wsFs");
+  // win=false fills the window without asking the browser for full screen yet (the opening animation asks once it has finished: see goFull).
+  function setFs(on, win = true) { if (on === FS) return; FS = on; const sec = document.getElementById("viewWs"), b = document.getElementById("wsFs");
     sec.classList.toggle("fs", FS); document.documentElement.style.overflow = FS ? "hidden" : ""; b.textContent = FS ? "✕" : "⛶"; b.setAttribute("aria-label", FS ? "Exit full screen" : "Full screen");
-    try { if (FS && sec.requestFullscreen && document.fullscreenEnabled) sec.requestFullscreen().catch(() => {}); else if (!FS && document.fullscreenElement) document.exitFullscreen().catch(() => {}); } catch(e) {}
+    try { if (FS && win && sec.requestFullscreen && document.fullscreenEnabled) sec.requestFullscreen().catch(() => {}); else if (!FS && document.fullscreenElement) document.exitFullscreen().catch(() => {}); } catch(e) {}
     requestAnimationFrame(() => { if (sec.hidden) return; size(); parts.forEach(spawn); drawBase(); }); }
   document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && FS) setView("fc"); else if (FS) requestAnimationFrame(() => { size(); drawBase(); }); });
   document.addEventListener("keydown", e => { if (e.key === "Escape" && FS) setView("fc"); });
@@ -919,11 +920,17 @@ const WS = (() => {
     document.getElementById("wsFs").onclick = () => setView("fc"); // ✕ leaves the map for Forecast (the map is only ever full screen)
     built = true; }
   return {
-    show() { if (!built) build(); size(); legend(); setT(ti);
+    // still=true draws the map but holds its moving streaks until go(), so they don't compete with the opening animation for frames.
+    show(still) { if (!built) build(); size(); legend(); setT(ti);
       if (document.fonts) Promise.all([document.fonts.load('italic 800 13px "Anybody"'), document.fonts.load('17px "Metal Mania"'), document.fonts.load('16px "VT323"')]).then(() => { if (raf) drawBase(); }).catch(() => {}); parts = Array.from({length: Math.min(4000, Math.round(W*H/260))}, () => { const p = {}; spawn(p); return p; });
-      cancelAnimationFrame(raf); if (!matchMedia("(prefers-reduced-motion: reduce)").matches) raf = requestAnimationFrame(frame); },
+      cancelAnimationFrame(raf); raf = 0; if (!still) this.go(); },
+    go() { if (!raf && !document.getElementById("viewWs").hidden && !matchMedia("(prefers-reduced-motion: reduce)").matches) raf = requestAnimationFrame(frame); },
+    pause() { cancelAnimationFrame(raf); raf = 0; },
     resize() { if (!built || document.getElementById("viewWs").hidden) return; size(); parts.forEach(spawn); drawBase(); },
-    full(on) { setFs(on); },
+    full(on, win) { setFs(on, win); },
+    // Ask the browser for full screen after the opening animation, while the tap still counts as the user's (browsers refuse it later).
+    goFull() { const sec = document.getElementById("viewWs"), ua = navigator.userActivation;
+      try { if (FS && !document.fullscreenElement && sec.requestFullscreen && document.fullscreenEnabled && (!ua || ua.isActive)) sec.requestFullscreen().catch(() => {}); } catch(e) {} },
     hide() { cancelAnimationFrame(raf); raf = 0; if (playing) { clearInterval(playing); playing = 0; document.getElementById("wsPlay").textContent = "▶"; } },
     redraw() { if (built && raf) drawBase(); } };
 })();
@@ -939,11 +946,13 @@ const FX = (() => {
     // scorched rim outside it, soft flames and smoke rising off the edge, and sparks drifting up. Closing burns the hole back down into the tab.
     ring: { dur: [1500, 1150], tail: 700, ease: u => .5 - .5*Math.cos(Math.PI*u),
       edge(W, H, p, t, o) { if (!o.ph) o.ph = Array.from({length: 6}, () => Math.random()*6.28);
-        const R = Math.hypot(Math.max(o.x, W-o.x), Math.max(o.y, H-o.y))*1.3 + 40, r = R*p, f = o.ph, P = []; o.r = r;
+        // The burnt edge wanders up to A px either side of radius r; the map shows through a plain circle just inside it (cheap for the browser to
+        // clip every frame, unlike a ragged outline), and the ring between the two is painted as charred paper.
+        const R = Math.hypot(Math.max(o.x, W-o.x), Math.max(o.y, H-o.y)) + 90, r = R*p, A = Math.min(.16*r, 55), f = o.ph, P = []; o.r = r; o.rc = Math.max(0, r - A*1.24 - 3);
         for (let i = 0; i < 160; i++) { const a = i/160*Math.PI*2, n = .55*Math.sin(3*a + f[0]) + .3*Math.sin(5*a + f[1] + t*.6) + .2*Math.sin(9*a + f[2]) + .12*Math.sin(17*a + f[3] + t*1.5) + .07*Math.sin(29*a + f[4] - t*3),
-          rr = Math.max(0, r*(1 + .16*n) + Math.sin(41*a + f[5] + t*7)*2.5*Math.min(1, r/40)); P.push([o.x + Math.cos(a)*rr, o.y + Math.sin(a)*rr]); }
+          rr = Math.max(0, r + A*n + Math.sin(41*a + f[5] + t*7)*2.5*Math.min(1, r/40)); P.push([o.x + Math.cos(a)*rr, o.y + Math.sin(a)*rr]); }
         return P; },
-      clip(P) { return P.map(q => q.join("px ")+"px"); },
+      clip(P, W, H, o) { return `circle(${o.rc.toFixed(1)}px at ${o.x}px ${o.y}px)`; },
       paint(g, P, W, H, t, E, o, dt, live) {
         if (!o.spr) { const mk = (stops) => { const c = document.createElement("canvas"); c.width = c.height = 64; const x = c.getContext("2d"), r = x.createRadialGradient(32, 32, 0, 32, 32, 32);
             stops.forEach(([k, col]) => r.addColorStop(k, col)); x.fillStyle = r; x.fillRect(0, 0, 64, 64); return c; };
@@ -951,8 +960,8 @@ const FX = (() => {
             mk([[0, "rgba(220,45,10,.9)"], [.5, "rgba(140,20,0,.35)"], [1, "rgba(80,0,0,0)"]]), mk([[0, "rgba(55,50,48,.85)"], [1, "rgba(55,50,48,0)"]])]; o.F = []; o.S = []; }
         const path = () => { P.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); }, rnd = Math.random;
         if (live) { g.save(); g.beginPath(); g.rect(0, 0, W, H); path(); g.clip("evenodd"); g.lineJoin = "round";
-          for (const [w, a] of [[80, .05], [62, .07], [46, .1], [32, .14], [20, .2], [10, .4]]) { g.beginPath(); path(); g.strokeStyle = `rgba(48,20,6,${a})`; g.lineWidth = w; g.stroke(); }
-          g.restore();
+          for (const [w, a] of [[80, .07], [52, .12], [28, .22], [12, .45]]) { g.beginPath(); path(); g.strokeStyle = `rgba(48,20,6,${a})`; g.lineWidth = w; g.stroke(); }
+          g.restore(); g.beginPath(); path(); g.moveTo(o.x + o.rc, o.y); g.arc(o.x, o.y, o.rc, 0, Math.PI*2); g.fillStyle = "rgba(24,12,8,.95)"; g.fill("evenodd");
           let len = 0; for (let i = 1; i < P.length; i++) len += Math.hypot(P[i][0]-P[i-1][0], P[i][1]-P[i-1][1]);
           const sec = dt/1000, vr = o.pr == null ? 0 : (o.r - o.pr)/Math.max(sec, .001), n = Math.min(80, len/8)*dt/16; o.pr = o.r;
           for (let k = 0; k < n; k++) { const [x0, y0] = P[rnd()*P.length | 0], d = Math.hypot(x0 - o.x, y0 - o.y) || 1, ux = (x0 - o.x)/d, uy = (y0 - o.y)/d, x = x0 + ux*5, y = y0 + uy*5;
@@ -973,20 +982,21 @@ const FX = (() => {
         if (o.F.length > 1500) o.F.splice(0, o.F.length - 1500); if (o.S.length > 250) o.S.splice(0, o.S.length - 250); } } };
   // Runs one move; returns a stop function that jumps straight to the end. The view switch is done when the edge stops; flames and sparks
   // already in the air can drift out for a short tail after that. FX.manual lets the preview recorder step the clock by hand.
-  function run(name, open, ws, done) { const st = S[name], dur = st.dur[open ? 0 : 1], tail = st.tail || 0, W = innerWidth, H = innerHeight,
+  function run(name, open, ws, done, after) { const st = S[name], dur = st.dur[open ? 0 : 1], tail = st.tail || 0, W = innerWidth, H = innerHeight,
       tab = document.querySelector('.tabs button[data-v="ws"]').getBoundingClientRect(), o = {x: tab.left + tab.width/2, y: tab.top + tab.height/2},
       c = document.createElement("canvas"), g = c.getContext("2d"), E = []; let el = 0, raf = 0, last = 0, over = false, landed = false, P = null;
-    c.width = W; c.height = H; c.style.cssText = "position:fixed;inset:0;width:100%;height:100%;z-index:101;pointer-events:none"; document.body.appendChild(c);
+    const k = Math.min(1, Math.sqrt(1.2e6/(W*H))); // big screens draw the fire at lower resolution and let the browser stretch it: it's soft anyway
+    c.width = Math.round(W*k); c.height = Math.round(H*k); g.scale(k, k); c.style.cssText = "position:fixed;inset:0;width:100%;height:100%;z-index:101;pointer-events:none"; document.body.appendChild(c);
     const ease = st.ease || (u => 1 - Math.pow(1 - u, 3));
     function land() { if (landed) return; landed = true; ws.style.clipPath = ""; done(); }
     function step(dt) { el = Math.min(dur + tail, el + dt); const live = el < dur, t = el/1000;
-      if (live) { const u = el/dur; P = st.edge(W, H, ease(open ? u : 1 - u), t, o); ws.style.clipPath = `polygon(${st.clip(P, W, H).join(",")})`; } else land();
+      if (live) { const u = el/dur; P = st.edge(W, H, ease(open ? u : 1 - u), t, o); ws.style.clipPath = st.clip(P, W, H, o); } else land();
       g.clearRect(0, 0, W, H); if (live || tail) st.paint(g, P, W, H, t, E, o, dt, live);
       for (let i = E.length-1; i >= 0; i--) { const e = E[i]; e.x += e.vx*dt/1000; e.y += e.vy*dt/1000; e.vy += (e.c ? 500 : -60)*dt/1000; e.life -= dt/(e.c ? 600 : 700);
         if (e.life <= 0) { E.splice(i, 1); continue; } g.globalAlpha = e.life; g.fillStyle = e.c ? "#e8fbff" : e.life > .5 ? "#ffe680" : "#ff5a1a"; g.fillRect(e.x, e.y, e.s, e.s); }
       g.globalAlpha = 1; if (E.length > 400) E.splice(0, E.length - 400); if (el >= dur + tail) stop(); }
     function tick(now) { step(last ? Math.min(50, now - last) : 16); last = now; if (!over) raf = requestAnimationFrame(tick); }
-    function stop() { if (over) return; over = true; cancelAnimationFrame(raf); c.remove(); land(); }
+    function stop() { if (over) return; over = true; cancelAnimationFrame(raf); c.remove(); land(); if (after) after(); }
     if (FX.manual) FX.step = step; else raf = requestAnimationFrame(tick);
     return stop; }
   return { run, manual: false, step: null };
@@ -994,11 +1004,14 @@ const FX = (() => {
 function setView(v, instant){ VIEW=v; try{ localStorage.setItem("waveslave-view", v); }catch(e){}
   document.querySelectorAll(".tabs button").forEach(b=>b.setAttribute("aria-selected", b.dataset.v===v));
   if(v===SHOWN) return; SHOWN=v; if(ending) ending();
-  const fc=document.getElementById("viewFc"), ws=document.getElementById("viewWs"), open=v==="ws";
-  const done = open ? () => { ending = null; fc.hidden = true; } : () => { ending = null; ws.hidden = true; WS.full(false); WS.hide(); };
-  if(open){ ws.hidden=false; WS.show(); WS.full(true); } else { fc.hidden=false; boot(CUR); try{ if(document.fullscreenElement) document.exitFullscreen().catch(()=>{}); }catch(e){} }
-  if(instant || matchMedia("(prefers-reduced-motion: reduce)").matches) return done();
-  ending = FX.run("ring", open, ws, done); }
+  const fc=document.getElementById("viewFc"), ws=document.getElementById("viewWs"), open=v==="ws", calm=instant || matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const done = open ? () => { ending = null; fc.hidden = true; WS.go(); } : () => { ending = null; ws.hidden = true; WS.full(false); WS.hide(); };
+  if(open){ ws.hidden=false; WS.show(!calm); WS.full(true, calm); if(calm) return done(); ending = FX.run("ring", true, ws, done, () => WS.goFull()); return; }
+  fc.hidden=false; boot(CUR); WS.pause(); if(calm) return done();
+  // A full-screen browser shows only the map, so leave full screen first and burn back to the forecast once the window has settled.
+  const go = () => { clearTimeout(wait); document.removeEventListener("fullscreenchange", go); if(SHOWN==="fc" && ending===hold) ending = FX.run("ring", false, ws, done); };
+  const hold = () => { go(); if(ending) ending(); }; let wait = 0; ending = hold;
+  if(document.fullscreenElement){ document.addEventListener("fullscreenchange", go); wait = setTimeout(go, 700); try{ document.exitFullscreen().catch(go); }catch(e){ go(); } } else go(); }
 document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>setView(b.dataset.v));
 addEventListener("hashchange", () => switchSpot(location.hash.slice(1)));
 function boot(SPOT){

@@ -464,7 +464,7 @@ const WS = (() => {
         dot(g, x, y, r) { g.strokeStyle = "#fff"; g.lineWidth = 1.2; g.beginPath(); g.moveTo(x-3, y); g.lineTo(x+3, y); g.moveTo(x, y-3); g.lineTo(x, y+3); g.stroke(); },
         text(g, s, x, y, r) { g.fillStyle = "rgba(14,8,36,.7)"; const w = g.measureText(s).width; g.fillRect(x-2, y-7, w+4, 14); g.fillStyle = r === 1 ? "#ffe600" : "#e6f7ff"; g.fillText(s, x, y+1); } } },
     lights: { land(g) { drawRelief(g, [[0,"#0d0a24"],[.5,"#1d1840"],[1,"#3b3570"]], .2, .9);
-        g.save(); path(g); g.clip(); g.globalCompositeOperation = "lighter";
+        g.save(); path(g); g.clip(); 
         for (const [, lon, lat, r] of TOWNS) { const [x, y] = px(lon, lat), R = (r === 1 ? 0.16 : r === 2 ? 0.08 : 0.04)*z, gr = g.createRadialGradient(x, y, 0, x, y, R);
           gr.addColorStop(0, "rgba(255,214,120,.9)"); gr.addColorStop(.35, "rgba(255,150,40,.4)"); gr.addColorStop(1, "rgba(255,90,0,0)"); g.fillStyle = gr; g.fillRect(x-R, y-R, 2*R, 2*R); }
         g.restore(); },
@@ -930,10 +930,75 @@ const WS = (() => {
 // ---- View tabs: Forecast or the WaveSlave map
 let VIEW="fc";
 try{ VIEW=localStorage.getItem("waveslave-view")==="ws"?"ws":"fc"; }catch(e){}
-function setView(v){ VIEW=v; try{ localStorage.setItem("waveslave-view", v); }catch(e){}
+// Switching burns through: a ring of fire opens the map out of the Map tab and burns back into it on the way out.
+// The map is clipped to the moving edge and the fire is painted on a canvas laid over the top for the length of the move.
+let SHOWN="fc", ending=null;
+const FX = (() => {
+  const S = {
+    // Ring of fire: the forecast catches light at the Map tab and burns away like paper, slowly at first and then faster: a glowing ember line with a
+    // scorched rim outside it, soft flames and smoke rising off the edge, and sparks drifting up. Closing burns the hole back down into the tab.
+    ring: { dur: [1500, 1150], tail: 700, ease: u => .5 - .5*Math.cos(Math.PI*u),
+      edge(W, H, p, t, o) { if (!o.ph) o.ph = Array.from({length: 6}, () => Math.random()*6.28);
+        const R = Math.hypot(Math.max(o.x, W-o.x), Math.max(o.y, H-o.y))*1.3 + 40, r = R*p, f = o.ph, P = []; o.r = r;
+        for (let i = 0; i < 160; i++) { const a = i/160*Math.PI*2, n = .55*Math.sin(3*a + f[0]) + .3*Math.sin(5*a + f[1] + t*.6) + .2*Math.sin(9*a + f[2]) + .12*Math.sin(17*a + f[3] + t*1.5) + .07*Math.sin(29*a + f[4] - t*3),
+          rr = Math.max(0, r*(1 + .16*n) + Math.sin(41*a + f[5] + t*7)*2.5*Math.min(1, r/40)); P.push([o.x + Math.cos(a)*rr, o.y + Math.sin(a)*rr]); }
+        return P; },
+      clip(P) { return P.map(q => q.join("px ")+"px"); },
+      paint(g, P, W, H, t, E, o, dt, live) {
+        if (!o.spr) { const mk = (stops) => { const c = document.createElement("canvas"); c.width = c.height = 64; const x = c.getContext("2d"), r = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+            stops.forEach(([k, col]) => r.addColorStop(k, col)); x.fillStyle = r; x.fillRect(0, 0, 64, 64); return c; };
+          o.spr = [mk([[0, "rgba(255,250,225,1)"], [.35, "rgba(255,205,90,.65)"], [1, "rgba(255,140,0,0)"]]), mk([[0, "rgba(255,170,40,1)"], [.45, "rgba(255,90,10,.5)"], [1, "rgba(255,40,0,0)"]]),
+            mk([[0, "rgba(220,45,10,.9)"], [.5, "rgba(140,20,0,.35)"], [1, "rgba(80,0,0,0)"]]), mk([[0, "rgba(55,50,48,.85)"], [1, "rgba(55,50,48,0)"]])]; o.F = []; o.S = []; }
+        const path = () => { P.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); }, rnd = Math.random;
+        if (live) { g.save(); g.beginPath(); g.rect(0, 0, W, H); path(); g.clip("evenodd"); g.lineJoin = "round";
+          for (const [w, a] of [[80, .05], [62, .07], [46, .1], [32, .14], [20, .2], [10, .4]]) { g.beginPath(); path(); g.strokeStyle = `rgba(48,20,6,${a})`; g.lineWidth = w; g.stroke(); }
+          g.restore();
+          let len = 0; for (let i = 1; i < P.length; i++) len += Math.hypot(P[i][0]-P[i-1][0], P[i][1]-P[i-1][1]);
+          const sec = dt/1000, vr = o.pr == null ? 0 : (o.r - o.pr)/Math.max(sec, .001), n = Math.min(80, len/8)*dt/16; o.pr = o.r;
+          for (let k = 0; k < n; k++) { const [x0, y0] = P[rnd()*P.length | 0], d = Math.hypot(x0 - o.x, y0 - o.y) || 1, ux = (x0 - o.x)/d, uy = (y0 - o.y)/d, x = x0 + ux*5, y = y0 + uy*5;
+            if (x < -30 || x > W+30 || y < -30 || y > H+30) continue; // flames ride along with the burning edge, then rise off it
+            o.F.push({x: x + (rnd()-.5)*6, y, vx: ux*vr*.9 + (rnd()-.5)*24, vy: uy*vr*.9 - 45 - rnd()*95, a: 0, m: .28 + rnd()*.32, s: 8 + rnd()*12, w: rnd()*6.28});
+            if (rnd() < .14) o.S.push({x, y, vx: ux*vr*.8 + (rnd()-.5)*16, vy: uy*vr*.8 - 22 - rnd()*38, a: 0, m: 1.3 + rnd()*.9, s: 18 + rnd()*26});
+            if (rnd() < .05) E.push({x, y, vx: (rnd()-.5)*50, vy: -60 - rnd()*120, life: 1, s: 1 + rnd()*1.6, c: 0}); } }
+        const sec = dt/1000, move = (q) => { for (let i = q.length-1; i >= 0; i--) { const e = q[i]; e.a += sec; if (e.a >= e.m) { q.splice(i, 1); continue; } e.x += e.vx*sec; e.y += e.vy*sec; } };
+        move(o.S); move(o.F);
+        for (const e of o.S) { const k = e.a/e.m, z = e.s*(1 + 1.5*k); g.globalAlpha = .26*Math.sin(Math.PI*k); g.drawImage(o.spr[3], e.x - z/2, e.y - z/2, z, z); }
+        g.globalAlpha = 1;
+        if (live) { g.globalCompositeOperation = "lighter"; g.lineJoin = "round";
+          for (const [w, col] of [[12, "rgba(255,80,0,.3)"], [4.5, "rgba(255,150,30,.85)"], [1.6, "rgba(255,240,190,.95)"]]) { g.beginPath(); path(); g.strokeStyle = col; g.lineWidth = w; g.stroke(); } }
+        g.globalCompositeOperation = "lighter";
+        for (const e of o.F) { const k = e.a/e.m, z = e.s*(1 - .55*k)*(.85 + .15*Math.sin(t*30 + e.w)); g.globalAlpha = (1 - k)*.7*Math.min(1, e.a*12);
+          g.drawImage(o.spr[k < .28 ? 0 : k < .6 ? 1 : 2], e.x + Math.sin(t*9 + e.w)*3*k - z/2, e.y - z, z, z*1.9); }
+        g.globalAlpha = 1; g.globalCompositeOperation = "source-over";
+        if (o.F.length > 1500) o.F.splice(0, o.F.length - 1500); if (o.S.length > 250) o.S.splice(0, o.S.length - 250); } } };
+  // Runs one move; returns a stop function that jumps straight to the end. The view switch is done when the edge stops; flames and sparks
+  // already in the air can drift out for a short tail after that. FX.manual lets the preview recorder step the clock by hand.
+  function run(name, open, ws, done) { const st = S[name], dur = st.dur[open ? 0 : 1], tail = st.tail || 0, W = innerWidth, H = innerHeight,
+      tab = document.querySelector('.tabs button[data-v="ws"]').getBoundingClientRect(), o = {x: tab.left + tab.width/2, y: tab.top + tab.height/2},
+      c = document.createElement("canvas"), g = c.getContext("2d"), E = []; let el = 0, raf = 0, last = 0, over = false, landed = false, P = null;
+    c.width = W; c.height = H; c.style.cssText = "position:fixed;inset:0;width:100%;height:100%;z-index:101;pointer-events:none"; document.body.appendChild(c);
+    const ease = st.ease || (u => 1 - Math.pow(1 - u, 3));
+    function land() { if (landed) return; landed = true; ws.style.clipPath = ""; done(); }
+    function step(dt) { el = Math.min(dur + tail, el + dt); const live = el < dur, t = el/1000;
+      if (live) { const u = el/dur; P = st.edge(W, H, ease(open ? u : 1 - u), t, o); ws.style.clipPath = `polygon(${st.clip(P, W, H).join(",")})`; } else land();
+      g.clearRect(0, 0, W, H); if (live || tail) st.paint(g, P, W, H, t, E, o, dt, live);
+      for (let i = E.length-1; i >= 0; i--) { const e = E[i]; e.x += e.vx*dt/1000; e.y += e.vy*dt/1000; e.vy += (e.c ? 500 : -60)*dt/1000; e.life -= dt/(e.c ? 600 : 700);
+        if (e.life <= 0) { E.splice(i, 1); continue; } g.globalAlpha = e.life; g.fillStyle = e.c ? "#e8fbff" : e.life > .5 ? "#ffe680" : "#ff5a1a"; g.fillRect(e.x, e.y, e.s, e.s); }
+      g.globalAlpha = 1; if (E.length > 400) E.splice(0, E.length - 400); if (el >= dur + tail) stop(); }
+    function tick(now) { step(last ? Math.min(50, now - last) : 16); last = now; if (!over) raf = requestAnimationFrame(tick); }
+    function stop() { if (over) return; over = true; cancelAnimationFrame(raf); c.remove(); land(); }
+    if (FX.manual) FX.step = step; else raf = requestAnimationFrame(tick);
+    return stop; }
+  return { run, manual: false, step: null };
+})();
+function setView(v, instant){ VIEW=v; try{ localStorage.setItem("waveslave-view", v); }catch(e){}
   document.querySelectorAll(".tabs button").forEach(b=>b.setAttribute("aria-selected", b.dataset.v===v));
-  document.getElementById("viewFc").hidden = v!=="fc"; document.getElementById("viewWs").hidden = v!=="ws";
-  if(v==="fc") boot(CUR); if(v==="ws") { WS.show(); WS.full(true); } else { WS.full(false); WS.hide(); } }
+  if(v===SHOWN) return; SHOWN=v; if(ending) ending();
+  const fc=document.getElementById("viewFc"), ws=document.getElementById("viewWs"), open=v==="ws";
+  const done = open ? () => { ending = null; fc.hidden = true; } : () => { ending = null; ws.hidden = true; WS.full(false); WS.hide(); };
+  if(open){ ws.hidden=false; WS.show(); WS.full(true); } else { fc.hidden=false; boot(CUR); try{ if(document.fullscreenElement) document.exitFullscreen().catch(()=>{}); }catch(e){} }
+  if(instant || matchMedia("(prefers-reduced-motion: reduce)").matches) return done();
+  ending = FX.run("ring", open, ws, done); }
 document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>setView(b.dataset.v));
 addEventListener("hashchange", () => switchSpot(location.hash.slice(1)));
 function boot(SPOT){
@@ -1223,7 +1288,7 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
 drawDays(); drawDay();
 }
 boot(SPOT0);
-if(VIEW!=="fc") setView(VIEW);
+if(VIEW!=="fc") setView(VIEW, true);
 
 // ---- Wave of the week title: water spray blasting off the end of the letters (placed once the font has loaded).
 (() => { const g=document.getElementById("wotwSpray"); if(!g) return;

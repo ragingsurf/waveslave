@@ -930,41 +930,11 @@ const WS = (() => {
 // ---- View tabs: Forecast or the WaveSlave map
 let VIEW="fc";
 try{ VIEW=localStorage.getItem("waveslave-view")==="ws"?"ws":"fc"; }catch(e){}
-// Switching animates: a wall of fire, a rising wave or a ring of fire carries the map in, and back out (TRANS picks the style while we try them out).
-// The map is clipped to the moving edge and the flames or foam are painted on a canvas laid over the top for the length of the move.
-let SHOWN="fc", TRANS="ring", ending=null;
+// Switching burns through: a ring of fire opens the map out of the Map tab and burns back into it on the way out.
+// The map is clipped to the moving edge and the fire is painted on a canvas laid over the top for the length of the move.
+let SHOWN="fc", ending=null;
 const FX = (() => {
-  const wob = (x, t) => Math.sin(x*.045 + t*9)*.5 + Math.sin(x*.11 - t*13)*.3 + Math.sin(x*.023 + t*5)*.6;
-  // One flame tongue rising from (x, y) along direction (ux, uy): white-hot at the root, orange, then red fading out at the tip.
-  function tongue(g, x, y, h, w, ux, uy, sway) { const nx = -uy, ny = ux, tx = x + ux*h + nx*sway, ty = y + uy*h + ny*sway,
-      gr = g.createLinearGradient(x, y, tx, ty);
-    gr.addColorStop(0, "rgba(255,245,200,.85)"); gr.addColorStop(.25, "rgba(255,190,40,.75)"); gr.addColorStop(.6, "rgba(255,70,10,.5)"); gr.addColorStop(1, "rgba(160,0,0,0)");
-    g.fillStyle = gr; g.beginPath(); g.moveTo(x - nx*w, y - ny*w);
-    g.quadraticCurveTo(x + ux*h*.5 - nx*w*.9 + nx*sway*.3, y + uy*h*.5 - ny*w*.9 + ny*sway*.3, tx, ty);
-    g.quadraticCurveTo(x + ux*h*.5 + nx*w*.9 + nx*sway*.3, y + uy*h*.5 + ny*w*.9 + ny*sway*.3, x + nx*w, y + ny*w); g.closePath(); g.fill(); }
-  const fl = (i, t) => .5 + .5*Math.sin(i*2.3 + t*17) * Math.sin(i*.7 + t*11 + 1); // per-flame flicker 0..1
   const S = {
-    // Fire: a ragged wall of flame climbs the screen with the map under it, throwing embers.
-    fire: { dur: [700, 520], edge(W, H, p, t) { const P = []; for (let x = -10; x <= W+10; x += 10) P.push([x, H+70 - (H+170)*p + wob(x, t)*26]); return P; },
-      clip(P, W, H) { return P.map(q => q.join("px ")+"px").concat([`${W+10}px ${H+400}px`, `-10px ${H+400}px`]); },
-      paint(g, P, W, H, t, E) { const top = Math.min(...P.map(q => q[1])), gl = g.createLinearGradient(0, top - 120, 0, top + 60);
-        gl.addColorStop(0, "rgba(255,60,0,0)"); gl.addColorStop(.5, "rgba(255,80,0,.3)"); gl.addColorStop(.75, "rgba(140,0,0,.4)"); gl.addColorStop(1, "rgba(80,0,0,0)"); g.fillStyle = gl; g.fillRect(0, top - 120, W, 200);
-        g.globalCompositeOperation = "lighter";
-        P.forEach(([x, y], i) => { const f = fl(i, t); tongue(g, x, y + 14, 40 + 90*f*f, 9 + 6*f, 0, -1, Math.sin(t*8 + i)*14);
-          if (i % 3 === 0) tongue(g, x + 5, y + 10, 20 + 30*fl(i+50, t), 7, 0, -1, Math.sin(t*12 + i*2)*8);
-          if (Math.random() < .2) E.push({x, y: y - 20, vx: (Math.random()-.5)*60, vy: -140 - Math.random()*200, life: 1, s: 1 + Math.random()*2.5, c: 0}); });
-        g.globalCompositeOperation = "source-over"; } },
-    // Water: a swell rises with a white foam crest and a lighter wave running ahead of it, flinging spray off the top.
-    water: { dur: [760, 560], edge(W, H, p, t) { const P = []; for (let x = -10; x <= W+10; x += 10) P.push([x, H+150 - (H+290)*p + Math.sin(x*.018 + t*7)*30 + Math.sin(x*.05 - t*10)*9]); return P; },
-      clip(P, W, H) { return P.map(q => q.join("px ")+"px").concat([`${W+10}px ${H+400}px`, `-10px ${H+400}px`]); },
-      paint(g, P, W, H, t, E) { const ahead = P.map(([x, y]) => [x, y - 80 + Math.sin(x*.03 - t*8)*16]), deep = g.createLinearGradient(0, Math.min(...ahead.map(q => q[1])), 0, Math.max(...P.map(q => q[1])));
-        deep.addColorStop(0, "rgba(120,220,240,.55)"); deep.addColorStop(1, "rgba(10,70,110,.85)");
-        g.beginPath(); ahead.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); for (let i = P.length-1; i >= 0; i--) g.lineTo(P[i][0], P[i][1]); g.closePath();
-        g.fillStyle = deep; g.fill();
-        g.lineJoin = "round"; g.beginPath(); ahead.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.strokeStyle = "rgba(159,224,234,.8)"; g.lineWidth = 3; g.stroke();
-        g.beginPath(); P.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.strokeStyle = "rgba(255,255,255,.45)"; g.lineWidth = 16; g.stroke(); g.strokeStyle = "#fff"; g.lineWidth = 4; g.stroke();
-        for (let i = 1; i < P.length-1; i++) if (P[i][1] < P[i-1][1] && P[i][1] < P[i+1][1] || Math.random() < .08) for (let k = 0; k < 3; k++)
-          E.push({x: P[i][0], y: P[i][1], vx: (Math.random()-.5)*120, vy: -150 - Math.random()*220, life: 1, s: 1.5 + Math.random()*2.5, c: 1}); } },
     // Ring of fire: the forecast catches light at the Map tab and burns away like paper, slowly at first and then faster: a glowing ember line with a
     // scorched rim outside it, soft flames and smoke rising off the edge, and sparks drifting up. Closing burns the hole back down into the tab.
     ring: { dur: [1500, 1150], tail: 700, ease: u => .5 - .5*Math.cos(Math.PI*u),
@@ -1028,7 +998,7 @@ function setView(v, instant){ VIEW=v; try{ localStorage.setItem("waveslave-view"
   const done = open ? () => { ending = null; fc.hidden = true; } : () => { ending = null; ws.hidden = true; WS.full(false); WS.hide(); };
   if(open){ ws.hidden=false; WS.show(); WS.full(true); } else { fc.hidden=false; boot(CUR); try{ if(document.fullscreenElement) document.exitFullscreen().catch(()=>{}); }catch(e){} }
   if(instant || matchMedia("(prefers-reduced-motion: reduce)").matches) return done();
-  ending = FX.run(TRANS, open, ws, done); }
+  ending = FX.run("ring", open, ws, done); }
 document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>setView(b.dataset.v));
 addEventListener("hashchange", () => switchSpot(location.hash.slice(1)));
 function boot(SPOT){

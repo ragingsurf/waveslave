@@ -947,8 +947,8 @@ const FX = (() => {
     ring: { dur: [1500, 1150], tail: 700, ease: u => .5 - .5*Math.cos(Math.PI*u),
       edge(W, H, p, t, o) { if (!o.ph) o.ph = Array.from({length: 6}, () => Math.random()*6.28);
         // The burnt edge wanders up to A px either side of radius r; the map shows through a plain circle just inside it (cheap for the browser to
-        // clip every frame, unlike a ragged outline), and the ring between the two is painted as charred paper.
-        const R = Math.hypot(Math.max(o.x, W-o.x), Math.max(o.y, H-o.y)) + 90, r = R*p, A = Math.min(.16*r, 55), f = o.ph, P = []; o.r = r; o.rc = Math.max(0, r - A*1.24 - 3);
+        // clip every frame, unlike a ragged outline). Char painted from a little inside that circle out to the edge hides where the circle is.
+        const R = Math.hypot(Math.max(o.x, W-o.x), Math.max(o.y, H-o.y)) + 90, r = R*p, A = Math.min(.12*r, 36), f = o.ph, P = []; o.r = r; o.rc = Math.max(0, r - A*1.24 - 3);
         for (let i = 0; i < 160; i++) { const a = i/160*Math.PI*2, n = .55*Math.sin(3*a + f[0]) + .3*Math.sin(5*a + f[1] + t*.6) + .2*Math.sin(9*a + f[2]) + .12*Math.sin(17*a + f[3] + t*1.5) + .07*Math.sin(29*a + f[4] - t*3),
           rr = Math.max(0, r + A*n + Math.sin(41*a + f[5] + t*7)*2.5*Math.min(1, r/40)); P.push([o.x + Math.cos(a)*rr, o.y + Math.sin(a)*rr]); }
         return P; },
@@ -959,27 +959,33 @@ const FX = (() => {
           o.spr = [mk([[0, "rgba(255,250,225,1)"], [.35, "rgba(255,205,90,.65)"], [1, "rgba(255,140,0,0)"]]), mk([[0, "rgba(255,170,40,1)"], [.45, "rgba(255,90,10,.5)"], [1, "rgba(255,40,0,0)"]]),
             mk([[0, "rgba(220,45,10,.9)"], [.5, "rgba(140,20,0,.35)"], [1, "rgba(80,0,0,0)"]]), mk([[0, "rgba(55,50,48,.85)"], [1, "rgba(55,50,48,0)"]])]; o.F = []; o.S = []; }
         const path = () => { P.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); }, rnd = Math.random;
-        if (live) { g.save(); g.beginPath(); g.rect(0, 0, W, H); path(); g.clip("evenodd"); g.lineJoin = "round";
-          for (const [w, a] of [[80, .07], [52, .12], [28, .22], [12, .45]]) { g.beginPath(); path(); g.strokeStyle = `rgba(48,20,6,${a})`; g.lineWidth = w; g.stroke(); }
-          g.restore(); g.beginPath(); path(); g.moveTo(o.x + o.rc, o.y); g.arc(o.x, o.y, o.rc, 0, Math.PI*2); g.fillStyle = "rgba(24,12,8,.95)"; g.fill("evenodd");
+        if (live) { const sc = g.createRadialGradient(o.x, o.y, Math.max(0, o.r - 40), o.x, o.y, o.r + 130); // scorch fading out past the edge
+          sc.addColorStop(0, "rgba(60,26,8,.55)"); sc.addColorStop(.35, "rgba(70,32,10,.38)"); sc.addColorStop(.65, "rgba(90,45,15,.14)"); sc.addColorStop(1, "rgba(90,45,15,0)");
+          g.save(); g.beginPath(); g.rect(0, 0, W, H); path(); g.clip("evenodd"); g.fillStyle = sc; g.fillRect(0, 0, W, H);
+          g.restore(); const r0 = Math.max(0, o.rc - 26), r1 = Math.max(r0 + 1, o.r + 1.3*Math.min(.12*o.r, 36) + 4), ch = g.createRadialGradient(o.x, o.y, r0, o.x, o.y, r1);
+          ch.addColorStop(0, "rgba(22,11,7,0)"); ch.addColorStop(Math.min(.99, (o.rc - r0)/(r1 - r0)), "rgba(22,11,7,.93)"); ch.addColorStop(1, "rgba(30,12,6,.96)");
+          g.beginPath(); path(); g.moveTo(o.x + r0, o.y); g.arc(o.x, o.y, r0, 0, Math.PI*2); g.fillStyle = ch; g.fill("evenodd");
           let len = 0; for (let i = 1; i < P.length; i++) len += Math.hypot(P[i][0]-P[i-1][0], P[i][1]-P[i-1][1]);
-          const sec = dt/1000, vr = o.pr == null ? 0 : (o.r - o.pr)/Math.max(sec, .001), n = Math.min(80, len/8)*dt/16; o.pr = o.r;
-          for (let k = 0; k < n; k++) { const [x0, y0] = P[rnd()*P.length | 0], d = Math.hypot(x0 - o.x, y0 - o.y) || 1, ux = (x0 - o.x)/d, uy = (y0 - o.y)/d, x = x0 + ux*5, y = y0 + uy*5;
-            if (x < -30 || x > W+30 || y < -30 || y > H+30) continue; // flames ride along with the burning edge, then rise off it
-            o.F.push({x: x + (rnd()-.5)*6, y, vx: ux*vr*.9 + (rnd()-.5)*24, vy: uy*vr*.9 - 45 - rnd()*95, a: 0, m: .28 + rnd()*.32, s: 8 + rnd()*12, w: rnd()*6.28});
-            if (rnd() < .14) o.S.push({x, y, vx: ux*vr*.8 + (rnd()-.5)*16, vy: uy*vr*.8 - 22 - rnd()*38, a: 0, m: 1.3 + rnd()*.9, s: 18 + rnd()*26});
+          const sec = dt/1000, vr = o.pr == null ? 0 : (o.r - o.pr)/Math.max(sec, .001), sz = Math.min(1.8, Math.max(1, Math.sqrt(W*H)/650)), n = Math.min(90*sz, len/8)*dt/16; o.pr = o.r; // bigger screens: bigger, more flames
+          for (let k = 0; k < n; k++) { const i = rnd()*P.length | 0, [x0, y0] = P[i], d = Math.hypot(x0 - o.x, y0 - o.y) || 1, ux = (x0 - o.x)/d, uy = (y0 - o.y)/d, x = x0 + ux*5, y = y0 + uy*5;
+            if (x < -30 || x > W+30 || y < -30 || y > H+30) continue;
+            // Each flame stays pinned to its spot on the burning edge (wherever the edge has moved to) and rises off it as it ages.
+            o.F.push({i, off: 3 + rnd()*8, j: (rnd()-.5)*8, h: 0, vh: 45 + rnd()*95, x, y, a: 0, m: .28 + rnd()*.32, s: (9 + rnd()*13)*sz, w: rnd()*6.28});
+            if (rnd() < .14) o.S.push({x, y, vx: ux*vr*.8 + (rnd()-.5)*16, vy: uy*vr*.8 - 22 - rnd()*38, a: 0, m: 1.3 + rnd()*.9, s: (18 + rnd()*26)*sz});
             if (rnd() < .05) E.push({x, y, vx: (rnd()-.5)*50, vy: -60 - rnd()*120, life: 1, s: 1 + rnd()*1.6, c: 0}); } }
         const sec = dt/1000, move = (q) => { for (let i = q.length-1; i >= 0; i--) { const e = q[i]; e.a += sec; if (e.a >= e.m) { q.splice(i, 1); continue; } e.x += e.vx*sec; e.y += e.vy*sec; } };
-        move(o.S); move(o.F);
+        move(o.S);
+        for (let i = o.F.length-1; i >= 0; i--) { const e = o.F[i]; e.a += sec; if (e.a >= e.m) { o.F.splice(i, 1); continue; } e.h += e.vh*sec;
+          if (live) { const [x0, y0] = P[e.i], d = Math.hypot(x0 - o.x, y0 - o.y) || 1; e.x = x0 + (x0 - o.x)/d*e.off + e.j; e.y = y0 + (y0 - o.y)/d*e.off; } }
         for (const e of o.S) { const k = e.a/e.m, z = e.s*(1 + 1.5*k); g.globalAlpha = .26*Math.sin(Math.PI*k); g.drawImage(o.spr[3], e.x - z/2, e.y - z/2, z, z); }
         g.globalAlpha = 1;
         if (live) { g.globalCompositeOperation = "lighter"; g.lineJoin = "round";
           for (const [w, col] of [[12, "rgba(255,80,0,.3)"], [4.5, "rgba(255,150,30,.85)"], [1.6, "rgba(255,240,190,.95)"]]) { g.beginPath(); path(); g.strokeStyle = col; g.lineWidth = w; g.stroke(); } }
         g.globalCompositeOperation = "lighter";
         for (const e of o.F) { const k = e.a/e.m, z = e.s*(1 - .55*k)*(.85 + .15*Math.sin(t*30 + e.w)); g.globalAlpha = (1 - k)*.7*Math.min(1, e.a*12);
-          g.drawImage(o.spr[k < .28 ? 0 : k < .6 ? 1 : 2], e.x + Math.sin(t*9 + e.w)*3*k - z/2, e.y - z, z, z*1.9); }
+          g.drawImage(o.spr[k < .28 ? 0 : k < .6 ? 1 : 2], e.x + Math.sin(t*9 + e.w)*3*k - z/2, e.y - e.h - z, z, z*1.5); }
         g.globalAlpha = 1; g.globalCompositeOperation = "source-over";
-        if (o.F.length > 1500) o.F.splice(0, o.F.length - 1500); if (o.S.length > 250) o.S.splice(0, o.S.length - 250); } } };
+        if (o.F.length > 2000) o.F.splice(0, o.F.length - 2000); if (o.S.length > 250) o.S.splice(0, o.S.length - 250); } } };
   // Runs one move; returns a stop function that jumps straight to the end. The view switch is done when the edge stops; flames and sparks
   // already in the air can drift out for a short tail after that. FX.manual lets the preview recorder step the clock by hand.
   function run(name, open, ws, done, after) { const st = S[name], dur = st.dur[open ? 0 : 1], tail = st.tail || 0, W = innerWidth, H = innerHeight,

@@ -41,11 +41,14 @@ header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-be
   background:linear-gradient(180deg,#fff7b0 0%,#ffd400 28%,#ff8a00 55%,#ff3d00 78%,#b80000 100%);
   -webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;
   -webkit-text-stroke:1px #200300;
-  filter:drop-shadow(0 0 8px rgba(255,60,0,.7)) drop-shadow(2px 3px 0 #200300);
-  animation:flicker 2.6s ease-in-out infinite}
-@keyframes flicker{0%,100%{filter:drop-shadow(0 0 8px rgba(255,60,0,.7)) drop-shadow(2px 3px 0 #200300)}
-  45%{filter:drop-shadow(0 0 13px rgba(255,40,0,.85)) drop-shadow(2px 3px 0 #200300)}
-  60%{filter:drop-shadow(0 0 5px rgba(255,110,0,.55)) drop-shadow(2px 3px 0 #200300)}}
+  filter:drop-shadow(0 0 8px rgba(255,60,0,.7)) drop-shadow(2px 3px 0 #200300);will-change:transform}
+/* The flicker is a glow behind the wordmark that fades in and out (opacity only), so the phone draws the logo once and never repaints it
+   while the page moves. Animating the logo's own blur filter repainted it every frame and made it glitch during pull-to-refresh on iPhone. */
+.brandbox{position:relative;isolation:isolate;display:inline-block}
+.brandbox::before{content:"";position:absolute;z-index:-1;left:-4%;right:-6%;top:18%;bottom:-6%;pointer-events:none;border-radius:50%;
+  background:radial-gradient(closest-side,rgba(255,70,0,.42),rgba(255,40,0,.16) 60%,transparent);transform:rotate(-7deg);
+  will-change:opacity;animation:flicker 2.6s ease-in-out infinite}
+@keyframes flicker{0%,100%{opacity:.55}45%{opacity:1}60%{opacity:.3}}
 .where{color:var(--muted);font-size:13px}
 .fresh{font-size:12px;padding:4px 10px;border-radius:99px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
 .fresh.stale{border-color:var(--fair);color:var(--fair)}
@@ -169,7 +172,9 @@ table.mdl th:first-child,table.mdl td:first-child{position:sticky;left:0;backgro
 table.mdl td{text-align:center}table.mdl td:first-child{text-align:left;font-family:var(--body);font-weight:600}
 table.mdl tr.main td{color:var(--sea)}table.mdl tr.spr td{border-top:1px solid var(--muted)}
 /* Pull to refresh: an amber LED sign (like the readout) drops in from the top: PULL, LET GO, then LOADING. */
-.ptr{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) - 40px);transform:translate(-50%,0);z-index:20;pointer-events:none;opacity:0;
+/* The page itself doesn't bounce at the top (overscroll-behavior), so only the sign moves and Safari's own pull-to-refresh doesn't fight it. */
+html{overscroll-behavior-y:none}
+.ptr{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) - 40px);transform:translate3d(-50%,0,0);z-index:20;pointer-events:none;opacity:0;will-change:transform,opacity;
   background:#0a0f12;border-radius:8px;padding:4px 12px;font-family:"VT323",ui-monospace,monospace;font-size:20px;line-height:1.1;color:#ffb347;
   text-shadow:0 0 6px rgba(255,140,0,.7);white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.3)}
 .ptr.spin{animation:ptrblink .7s steps(1) infinite}
@@ -253,7 +258,7 @@ table.mdl tr.main td{color:var(--sea)}table.mdl tr.spr td{border-top:1px solid v
 
 <div class="wrap">
   <header>
-    <div>
+    <div class="brandbox">
       <h1 class="brand">WaveSlave</h1>
     </div>
     <span class="fresh" id="fresh">Data snapshot</span>
@@ -1287,15 +1292,21 @@ if(VIEW!=="fc") setView(VIEW, true);
   (document.fonts?document.fonts.ready:Promise.resolve()).then(place); })();
 
 // ---- pull to refresh (touch): drag down from the top of the page, release past the line to reload.
+// The sign follows the finger once per frame with a springy pull that slows as it nears the bottom, and the text only changes when it crosses the line.
 (() => {
   const el=document.createElement("div"); el.className="ptr"; el.setAttribute("aria-hidden","true"); el.textContent="PULL ▼"; document.body.append(el);
-  const MAX=100, GO=70; let y0=null, d=0;
-  const set=v=>{ d=v; el.style.transform=`translate(-50%,${Math.min(v,MAX)}px)`; el.style.opacity=Math.min(1,v/GO); el.textContent = v>=GO ? "LET GO ▲" : "PULL ▼"; };
-  addEventListener("touchstart",e=>{ y0 = (scrollY<=0 && e.touches.length===1) ? e.touches[0].clientY : null; d=0; },{passive:true});
-  addEventListener("touchmove",e=>{ if(y0===null) return; const v=(e.touches[0].clientY-y0)*.55; if(v<=0||scrollY>0){ set(0); return; } set(v); },{passive:true});
-  addEventListener("touchend",()=>{ if(y0===null) return; y0=null;
-    if(d>=GO){ el.textContent="LOADING…"; el.classList.add("spin"); el.style.transform=`translate(-50%,${GO}px)`; setTimeout(()=>location.reload(),450); }
-    else { el.style.transition="transform .2s, opacity .2s"; set(0); setTimeout(()=>el.style.transition="",220); } },{passive:true});
+  const MAX=110, GO=70; let y0=null, d=0, want=0, raf=0, go=false;
+  const pos=v=>`translate3d(-50%,${v.toFixed(1)}px,0)`;
+  const draw=()=>{ raf=0; d=want; el.style.transform=pos(d); el.style.opacity=Math.min(1,d/GO).toFixed(3);
+    const g=d>=GO; if(g!==go){ go=g; el.textContent = g ? "LET GO ▲" : "PULL ▼"; } };
+  const set=v=>{ want=v; if(!raf) raf=requestAnimationFrame(draw); };
+  addEventListener("touchstart",e=>{ y0 = (scrollY<=0 && e.touches.length===1) ? e.touches[0].clientY : null; el.style.transition=""; },{passive:true});
+  addEventListener("touchmove",e=>{ if(y0===null) return; const dy=e.touches[0].clientY-y0;
+    if(dy<=0||scrollY>0){ set(0); return; } set(MAX*(1-Math.exp(-dy/(MAX*1.2)))); },{passive:true});
+  const end=()=>{ if(y0===null) return; y0=null; cancelAnimationFrame(raf); raf=0;
+    if(want>=GO){ el.textContent="LOADING…"; el.classList.add("spin"); el.style.transition="transform .15s ease-out"; el.style.transform=pos(GO); el.style.opacity=1; setTimeout(()=>location.reload(),450); }
+    else { el.style.transition="transform .25s ease-out, opacity .25s ease-out"; want=d=0; go=false; el.style.transform=pos(0); el.style.opacity=0; el.textContent="PULL ▼"; } };
+  addEventListener("touchend",end,{passive:true}); addEventListener("touchcancel",end,{passive:true});
 })();
 // Grab and drag the forecast table sideways with a mouse (fingers use the phone's own scrolling), with a little glide when you let go; a drag doesn't count as a tap on a cell.
 (() => { let el = null, x0 = 0, s0 = 0, lx = 0, lt = 0, v = 0, moved = false, glide = 0;

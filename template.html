@@ -640,14 +640,15 @@ const WS = (() => {
         g.beginPath(); g.moveTo(x1, y1); g.lineTo(x1-dx*6-dy*4, y1-dy*6+dx*4); g.lineTo(x1-dx*6+dy*4, y1-dy*6-dx*4); g.closePath(); g.fill(); } }
     g.restore(); }
   // Map height from the visible screen, upright or sideways (the app frame can be taller than the screen, so the device size caps it).
-  // Full screen: the map panel fills the screen (and the browser goes full screen when it allows it); ✕ or Esc comes back.
+  // Full screen: the map panel fills the screen (and the browser goes full screen when it allows it). The map only shows full screen:
+  // ✕, Esc or leaving the browser's full screen all go back to Forecast.
   let FS = false;
   function setFs(on) { if (on === FS) return; FS = on; const sec = document.getElementById("viewWs"), b = document.getElementById("wsFs");
     sec.classList.toggle("fs", FS); document.documentElement.style.overflow = FS ? "hidden" : ""; b.textContent = FS ? "✕" : "⛶"; b.setAttribute("aria-label", FS ? "Exit full screen" : "Full screen");
     try { if (FS && sec.requestFullscreen && document.fullscreenEnabled) sec.requestFullscreen().catch(() => {}); else if (!FS && document.fullscreenElement) document.exitFullscreen().catch(() => {}); } catch(e) {}
     requestAnimationFrame(() => { if (sec.hidden) return; size(); parts.forEach(spawn); drawBase(); }); }
-  document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && FS) setFs(false); else if (FS) requestAnimationFrame(() => { size(); drawBase(); }); });
-  document.addEventListener("keydown", e => { if (e.key === "Escape" && FS) setFs(false); });
+  document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && FS) setView("fc"); else if (FS) requestAnimationFrame(() => { size(); drawBase(); }); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && FS) setView("fc"); });
   function screenH() { const so = screen.orientation && screen.orientation.type, land = so ? so.startsWith("landscape") : Math.abs(window.orientation || 0) === 90 || innerWidth > innerHeight;
     const sw = screen.width || innerWidth, sh = screen.height || innerHeight, dev = land ? Math.min(sw, sh) : Math.max(sw, sh), vv = window.visualViewport ? visualViewport.height : innerHeight;
     return { land, h: Math.min(vv, innerHeight, dev) }; }
@@ -915,7 +916,7 @@ const WS = (() => {
     // Taiwan button: one tap zooms all the way out to the whole West Pacific; tap again when already out to come back to Taiwan.
     document.getElementById("wsHome").onclick = () => { if (GRID && z > zmin*1.01) { cx = GRID.lon0 + (GRID.nlon-1)*GRID.dlon/2; cy = GRID.lat0 + (GRID.nlat-1)*GRID.dlat/2; z = zmin; }
       else { cx = HOME.cx; cy = HOME.cy; z = z0; } moved(); };
-    document.getElementById("wsFs").onclick = () => { if (FS) { setFs(false); setView("fc"); } else setFs(true); }; // ✕ leaves the map for Forecast
+    document.getElementById("wsFs").onclick = () => setView("fc"); // ✕ leaves the map for Forecast (the map is only ever full screen)
     built = true; }
   return {
     show() { if (!built) build(); size(); legend(); setT(ti);

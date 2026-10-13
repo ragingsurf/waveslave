@@ -97,12 +97,12 @@ svg text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
 /* Readout: amber LED scoreboard (one look in both themes). */
 .readout{margin:4px 0 12px;background:#0a0f12;border-radius:12px;padding:10px 14px;display:grid;grid-template-columns:auto repeat(4,minmax(0,1fr));gap:4px 12px;align-items:end;
   font-family:"VT323",ui-monospace,monospace;color:#ffb347;text-shadow:0 0 6px rgba(255,140,0,.6);font-variant-numeric:tabular-nums}
-.readout .t{grid-row:span 2;font-size:38px;line-height:1;color:#fff3c4}
+.readout .t{grid-row:span 2;font-size:56px;line-height:.9;letter-spacing:-.02em;color:#fff3c4}
 .readout .k{font-size:14px;color:#6f8a94;text-shadow:none;letter-spacing:.06em;line-height:1}
 .readout .v{font-size:30px;line-height:1}
 .readout .r{grid-column:1/-1;font-size:20px;line-height:1.2;border-top:1px dashed #33464d;padding-top:4px}
-@media (max-width:440px){.readout{gap:4px 8px;padding-inline:10px}.readout .t{font-size:32px}.readout .v{font-size:25px}}
-@media (max-width:360px){.readout .t{font-size:28px}.readout .v{font-size:22px}}
+@media (max-width:440px){.readout{gap:4px 8px;padding-inline:10px}.readout .t{font-size:50px}.readout .v{font-size:25px}}
+@media (max-width:360px){.readout .t{font-size:42px}.readout .v{font-size:22px}}
 @media (max-width:640px){.daypanel>.readout{margin-inline:12px}}
 .legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--muted);margin-top:8px}
 .legend span{display:inline-flex;align-items:center;gap:6px}.legend i{width:12px;height:4px;border-radius:2px;display:inline-block}

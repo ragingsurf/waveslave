@@ -74,7 +74,7 @@ for n,S in enumerate(SPOTS):
     storms.append({'name':name,'kind':kind,'id':s.get('CwaTyphoonName') or ('TD'+s.get('CwaTdNo','')),'distNm':dist,'bearing':bear,'heading':CMP.get(f.get('MovingDirection'),0),
       'kt':kt,'gust':round(float(f.get('MaxGustSpeed') or 0)*1.944),'mb':int(float(f['Pressure'])),'swell':None})
   storms.sort(key=lambda s:s['distNm'])
-  meta={k:S[k] for k in ('name','full','region','buoyName','stationName','off','lat','lon','blurb','cams')}
+  meta={k:S[k] for k in ('name','full','region','buoyName','stationName','off','lat','lon','blurb','cams')}; meta['zh']=S.get('zh') or {}  # Traditional Chinese names for the 中文 view
   spots[S['id']]=dict(meta,buoyId=bid,buoyAt=buoy[-1][0] if buoy else '',hourly=hourly,wind=wind,tides=tides,sun=sun,buoy=buoy,dwind=dwind,storms=storms)
   src[S['id']]=(buoy[-1][0] if buoy else '')+'/'+(dwind[-1][0] if dwind else '')
 

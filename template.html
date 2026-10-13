@@ -930,10 +930,27 @@ const WS = (() => {
 // ---- View tabs: Forecast or the WaveSlave map
 let VIEW="fc";
 try{ VIEW=localStorage.getItem("waveslave-view")==="ws"?"ws":"fc"; }catch(e){}
-function setView(v){ VIEW=v; try{ localStorage.setItem("waveslave-view", v); }catch(e){}
+// Switching animates: the map grows out of the Map tab and shrinks back into it (TRANS picks the style while we try them out).
+let SHOWN="fc", TRANS="grow", ending=null;
+function setView(v, instant){ VIEW=v; try{ localStorage.setItem("waveslave-view", v); }catch(e){}
   document.querySelectorAll(".tabs button").forEach(b=>b.setAttribute("aria-selected", b.dataset.v===v));
-  document.getElementById("viewFc").hidden = v!=="fc"; document.getElementById("viewWs").hidden = v!=="ws";
-  if(v==="fc") boot(CUR); if(v==="ws") { WS.show(); WS.full(true); } else { WS.full(false); WS.hide(); } }
+  if(v===SHOWN) return; SHOWN=v; if(ending) ending();
+  const fc=document.getElementById("viewFc"), ws=document.getElementById("viewWs"), open=v==="ws";
+  const done = open ? () => { fc.hidden = true; } : () => { ws.hidden = true; WS.full(false); WS.hide(); };
+  if(open){ ws.hidden=false; WS.show(); WS.full(true); } else { fc.hidden=false; boot(CUR); try{ if(document.fullscreenElement) document.exitFullscreen().catch(()=>{}); }catch(e){} }
+  if(instant || !ws.animate || matchMedia("(prefers-reduced-motion: reduce)").matches) return done();
+  const tab=document.querySelector('.tabs button[data-v="ws"]').getBoundingClientRect(), x=tab.left+tab.width/2, y=tab.top+tab.height/2,
+    r=Math.hypot(Math.max(x, innerWidth-x), Math.max(y, innerHeight-y)), ox=innerWidth/2+"px "+(scrollY+innerHeight/2-fc.offsetTop)+"px";
+  const K = {
+    grow:  [[{clipPath:`circle(0px at ${x}px ${y}px)`}, {clipPath:`circle(${r}px at ${x}px ${y}px)`}], null],
+    slide: [[{transform:"translateY(100%)"}, {transform:"none"}], [{transform:"none", opacity:1}, {transform:"scale(.93)", opacity:.4}]],
+    zoom:  [[{transform:"scale(1.12)", opacity:0}, {transform:"none", opacity:1}], [{transform:"none", opacity:1}, {transform:"scale(.94)", opacity:0}]] }[TRANS];
+  const t = open ? {duration:420, easing:"cubic-bezier(.2,.8,.2,1)"} : {duration:320, easing:"cubic-bezier(.5,0,.75,.6)", direction:"reverse"};
+  fc.style.transformOrigin = ox;
+  const anims = [ws.animate(K[0], t)].concat(K[1] ? [fc.animate(K[1], t)] : []);
+  let left = anims.length;
+  ending = () => { ending = null; anims.forEach(a => a.cancel()); done(); };
+  anims.forEach(a => a.onfinish = () => { if(--left === 0 && ending) ending(); }); }
 document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>setView(b.dataset.v));
 addEventListener("hashchange", () => switchSpot(location.hash.slice(1)));
 function boot(SPOT){
@@ -1223,7 +1240,7 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
 drawDays(); drawDay();
 }
 boot(SPOT0);
-if(VIEW!=="fc") setView(VIEW);
+if(VIEW!=="fc") setView(VIEW, true);
 
 // ---- Wave of the week title: water spray blasting off the end of the letters (placed once the font has loaded).
 (() => { const g=document.getElementById("wotwSpray"); if(!g) return;

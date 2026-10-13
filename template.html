@@ -937,73 +937,41 @@ const WS = (() => {
 // ---- View tabs: Forecast or the WaveSlave map
 let VIEW="fc";
 try{ VIEW=localStorage.getItem("waveslave-view")==="ws"?"ws":"fc"; }catch(e){}
-// Switching burns through: a ring of fire opens the map out of the Map tab and burns back into it on the way out.
-// The map is clipped to the moving edge and the fire is painted on a canvas laid over the top for the length of the move.
+// Switching views plays the chrome-shine logo stamp (FX below) both ways.
 let SHOWN="fc", ending=null;
 const FX = (() => {
+  // Switching views stamps the logo: the view going away falls back into the dark, the flaming WaveSlave wordmark takes the screen, and the
+  // view arriving rises in behind it. Everything moves with transform and opacity only, which phones and computers both animate smoothly.
+  const out = "cubic-bezier(.16,1,.3,1)", inn = "cubic-bezier(.5,0,.75,0)";
+  const el = (css, html = "") => { const d = document.createElement("div"); d.style.cssText = "position:fixed;pointer-events:none;" + css; d.innerHTML = html; document.body.appendChild(d); return d; };
+  const BACK = "background:radial-gradient(circle at 50% 50%,#24183f,#07050f 70%)";
+  const LOGO = '<div style="transform-origin:50% 50%"><div class="brand" style="margin:0;font-size:clamp(54px,16vw,120px);transform-origin:50% 50%">WaveSlave</div></div>';
+  // The shared stage: dark backdrop, the logo centred over it, the old view out, the new view in. Returns the pieces for each style to animate.
+  function stage(open, ws, fc, dur, inAt = .55) { const back = el("inset:0;z-index:99;" + BACK), mark = el("inset:0;z-index:101;display:flex;align-items:center;justify-content:center", LOGO),
+      from = open ? fc : ws, to = open ? ws : fc, t = {duration: dur, fill: "both"};
+    return {back, mark, w: mark.firstChild, t, els: [back, mark], anims: [
+      from.animate([{opacity: 1, transform: "none", easing: inn}, {opacity: 0, transform: "scale(.94)", offset: .3}, {opacity: 0, transform: "scale(.94)"}], t),
+      back.animate([{opacity: 0}, {opacity: 1, offset: .25}, {opacity: 1, offset: inAt + .05}, {opacity: 0}], t),
+      to.animate([{opacity: 0, transform: "scale(1.06)"}, {opacity: 0, transform: "scale(1.06)", offset: inAt, easing: out}, {opacity: 1, transform: "none"}], t)]}; }
   const S = {
-    // Ring of fire: the forecast catches light at the Map tab and burns away like paper, slowly at first and then faster: a glowing ember line with a
-    // scorched rim outside it, soft flames and smoke rising off the edge, and sparks drifting up. Closing burns the hole back down into the tab.
-    ring: { dur: [1500, 1150], tail: 700, ease: u => .5 - .5*Math.cos(Math.PI*u),
-      edge(W, H, p, t, o) { if (!o.ph) o.ph = Array.from({length: 6}, () => Math.random()*6.28);
-        // The burnt edge wanders up to A px either side of radius r; the map shows through a plain circle just inside it (cheap for the browser to
-        // clip every frame, unlike a ragged outline). Char painted from a little inside that circle out to the edge hides where the circle is.
-        const R = Math.hypot(Math.max(o.x, W-o.x), Math.max(o.y, H-o.y)) + 90, r = R*p, A = Math.min(.12*r, 36), f = o.ph, P = []; o.r = r; o.rc = Math.max(0, r - A*1.24 - 3);
-        for (let i = 0; i < 160; i++) { const a = i/160*Math.PI*2, n = .55*Math.sin(3*a + f[0]) + .3*Math.sin(5*a + f[1] + t*.6) + .2*Math.sin(9*a + f[2]) + .12*Math.sin(17*a + f[3] + t*1.5) + .07*Math.sin(29*a + f[4] - t*3),
-          rr = Math.max(0, r + A*n + Math.sin(41*a + f[5] + t*7)*2.5*Math.min(1, r/40)); P.push([o.x + Math.cos(a)*rr, o.y + Math.sin(a)*rr]); }
-        return P; },
-      clip(P, W, H, o) { return `circle(${o.rc.toFixed(1)}px at ${o.x}px ${o.y}px)`; },
-      paint(g, P, W, H, t, E, o, dt, live) {
-        if (!o.spr) { const mk = (stops) => { const c = document.createElement("canvas"); c.width = c.height = 64; const x = c.getContext("2d"), r = x.createRadialGradient(32, 32, 0, 32, 32, 32);
-            stops.forEach(([k, col]) => r.addColorStop(k, col)); x.fillStyle = r; x.fillRect(0, 0, 64, 64); return c; };
-          o.spr = [mk([[0, "rgba(255,250,225,1)"], [.35, "rgba(255,205,90,.65)"], [1, "rgba(255,140,0,0)"]]), mk([[0, "rgba(255,170,40,1)"], [.45, "rgba(255,90,10,.5)"], [1, "rgba(255,40,0,0)"]]),
-            mk([[0, "rgba(220,45,10,.9)"], [.5, "rgba(140,20,0,.35)"], [1, "rgba(80,0,0,0)"]]), mk([[0, "rgba(55,50,48,.85)"], [1, "rgba(55,50,48,0)"]])]; o.F = []; o.S = []; }
-        const path = () => { P.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); }, rnd = Math.random;
-        if (live) { const sc = g.createRadialGradient(o.x, o.y, Math.max(0, o.r - 40), o.x, o.y, o.r + 130); // scorch fading out past the edge
-          sc.addColorStop(0, "rgba(60,26,8,.55)"); sc.addColorStop(.35, "rgba(70,32,10,.38)"); sc.addColorStop(.65, "rgba(90,45,15,.14)"); sc.addColorStop(1, "rgba(90,45,15,0)");
-          g.save(); g.beginPath(); g.rect(0, 0, W, H); path(); g.clip("evenodd"); g.fillStyle = sc; g.fillRect(0, 0, W, H);
-          g.restore(); const r0 = Math.max(0, o.rc - 26), r1 = Math.max(r0 + 1, o.r + 1.3*Math.min(.12*o.r, 36) + 4), ch = g.createRadialGradient(o.x, o.y, r0, o.x, o.y, r1);
-          ch.addColorStop(0, "rgba(22,11,7,0)"); ch.addColorStop(Math.min(.99, (o.rc - r0)/(r1 - r0)), "rgba(22,11,7,.93)"); ch.addColorStop(1, "rgba(30,12,6,.96)");
-          g.beginPath(); path(); g.moveTo(o.x + r0, o.y); g.arc(o.x, o.y, r0, 0, Math.PI*2); g.fillStyle = ch; g.fill("evenodd");
-          let len = 0; for (let i = 1; i < P.length; i++) len += Math.hypot(P[i][0]-P[i-1][0], P[i][1]-P[i-1][1]);
-          const sec = dt/1000, vr = o.pr == null ? 0 : (o.r - o.pr)/Math.max(sec, .001), sz = Math.min(1.8, Math.max(1, Math.sqrt(W*H)/650)), n = Math.min(90*sz, len/8)*dt/16; o.pr = o.r; // bigger screens: bigger, more flames
-          for (let k = 0; k < n; k++) { const i = rnd()*P.length | 0, [x0, y0] = P[i], d = Math.hypot(x0 - o.x, y0 - o.y) || 1, ux = (x0 - o.x)/d, uy = (y0 - o.y)/d, x = x0 + ux*5, y = y0 + uy*5;
-            if (x < -30 || x > W+30 || y < -30 || y > H+30) continue;
-            // Each flame stays pinned to its spot on the burning edge (wherever the edge has moved to) and rises off it as it ages.
-            o.F.push({i, off: 3 + rnd()*8, j: (rnd()-.5)*8, h: 0, vh: 45 + rnd()*95, x, y, a: 0, m: .28 + rnd()*.32, s: (9 + rnd()*13)*sz, w: rnd()*6.28});
-            if (rnd() < .14) o.S.push({x, y, vx: ux*vr*.8 + (rnd()-.5)*16, vy: uy*vr*.8 - 22 - rnd()*38, a: 0, m: 1.3 + rnd()*.9, s: (18 + rnd()*26)*sz});
-            if (rnd() < .05) E.push({x, y, vx: (rnd()-.5)*50, vy: -60 - rnd()*120, life: 1, s: 1 + rnd()*1.6, c: 0}); } }
-        const sec = dt/1000, move = (q) => { for (let i = q.length-1; i >= 0; i--) { const e = q[i]; e.a += sec; if (e.a >= e.m) { q.splice(i, 1); continue; } e.x += e.vx*sec; e.y += e.vy*sec; } };
-        move(o.S);
-        for (let i = o.F.length-1; i >= 0; i--) { const e = o.F[i]; e.a += sec; if (e.a >= e.m) { o.F.splice(i, 1); continue; } e.h += e.vh*sec;
-          if (live) { const [x0, y0] = P[e.i], d = Math.hypot(x0 - o.x, y0 - o.y) || 1; e.x = x0 + (x0 - o.x)/d*e.off + e.j; e.y = y0 + (y0 - o.y)/d*e.off; } }
-        for (const e of o.S) { const k = e.a/e.m, z = e.s*(1 + 1.5*k); g.globalAlpha = .26*Math.sin(Math.PI*k); g.drawImage(o.spr[3], e.x - z/2, e.y - z/2, z, z); }
-        g.globalAlpha = 1;
-        if (live) { g.globalCompositeOperation = "lighter"; g.lineJoin = "round";
-          for (const [w, col] of [[12, "rgba(255,80,0,.3)"], [4.5, "rgba(255,150,30,.85)"], [1.6, "rgba(255,240,190,.95)"]]) { g.beginPath(); path(); g.strokeStyle = col; g.lineWidth = w; g.stroke(); } }
-        g.globalCompositeOperation = "lighter";
-        for (const e of o.F) { const k = e.a/e.m, z = e.s*(1 - .55*k)*(.85 + .15*Math.sin(t*30 + e.w)); g.globalAlpha = (1 - k)*.7*Math.min(1, e.a*12);
-          g.drawImage(o.spr[k < .28 ? 0 : k < .6 ? 1 : 2], e.x + Math.sin(t*9 + e.w)*3*k - z/2, e.y - e.h - z, z, z*1.5); }
-        g.globalAlpha = 1; g.globalCompositeOperation = "source-over";
-        if (o.F.length > 2000) o.F.splice(0, o.F.length - 2000); if (o.S.length > 250) o.S.splice(0, o.S.length - 250); } } };
-  // Runs one move; returns a stop function that jumps straight to the end. The view switch is done when the edge stops; flames and sparks
-  // already in the air can drift out for a short tail after that. FX.manual lets the preview recorder step the clock by hand.
-  function run(name, open, ws, done, after) { const st = S[name], dur = st.dur[open ? 0 : 1], tail = st.tail || 0, W = innerWidth, H = innerHeight,
-      tab = document.querySelector('.tabs button[data-v="ws"]').getBoundingClientRect(), o = {x: tab.left + tab.width/2, y: tab.top + tab.height/2},
-      c = document.createElement("canvas"), g = c.getContext("2d"), E = []; let el = 0, raf = 0, last = 0, over = false, landed = false, P = null;
-    const k = Math.min(1, Math.sqrt(1.2e6/(W*H))); // big screens draw the fire at lower resolution and let the browser stretch it: it's soft anyway
-    c.width = Math.round(W*k); c.height = Math.round(H*k); g.scale(k, k); c.style.cssText = "position:fixed;inset:0;width:100%;height:100%;z-index:101;pointer-events:none"; document.body.appendChild(c);
-    const ease = st.ease || (u => 1 - Math.pow(1 - u, 3));
-    function land() { if (landed) return; landed = true; ws.style.clipPath = ""; done(); }
-    function step(dt) { el = Math.min(dur + tail, el + dt); const live = el < dur, t = el/1000;
-      if (live) { const u = el/dur; P = st.edge(W, H, ease(open ? u : 1 - u), t, o); ws.style.clipPath = st.clip(P, W, H, o); } else land();
-      g.clearRect(0, 0, W, H); if (live || tail) st.paint(g, P, W, H, t, E, o, dt, live);
-      for (let i = E.length-1; i >= 0; i--) { const e = E[i]; e.x += e.vx*dt/1000; e.y += e.vy*dt/1000; e.vy += (e.c ? 500 : -60)*dt/1000; e.life -= dt/(e.c ? 600 : 700);
-        if (e.life <= 0) { E.splice(i, 1); continue; } g.globalAlpha = e.life; g.fillStyle = e.c ? "#e8fbff" : e.life > .5 ? "#ffe680" : "#ff5a1a"; g.fillRect(e.x, e.y, e.s, e.s); }
-      g.globalAlpha = 1; if (E.length > 400) E.splice(0, E.length - 400); if (el >= dur + tail) stop(); }
-    function tick(now) { step(last ? Math.min(50, now - last) : 16); last = now; if (!over) raf = requestAnimationFrame(tick); }
-    function stop() { if (over) return; over = true; cancelAnimationFrame(raf); c.remove(); land(); if (after) after(); }
-    if (FX.manual) FX.step = step; else raf = requestAnimationFrame(tick);
+    // Chrome shine: the wordmark eases in, a streak of light glints across the letters, and a thin chrome rule draws out beneath it.
+    shine: { dur: [1350, 1100], go(open, ws, fc, W, H, dur) { const s = stage(open, ws, fc, dur, .6), b = s.w.firstChild;
+        const glint = document.createElement("div"); glint.className = "brand"; glint.textContent = "WaveSlave";
+        glint.style.cssText = "position:absolute;inset:0;margin:0;font-size:inherit;transform:none;animation:none;filter:none;-webkit-text-stroke:0;background:linear-gradient(105deg,rgba(255,255,255,0) 45%,rgba(255,255,255,.95) 50%,rgba(255,255,255,0) 55%) no-repeat;background-size:300% 100%;-webkit-background-clip:text;background-clip:text";
+        b.style.position = "relative"; b.appendChild(glint);
+        const rule = document.createElement("div"); rule.style.cssText = "height:2px;margin:22px auto 0;width:min(70vw,520px);background:linear-gradient(90deg,rgba(255,43,214,0),#ff2bd6 15%,#fff 50%,#ffb347 85%,rgba(255,179,71,0));box-shadow:0 0 12px rgba(255,43,214,.7)";
+        s.w.appendChild(rule);
+        s.anims.push(s.w.animate([{opacity: 0, transform: "scale(1.12)", easing: out}, {opacity: 0, transform: "scale(1.12)", offset: .1, easing: out}, {opacity: 1, transform: "none", offset: .34},
+          {opacity: 1, transform: "none", offset: .66, easing: "ease-in"}, {opacity: 0, transform: "scale(.96)", offset: .86}, {opacity: 0}], s.t),
+          glint.animate([{backgroundPosition: "82% 0"}, {backgroundPosition: "82% 0", offset: .3, easing: "cubic-bezier(.4,0,.2,1)"}, {backgroundPosition: "18% 0", offset: .62}, {backgroundPosition: "18% 0"}], s.t),
+          rule.animate([{transform: "scaleX(0)", opacity: 0}, {transform: "scaleX(0)", opacity: 0, offset: .28, easing: out}, {transform: "scaleX(1)", opacity: 1, offset: .55}, {transform: "scaleX(1)", opacity: 1}], s.t)); return s; } } };
+  // Runs one move; returns a stop function that jumps straight to the end. FX.manual lets the preview recorder step the clock by hand.
+  function run(name, open, ws, done, after) { const st = S[name], dur = st.dur[open ? 0 : 1], fc = document.getElementById("viewFc");
+    const {els, anims} = st.go(open, ws, fc, innerWidth, innerHeight, dur); let over = false;
+    const end = Math.max(...anims.map(a => a.effect.getComputedTiming().endTime));
+    function stop() { if (over) return; over = true; anims.forEach(a => a.cancel()); els.forEach(e => e.remove()); done(); if (after) after(); }
+    if (FX.manual) { let t = 0; anims.forEach(a => { a.pause(); a.currentTime = 0; }); FX.step = dt => { t += dt; anims.forEach(a => a.currentTime = Math.min(t, end)); if (t >= end) stop(); }; FX.live = () => !over; }
+    else Promise.all(anims.map(a => a.finished)).then(stop, () => {});
     return stop; }
   return { run, manual: false, step: null };
 })();
@@ -1012,10 +980,10 @@ function setView(v, instant){ VIEW=v; try{ localStorage.setItem("waveslave-view"
   if(v===SHOWN) return; SHOWN=v; if(ending) ending();
   const fc=document.getElementById("viewFc"), ws=document.getElementById("viewWs"), open=v==="ws", calm=instant || matchMedia("(prefers-reduced-motion: reduce)").matches;
   const done = open ? () => { ending = null; fc.hidden = true; WS.go(); } : () => { ending = null; ws.hidden = true; WS.full(false); WS.hide(); };
-  if(open){ ws.hidden=false; WS.show(!calm); WS.full(true, calm); if(calm) return done(); ending = FX.run("ring", true, ws, done, () => WS.goFull()); return; }
+  if(open){ ws.hidden=false; WS.show(!calm); WS.full(true, calm); if(calm) return done(); ending = FX.run("shine", true, ws, done, () => WS.goFull()); return; }
   fc.hidden=false; boot(CUR); WS.pause(); if(calm) return done();
   // A full-screen browser shows only the map, so leave full screen first and burn back to the forecast once the window has settled.
-  const go = () => { clearTimeout(wait); document.removeEventListener("fullscreenchange", go); if(SHOWN==="fc" && ending===hold) ending = FX.run("ring", false, ws, done); };
+  const go = () => { clearTimeout(wait); document.removeEventListener("fullscreenchange", go); if(SHOWN==="fc" && ending===hold) ending = FX.run("shine", false, ws, done); };
   const hold = () => { go(); if(ending) ending(); }; let wait = 0; ending = hold;
   if(document.fullscreenElement){ document.addEventListener("fullscreenchange", go); wait = setTimeout(go, 700); try{ document.exitFullscreen().catch(go); }catch(e){ go(); } } else go(); }
 document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>setView(b.dataset.v));

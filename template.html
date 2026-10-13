@@ -937,7 +937,7 @@ const WS = (() => {
 // ---- View tabs: Forecast or the WaveSlave map
 let VIEW="fc";
 try{ VIEW=localStorage.getItem("waveslave-view")==="ws"?"ws":"fc"; }catch(e){}
-// Switching views plays the chrome-shine logo stamp (FX below) both ways.
+// Switching views plays the slam logo stamp (FX below) both ways.
 let SHOWN="fc", ending=null;
 const FX = (() => {
   // Switching views stamps the logo: the view going away falls back into the dark, the flaming WaveSlave wordmark takes the screen, and the
@@ -954,17 +954,17 @@ const FX = (() => {
       back.animate([{opacity: 0}, {opacity: 1, offset: .25}, {opacity: 1, offset: inAt + .05}, {opacity: 0}], t),
       to.animate([{opacity: 0, transform: "scale(1.06)"}, {opacity: 0, transform: "scale(1.06)", offset: inAt, easing: out}, {opacity: 1, transform: "none"}], t)]}; }
   const S = {
-    // Chrome shine: the wordmark eases in, a streak of light glints across the letters, and a thin chrome rule draws out beneath it.
-    shine: { dur: [1350, 1100], go(open, ws, fc, W, H, dur) { const s = stage(open, ws, fc, dur, .6), b = s.w.firstChild;
-        const glint = document.createElement("div"); glint.className = "brand"; glint.textContent = "WaveSlave";
-        glint.style.cssText = "position:absolute;inset:0;margin:0;font-size:inherit;transform:none;animation:none;filter:none;-webkit-text-stroke:0;background:linear-gradient(105deg,rgba(255,255,255,0) 45%,rgba(255,255,255,.95) 50%,rgba(255,255,255,0) 55%) no-repeat;background-size:300% 100%;-webkit-background-clip:text;background-clip:text";
-        b.style.position = "relative"; b.appendChild(glint);
-        const rule = document.createElement("div"); rule.style.cssText = "height:2px;margin:22px auto 0;width:min(70vw,520px);background:linear-gradient(90deg,rgba(255,43,214,0),#ff2bd6 15%,#fff 50%,#ffb347 85%,rgba(255,179,71,0));box-shadow:0 0 12px rgba(255,43,214,.7)";
-        s.w.appendChild(rule);
-        s.anims.push(s.w.animate([{opacity: 0, transform: "scale(1.12)", easing: out}, {opacity: 0, transform: "scale(1.12)", offset: .1, easing: out}, {opacity: 1, transform: "none", offset: .34},
-          {opacity: 1, transform: "none", offset: .66, easing: "ease-in"}, {opacity: 0, transform: "scale(.96)", offset: .86}, {opacity: 0}], s.t),
-          glint.animate([{backgroundPosition: "82% 0"}, {backgroundPosition: "82% 0", offset: .3, easing: "cubic-bezier(.4,0,.2,1)"}, {backgroundPosition: "18% 0", offset: .62}, {backgroundPosition: "18% 0"}], s.t),
-          rule.animate([{transform: "scaleX(0)", opacity: 0}, {transform: "scaleX(0)", opacity: 0, offset: .28, easing: out}, {transform: "scaleX(1)", opacity: 1, offset: .55}, {transform: "scaleX(1)", opacity: 1}], s.t)); return s; } } };
+    // Slam: the wordmark drops in hard from above the screen, the screen jolts and a shock ring of amber and neon rolls out from it.
+    slam: { dur: [1250, 1050], go(open, ws, fc, W, H, dur) { const s = stage(open, ws, fc, dur, .58), R = Math.hypot(W, H)/2,
+        ring = el(`left:50%;top:50%;width:200px;height:200px;margin:-100px 0 0 -100px;border-radius:50%;z-index:101;box-shadow:0 0 0 3px #ffb347,0 0 24px 6px rgba(255,43,214,.6),inset 0 0 18px 4px rgba(255,43,214,.45)`),
+        flash = el("inset:0;z-index:101;background:radial-gradient(circle at 50% 50%,rgba(255,240,200,.9),rgba(255,120,0,.25) 45%,rgba(255,60,0,0) 75%)"); s.els.push(ring, flash);
+      s.anims.push(s.w.animate([{opacity: 0, transform: "scale(3.2)", easing: "cubic-bezier(.55,0,.9,.3)"}, {opacity: 0, transform: "scale(3.2)", offset: .08, easing: "cubic-bezier(.55,0,.9,.3)"},
+          {opacity: 1, transform: "none", offset: .3}, {transform: "scale(.93,1.06)", offset: .34}, {transform: "scale(1.03,.97)", offset: .38}, {transform: "none", offset: .42},
+          {opacity: 1, transform: "none", offset: .62, easing: "ease-in"}, {opacity: 0, transform: "scale(.9) translateY(30px)", offset: .85}, {opacity: 0}], s.t),
+        s.mark.animate([{transform: "none"}, {transform: "none", offset: .3}, {transform: "translate(7px,-5px)", offset: .32}, {transform: "translate(-6px,4px)", offset: .35},
+          {transform: "translate(4px,2px)", offset: .38}, {transform: "translate(-2px,-1px)", offset: .41}, {transform: "none", offset: .44}, {transform: "none"}], s.t),
+        ring.animate([{opacity: 0, transform: "scale(.3)"}, {opacity: 0, transform: "scale(.3)", offset: .3, easing: out}, {opacity: 1, transform: "scale(.6)", offset: .31, easing: out}, {opacity: 0, transform: `scale(${R/90})`, offset: .62}, {opacity: 0}], s.t),
+        flash.animate([{opacity: 0}, {opacity: 0, offset: .3}, {opacity: 1, offset: .31, easing: "ease-out"}, {opacity: 0, offset: .48}, {opacity: 0}], s.t)); return s; } } };
   // Runs one move; returns a stop function that jumps straight to the end. FX.manual lets the preview recorder step the clock by hand.
   function run(name, open, ws, done, after) { const st = S[name], dur = st.dur[open ? 0 : 1], fc = document.getElementById("viewFc");
     const {els, anims} = st.go(open, ws, fc, innerWidth, innerHeight, dur); let over = false;
@@ -980,10 +980,10 @@ function setView(v, instant){ VIEW=v; try{ localStorage.setItem("waveslave-view"
   if(v===SHOWN) return; SHOWN=v; if(ending) ending();
   const fc=document.getElementById("viewFc"), ws=document.getElementById("viewWs"), open=v==="ws", calm=instant || matchMedia("(prefers-reduced-motion: reduce)").matches;
   const done = open ? () => { ending = null; fc.hidden = true; WS.go(); } : () => { ending = null; ws.hidden = true; WS.full(false); WS.hide(); };
-  if(open){ ws.hidden=false; WS.show(!calm); WS.full(true, calm); if(calm) return done(); ending = FX.run("shine", true, ws, done, () => WS.goFull()); return; }
+  if(open){ ws.hidden=false; WS.show(!calm); WS.full(true, calm); if(calm) return done(); ending = FX.run("slam", true, ws, done, () => WS.goFull()); return; }
   fc.hidden=false; boot(CUR); WS.pause(); if(calm) return done();
   // A full-screen browser shows only the map, so leave full screen first and burn back to the forecast once the window has settled.
-  const go = () => { clearTimeout(wait); document.removeEventListener("fullscreenchange", go); if(SHOWN==="fc" && ending===hold) ending = FX.run("shine", false, ws, done); };
+  const go = () => { clearTimeout(wait); document.removeEventListener("fullscreenchange", go); if(SHOWN==="fc" && ending===hold) ending = FX.run("slam", false, ws, done); };
   const hold = () => { go(); if(ending) ending(); }; let wait = 0; ending = hold;
   if(document.fullscreenElement){ document.addEventListener("fullscreenchange", go); wait = setTimeout(go, 700); try{ document.exitFullscreen().catch(go); }catch(e){ go(); } } else go(); }
 document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>setView(b.dataset.v));

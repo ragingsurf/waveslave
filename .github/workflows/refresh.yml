@@ -10,7 +10,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write   # logstore.sh keeps the forecast-vs-buoy log on the data branch
   pages: write
   id-token: write
 
@@ -31,11 +31,16 @@ jobs:
             log
           key: state-${{ github.run_id }}
           restore-keys: state-
+      - name: Restore log days the cache lost
+        run: sh logstore.sh restore || echo "log restore failed" >&2
       - name: Build
         env:
           CWA_KEY: ${{ secrets.CWA_KEY }}
           TZ: Asia/Taipei
         run: sh build-site.sh _site
+      - name: Save finished log days for good
+        if: always()
+        run: sh logstore.sh save || echo "log save failed" >&2
       - uses: actions/cache/save@v4
         if: always()
         with:

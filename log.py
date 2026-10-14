@@ -1,4 +1,4 @@
-# Forecast-vs-observation log for learning per-spot corrections later.
+# Forecast-vs-observation log: correct.py learns per-spot corrections from it, and logstore.sh keeps it for good.
 # Appends one record per new snapshot to log/YYYY-MM-DD.jsonl.gz (Taipei date): every spot's
 # Open-Meteo hourly forecast and CWA wind forecast as issued, plus the latest buoy and station readings.
 # fc stays the first 5 days (120 hours) as it was when logging started, even though the app now shows 7.

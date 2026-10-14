@@ -288,6 +288,7 @@ html{overscroll-behavior-y:none}
   <section aria-label="Five-day outlook">
     <div class="label" id="outH" style="margin-bottom:8px">5-day outlook</div>
     <div class="days" id="days"></div>
+    <div class="where" id="acc" style="font-size:12px;margin-top:8px"></div>
   </section>
 
   <section class="panel daypanel" aria-labelledby="dayTitle">
@@ -1327,6 +1328,17 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
     ${c ? `<p>${near ? `Closest forecast pass <b class="mono">${c.nm.toLocaleString("en")} nm</b> ${compass(c.bearing)}, ${when(c.at)}` : "Forecast to move away from here"} <span class="where">(${c.src} track)</span></p>` : ""}
     <p class="where" style="font-size:12px">${[s.mb?s.mb+" hPa":"", s.gust?"gusts "+s.gust+" kt":"", s.src?"Tracks: "+s.src.join(" + "):""].filter(Boolean).join(", ")}</p>`; };
   el.innerHTML = `${H3}${DATA.storms.slice(0,3).map(one).join("")}<p class="where" style="font-size:12px">${src} · ${jt} · ${zh?"路徑請看地圖頁":"tracks on the Map tab"}</p>`; })();
+
+// ---- forecast check: heights are tuned to the spot's buoy (correct.py) and scored against it
+(() => {
+  const a = DATA.adj, el = document.getElementById("acc");
+  // Shown only once it has a day of hours to go on, and only where the buoy tracks the spot well enough to judge by.
+  if(!a || a.acc==null || a.n<24 || a.acc<50){ el.innerHTML = ""; return; }
+  const zh = isZh(), bn = SPT(DATA,"buoyName"), pct = Math.round(Math.abs(1-a.f)*100);
+  const tune = pct<3 ? "" : zh ? `浪高已依${bn}浮標${a.f<1?"調低":"調高"} ${pct}%。` : `Heights ${a.f<1?"trimmed":"raised"} ${pct}% to match the ${bn} buoy. `;
+  el.innerHTML = zh ? `✓ 預報檢驗：過去 ${a.days} 天，隔天預報有 <b class="mono">${a.acc}%</b> 的時段與${bn}浮標相差 0.3 m 以內（平均差 ${r1(a.miss)} m）。${tune}`
+    : `✓ Forecast check: over the last ${a.days} days, the next-day forecast was within 0.3 m of the ${bn} buoy <b class="mono">${a.acc}%</b> of the time (typical miss ${r1(a.miss)} m). ${tune}`;
+})();
 
 // ---- spot picker and per-spot labels
 (() => {

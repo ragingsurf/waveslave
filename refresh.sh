@@ -46,6 +46,8 @@ fi
 GJ="$G/grid.json"; [ -f "$GJ" ] || { echo null > "$W/gridnull.json"; GJ="$W/gridnull.json"; }
 # Forecast vs buoy log for later corrections; never blocks the build.
 python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log" || true
+# Tune each spot's wave heights to its buoy from that log and score the forecast (after log.py, so the log stays raw).
+python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log" || echo "corrections skipped" >&2
 # Wave of the week photo (wotw.jpg) is embedded inline.
 python3 -I -c "import sys,base64;t=open(sys.argv[1]).read();d=open(sys.argv[2]).read();img='data:image/jpeg;base64,'+base64.b64encode(open(sys.argv[4],'rb').read()).decode();open(sys.argv[3],'w').write(t.replace('__DATA__',d).replace('__WOTW__',img).replace('__GRID__',open(sys.argv[5]).read()))" "$HERE/template.html" "$W/snap.json" "$W/taitung-surf.html" "$HERE/wotw.jpg" "$GJ"
 echo "built $W/taitung-surf.html"

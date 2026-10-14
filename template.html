@@ -1178,8 +1178,8 @@ const dayInfo = dayKeys.map(key => {
   const best = arr => arr.reduce((a,b)=> b.s>a.s ? b : a, arr[0]);
   // PRIMO never goes on an hour that has already passed.
   const ahead = pool.filter(x=>x.t >= nowMs-nowMs%36e5), past = !ahead.length, cand = past ? pool : ahead, top = best(cand);
-  // Every forecast day gets a PRIMO window on its best upcoming hours, whatever the rating (Bryan, Oct 15).
-  const primo = !past;
+  // PRIMO only goes on a Good or Firing hour (Bryan, Oct 14); a Fair or worse best hour just reads "Best".
+  const primo = !past && rate(top.s)>=3;
   // The window grows out from the best hour over back-to-back hours with the same score.
   let lo = cand.indexOf(top), hi = lo;
   while(lo>0 && cand[lo-1].s>=top.s && cand[lo].t-cand[lo-1].t<=36e5) lo--;
@@ -1268,10 +1268,10 @@ function drawDay(){
   const r = rate(top.s);
   document.getElementById("best").innerHTML = isZh() ? (d.hasWind
     ? `${d.past?"最佳時段已過":"最佳時段"} ${win.a<win.b?`<b class="mono">${hhmm(win.a)}–${hhmm(win.b+36e5)}</b>`:`約 <b class="mono">${hhmm(top.t)}</b>`}：${r1(top.h)} m、${r1(top.p)} s${top.w?`，${Math.round(top.w.kt)} kt ${KIND[windKind(top.w.from)][0]}`:""} · <span style="color:${RATE[r][1]};font-weight:600">${RATE[r][0]}</span>`
-    : `最佳時段 ${win.a<win.b?`<b class="mono">${hhmm(win.a)}–${hhmm(win.b+36e5)}</b>`:`約 <b class="mono">${hhmm(top.t)}</b>`}：${r1(top.h)} m、${r1(top.p)} s（尚無風力預報）`)
+    : `浪最大約在 <b class="mono">${hhmm(top.t)}</b>：${r1(top.h)} m、${r1(top.p)} s`)
     : d.hasWind
     ? `${d.primo?"Primo":d.past?"Best was":"Best"} ${win.a<win.b?`<b class="mono">${hhmm(win.a)}–${hhmm(win.b+36e5)}</b>`:`around <b class="mono">${hhmm(top.t)}</b>`}: ${r1(top.h)} m at ${r1(top.p)} s, ${top.w?`${Math.round(top.w.kt)} kt ${KIND[windKind(top.w.from)][0].toLowerCase()}`:""} · <span style="color:${RATE[r][1]};font-weight:600">${RATE[r][0]}</span>`
-    : `${d.primo?"Primo":"Best was"} ${win.a<win.b?`<b class="mono">${hhmm(win.a)}–${hhmm(win.b+36e5)}</b>`:`around <b class="mono">${hhmm(top.t)}</b>`}: ${r1(top.h)} m at ${r1(top.p)} s (no wind forecast yet)`;
+    : `Biggest around <b class="mono">${hhmm(top.t)}</b>: ${r1(top.h)} m at ${r1(top.p)} s`;
   document.getElementById("tides").innerHTML = (DATA.tides[d.key]||[]).map(e=>`<span class="tide">${isZh() ? (e[1]==="H"?"滿潮":"乾潮") : e[1]==="H"?"High":"Low"} <b>${e[0]}</b> · ${e[2]} cm</span>`).join("")
     + (sun && sun.phen.length ? `<span class="tide">🌙 ${sun.phen.join(", ")}</span>` : "");
 

@@ -1,9 +1,10 @@
 name: Refresh WaveSlave
 
-# Rebuild the forecast from CWA + Open-Meteo every hour and publish it to GitHub Pages.
+# Rebuild the forecast from CWA + Open-Meteo every half hour and publish it to GitHub Pages.
+# GitHub often skips scheduled runs (only 2 ran overnight on Oct 13-14), so two slots an hour keeps the data fresher.
 on:
   schedule:
-    - cron: "7 * * * *"
+    - cron: "7,37 * * * *"
   workflow_dispatch:
   push:
     branches: [main]

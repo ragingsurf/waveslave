@@ -692,12 +692,20 @@ const WS = (() => {
   // Full screen: the map panel fills the screen (and the browser goes full screen when it allows it). The map only shows full screen:
   // ✕, Esc or leaving the browser's full screen all go back to Forecast.
   let FS = false;
+  // Where the map was last left (centre and zoom), so a reload or the page's own refresh opens it there again instead of zoomed all the way out.
+  let LAST = null; try { LAST = JSON.parse(localStorage.getItem("waveslave-mapview")); } catch(e) {}
+  const keep = () => { if (z0 > 1) try { localStorage.setItem("waveslave-mapview", JSON.stringify({cx, cy, k: z/z0})); } catch(e) {} };
+  addEventListener("pagehide", () => { if (FS) keep(); });
   // win=false fills the window without asking the browser for full screen yet (the opening animation asks once it has finished: see goFull).
   function setFs(on, win = true) { if (on === FS) return; FS = on; const sec = document.getElementById("viewWs"), b = document.getElementById("wsFs");
     sec.classList.toggle("fs", FS); document.documentElement.style.overflow = FS ? "hidden" : ""; b.textContent = FS ? "✕" : "⛶"; b.setAttribute("aria-label", T(FS ? "Exit full screen" : "Full screen"));
     try { if (FS && win && sec.requestFullscreen && document.fullscreenEnabled) sec.requestFullscreen().catch(() => {}); else if (!FS && document.fullscreenElement) document.exitFullscreen().catch(() => {}); } catch(e) {}
     requestAnimationFrame(() => { if (sec.hidden) return; size(); parts.forEach(spawn); drawBase(); }); }
-  document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && FS) setView("fc"); else if (FS) requestAnimationFrame(() => { size(); drawBase(); }); });
+  document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && FS) setView("fc"); });
+  // The panel can change size after it opens (the browser going full screen, a phone's address bar, rotating): redraw once at the new size, same view.
+  let seen = "", rsz = 0;
+  if (window.ResizeObserver) new ResizeObserver(() => { const box = document.getElementById("wsBox"), k = box.clientWidth + "x" + box.clientHeight;
+    if (!FS || !built || document.getElementById("viewWs").hidden || k === seen || rsz) return; rsz = requestAnimationFrame(() => { rsz = 0; seen = box.clientWidth + "x" + box.clientHeight; size(); drawBase(); }); }).observe(document.getElementById("wsBox"));
   document.addEventListener("keydown", e => { if (e.key === "Escape" && FS) setView("fc"); });
   function screenH() { const so = screen.orientation && screen.orientation.type, land = so ? so.startsWith("landscape") : Math.abs(window.orientation || 0) === 90 || innerWidth > innerHeight;
     const sw = screen.width || innerWidth, sh = screen.height || innerHeight, dev = land ? Math.min(sw, sh) : Math.max(sw, sh), vv = window.visualViewport ? visualViewport.height : innerHeight;
@@ -706,7 +714,8 @@ const WS = (() => {
     H = FS ? Math.max(150, box.clientHeight) : Math.round(Math.max(240, v.land ? Math.min(W*0.75, v.h*0.86) : Math.min(W*1.35, v.h*0.7)));
     const dpr = Math.min(2, window.devicePixelRatio||1);
     FXR = W*H > 1.2e6 ? 1 : Math.min(1.5, dpr); for (const [c, r] of [[base, dpr], [fx, FXR]]) { c.width = W*r; c.height = H*r; c.style.height = H+"px"; c.getContext("2d").setTransform(r,0,0,r,0,0); }
-    z0 = H/HOME.span; zmin = GRID ? Math.max(W/((GRID.nlon-1)*GRID.dlon*KX), H/((GRID.nlat-1)*GRID.dlat)) : z0; if (z === 1) z = zmin; else if (was) z = was*z0; clampView();
+    z0 = H/HOME.span; zmin = GRID ? Math.max(W/((GRID.nlon-1)*GRID.dlon*KX), H/((GRID.nlat-1)*GRID.dlat)) : z0;
+    if (z === 1) { const k = LAST && LAST.k > 0 ? LAST.k : 0; z = k ? k*z0 : zmin; if (k) { cx = LAST.cx; cy = LAST.cy; } } else if (was) z = was*z0; clampView();
     if (parts.length) { const n = Math.min(4000, Math.round(W*H/260)); while (parts.length < n) { const p = {}; spawn(p); parts.push(p); } parts.length = n; } } // same streak density at any size, capped so big full screens stay smooth
   function clampView() { z = Math.max(zmin, Math.min(z0*10, z));
     const [l0, l1, a0, a1] = GRID ? [GRID.lon0, GRID.lon0+(GRID.nlon-1)*GRID.dlon, GRID.lat0, GRID.lat0+(GRID.nlat-1)*GRID.dlat] : [119, 123, 21.5, 26];
@@ -980,7 +989,7 @@ const WS = (() => {
     // Ask the browser for full screen after the opening animation, while the tap still counts as the user's (browsers refuse it later).
     goFull() { const sec = document.getElementById("viewWs"), ua = navigator.userActivation;
       try { if (FS && !document.fullscreenElement && sec.requestFullscreen && document.fullscreenEnabled && (!ua || ua.isActive)) sec.requestFullscreen().catch(() => {}); } catch(e) {} },
-    hide() { cancelAnimationFrame(raf); raf = 0; if (playing) { clearInterval(playing); playing = 0; document.getElementById("wsPlay").textContent = "▶"; } },
+    hide() { keep(); cancelAnimationFrame(raf); raf = 0; if (playing) { clearInterval(playing); playing = 0; document.getElementById("wsPlay").textContent = "▶"; } },
     redraw() { if (built && raf) drawBase(); },
     // After a language switch: day labels, an open forecast table and the map's own text.
     relang() { if (!built) return; timeline(); tlMark(); const el = document.getElementById("wsSheet"); if (!el.hidden) { if (SHEET) { const k = [cx, cy, z]; openSheet(SHEET); [cx, cy, z] = k; clampView(); } else if (PIN && PIN.open) showPin(); }
@@ -1004,7 +1013,7 @@ const FX = (() => {
     return {back, mark, w: mark.firstChild, t, els: [back, mark], anims: [
       from.animate([{opacity: 1, transform: "none", easing: inn}, {opacity: 0, transform: "scale(.94)", offset: .3}, {opacity: 0, transform: "scale(.94)"}], t),
       back.animate([{opacity: 0}, {opacity: 1, offset: .25}, {opacity: 1, offset: inAt + .05}, {opacity: 0}], t),
-      to.animate([{opacity: 0, transform: "scale(1.06)"}, {opacity: 0, transform: "scale(1.06)", offset: inAt, easing: out}, {opacity: 1, transform: "none"}], t)]}; }
+      to.animate([{opacity: 0, transform: open ? "none" : "scale(1.06)"}, {opacity: 0, transform: open ? "none" : "scale(1.06)", offset: inAt, easing: out}, {opacity: 1, transform: "none"}], t)]}; }
   const S = {
     // Slam: the wordmark drops in hard from above the screen, the screen jolts and a shock ring of amber and neon rolls out from it.
     slam: { dur: [1250, 1050], go(open, ws, fc, W, H, dur) { const s = stage(open, ws, fc, dur, .58), R = Math.hypot(W, H)/2,
@@ -1032,7 +1041,7 @@ function setView(v, instant){ VIEW=v; try{ localStorage.setItem("waveslave-view"
   if(v===SHOWN) return; SHOWN=v; if(ending) ending();
   const fc=document.getElementById("viewFc"), ws=document.getElementById("viewWs"), open=v==="ws", calm=instant || matchMedia("(prefers-reduced-motion: reduce)").matches;
   const done = open ? () => { ending = null; fc.hidden = true; WS.go(); } : () => { ending = null; ws.hidden = true; WS.full(false); WS.hide(); };
-  if(open){ ws.hidden=false; WS.show(!calm); WS.full(true, calm); if(calm) return done(); ending = FX.run("slam", true, ws, done, () => WS.goFull()); return; }
+  if(open){ ws.hidden=false; WS.full(true, calm); WS.show(!calm); if(calm) return done(); ending = FX.run("slam", true, ws, done, () => WS.goFull()); return; }
   fc.hidden=false; boot(CUR); WS.pause(); if(calm) return done();
   // A full-screen browser shows only the map, so leave full screen first and burn back to the forecast once the window has settled.
   const go = () => { clearTimeout(wait); document.removeEventListener("fullscreenchange", go); if(SHOWN==="fc" && ending===hold) ending = FX.run("slam", false, ws, done); };

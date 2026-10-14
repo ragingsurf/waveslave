@@ -253,6 +253,8 @@ html{overscroll-behavior-y:none}
 .wsmap.fs .wsbar{position:absolute;z-index:5;top:calc(10px + env(safe-area-inset-top));left:calc(10px + env(safe-area-inset-left));right:calc(10px + env(safe-area-inset-right));margin:0;padding:6px;gap:4px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;border-radius:99px;border:1px solid rgba(255,43,214,.35);background:rgba(14,8,36,.55);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
 .wsmap.fs .wsbar::-webkit-scrollbar{display:none}
 .wsmap.fs .wsbar button{flex:none;padding:6px 8px}
+/* The ✕ back to Forecast glows amber (like the selected tab), set apart from the pink map tools. */
+.wsmap.fs #wsFs{margin-top:10px;border-color:#ffb347;background:#0a0f12;color:#ffb347;font-size:20px;text-shadow:0 0 6px rgba(255,140,0,.8);box-shadow:0 0 8px rgba(255,140,0,.4)}
 .wsmap.fs .zoom{top:calc(70px + env(safe-area-inset-top));right:calc(8px + env(safe-area-inset-right))}
 .wsmap.fs .time{position:absolute;z-index:5;margin:0;left:calc(10px + env(safe-area-inset-left));right:calc(10px + env(safe-area-inset-right));bottom:calc(72px + env(safe-area-inset-bottom))}
 .wsmap.fs .tl{position:absolute;z-index:5;margin:0;left:calc(10px + env(safe-area-inset-left));right:calc(10px + env(safe-area-inset-right));bottom:calc(20px + env(safe-area-inset-bottom));background:rgba(21,13,51,.6);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
@@ -372,7 +374,7 @@ const TR = {
   "Super typhoon":"超級颱風", "Typhoon":"颱風", "Tropical storm":"熱帶風暴", "Tropical depression":"熱帶性低氣壓",
   "Wind":"風", "Waves":"浪", "Swell":"湧浪", "Rain":"雨", "wind":"風", "waves":"浪", "swell":"湧浪", "rain":"雨",
   "Hours":"時間", "Temp":"氣溫", "Gusts":"陣風", "2nd swell":"次湧浪", "Period":"週期", "CWA wave":"氣象署浪高", "Energy":"能量", "Tide":"潮汐", "Pressure":"氣壓",
-  "Close":"關閉", "Full screen":"全螢幕", "Exit full screen":"離開全螢幕", "Less certain this far out":"這麼遠的預報較不準",
+  "Close":"關閉", "Back to Forecast":"回到預報", "Full screen":"全螢幕", "Exit full screen":"離開全螢幕", "Less certain this far out":"這麼遠的預報較不準",
   "map model":"地圖模式", "Open-Meteo live":"Open-Meteo 即時", "RAIN":"雨", "WIND":"風", "SWELL":"湧浪", "WAVES":"浪", "TIDE":"潮汐",
   "PULL ▼":"下拉更新 ▼", "LET GO ▲":"放開 ▲", "LOADING…":"載入中…",
   // Towns on the map.
@@ -698,7 +700,7 @@ const WS = (() => {
   addEventListener("pagehide", () => { if (FS) keep(); });
   // win=false fills the window without asking the browser for full screen yet (the opening animation asks once it has finished: see goFull).
   function setFs(on, win = true) { if (on === FS) return; FS = on; const sec = document.getElementById("viewWs"), b = document.getElementById("wsFs");
-    sec.classList.toggle("fs", FS); document.documentElement.style.overflow = FS ? "hidden" : ""; b.textContent = FS ? "✕" : "⛶"; b.setAttribute("aria-label", T(FS ? "Exit full screen" : "Full screen"));
+    sec.classList.toggle("fs", FS); document.documentElement.style.overflow = FS ? "hidden" : ""; b.textContent = FS ? "✕" : "⛶"; b.setAttribute("aria-label", T(FS ? "Back to Forecast" : "Full screen"));
     try { if (FS && win && sec.requestFullscreen && document.fullscreenEnabled) sec.requestFullscreen().catch(() => {}); else if (!FS && document.fullscreenElement) document.exitFullscreen().catch(() => {}); } catch(e) {}
     requestAnimationFrame(() => { if (sec.hidden) return; size(); parts.forEach(spawn); drawBase(); }); }
   document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && FS) setView("fc"); });
@@ -993,7 +995,7 @@ const WS = (() => {
     redraw() { if (built && raf) drawBase(); },
     // After a language switch: day labels, an open forecast table and the map's own text.
     relang() { if (!built) return; timeline(); tlMark(); const el = document.getElementById("wsSheet"); if (!el.hidden) { if (SHEET) { const k = [cx, cy, z]; openSheet(SHEET); [cx, cy, z] = k; clampView(); } else if (PIN && PIN.open) showPin(); }
-      document.getElementById("wsFs").setAttribute("aria-label", T(FS ? "Exit full screen" : "Full screen")); if (!document.getElementById("viewWs").hidden) drawBase(); } };
+      document.getElementById("wsFs").setAttribute("aria-label", T(FS ? "Back to Forecast" : "Full screen")); if (!document.getElementById("viewWs").hidden) drawBase(); } };
 })();
 // ---- View tabs: Forecast or the WaveSlave map
 let VIEW="fc";

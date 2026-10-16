@@ -691,17 +691,20 @@ const WS = (() => {
         g.beginPath(); g.moveTo(x1, y1); g.lineTo(x1-dx*6-dy*4, y1-dy*6+dx*4); g.lineTo(x1-dx*6+dy*4, y1-dy*6-dx*4); g.closePath(); g.fill(); } }
     g.restore(); }
   // Map height from the visible screen, upright or sideways (the app frame can be taller than the screen, so the device size caps it).
-  // Full screen: the map panel fills the screen (and the browser goes full screen when it allows it). The map only shows full screen:
+  // Full screen: the map panel fills the screen (phones and tablets also ask the browser for real full screen). The map only shows full screen:
   // ✕, Esc or leaving the browser's full screen all go back to Forecast.
   let FS = false;
   // Where the map was last left (centre and zoom), so a reload or the page's own refresh opens it there again instead of zoomed all the way out.
   let LAST = null; try { LAST = JSON.parse(localStorage.getItem("waveslave-mapview")); } catch(e) {}
   const keep = () => { if (z0 > 1) try { localStorage.setItem("waveslave-mapview", JSON.stringify({cx, cy, k: z/z0})); } catch(e) {} };
   addEventListener("pagehide", () => { if (FS) keep(); });
+  // Only phones and tablets (a touch screen as the main pointer) ask the browser for real full screen, to hide the address bar.
+  // On a computer the map just fills the browser window, so the taskbar and browser tabs stay put.
+  const TRUEFS = matchMedia("(pointer: coarse)").matches;
   // win=false fills the window without asking the browser for full screen yet (the opening animation asks once it has finished: see goFull).
   function setFs(on, win = true) { if (on === FS) return; FS = on; const sec = document.getElementById("viewWs"), b = document.getElementById("wsFs");
     sec.classList.toggle("fs", FS); document.documentElement.style.overflow = FS ? "hidden" : ""; b.textContent = FS ? "✕" : "⛶"; b.setAttribute("aria-label", T(FS ? "Back to Forecast" : "Full screen"));
-    try { if (FS && win && sec.requestFullscreen && document.fullscreenEnabled) sec.requestFullscreen().catch(() => {}); else if (!FS && document.fullscreenElement) document.exitFullscreen().catch(() => {}); } catch(e) {}
+    try { if (FS && win && TRUEFS && sec.requestFullscreen && document.fullscreenEnabled) sec.requestFullscreen().catch(() => {}); else if (!FS && document.fullscreenElement) document.exitFullscreen().catch(() => {}); } catch(e) {}
     requestAnimationFrame(() => { if (sec.hidden) return; size(); parts.forEach(spawn); drawBase(); }); }
   document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && FS) setView("fc"); });
   // The panel can change size after it opens (the browser going full screen, a phone's address bar, rotating): redraw once at the new size, same view.
@@ -990,7 +993,7 @@ const WS = (() => {
     full(on, win) { setFs(on, win); },
     // Ask the browser for full screen after the opening animation, while the tap still counts as the user's (browsers refuse it later).
     goFull() { const sec = document.getElementById("viewWs"), ua = navigator.userActivation;
-      try { if (FS && !document.fullscreenElement && sec.requestFullscreen && document.fullscreenEnabled && (!ua || ua.isActive)) sec.requestFullscreen().catch(() => {}); } catch(e) {} },
+      try { if (FS && TRUEFS && !document.fullscreenElement && sec.requestFullscreen && document.fullscreenEnabled && (!ua || ua.isActive)) sec.requestFullscreen().catch(() => {}); } catch(e) {} },
     hide() { keep(); cancelAnimationFrame(raf); raf = 0; if (playing) { clearInterval(playing); playing = 0; document.getElementById("wsPlay").textContent = "▶"; } },
     redraw() { if (built && raf) drawBase(); },
     // After a language switch: day labels, an open forecast table and the map's own text.

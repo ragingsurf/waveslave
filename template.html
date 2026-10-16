@@ -115,6 +115,13 @@ header{position:relative}
 .day{appearance:none;font:inherit;color:inherit;text-align:left;cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;display:grid;gap:6px}
 .day:hover{border-color:var(--sea)}
 .day[aria-pressed="true"]{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+/* Today stands out in the sea colour (Bryan, Oct 16) so it's easy to find your way back; picked, it fills in. */
+.days .day.today{border:1px solid var(--sea);box-shadow:inset 0 0 0 1px var(--sea)}
+.days .day.today .dn,.days .day.today .mini i{color:var(--sea);font-weight:700}
+@media (max-width:560px){
+  .days .day.today[aria-pressed="true"]{background:var(--sea);border-color:var(--sea)}
+  .days .day.today[aria-pressed="true"] .mini i,.days .day.today[aria-pressed="true"] .mini b{color:var(--bg)}
+}
 .day .dn{font-weight:600}
 .day .big{font-family:var(--display);font-weight:800;font-stretch:115%;line-height:1}
 .day .big small{font-size:13px;color:var(--muted);font-weight:600}
@@ -1299,7 +1306,7 @@ let sel = Math.max(0, dayKeys.indexOf(todayKey));
 function drawDays(){
   const el = document.getElementById("days");
   el.innerHTML = dayInfo.map((d,i)=>{ const r=rate(d.peakS), o=d.obs, lo=o?o.minH:d.minH, hi=o?o.maxH:d.maxH, pa=o&&o.ps.length?Math.min(...o.ps):d.minP, pb=o&&o.ps.length?Math.max(...o.ps):d.maxP;
-    return `<button class="day${d.hist?" hist":""}" aria-pressed="${i===sel}" data-i="${i}">
+    return `<button class="day${d.hist?" hist":""}${d.key===todayKey?" today":""}" aria-pressed="${i===sel}" data-i="${i}">
       <span class="dn">${dayName(d.key,todayKey)} <span class="where mono">${d.key.slice(8)}</span></span>
       ${d.hist ? `<span class="tag">${o ? (isZh()?"浮標實測":"Buoy measured") : (isZh()?"模式推算":"Model, no buoy")}</span>` : ""}
       <span class="big mono">${r1(lo)}–${r1(hi)}<small> m</small></span>

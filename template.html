@@ -73,9 +73,13 @@ header{position:relative}
 .dir{display:inline-block;transition:transform .3s}
 
 /* Days */
-.days{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.days{display:grid;grid-auto-flow:column;grid-auto-columns:176px;gap:8px;overflow-x:auto;padding-bottom:6px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+.day.hist{background:transparent;border-style:dashed}
+.day.hist .big{color:var(--muted)}
+.day .tag{font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--muted);text-transform:uppercase}
+.day.hist .tag{color:var(--ink)}
 @media (max-width:560px){
-  .days{grid-template-columns:repeat(5,148px);overflow-x:auto;padding-bottom:6px;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+  .days{grid-auto-columns:148px}
   .day{padding:10px 12px;gap:5px;grid-template-columns:minmax(0,1fr)}
   .day .big{font-size:20px;font-stretch:100%;letter-spacing:-.01em;white-space:nowrap}.day .big small{font-size:11px}
   .day .per{font-size:12px;white-space:nowrap}.day .w{font-size:11.5px}
@@ -287,8 +291,8 @@ html{overscroll-behavior-y:none}
   </section>
 
 
-  <section aria-label="Five-day outlook">
-    <div class="label" id="outH" style="margin-bottom:8px">5-day outlook</div>
+  <section aria-label="Last 5 days and 5-day outlook">
+    <div class="label" id="outH" style="margin-bottom:8px">Last 5 days · 5-day outlook</div>
     <div class="days" id="days"></div>
     <div class="where" id="acc" style="font-size:12px;margin-top:8px"></div>
   </section>
@@ -308,6 +312,7 @@ html{overscroll-behavior-y:none}
       <span><i style="background:var(--fair)"></i><span data-zh="側風">Cross-shore</span></span>
       <span><i style="background:var(--bad)"></i><span data-zh="向岸風">Onshore</span></span>
       <span><i style="background:var(--buoy)"></i><span data-zh="潮汐">Tide</span></span>
+      <span><i style="background:var(--ink);width:8px;height:8px;border-radius:50%"></i><span data-zh="浮標實測">Buoy measured</span></span>
     </div>
     <div class="tides" id="tides"></div>
     <details class="mdlx">
@@ -364,7 +369,7 @@ let LANG = (() => { try{ const l=localStorage.getItem("waveslave-lang"); if(l===
 const isZh = () => LANG==="zh";
 // English words and short phrases -> 中文. Sentences with numbers in them are written out in place with isZh().
 const TR = {
-  "Today":"今天", "Tomorrow":"明天", "Sun":"週日", "Mon":"週一", "Tue":"週二", "Wed":"週三", "Thu":"週四", "Fri":"週五", "Sat":"週六",
+  "Today":"今天", "Tomorrow":"明天", "Yesterday":"昨天", "Sun":"週日", "Mon":"週一", "Tue":"週二", "Wed":"週三", "Thu":"週四", "Fri":"週五", "Sat":"週六",
   "SUN":"週日", "MON":"週一", "TUE":"週二", "WED":"週三", "THU":"週四", "FRI":"週五", "SAT":"週六",
   "N":"北", "NNE":"北北東", "NE":"東北", "ENE":"東北東", "E":"東", "ESE":"東南東", "SE":"東南", "SSE":"南南東",
   "S":"南", "SSW":"南南西", "SW":"西南", "WSW":"西南西", "W":"西", "WNW":"西北西", "NW":"西北", "NNW":"北北西",
@@ -1065,19 +1070,32 @@ const DOW = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(T);
 const dayKey = ms => local(ms).toISOString().slice(0,10);
 const dayName = (key, todayKey) => { const d = new Date(key+"T00:00Z"); const n = DOW[d.getUTCDay()];
   const diff = Math.round((d - new Date(todayKey+"T00:00Z"))/864e5);
-  return diff===0 ? T("Today") : diff===1 ? T("Tomorrow") : n; };
+  return diff===0 ? T("Today") : diff===1 ? T("Tomorrow") : diff===-1 ? T("Yesterday") : n; };
 const COMPASS = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
 const compass = d => T(COMPASS[Math.round(((d%360)+360)%360/22.5)%16]);
 const r1 = v => (Math.round(v*10)/10).toFixed(1);
 
 // ---- data prep
+const nowMs = Date.now();
+const todayKey = dayKey(nowMs);
 // Bryan asked for buoy periods to always be shown ×1.3 (the buoy reports a shorter, average period; it was ×1.5 until Oct 12).
 const BUOY_P = 1.3;
 // Same ×1.3 for the Open-Meteo forecast periods (also an average period), so forecast and buoy read alike.
-const hours = DATA.hourly.map(r => ({t:tp(r[0]), h:r[1], p:r[2]*BUOY_P, dir:r[3], sh:r[4], sp:r[5]*BUOY_P, sdir:r[6], ww:r[7]}));
-const wind = DATA.wind.map(r => ({t:tp(r[0]), kt:r[1], from:r[2], sky:r[3]}));
+// The last 5 days come first (hist: the model's own hindcast, plus what the buoy and wind station measured), then the forecast.
+const HIST = DATA.hist || {};
+const hours = (HIST.wave||[]).concat(DATA.hourly).map(r => ({t:tp(r[0]), h:r[1], p:r[2]*BUOY_P, dir:r[3], sh:r[4], sp:r[5]*BUOY_P, sdir:r[6], ww:r[7]}));
+// Wind: the CWA forecast; before it starts, the wind station's readings (obs), or the model's wind every 3 h where the station has none.
+const cwaWind = DATA.wind.map(r => ({t:tp(r[0]), kt:r[1], from:r[2], sky:r[3]}));
+const wStart = cwaWind.length ? cwaWind[0].t - 90*60e3 : Infinity;
+const stn = (HIST.station||[]).concat(DATA.dwind||[]).map(r => ({t:tp(r[0]), kt:r[1], from:r[2], sky:null, obs:true})).filter(w => w.t < wStart && w.kt != null && w.from != null);
+const mWind = (HIST.wx||[]).filter(r => r[4] != null && r[5] != null && +r[0].slice(11,13)%3===0).map(r => ({t:tp(r[0]), kt:r[4], from:r[5], sky:r[3]>=0.5?"Rain":null, model:true}))
+  .filter(w => w.t < wStart && !stn.some(o => Math.abs(o.t-w.t) <= 2*36e5));
+const wind = [...new Map(stn.concat(mWind).map(w => [w.t, w])).values()].sort((a,b)=>a.t-b.t).concat(cwaWind);
+// Buoy readings by hour (heights in m, periods ×1.3 like everywhere else).
+const bObs = new Map();
+(HIST.buoy||[]).concat(DATA.buoy||[]).forEach(r => { if(r[1]==null) return; const t=tp(r[0]); if(t%36e5) return; bObs.set(t, {h:r[1], p:r[2]!=null?r[2]*BUOY_P:null, dir:r[3]}); });
 // Secondary swell (Open-Meteo MFWAM), shown alongside the main swell; not used in the rating.
-const sw2 = new Map((DATA.swell2||[]).filter(r=>r[1]!=null).map(r => [tp(r[0]), {h:r[1], p:r[2]!=null?r[2]*BUOY_P:null, dir:r[3]}]));
+const sw2 = new Map((HIST.swell2||[]).concat(DATA.swell2||[]).filter(r=>r[1]!=null).map(r => [tp(r[0]), {h:r[1], p:r[2]!=null?r[2]*BUOY_P:null, dir:r[3]}]));
 hours.forEach(x => { x.s2 = sw2.get(x.t) || null; });
 const tideEv = Object.entries(DATA.tides).flatMap(([d,evs]) => evs.map(e => ({t:tp(d+"T"+e[0]), type:e[1], cm:e[2]}))).sort((a,b)=>a.t-b.t);
 // Mid tide: at least 1 h from any high or low. Hours past the tide table count as mid tide.
@@ -1110,14 +1128,14 @@ function score(h,p,w,off=DATA.off){
 }
 const RATE = [["Flat","var(--muted)"],["Poor","var(--bad)"],["Fair","var(--fair)"],["Good","var(--good)"],["Firing","var(--buoy)"]].map(([n,c]) => [T(n),c]);
 const rate = s => s<=1?0 : s<=3?1 : s<=5?2 : s<=6?3 : 4;
-hours.forEach(x => { x.w = windAt(x.t); x.s = score(x.h*exposure(x.dir),x.p,x.w); });
+// Hours already past are rated on what the buoy measured, where it has a reading.
+hours.forEach(x => { x.w = windAt(x.t); const b = x.t<=nowMs ? bObs.get(x.t) : null; if(b) x.b = b;
+  x.s = b && b.p!=null ? score(b.h*exposure(b.dir!=null?b.dir:x.dir),b.p,x.w) : score(x.h*exposure(x.dir),x.p,x.w); });
 const hourByT = new Map(hours.map(x=>[x.t,x]));
 const isDay = (t,key) => { const s=DATA.sun[key]; if(!s) return true; const hm=hhmm(t); return hm>=s.first && hm<=s.last; };
 
 // ---- freshness
 const updated = Date.parse(DATA.updated);
-const nowMs = Date.now();
-const todayKey = dayKey(nowMs);
 (() => { const el=document.getElementById("fresh"); const ageH=(nowMs-updated)/36e5;
   const when = isZh() ? (ageH<1 ? "不到一小時前" : ageH<48 ? Math.round(ageH)+" 小時前" : Math.round(ageH/24)+" 天前")
     : ageH<1 ? "less than an hour ago" : ageH<48 ? Math.round(ageH)+" h ago" : Math.round(ageH/24)+" days ago";
@@ -1172,8 +1190,9 @@ const todayKey = dayKey(nowMs);
 })();
 
 // ---- days
-// The Forecast tab shows 5 days; the data runs further out for the Map.
-const dayKeys = [...new Set(hours.map(x=>dayKey(x.t)))].slice(0, 5);
+// The Forecast tab shows the last 5 days, today and the next 4 (today in the middle); the data runs further out for the Map.
+const allKeys = [...new Set(hours.map(x=>dayKey(x.t)))], ti0 = Math.max(0, allKeys.indexOf(todayKey));
+const dayKeys = allKeys.slice(Math.max(0, ti0-5), ti0+5);
 const dayInfo = dayKeys.map(key => {
   const hs = hours.filter(x=>dayKey(x.t)===key);
   const lit = hs.filter(x=>isDay(x.t,key) && x.w);
@@ -1194,17 +1213,24 @@ const dayInfo = dayKeys.map(key => {
   const maxH = Math.max(...hs.map(x=>x.h)), minH = Math.min(...hs.map(x=>x.h));
   const maxP = Math.max(...hs.map(x=>x.p)), minP = Math.min(...hs.map(x=>x.p));
   const ws = hs.map(x=>x.w).filter(Boolean);
-  return {key, hs, top, win, primo, past, maxH, minH, maxP, minP, peakS: Math.max(...pool.map(x=>x.s)), avgKt: ws.length? ws.reduce((a,w)=>a+w.kt,0)/ws.length : null, hasWind: lit.length>0};
+  // A past day reads off the buoy when it has most of the day's readings.
+  const bs = hs.filter(x=>x.b), hist = key<todayKey, obs = hist && bs.length>=12 ? {minH: Math.min(...bs.map(x=>x.b.h)), maxH: Math.max(...bs.map(x=>x.b.h)),
+    ps: bs.map(x=>x.b.p).filter(p=>p!=null)} : null;
+  return {key, hs, top, win, primo, past, hist, obs, maxH, minH, maxP, minP, obsMax: bs.length ? Math.max(...bs.map(x=>x.b.h)) : 0, peakS: Math.max(...pool.map(x=>x.s)), avgKt: ws.length? ws.reduce((a,w)=>a+w.kt,0)/ws.length : null, hasWind: lit.length>0};
 });
 let sel = Math.max(0, dayKeys.indexOf(todayKey));
-function drawDays(){
-  document.getElementById("days").innerHTML = dayInfo.map((d,i)=>{ const r=rate(d.peakS);
-    return `<button class="day" aria-pressed="${i===sel}" data-i="${i}">
+function drawDays(center){
+  const el = document.getElementById("days");
+  el.innerHTML = dayInfo.map((d,i)=>{ const r=rate(d.peakS), o=d.obs, lo=o?o.minH:d.minH, hi=o?o.maxH:d.maxH, pa=o&&o.ps.length?Math.min(...o.ps):d.minP, pb=o&&o.ps.length?Math.max(...o.ps):d.maxP;
+    return `<button class="day${d.hist?" hist":""}" aria-pressed="${i===sel}" data-i="${i}">
       <span class="dn">${dayName(d.key,todayKey)} <span class="where mono">${d.key.slice(8)}</span></span>
-      <span class="big mono">${r1(d.minH)}–${r1(d.maxH)}<small> m</small></span>
-      <span class="per mono">${isZh()?"週期 ":""}${Math.round(d.minP)===Math.round(d.maxP)?Math.round(d.maxP):Math.round(d.minP)+"–"+Math.round(d.maxP)} s${isZh()?"":" period"}</span>
+      ${d.hist ? `<span class="tag">${o ? (isZh()?"浮標實測":"Buoy measured") : (isZh()?"模式推算":"Model, no buoy")}</span>` : ""}
+      <span class="big mono">${r1(lo)}–${r1(hi)}<small> m</small></span>
+      <span class="per mono">${isZh()?"週期 ":""}${Math.round(pa)===Math.round(pb)?Math.round(pb):Math.round(pa)+"–"+Math.round(pb)} s${isZh()?"":" period"}</span>
       <span class="bar"><i style="width:${(d.peakS/8*100).toFixed(0)}%;background:${RATE[r][1]}"></i></span>
       <span class="w">${RATE[r][0]}${isZh() ? (d.avgKt!=null?` · 風 ${Math.round(d.avgKt)} kt`:" · 無風力資料") : d.avgKt!=null?` · ${Math.round(d.avgKt)} kt wind`:" · no wind data"}</span></button>`; }).join("");
+  // Open with today in the middle of the strip, the past to its left.
+  if(center){ const c = el.children[sel]; if(c) el.scrollLeft = c.offsetLeft - el.offsetLeft - (el.clientWidth - c.offsetWidth)/2; }
 }
 document.getElementById("days").onclick = (e => { const b=e.target.closest(".day"); if(!b) return; sel=+b.dataset.i; drawDays(); drawDay(); });
 
@@ -1217,7 +1243,7 @@ function drawDay(){
   document.getElementById("chart").setAttribute("viewBox", `0 0 ${W} 300`);
   const d = dayInfo[sel], t0 = tp(d.key+"T00:00"), t1 = t0+24*3600e3;
   const x = t => P.l + (t-t0)/(t1-t0)*CW;
-  const hMax = Math.max(2, Math.ceil(Math.max(...dayInfo.map(q=>q.maxH))*2)/2);
+  const hMax = Math.max(2, Math.ceil(Math.max(...dayInfo.map(q=>Math.max(q.maxH,q.obsMax)))*2)/2);
   const yw = h => Y.wBot - h/hMax*(Y.wBot-Y.wTop);
   const tideMin=-80, tideMax=130, yt = c => Y.tBot - (c-tideMin)/(tideMax-tideMin)*(Y.tBot-Y.tTop);
   const sun = DATA.sun[d.key];
@@ -1231,10 +1257,15 @@ function drawDay(){
   for(let h=0; h<=hMax; h+=hMax>3?1:0.5){ s += `<line x1="${P.l}" x2="${P.l+CW}" y1="${yw(h)}" y2="${yw(h)}" stroke="var(--line)" stroke-width="1"/><text x="${P.l-5}" y="${yw(h)+3}" text-anchor="end">${h}m</text>`; }
   const hs = hours.filter(q=>q.t>=t0 && q.t<=t1);
   const area = (key,fill,op) => `<path d="M${x(hs[0].t)},${Y.wBot} ${hs.map(q=>`L${x(q.t).toFixed(1)},${yw(q[key]).toFixed(1)}`).join(" ")} L${x(hs[hs.length-1].t)},${Y.wBot}Z" fill="${fill}" fill-opacity="${op}"/>`;
-  s += area("h","var(--sea)",.35) + area("sh","var(--swell)",.55);
+  // A past day keeps the model's waves, fainter, under the buoy's readings.
+  const fade = d.hist ? .55 : 1;
+  s += area("h","var(--sea)",.35*fade) + area("sh","var(--swell)",.55*fade);
   const h2 = hs.filter(q=>q.s2);
-  if(h2.length) s += `<path d="${h2.map((q,i)=>`${i?"L":"M"}${x(q.t).toFixed(1)},${yw(q.s2.h).toFixed(1)}`).join(" ")}" fill="none" stroke="var(--swell)" stroke-width="1.5" stroke-dasharray="4 3"/>`;
-  s += `<path d="${hs.map((q,i)=>`${i?"L":"M"}${x(q.t).toFixed(1)},${yw(q.h).toFixed(1)}`).join(" ")}" fill="none" stroke="var(--sea)" stroke-width="2"/>`;
+  if(h2.length) s += `<path d="${h2.map((q,i)=>`${i?"L":"M"}${x(q.t).toFixed(1)},${yw(q.s2.h).toFixed(1)}`).join(" ")}" fill="none" stroke="var(--swell)" stroke-width="1.5" stroke-dasharray="4 3" stroke-opacity="${fade}"/>`;
+  s += `<path d="${hs.map((q,i)=>`${i?"L":"M"}${x(q.t).toFixed(1)},${yw(q.h).toFixed(1)}`).join(" ")}" fill="none" stroke="var(--sea)" stroke-width="2" stroke-opacity="${fade}"/>`;
+  // Buoy readings: what the sea actually did (past days, and today up to now).
+  const hb = hs.filter(q=>q.b);
+  if(hb.length) s += `<g fill="var(--ink)" stroke="var(--bg)" stroke-width="1">${hb.map(q=>`<circle cx="${x(q.t).toFixed(1)}" cy="${yw(q.b.h).toFixed(1)}" r="2.8"/>`).join("")}</g>`;
   // best hour marker
   // primo hour: wavy water line under a flaming PRIMO label (logo style)
   const top = d.top, win = d.win; if(top && d.primo && win.b>=t0 && win.a<t1){
@@ -1247,9 +1278,11 @@ function drawDay(){
     s += `<text x="${px.toFixed(1)}" y="${ly}" text-anchor="middle" filter="url(#pmGlow)" style="fill:url(#pmFire);stroke:#200300;stroke-width:.6px;font-family:'Metal Mania','Impact',serif;font-size:21px;letter-spacing:.03em">PRIMO</text>`; }
   // wind row
   s += `<text x="${P.l-5}" y="${Y.windY+3}" text-anchor="end">kt</text>`;
-  wind.filter(w=>w.t>=t0 && w.t<t1).forEach(w => { const c=KIND[windKind(w.from)][1], cx=x(w.t);
+  // Station readings come hourly: draw every third hour, like the forecast.
+  const wRow = wind.filter(w=>w.t>=t0 && w.t<t1 && (!w.obs || local(w.t).getUTCHours()%3===0));
+  wRow.forEach(w => { const c=KIND[windKind(w.from)][1], cx=x(w.t);
     s += `<g transform="translate(${cx},${Y.windY-6}) rotate(${w.from+180})"><path d="M0,-9 L5,4 L0,1 L-5,4Z" fill="${c}"/></g><text x="${cx}" y="${Y.windY+16}" text-anchor="middle" style="fill:${c}">${Math.round(w.kt)}</text>`; });
-  if(!wind.some(w=>w.t>=t0 && w.t<t1)) s += `<text x="${P.l+CW/2}" y="${Y.windY+3}" text-anchor="middle">${isZh()?"這天還沒有風力預報":"No wind forecast this far out"}</text>`;
+  if(!wRow.length) s += `<text x="${P.l+CW/2}" y="${Y.windY+3}" text-anchor="middle">${d.hist ? (isZh()?"這天沒有風力紀錄":"No wind readings this day") : (isZh()?"這天還沒有風力預報":"No wind forecast this far out")}</text>`;
   // tide
   const tpts=[]; for(let t=t0;t<=t1;t+=15*60e3){ const v=tideAt(t); if(v) tpts.push([x(t),yt(v.cm)]); }
   if(tpts.length) s += `<path d="${tpts.map((p,i)=>`${i?"L":"M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ")}" fill="none" stroke="var(--buoy)" stroke-width="2"/>`;
@@ -1263,17 +1296,17 @@ function drawDay(){
   s += `<rect id="hit" x="${P.l}" y="0" width="${CW}" height="${Y.axis}" fill="transparent"/>`;
   const svg = document.getElementById("chart"); svg.innerHTML = s;
 
-  const dt0 = new Date(d.key+"T00:00Z"), dn = dayName(d.key,todayKey), near = dn === T("Today") || dn === T("Tomorrow");
+  const dt0 = new Date(d.key+"T00:00Z"), dn = dayName(d.key,todayKey), near = dn === T("Today") || dn === T("Tomorrow") || dn === T("Yesterday");
   document.getElementById("dayTitle").textContent = isZh()
     ? (near ? dn+"，" : "")+dt0.toLocaleDateString("zh-TW",{month:"long",day:"numeric",timeZone:"UTC"})+(near ? "" : " "+dt0.toLocaleDateString("zh-TW",{weekday:"long",timeZone:"UTC"}))
     : near ? dn+", "+dt0.toLocaleDateString("en",{month:"short",day:"numeric",timeZone:"UTC"})
     : dt0.toLocaleDateString("en",{weekday:"long",month:"short",day:"numeric",timeZone:"UTC"});
-  const r = rate(top.s);
+  const r = rate(top.s), tv = top.b && top.b.p!=null ? top.b : top;
   document.getElementById("best").innerHTML = isZh() ? (d.hasWind
-    ? `${d.past?"最佳時段已過":"最佳時段"} ${win.a<win.b?`<b class="mono">${hhmm(win.a)}–${hhmm(win.b+36e5)}</b>`:`約 <b class="mono">${hhmm(top.t)}</b>`}：${r1(top.h)} m、${r1(top.p)} s${top.w?`，${Math.round(top.w.kt)} kt ${KIND[windKind(top.w.from)][0]}`:""} · <span style="color:${RATE[r][1]};font-weight:600">${RATE[r][0]}</span>`
+    ? `${d.past?"最佳時段已過":"最佳時段"} ${win.a<win.b?`<b class="mono">${hhmm(win.a)}–${hhmm(win.b+36e5)}</b>`:`約 <b class="mono">${hhmm(top.t)}</b>`}：${r1(tv.h)} m、${r1(tv.p)} s${top.w?`，${Math.round(top.w.kt)} kt ${KIND[windKind(top.w.from)][0]}`:""} · <span style="color:${RATE[r][1]};font-weight:600">${RATE[r][0]}</span>`
     : `浪最大約在 <b class="mono">${hhmm(top.t)}</b>：${r1(top.h)} m、${r1(top.p)} s`)
     : d.hasWind
-    ? `${d.primo?"Primo":d.past?"Best was":"Best"} ${win.a<win.b?`<b class="mono">${hhmm(win.a)}–${hhmm(win.b+36e5)}</b>`:`around <b class="mono">${hhmm(top.t)}</b>`}: ${r1(top.h)} m at ${r1(top.p)} s, ${top.w?`${Math.round(top.w.kt)} kt ${KIND[windKind(top.w.from)][0].toLowerCase()}`:""} · <span style="color:${RATE[r][1]};font-weight:600">${RATE[r][0]}</span>`
+    ? `${d.primo?"Primo":d.past?"Best was":"Best"} ${win.a<win.b?`<b class="mono">${hhmm(win.a)}–${hhmm(win.b+36e5)}</b>`:`around <b class="mono">${hhmm(top.t)}</b>`}: ${r1(tv.h)} m at ${r1(tv.p)} s, ${top.w?`${Math.round(top.w.kt)} kt ${KIND[windKind(top.w.from)][0].toLowerCase()}`:""} · <span style="color:${RATE[r][1]};font-weight:600">${RATE[r][0]}</span>`
     : `Biggest around <b class="mono">${hhmm(top.t)}</b>: ${r1(top.h)} m at ${r1(top.p)} s`;
   document.getElementById("tides").innerHTML = (DATA.tides[d.key]||[]).map(e=>`<span class="tide">${isZh() ? (e[1]==="H"?"滿潮":"乾潮") : e[1]==="H"?"High":"Low"} <b>${e[0]}</b> · ${e[2]} cm</span>`).join("")
     + (sun && sun.phen.length ? `<span class="tide">🌙 ${sun.phen.join(", ")}</span>` : "");
@@ -1293,15 +1326,15 @@ function drawDay(){
     const tv=tideAt(t), k=q.w?KIND[windKind(q.w.from)]:null;
     out.innerHTML = `<span class="t">${hhmm(t)}</span>${["WAVES","SWELL","WIND","TIDE"].map(k=>`<span class="k">${T(k)}</span>`).join("")}`
       + `<span class="v">${r1(q.h)}m ${r1(q.p)}s</span><span class="v">${r1(q.sh)}m ${r1(q.sp)}s</span><span class="v">${q.w?Math.round(q.w.kt)+"kt":"–"}</span><span class="v">${tv?Math.round(tv.cm)+"cm "+(tv.rising?"▲":"▼"):"–"}</span>`
-      + (isZh() ? `<span class="r">${compass(q.dir)}湧浪${q.s2&&q.s2.h>=0.2?` · 次湧 ${r1(q.s2.h)}m ${q.s2.p!=null?r1(q.s2.p)+"s ":""}${compass(q.s2.dir)}`:""}${q.w?` · ${k[0]}（${compass(q.w.from)}）${q.w.sky==="Rain"?" · 雨":""}`:""} · ${RATE[rate(q.s)][0]}</span>`
-      : `<span class="r">${compass(q.dir)} SWELL${q.s2&&q.s2.h>=0.2?` · 2ND ${r1(q.s2.h)}m ${q.s2.p!=null?r1(q.s2.p)+"s ":""}${compass(q.s2.dir)}`:""}${q.w?` · ${k[0].toUpperCase()} (${compass(q.w.from)})${q.w.sky==="Rain"?" · RAIN":""}`:""} · ${RATE[rate(q.s)][0].toUpperCase()}</span>`); };
+      + (isZh() ? `<span class="r">${q.b?`浮標 ${r1(q.b.h)}m${q.b.p!=null?" "+r1(q.b.p)+"s":""} · `:""}${compass(q.dir)}湧浪${q.s2&&q.s2.h>=0.2?` · 次湧 ${r1(q.s2.h)}m ${q.s2.p!=null?r1(q.s2.p)+"s ":""}${compass(q.s2.dir)}`:""}${q.w?` · ${k[0]}（${compass(q.w.from)}）${q.w.sky==="Rain"?" · 雨":""}`:""} · ${RATE[rate(q.s)][0]}</span>`
+      : `<span class="r">${q.b?`BUOY ${r1(q.b.h)}m${q.b.p!=null?" "+r1(q.b.p)+"s":""} · `:""}${compass(q.dir)} SWELL${q.s2&&q.s2.h>=0.2?` · 2ND ${r1(q.s2.h)}m ${q.s2.p!=null?r1(q.s2.p)+"s ":""}${compass(q.s2.dir)}`:""}${q.w?` · ${k[0].toUpperCase()} (${compass(q.w.from)})${q.w.sky==="Rain"?" · RAIN":""}`:""} · ${RATE[rate(q.s)][0].toUpperCase()}</span>`); };
   hit.addEventListener("pointermove", show, {passive:true}); hit.addEventListener("pointerdown", show, {passive:true});
   // Start the readout on the current hour (or the best hour) so it never jumps from empty.
   const startT = nowMs>=t0 && nowMs<t1 ? t0+Math.floor((nowMs-t0)/36e5)*36e5 : d.top.t; shownT=startT; render(startT);
   drawModels(d.key);
 }
 // ---- model check: the main forecast against ECMWF, GFS, DWD and CWA's own wave forecast, every 3 hours.
-const MSRC = [["WaveSlave", new Map(hours.map(q=>[q.t,q.h]))]]
+const MSRC = [["WaveSlave", new Map(hours.filter(q=>q.t>=tp(DATA.hourly[0][0])).map(q=>[q.t,q.h]))]]
   .concat(Object.entries(DATA.models||{}).map(([k,rows]) => [k, new Map(rows.map(r=>[tp(r[0]),r[1]]))]))
   .concat(DATA.cwawave && DATA.cwawave.length ? [["CWA", new Map(DATA.cwawave.map(r=>[tp(r[0]),r[1]]))]] : []);
 function agree(t){ const v = MSRC.map(([,m])=>m.get(t)).filter(x=>x!=null); if(v.length<3) return null;
@@ -1363,7 +1396,7 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
   document.getElementById("picker").innerHTML = ids.map(id => `<a href="#${id}" data-spot="${id}"${id===SPOT?' aria-current="page"':""}>${SPT(ALL.spots[id],"name")}</a>`).join("");
   const zh = isZh(), bn = SPT(DATA,"buoyName"), nm = SPT(DATA,"name");
   document.getElementById("nowH").textContent = zh ? `目前 · ${bn}浮標` : `Right now · ${bn} buoy`;
-  document.getElementById("outH").textContent = zh ? `五天預報 · ${nm}` : `5-day outlook · ${nm}`;
+  document.getElementById("outH").textContent = zh ? `過去五天 · 五天預報 · ${nm}` : `Last 5 days · 5-day outlook · ${nm}`;
   document.getElementById("pastChart").setAttribute("aria-label", zh ? `${bn}浮標過去 12 小時浪高` : `Wave height at the ${bn} buoy, last 12 hours`);
   document.getElementById("pastSrc").innerHTML = zh ? `${bn}浮標（${DATA.buoyId}），每小時。<a href="${cwaBuoy(DATA.buoyId)}" target="_blank" rel="noopener">氣象署 30 天完整紀錄</a>`
     : `${bn} wave buoy (${DATA.buoyId}), hourly. <a href="${cwaBuoy(DATA.buoyId)}" target="_blank" rel="noopener">Full 30-day record at CWA</a>`;
@@ -1374,7 +1407,7 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
   document.title = `WaveSlave · ${nm}`;
 })();
 
-drawDays(); drawDay();
+drawDays(true); drawDay();
 }
 applyLang();
 document.querySelectorAll("#lang button").forEach(b=>b.onclick=()=>setLang(b.dataset.l));

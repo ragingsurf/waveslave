@@ -774,9 +774,9 @@ const WS = (() => {
   // Colour field, drawn once into a canvas a quarter-view bigger on each side so dragging just slides it; zooming stretches it until the fingers stop.
   // While the time bar is being dragged it covers just the view (half the work), and fills the margin back in once the finger lifts.
   let HC = null, hcTo = 0; const HCS = new Map(); // the last couple of dozen times drawn, so sliding back over them is instant
-  function heat(g, S, cell, lite) { const key = times[ti]+"|"+layer, [vl, vt] = ll(0, 0), [vr, vb] = ll(W, H);
+  function heat(g, S, cell, lite) { const key = times[ti]+"|"+layer+"|"+cell, [vl, vt] = ll(0, 0), [vr, vb] = ll(W, H);
     const fits = c => c && c.key === key && vl >= c.l && vr <= c.r && vt <= c.t && vb >= c.b;
-    if (!fits(HC) && (c => fits(c) && c.z === z && c.cell === cell)(HCS.get(key))) HC = HCS.get(key); // a time already drawn at this view
+    if (!fits(HC) && (c => fits(c) && c.z === z)(HCS.get(key))) HC = HCS.get(key); // a time already drawn at this view
     if (!fits(HC)) {
       clearTimeout(hcTo); hcTo = 0; const mx = lite ? 0 : (vr-vl)/4, my = lite ? 0 : (vt-vb)/4, l = vl-mx, t = vt+my, gw = Math.ceil((vr-vl+2*mx)*KX*z/cell), gh = Math.ceil((vt-vb+2*my)*z/cell);
       const LUT = rampLut(PAL[layer]), off = document.createElement("canvas"); off.width = gw; off.height = gh; const og = off.getContext("2d"), img = og.createImageData(gw, gh);
@@ -800,7 +800,7 @@ const WS = (() => {
     g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(LC.c, 0, 0); g.restore(); }
   function drawBase() { const g = base.getContext("2d"), t = times[ti], S = sample(t), cell = Math.max(6, Math.round(Math.sqrt(W*H/40000))), close = z >= z0*0.6;
     g.fillStyle = "#0e0824"; g.fillRect(0, 0, W, H);
-    heat(g, S, cell, TLF != null);
+    heat(g, S, TLF != null ? Math.round(cell*1.6) : cell, TLF != null); // coarser colours while the time bar is dragged, full detail once it lets go
     if (layer === "swell") swellArrows(g, S);
     landLayer(g, close);
     isobars(g); tracks(g, t);
@@ -981,7 +981,8 @@ const WS = (() => {
     B.forEach((b, i) => { if (!b.length) return; g.strokeStyle = `rgba(${c[0]},${c[1]},${c[2]},${(0.25+0.15*i).toFixed(2)})`; g.beginPath();
       for (let j = 0; j < b.length; j += 4) { g.moveTo(b[j], b[j+1]); g.lineTo(b[j+2], b[j+3]); } g.stroke(); });
     raf = requestAnimationFrame(frame); }
-  function moved() { clampView(); if (raf) dirty = true; else drawBase(); }
+  let mvRaf = 0; // without streaks running, moves still redraw at most once per screen frame
+  function moved() { clampView(); if (raf) dirty = true; else if (!mvRaf) mvRaf = requestAnimationFrame(() => { mvRaf = 0; drawBase(); }); }
   function zoomAt(f, x, y) { const [lon,lat] = ll(x, y); z *= f; clampView(); const [nx,ny] = px(lon, lat); cx += (nx-x)/(KX*z); cy -= (ny-y)/z; moved(); }
   function legend() { const L = LAY[layer], el = document.getElementById("wsLegend");
     el.innerHTML = `<i style="background:linear-gradient(90deg,${PAL[layer].map(([f,c])=>`${c} ${f*100}%`).join(",")})"></i>` + L.ticks.map(v=>`<span style="left:${lf(v, L)*100}%">${v}${v===L.max?"+ "+L.unit:""}</span>`).join(""); }
@@ -1040,7 +1041,12 @@ const WS = (() => {
         for (const s of SP) { const [sx,sy] = px(s.lon, s.lat), dd = Math.hypot(sx-was[0], sy-was[1]); if (dd < bd) { bd = dd; best = s; } } if (best) { PIN = null; PINBTN = PINX = null; switchSpot(best.id); openSheet(best.id); } else { const [lon, lat] = ll(was[0], was[1]); dropPin(lon, lat); } }
       if (!P.size) downAt = null; };
     fx.onpointerup = up; fx.onpointercancel = up;
-    fx.addEventListener("wheel", e => { e.preventDefault(); const [x,y] = rel(e); zoomAt(Math.exp(-e.deltaY*0.0015), x, y); }, {passive: false});
+    // Wheel and trackpad: a mouse notch zooms about a fifth; a trackpad pinch (sent as ctrl+wheel with small steps) follows the fingers.
+    fx.addEventListener("wheel", e => { e.preventDefault(); const [x,y] = rel(e), d = e.deltaY*(e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
+      zoomAt(Math.exp(-d*(e.ctrlKey ? 0.012 : 0.0025)), x, y); }, {passive: false});
+    // Safari on a Mac sends trackpad pinches as gesture events instead.
+    let gsc = 1; fx.addEventListener("gesturestart", e => { e.preventDefault(); gsc = 1; });
+    fx.addEventListener("gesturechange", e => { e.preventDefault(); const [x,y] = rel(e); zoomAt(e.scale/gsc, x, y); gsc = e.scale; });
     document.getElementById("wsIn").onclick = () => zoomAt(1.6, W/2, H/2);
     document.getElementById("wsOut").onclick = () => zoomAt(1/1.6, W/2, H/2);
     // Taiwan button: one tap zooms all the way out to the whole West Pacific; tap again when already out to come back to Taiwan.

@@ -1,7 +1,7 @@
 # Learn a per-spot wave height correction from the forecast-vs-buoy log, apply it, and score how close the forecast has been.
 #   ratio : buoy height / forecast height over the last 21 days (forecasts 1-72 h ahead, as issued), shrunk toward 1 until
 #           14 days of buoy readings back it up, and kept within 0.6-1.4 (a buoy is not the beach, so never trust it fully)
-#   hourly heights (total, swell, wind sea) and swell2 are scaled by it; the log keeps the raw forecast (log.py runs first)
+#   hourly heights (total, swell, wind sea) and swell2, and their past days under hist, are scaled by it; the log keeps the raw forecast (log.py runs first)
 #   spots[id].adj = {f: factor, days: days of buoy data, acc: % of hours the next-day forecast (12-36 h ahead, as published)
 #                    was within 0.3 m of the buoy, miss: typical miss in m, n: hours scored}
 # Each run's factors go to log/<Taipei date>.adj.jsonl so the score uses what the site actually showed.
@@ -55,7 +55,10 @@ for k, sp in d['spots'].items():
     for row in sp.get('hourly') or []:
         for i in (1, 4, 7):
             if row[i] is not None: row[i] = round(row[i] * f, 1)
-    for row in sp.get('swell2') or []:
+    for row in (sp.get('hist') or {}).get('wave') or []:
+        for i in (1, 4, 7):
+            if row[i] is not None: row[i] = round(row[i] * f, 1)
+    for row in (sp.get('swell2') or []) + ((sp.get('hist') or {}).get('swell2') or []):
         if row[1] is not None: row[1] = round(row[1] * f, 2)
     sp['adj'] = {'f': f, 'days': days, 'acc': round(100 * hits / n) if n else None, 'miss': round(miss / n, 2) if n else None, 'n': n}
     out[k] = f

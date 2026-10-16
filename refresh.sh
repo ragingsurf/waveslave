@@ -7,7 +7,7 @@ HERE=$(cd "$(dirname "$0")" && pwd); W=${1:-/tmp/surf}; mkdir -p "$W/dl"; rm -f 
 K=${CWA_KEY:-$(tr -d ' \n\r' < "$HERE/cwa_key.txt")}
 [ -n "$K" ] || { echo "no CWA key" >&2; exit 1; }
 A="https://opendata.cwa.gov.tw/api/v1/rest/datastore"
-TODAY=$(TZ=Asia/Taipei date +%Y-%m-%d); END=$(TZ=Asia/Taipei date -d '+10 days' +%Y-%m-%d)
+TODAY=$(TZ=Asia/Taipei date +%Y-%m-%d); PAST=$(TZ=Asia/Taipei date -d '-5 days' +%Y-%m-%d); END=$(TZ=Asia/Taipei date -d '+10 days' +%Y-%m-%d)
 # Comma-joined id lists from spots.json (url-encoded where needed).
 ids(){ python3 -I -c "import json,sys,urllib.parse as u;S=json.load(open(sys.argv[1]));f=sys.argv[2];v=[]
 for s in S:
@@ -18,13 +18,13 @@ get(){ curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -m 120 -o "$W/dl/
 # Coastal forecast for all townships (wind, sky). Only served as a file, ~6 MB.
 get coastal "https://opendata.cwa.gov.tw/fileapi/v1/opendataapi/F-D0047-095?Authorization=$K&downloadType=WEB&format=JSON"
 get tide "$A/F-A0021-001?Authorization=$K&LocationId=$(ids tide)&timeFrom=${TODAY}T00:00:00"
-get sun "$A/A-B0062-001?Authorization=$K&CountyName=$(ids county)&timeFrom=$TODAY&timeTo=$END"
+get sun "$A/A-B0062-001?Authorization=$K&CountyName=$(ids county)&timeFrom=$PAST&timeTo=$END"
 get buoy "$A/O-B0075-001?Authorization=$K&StationID=$(ids buoy)"
 get obs "$A/O-A0001-001?Authorization=$K&StationId=$(ids station)"
 get typhoon "$A/W-C0034-005?Authorization=$K"
-get openwave "https://marine-api.open-meteo.com/v1/marine?latitude=$(ids lat)&longitude=$(ids lon)&hourly=wave_height,wave_period,wave_direction,swell_wave_height,swell_wave_period,swell_wave_direction,wind_wave_height,wind_wave_period,secondary_swell_wave_height,secondary_swell_wave_period,secondary_swell_wave_direction&models=meteofrance_wave&timezone=Asia%2FTaipei&forecast_days=10"
+get openwave "https://marine-api.open-meteo.com/v1/marine?latitude=$(ids lat)&longitude=$(ids lon)&hourly=wave_height,wave_period,wave_direction,swell_wave_height,swell_wave_period,swell_wave_direction,wind_wave_height,wind_wave_period,secondary_swell_wave_height,secondary_swell_wave_period,secondary_swell_wave_direction&models=meteofrance_wave&timezone=Asia%2FTaipei&forecast_days=10&past_days=5"
 # Air temperature and gusts for the forecast table (optional: the build carries on without them).
-get openwx "https://api.open-meteo.com/v1/forecast?latitude=$(ids lat)&longitude=$(ids lon)&hourly=temperature_2m,wind_gusts_10m,precipitation,wind_speed_10m,wind_direction_10m&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=10" || echo "openwx fetch failed" >&2
+get openwx "https://api.open-meteo.com/v1/forecast?latitude=$(ids lat)&longitude=$(ids lon)&hourly=temperature_2m,wind_gusts_10m,precipitation,wind_speed_10m,wind_direction_10m&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=10&past_days=5" || echo "openwx fetch failed" >&2
 python3 -I "$HERE/snap.py" "$W/dl" "$W/snap.json" "$HERE/spots.json"
 python3 -I "$HERE/wx.py" "$W/dl/openwx.json" "$W/snap.json"
 # Extra sources (optional, never block the build): ECMWF/GFS/DWD wave models for comparison, JTWC typhoon warnings; more.py adds them plus
@@ -44,6 +44,8 @@ if [ -z "$(find "$G/grid.json" -mmin -170 2>/dev/null)" ]; then
     python3 -I "$HERE/grid.py" "$G/gwind.json" "$G/gwave.json" "$G/grid.new" 0 3 16 100 3 21 && mv "$G/grid.new" "$G/grid.json"; } || echo "grid fetch failed, keeping last grid" >&2
 fi
 GJ="$G/grid.json"; [ -f "$GJ" ] || { echo null > "$W/gridnull.json"; GJ="$W/gridnull.json"; }
+# The last 5 days for the Forecast tab: buoy and wind station readings from the log, past tides kept in cache/; never blocks the build.
+python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log" "$G" || echo "history skipped" >&2
 # Forecast vs buoy log for later corrections; never blocks the build.
 python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log" || true
 # Tune each spot's wave heights to its buoy from that log and score the forecast (after log.py, so the log stays raw).

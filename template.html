@@ -101,7 +101,7 @@ header{position:relative}
   .day .mini u{display:block;width:14px;height:4px;border-radius:2px;text-decoration:none}
   .days .day[aria-pressed="true"]{background:var(--ink);border-color:var(--ink)}
   .days .day[aria-pressed="true"] .mini,.days .day[aria-pressed="true"] .mini b{color:var(--bg)}
-  .daydet{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 14px;align-items:center;margin-top:10px;padding:12px 14px;border-radius:14px;background:var(--panel);border:1px solid var(--ink)}
+  .daydet{touch-action:pan-y;user-select:none;-webkit-user-select:none;display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 14px;align-items:center;margin-top:10px;padding:12px 14px;border-radius:14px;background:var(--panel);border:1px solid var(--ink)}
   .daydet.hist{border-style:dashed;background:transparent}
   .daydet .k{grid-column:1/-1;display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-weight:600}
   .daydet .k small{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
@@ -1316,7 +1316,20 @@ function drawDays(){
     <span class="nav"><button data-d="-1"${sel>0?"":" hidden"}>‹ ${nm(sel-1)}</button><button data-d="1"${sel<dayInfo.length-1?"":" hidden"}>${nm(sel+1)} ›</button></span>`;
   dock();
 }
-document.getElementById("dayDet").onclick = e => { const b = e.target.closest("button[data-d]"); if(!b) return; sel = Math.max(0, Math.min(dayInfo.length-1, sel + +b.dataset.d)); drawDays(); drawDay(); };
+{ const det = document.getElementById("dayDet"), go = d => { const n = Math.max(0, Math.min(dayInfo.length-1, sel+d)); if(n===sel) return false; sel = n; drawDays(); drawDay(); return true; };
+  det.onclick = e => { const b = e.target.closest("button[data-d]"); if(b) go(+b.dataset.d); };
+  // Swipe the card left for the next day, right for the day before (Bryan, Oct 16); it follows the finger and slides the new day in.
+  let sx = null, sy = 0, dx = 0, lock = null;
+  det.onpointerdown = e => { if(e.pointerType==="mouse") return; sx = e.clientX; sy = e.clientY; dx = 0; lock = null; det.style.transition = "none"; };
+  det.onpointermove = e => { if(sx==null) return; dx = e.clientX-sx;
+    if(lock==null && Math.hypot(dx, e.clientY-sy) > 8) lock = Math.abs(dx) > Math.abs(e.clientY-sy);
+    if(!lock) return; const edge = (dx>0 && sel===0) || (dx<0 && sel===dayInfo.length-1);
+    det.style.transform = `translateX(${edge ? dx/4 : dx}px)`; det.style.opacity = 1-Math.min(.5, Math.abs(dx)/600); };
+  det.onpointerup = det.onpointercancel = () => { if(sx==null) return; sx = null; const w = det.offsetWidth;
+    det.style.transition = "transform .18s ease-out, opacity .18s ease-out";
+    if(lock && Math.abs(dx) > 50 && go(dx<0 ? 1 : -1)){ det.style.transition = "none"; det.style.transform = `translateX(${dx<0 ? w*.5 : -w*.5}px)`; det.style.opacity = .3;
+      det.offsetWidth; det.style.transition = "transform .2s ease-out, opacity .2s ease-out"; }
+    det.style.transform = ""; det.style.opacity = ""; }; }
 // Dock: at rest the picked day is big; the pointer (or a finger dragged along) swells the day under it and, a little, its neighbours.
 const DOCK_G = () => 2.2;
 function dock(x){ const el = document.getElementById("days"), G = DOCK_G();

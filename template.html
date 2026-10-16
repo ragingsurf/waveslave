@@ -1492,112 +1492,72 @@ if(VIEW!=="fc") setView(VIEW, true);
 })();
 </script>
 <script>
-// ---- Opening animation, Fire Barrel: ride a tube of fire, a flaming whip cracks at the light at the end, the barrel blows open on the page
-// and the WaveSlave wordmark flies up into its place in the header. Plays once per visit (each new tab or app launch); a tap or any key
-// skips it, and it never plays for people who ask their device for less motion. ?intro plays it again; ?manual lets the recorder step it.
+// ---- Opening animation, Whip Split (built on the map's slam stamp): a flaming whip cracks clean across the dark, the wordmark stamps
+// down with the amber and neon shock ring, the dark splits along the whip's line and slides apart on the page, and the wordmark flies up
+// into its place in the header. About 1.3 s. Plays once per visit (each new tab or app launch); a tap or any key skips it, and it never
+// plays for people who ask their device for less motion. ?intro plays it again; ?manual lets the recorder step the clock by hand.
+// Crisp vector shapes moved with transform and opacity only, so phones and computers both run it smoothly.
 (() => {
   const root = document.documentElement, q = new URLSearchParams(location.search), MANUAL = q.has("manual");
-  const off = () => root.classList.remove("intro-on");
   if (!root.classList.contains("intro-on") && !q.has("intro")) return;
   try { sessionStorage.setItem("waveslave-intro", "1"); } catch (e) {}
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches && !MANUAL) return off();
-  const W = innerWidth, H = innerHeight, m = Math.min(W, H), PHONE = m < 600, D = Math.min(devicePixelRatio || 1, PHONE ? 1.5 : 2), MAXP = PHONE ? 380 : 700;
-  const cv = document.createElement("canvas"); cv.width = Math.round(W * D); cv.height = Math.round(H * D);
-  cv.style.cssText = "position:fixed;inset:0;width:100vw;height:100vh;z-index:9998;touch-action:none";
-  document.body.appendChild(cv); const g = cv.getContext("2d");
-  const logo = document.createElement("div");
-  logo.style.cssText = "position:fixed;left:0;top:0;z-index:9999;pointer-events:none;opacity:0;will-change:transform,opacity";
-  logo.innerHTML = '<div class="brand" style="margin:0;font-size:clamp(58px,17vw,150px);white-space:nowrap">WaveSlave</div>';
-  document.body.appendChild(logo); const real = document.querySelector("header .brand"); if (real) real.style.visibility = "hidden";
-  const BG = "#07050f", R = (a, b) => a + Math.random() * (b - a), cl = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x)), seg = (t, a, b) => cl((t - a) / (b - a)),
-    ease = x => 1 - Math.pow(1 - cl(x), 3), smooth = x => (x = cl(x), x * x * (3 - 2 * x)), inOut = x => (x = cl(x), x < .5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2);
-  g.setTransform(D, 0, 0, D, 0, 0); g.fillStyle = BG; g.fillRect(0, 0, W, H); off();
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches && !MANUAL) return root.classList.remove("intro-on");
+  const W = innerWidth, H = innerHeight, m = Math.min(W, H), NS = "http://www.w3.org/2000/svg";
+  const BACK = "background:radial-gradient(circle at 50% 50%,#24183f,#07050f 70%)", OUT = "cubic-bezier(.16,1,.3,1)";
+  const anims = [], els = [], A = (node, kf, dur, delay = 0, easing = "linear") => { const a = node.animate(kf, {duration: dur, delay, easing, fill: "both"}); anims.push(a); return a; };
+  const el = (css, html = "") => { const d = document.createElement("div"); d.style.cssText = "position:fixed;pointer-events:none;" + css; d.innerHTML = html; document.body.appendChild(d); els.push(d); return d; };
+  const S = (tag, attrs, parent) => { const n = document.createElementNS(NS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); parent.appendChild(n); return n; };
+  let over = false; const real = document.querySelector("header .brand");
+  function finish() { if (over) return; over = true; anims.forEach(a => a.cancel()); els.forEach(e => e.remove()); if (real) real.style.visibility = ""; root.classList.remove("intro-on"); removeEventListener("keydown", finish); }
+  const start = () => { try {
+    // The whip's line runs corner to corner, low on the left to high on the right; the dark is cut along it into two halves.
+    const a = [-W * .05, H * (W > H ? .8 : .7)], b = [W * 1.05, H * (W > H ? .22 : .3)], dx = b[0] - a[0], dy = b[1] - a[1], nl = Math.hypot(dx, dy), ux = -dy / nl, uy = dx / nl;
+    const A2 = [a[0] - dx, a[1] - dy], B2 = [b[0] + dx, b[1] + dy], far = Math.hypot(W, H) * 2, go = Math.hypot(W, H) * .7;
+    const halves = [1, -1].map(s => { const pts = [A2, B2, [B2[0] + ux * far * s, B2[1] + uy * far * s], [A2[0] + ux * far * s, A2[1] + uy * far * s]];
+      const h = el(`inset:0;z-index:9997;pointer-events:auto;${BACK};clip-path:polygon(${pts.map(p => `${p[0].toFixed(1)}px ${p[1].toFixed(1)}px`).join(",")})`);
+      h.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="position:absolute;inset:0;width:100%;height:100%;overflow:visible">` +
+        [["#ff8a00", .014], ["#fff3b0", .004]].map(([c, w]) => `<line x1="${A2[0]}" y1="${A2[1]}" x2="${B2[0]}" y2="${B2[1]}" stroke="${c}" stroke-width="${m * w}"/>`).join("") + "</svg>";
+      return [h, s]; });
+    root.classList.remove("intro-on");                                             // the halves now cover the page in place of the first-paint cover
+    const svg = document.createElementNS(NS, "svg"); svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.style.cssText = "position:fixed;inset:0;width:100vw;height:100vh;z-index:9998;pointer-events:none;overflow:visible"; document.body.appendChild(svg); els.push(svg);
+    svg.innerHTML = '<defs><radialGradient id="isFlash"><stop offset="0" stop-color="#fffbe6"/><stop offset=".35" stop-color="#ffd27a" stop-opacity=".55"/><stop offset="1" stop-color="#ff6a00" stop-opacity="0"/></radialGradient></defs>';
+    const mark = el("left:50%;top:50%;z-index:9999", '<div style="transform-origin:50% 50%"><div class="brand" style="margin:0;font-size:clamp(54px,16vw,120px);white-space:nowrap">WaveSlave</div></div>');
+    const word = mark.firstChild, brand = word.firstChild, base = `translate(${-brand.offsetWidth / 2}px,${-brand.offsetHeight / 2}px)`; mark.style.transform = base;
+    if (real) real.style.visibility = "hidden";
 
-  // Glow sprites, drawn once and stamped with additive blending for flames, sparks and embers.
-  function sprite(stops) { const s = 64, c = document.createElement("canvas"); c.width = c.height = s; const x = c.getContext("2d"),
-      gr = x.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2); stops.forEach(([o, col]) => gr.addColorStop(o, col)); x.fillStyle = gr; x.fillRect(0, 0, s, s); return c; }
-  const SP = [sprite([[0, "rgba(255,255,235,1)"], [.25, "rgba(255,230,140,.9)"], [.6, "rgba(255,150,20,.35)"], [1, "rgba(255,90,0,0)"]]),
-    sprite([[0, "rgba(255,220,90,1)"], [.3, "rgba(255,140,0,.8)"], [.7, "rgba(230,50,0,.25)"], [1, "rgba(180,0,0,0)"]]),
-    sprite([[0, "rgba(255,110,10,.9)"], [.4, "rgba(200,30,0,.5)"], [1, "rgba(90,0,0,0)"]])];
-
-  // Particles: kind 0 flame (rises and cools from white to red), kind 1 spark (fast, falls, stays hot).
-  const P = [];
-  function emit(x, y, vx, vy, life, size, kind = 0) { if (P.length < MAXP) P.push({x, y, vx, vy, life, age: 0, size, kind}); }
-  function burst(x, y, n, speed, kind = 1, size = 5) { for (let i = 0; i < n; i++) { const a = R(0, 6.283), v = speed * R(.25, 1);
-      emit(x, y, Math.cos(a) * v, Math.sin(a) * v, R(.4, .9), size * R(.6, 1.4), kind); } }
-  function stepP(dt) { for (let i = P.length; i--;) { const p = P[i]; p.age += dt; if (p.age >= p.life) { P.splice(i, 1); continue; }
-      if (p.kind === 0) { p.vy -= 300 * dt; p.vx *= 1 - 1.6 * dt; p.vy *= 1 - 1.2 * dt; } else { p.vy += 800 * dt; p.vx *= 1 - 1.4 * dt; }
-      p.x += p.vx * dt; p.y += p.vy * dt; } }
-  function drawP() { g.globalCompositeOperation = "lighter"; for (const p of P) { const k = p.age / p.life, s = p.kind ? p.size * (1 - k * .6) : p.size * (1 + k * 1.2);
-      g.globalAlpha = p.kind ? 1 - k * k : (1 - k) * Math.min(1, k * 6); g.drawImage(SP[p.kind ? (k < .5 ? 0 : 1) : (k < .3 ? 0 : k < .65 ? 1 : 2)], p.x - s, p.y - s, s * 2, s * 2); }
-    g.globalAlpha = 1; g.globalCompositeOperation = "source-over"; }
-
-  // The whip: a tapered chain whose segments copy the handle's angle with a growing delay, so the swing rolls down the lash and the tip
-  // snaps fastest at the very end, where it cracks. It burns as it goes.
-  function Whip(hx, hy, cx, cy, t0, side, thick) { const L = Math.hypot(cx - hx, cy - hy), end = Math.atan2(cy - hy, cx - hx), N = 46, d = .0095, sw = .3,
-      A = t => t < t0 ? end + side * 2.5 : t < t0 + sw * .6 ? end + side * 2.5 - 2.95 * side * ease((t - t0) / (sw * .6)) : end - .45 * side + .45 * side * ease((t - t0 - sw * .6) / (sw * .8));
-    const base = Math.max(5, m * .016) * thick, trail = [];
-    function pts(t) { const out = [[hx, hy]]; let x = hx, y = hy; const sl = L / N;
-      for (let i = 1; i <= N; i++) { const a = A(t - i * d); x += Math.cos(a) * sl; y += Math.sin(a) * sl; out.push([x, y]); } return out; }
-    function line(q, w, col) { g.lineCap = "round";
-      for (const [lw, c] of col ? [[1.6, col]] : [[3.2, "rgba(255,80,0,.35)"], [1.7, "#ff8a00"], [1, "#2a0a02"], [.35, "#ffd27a"]]) {
-        g.strokeStyle = c; for (let i = 1; i < q.length; i++) { g.lineWidth = Math.max(.6, w * lw * (1 - i / q.length * .88));
-          g.beginPath(); g.moveTo(q[i-1][0], q[i-1][1]); g.lineTo(q[i][0], q[i][1]); g.stroke(); } } }
-    return { crack: t0 + sw * .6 + N * d, draw(t, dt, fade) { if (t < t0 - .05 || fade <= 0) return; const p = pts(t); trail.unshift(p); if (trail.length > 4) trail.pop();
-        trail.forEach((q, j) => { g.globalAlpha = fade * (j ? .2 / j : 1); line(q, base * (j ? .7 : 1), j ? "#ff7a1a" : null); }); g.globalAlpha = 1;
-        if (dt > 0) for (let k = 0; k < 4; k++) { const i = Math.floor(N * Math.sqrt(Math.random())), [x, y] = p[i]; emit(x, y, R(-40, 40), R(-90, -10), R(.25, .5), base * R(1, 2) * (1 - i / N * .6)); } } }; }
-
-  // The barrel: rings of fire rushing past, coloured from deep red up close to white-hot yellow at the far end, open at the bottom where
-  // the dark water is. The light at the end breathes slowly; everything else glides, with no flicker.
-  const N = 64, GAP = .09, FAR = N * GAP, R0 = m * .32, rings = []; for (let i = 0; i < N; i++) rings.push({z: .16 + i * GAP, b: i % 2});
-  const vp = t => [W / 2 + Math.sin(t * .9) * W * .06, H * .46 + Math.cos(t * 1.1) * H * .03], C = vp(1.72), whip = Whip(W * 1.06, H * 1.08, C[0], C[1], 1.0, -1, 1.8);
-  const DUR = 3.5; let cracked = false, t = 0, over = false;
-  function logoAt(cx, cy, s, a) { logo.style.opacity = a; const b = logo.firstChild;
-    logo.style.transformOrigin = `${b.offsetWidth / 2}px ${b.offsetHeight / 2}px`; logo.style.transform = `translate(${cx - b.offsetWidth / 2}px,${cy - b.offsetHeight / 2}px) scale(${s})`; }
-  let fly = null;
-  function frame(dt) { t += dt;
-    if (!cracked && t >= whip.crack) { cracked = true; burst(C[0], C[1], 70, 1300, 1, 5); burst(C[0], C[1], 30, 700, 0, m * .05); }
-    const blow = seg(t, whip.crack, whip.crack + .8), speed = 1.4 + 1.4 * smooth(t / .6) + 10 * blow * blow, V = vp(Math.min(t, whip.crack));
-    g.setTransform(D, 0, 0, D, 0, 0); g.clearRect(0, 0, W, H);
-    g.fillStyle = BG; g.globalAlpha = 1 - smooth(seg(t, whip.crack + .05, whip.crack + .75)); g.fillRect(0, 0, W, H);
-    g.globalCompositeOperation = "lighter"; const light = R0 * (1.15 + .06 * Math.sin(t * 3)) * (1 + 5 * ease(blow));
-    g.globalAlpha = .9 * (1 - smooth(blow)); g.lineCap = "round";
-    g.globalCompositeOperation = "source-over"; rings.sort((a, b) => b.z - a.z);
-    for (const r of rings) { r.z -= speed * dt * .5 * Math.pow(r.z, .3);
-      if (r.z < .1) { if (cracked) continue; r.z += FAR; }
-      const rad = R0 / r.z, cx = V[0] + (W / 2 - V[0]) / (1 + r.z) + Math.sin(r.z * 1.1 + t * .8) * m * (r.z - .2) * .05, cy = V[1] + (H * .55 - V[1]) / (1 + r.z),
-        depth = cl(r.z / FAR), a = cl((FAR - r.z) / 1.4) * cl((r.z - .1) / .3) * (1 - smooth(blow) * .92) * (.55 + .45 * (1 - depth));
-      if (a <= .01) continue; g.globalAlpha = a; g.lineWidth = rad * .3;
-      g.strokeStyle = `hsl(${2 + depth * 50 + r.b * 3},100%,${32 + depth * 36 + r.b * 6}%)`;
-      g.beginPath(); g.ellipse(cx, cy, rad * 1.15, rad, -.12, Math.PI * .72, Math.PI * 2.28); g.stroke();
-      if (dt > 0 && r.z < 1.2 && Math.random() < .3) { const aa = R(Math.PI * .72, Math.PI * 2.28), px = cx + Math.cos(aa) * rad * 1.15, py = cy + Math.sin(aa) * rad;
-        if (px > -40 && px < W + 40 && py > -40 && py < H + 40) emit(px, py, Math.cos(aa) * 220, Math.sin(aa) * 220 - 60, R(.35, .6), rad * R(.04, .08)); } }
-    g.globalCompositeOperation = "lighter"; g.globalAlpha = .85 * (1 - smooth(blow)); g.drawImage(SP[0], V[0] - light, V[1] - light, light * 2, light * 2);   // the light at the end
-    // the lip pouring over the top of the tube: a sheet of small flames streaming across
-    if (dt > 0 && !cracked) for (let i = 0; i < (PHONE ? 3 : 6); i++) emit(R(-.1, 1.1) * W, R(-.04, .1) * H, R(-260, -140), R(100, 220), R(.45, .8), m * R(.025, .05));
-    g.globalAlpha = 1; g.globalCompositeOperation = "source-over";
-    if (cracked) { const k = t - whip.crack, r = Math.hypot(W, H) * .55 * ease(k / .6);          // the crack: a soft white flash and a ring rolling out
-      if (k < .6) { g.globalCompositeOperation = "lighter"; g.globalAlpha = (1 - k / .6) ** 2; g.drawImage(SP[0], C[0] - r * .6, C[1] - r * .6, r * 1.2, r * 1.2);
-        g.globalAlpha = 1 - k / .6; g.lineWidth = 2 + 5 * (1 - k / .6); g.strokeStyle = "#ffb347"; g.beginPath(); g.arc(C[0], C[1], r * .7, 0, 6.283); g.stroke();
-        g.globalAlpha = 1; g.globalCompositeOperation = "source-over"; }
-      const ga = smooth(seg(t, whip.crack, whip.crack + .3)) * (1 - smooth(seg(t, 2.75, 3.1)));   // a warm glow under the wordmark
-      if (ga > 0) { const gr = g.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, logo.firstChild.offsetWidth * .6); gr.addColorStop(0, "rgba(255,90,0,.32)"); gr.addColorStop(1, "rgba(255,40,0,0)");
-        g.save(); g.globalAlpha = ga; g.translate(0, H / 2); g.scale(1, .42); g.translate(0, -H / 2); g.fillStyle = gr; g.fillRect(0, -H * 2, W, H * 5); g.restore(); } }
-    whip.draw(t, dt, 1 - smooth(seg(t, whip.crack, whip.crack + .3)));
-    stepP(dt); drawP();
-    if (cracked) { const k = seg(t, whip.crack, whip.crack + .55), p = ease(k);
-      if (t < 2.7) logoAt(C[0] + (W / 2 - C[0]) * p, C[1] + (H / 2 - C[1]) * p, .2 + .8 * (1 - Math.pow(1 - k, 3) * Math.cos(k * 4.5)), smooth(k * 3));
-      else { if (!fly) { const b = logo.firstChild.getBoundingClientRect(), r = real && real.getBoundingClientRect();
-          fly = r && r.width ? [r.left + r.width / 2, r.top + r.height / 2, r.width / b.width] : [W / 2, H / 2, 1]; }
-        const e = inOut(seg(t, 2.7, 3.25)); logoAt(W / 2 + (fly[0] - W / 2) * e, H / 2 + (fly[1] - H / 2) * e, 1 + (fly[2] - 1) * e, 1); } }
-    cv.style.opacity = 1 - smooth(seg(t, DUR - .35, DUR)); if (t >= DUR) finish(); }
-  function finish() { if (over) return; over = true; cv.remove(); logo.remove(); if (real) real.style.visibility = ""; removeEventListener("keydown", finish); }
-  cv.addEventListener("click", finish); addEventListener("keydown", finish);
-  const tick = dt => { try { frame(dt); } catch (e) { finish(); } };   // never leave the page covered
-  window.__introStep = ms => { if (!over) tick(ms / 1000); return !over; }; window.__introDur = DUR;
-  if (MANUAL) return;
-  let last = 0; const loop = now => { if (over) return; if (last) tick(Math.min(1 / 30, (now - last) / 1000)); last = now; requestAnimationFrame(loop); };
+    // The whip: drawn from the handle to the tip in a snap, a white-hot core over an orange glow, then the tail pulls away.
+    const T0 = 40, DRAW = 170, HIT = T0 + DRAW + 10, d = `M${a[0]} ${a[1]} C${W * .35} ${H * .5 + (a[1] - H * .5) * .7} ${W * .65} ${H * .5 + (b[1] - H * .5) * .7} ${b[0]} ${b[1]}`;
+    const wg = S("g", {}, svg); let L = 0;
+    for (const [c, w, o] of [["#ff6a00", .018, .55], ["#ffb347", .008, 1], ["#fff7d6", .003, 1]]) { const p = S("path", {d, fill: "none", stroke: c, "stroke-width": m * w, "stroke-linecap": "round", opacity: o}, wg);
+      L = L || p.getTotalLength(); p.style.strokeDasharray = `${L} ${L}`;
+      A(p, [{strokeDashoffset: L}, {strokeDashoffset: 0, offset: .45, easing: "cubic-bezier(.3,0,.2,1)"}, {strokeDashoffset: 0, offset: .6}, {strokeDashoffset: -L}], DRAW / .45, T0); }
+    A(wg, [{opacity: 1}, {opacity: 1, offset: .7}, {opacity: 0}], DRAW / .45, T0);
+    // The crack: a soft white flash, sharp spark streaks and the amber and neon shock ring from the map stamp, with a jolt of the screen.
+    const r = Math.hypot(W, H) * .45, cg = S("g", {transform: `translate(${W / 2} ${H / 2})`}, svg);
+    A(S("circle", {r: r * .5, fill: "url(#isFlash)"}, cg), [{opacity: 0, transform: "scale(.2)"}, {opacity: .85, transform: "scale(.5)", offset: .12}, {opacity: 0, transform: "scale(1)"}], 380, HIT, "ease-out");
+    for (let i = 0; i < 14; i++) { const an = i / 14 * 6.283 + (i % 2) * .2, len = m * (.05 + (i % 3) * .03), d0 = m * .03;
+      A(S("line", {x1: Math.cos(an) * d0, y1: Math.sin(an) * d0, x2: Math.cos(an) * (d0 + len), y2: Math.sin(an) * (d0 + len), stroke: i % 3 ? "#ffd400" : "#fff7d6", "stroke-width": 2.5, "stroke-linecap": "round"}, cg),
+        [{opacity: 0, transform: "scale(.4)"}, {opacity: 1, transform: "scale(.5)", offset: .02}, {opacity: 0, transform: `scale(${2.6 + (i % 4) * .5})`}], 420, HIT, OUT); }
+    for (const [c, w, o, rr] of [["#ffb347", 3, 1, 90], ["#ff2bd6", 9, .5, 86]])
+      A(S("circle", {r: rr, fill: "none", stroke: c, "stroke-width": w, opacity: o}, cg), [{opacity: 0, transform: "scale(.3)"}, {opacity: 1, transform: "scale(.6)", offset: .03}, {opacity: 0, transform: `scale(${r / 90})`}], 520, HIT, OUT);
+    A(svg, [{transform: "none"}, {transform: "translate(7px,-5px)", offset: .15}, {transform: "translate(-6px,4px)", offset: .35}, {transform: "translate(3px,2px)", offset: .6}, {transform: "none"}], 220, HIT);
+    // The split: each half slides away from the cut with its hot edge glowing, then fading.
+    for (const [h, s] of halves) { A(h.firstChild, [{opacity: 0}, {opacity: 0, offset: .001}, {opacity: 1, offset: .01}, {opacity: 1, offset: .5}, {opacity: 0}], 900, HIT);
+      A(h, [{transform: "none"}, {transform: "none", offset: .25, easing: "cubic-bezier(.5,0,.75,0)"}, {transform: `translate(${ux * go * s}px,${uy * go * s}px)`}], 760, HIT); }
+    // The wordmark stamps down on the crack, then flies up into its place in the header.
+    A(word, [{opacity: 0, transform: "scale(1.5)", easing: "cubic-bezier(.5,0,.8,.4)"}, {opacity: 1, transform: "none", offset: .6}, {transform: "scale(.96,1.04)", offset: .8}, {opacity: 1, transform: "none"}], 220, HIT - 130);
+    let tx = 0, ty = -H * .4, ts = .6; if (real) { const rr = real.getBoundingClientRect(), bb = brand.getBoundingClientRect(); if (rr.width) { tx = rr.left + rr.width / 2 - W / 2; ty = rr.top + rr.height / 2 - H / 2; ts = rr.width / bb.width; } }
+    A(mark, [{transform: base, easing: "cubic-bezier(.6,0,.2,1)"}, {transform: `translate(${tx}px,${ty}px) ${base} scale(${ts})`}], 380, HIT + 640);
+    const END = HIT + 640 + 400;
+    halves.forEach(([h]) => h.addEventListener("click", finish)); addEventListener("keydown", finish);
+    window.__introDur = END / 1000;
+    if (MANUAL) { let t = 0; anims.forEach(x => x.pause()); const set = () => anims.forEach(x => x.currentTime = Math.min(t, END)); set();
+      window.__introStep = ms => { if (over) return false; t += ms; try { set(); } catch (e) { finish(); } if (t >= END) finish(); return !over; }; }
+    else { Promise.all(anims.map(x => x.finished)).then(finish, finish); setTimeout(finish, END + 1500); }   // never leave the page covered
+  } catch (e) { finish(); } };
+  // Wait briefly for the Metal Mania font (behind the dark cover) so the wordmark is drawn in it from the first frame.
   const font = document.fonts ? document.fonts.load('40px "Metal Mania"').catch(() => {}) : null;
-  Promise.race([font, new Promise(r => setTimeout(r, 900))]).then(() => requestAnimationFrame(loop));
+  Promise.race([font, new Promise(r => setTimeout(r, 700))]).then(start);
 })();
 </script>

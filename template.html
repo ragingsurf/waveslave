@@ -113,7 +113,7 @@ header{position:relative}
   .daydet .nav button{appearance:none;border:0;background:none;color:var(--muted);font:inherit;font-size:13px;padding:6px 0;cursor:pointer}
 }
 .day{appearance:none;font:inherit;color:inherit;text-align:left;cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;display:grid;gap:6px}
-.day:hover{border-color:var(--sea)}
+@media (hover:hover){.day:hover{border-color:var(--sea)}}  /* phones keep :hover stuck on the last tapped tile, which looked like a second "today" */
 .day[aria-pressed="true"]{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
 /* Today stands out in the sea colour (Bryan, Oct 16) so it's easy to find your way back; picked, it fills in. */
 .days .day.today{border:1px solid var(--sea);box-shadow:inset 0 0 0 1px var(--sea)}

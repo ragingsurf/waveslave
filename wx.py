@@ -9,10 +9,10 @@ try:
     rows = rows if isinstance(rows, list) else [rows]
     for sid, r in zip(d['order'], rows):
         h = r['hourly']
-        rows = [list(r) for r in zip(h['time'], h['temperature_2m'], h['wind_gusts_10m'], h.get('precipitation') or [None]*len(h['time']), h.get('wind_speed_10m') or [None]*len(h['time']), h.get('wind_direction_10m') or [None]*len(h['time']))]
+        hrs = [list(r) for r in zip(h['time'], h['temperature_2m'], h['wind_gusts_10m'], h.get('precipitation') or [None]*len(h['time']), h.get('wind_speed_10m') or [None]*len(h['time']), h.get('wind_direction_10m') or [None]*len(h['time']))]
         # The past 5 days (past_days=5) go under hist.wx; wx still starts today for the Map tab.
-        d['spots'][sid]['wx'] = [r for r in rows if r[0][:10] >= TODAY]
-        d['spots'][sid].setdefault('hist', {})['wx'] = [r for r in rows if r[0][:10] < TODAY]
+        d['spots'][sid]['wx'] = [x for x in hrs if x[0][:10] >= TODAY]
+        d['spots'][sid].setdefault('hist', {})['wx'] = [x for x in hrs if x[0][:10] < TODAY]
 except Exception as e:
     print('wx skipped:', e, file=sys.stderr)
 json.dump(d, open(snap, 'w'), ensure_ascii=False, separators=(',', ':'))

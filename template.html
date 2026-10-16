@@ -1414,8 +1414,11 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
   if(!a || a.acc==null || a.n<24 || a.acc<50){ el.innerHTML = ""; return; }
   const zh = isZh(), bn = SPT(DATA,"buoyName"), pct = Math.round(Math.abs(1-a.f)*100);
   const tune = pct<3 ? "" : zh ? `浪高已依${bn}浮標${a.f<1?"調低":"調高"} ${pct}%。` : `Heights ${a.f<1?"trimmed":"raised"} ${pct}% to match the ${bn} buoy. `;
-  el.innerHTML = zh ? `✓ 預報檢驗：過去 ${a.days} 天，隔天預報有 <b class="mono">${a.acc}%</b> 的時段與${bn}浮標相差 0.3 m 以內（平均差 ${r1(a.miss)} m）。${tune}`
-    : `✓ Forecast check: over the last ${a.days} days, the next-day forecast was within 0.3 m of the ${bn} buoy <b class="mono">${a.acc}%</b> of the time (typical miss ${r1(a.miss)} m). ${tune}`;
+  // Wind is tuned to the spot's wind station the same way (wf); bands are the per-swell-period height trims.
+  const sn = SPT(DATA,"stationName"), wp = a.wf ? Math.round(Math.abs(1-a.wf)*100) : 0;
+  const wtune = wp<3 ? "" : zh ? `風速已依${sn}測站${a.wf<1?"調低":"調高"} ${wp}%。` : `Wind ${a.wf<1?"trimmed":"raised"} ${wp}% to match the ${sn} wind station.`;
+  el.innerHTML = zh ? `✓ 預報檢驗：過去 ${a.days} 天，隔天預報有 <b class="mono">${a.acc}%</b> 的時段與${bn}浮標相差 0.3 m 以內（平均差 ${r1(a.miss)} m）。${tune}${wtune}`
+    : `✓ Forecast check: over the last ${a.days} days, the next-day forecast was within 0.3 m of the ${bn} buoy <b class="mono">${a.acc}%</b> of the time (typical miss ${r1(a.miss)} m). ${tune}${wtune}`;
 })();
 
 // ---- spot picker and per-spot labels

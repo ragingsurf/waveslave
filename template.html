@@ -306,8 +306,8 @@ html{overscroll-behavior-y:none}
   </section>
 
 
-  <section aria-label="Last 5 days and 5-day outlook">
-    <div class="label" id="outH" style="margin-bottom:8px">Last 5 days · 5-day outlook</div>
+  <section aria-label="Last 4 days and 5-day outlook">
+    <div class="label" id="outH" style="margin-bottom:8px">Last 4 days · 5-day outlook</div>
     <div class="days" id="days"></div>
     <div class="where" id="acc" style="font-size:12px;margin-top:8px"></div>
   </section>
@@ -1205,9 +1205,9 @@ const updated = Date.parse(DATA.updated);
 })();
 
 // ---- days
-// The Forecast tab shows the last 5 days, today and the next 4 (today in the middle); the data runs further out for the Map.
+// The Forecast tab shows the last 4 days, today and the next 4 (today in the middle); the data runs further out for the Map.
 const allKeys = [...new Set(hours.map(x=>dayKey(x.t)))], ti0 = Math.max(0, allKeys.indexOf(todayKey));
-const dayKeys = allKeys.slice(Math.max(0, ti0-5), ti0+5);
+const dayKeys = allKeys.slice(Math.max(0, ti0-4), ti0+5);
 const dayInfo = dayKeys.map(key => {
   const hs = hours.filter(x=>dayKey(x.t)===key);
   const lit = hs.filter(x=>isDay(x.t,key) && x.w);
@@ -1427,7 +1427,7 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
   document.getElementById("picker").innerHTML = ids.map(id => `<a href="#${id}" data-spot="${id}"${id===SPOT?' aria-current="page"':""}>${SPT(ALL.spots[id],"name")}</a>`).join("");
   const zh = isZh(), bn = SPT(DATA,"buoyName"), nm = SPT(DATA,"name");
   document.getElementById("nowH").textContent = zh ? `目前 · ${bn}浮標` : `Right now · ${bn} buoy`;
-  document.getElementById("outH").textContent = zh ? `過去五天 · 五天預報 · ${nm}` : `Last 5 days · 5-day outlook · ${nm}`;
+  document.getElementById("outH").textContent = zh ? `過去四天 · 五天預報 · ${nm}` : `Last 4 days · 5-day outlook · ${nm}`;
   document.getElementById("pastChart").setAttribute("aria-label", zh ? `${bn}浮標過去 12 小時浪高` : `Wave height at the ${bn} buoy, last 12 hours`);
   document.getElementById("pastSrc").innerHTML = zh ? `${bn}浮標（${DATA.buoyId}），每小時。<a href="${cwaBuoy(DATA.buoyId)}" target="_blank" rel="noopener">氣象署 30 天完整紀錄</a>`
     : `${bn} wave buoy (${DATA.buoyId}), hourly. <a href="${cwaBuoy(DATA.buoyId)}" target="_blank" rel="noopener">Full 30-day record at CWA</a>`;

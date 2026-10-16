@@ -1322,20 +1322,26 @@ function drawDays(){
     <span class="nav"><button data-d="-1"${sel>0?"":" hidden"}>‹ ${nm(sel-1)}</button><button data-d="1"${sel<dayInfo.length-1?"":" hidden"}>${nm(sel+1)} ›</button></span>`;
   dock();
 }
-{ const det = document.getElementById("dayDet"), go = d => { const n = Math.max(0, Math.min(dayInfo.length-1, sel+d)); if(n===sel) return false; sel = n; drawDays(); drawDay(); return true; };
+{ const det = document.getElementById("dayDet"), go = (d, later) => { const n = Math.max(0, Math.min(dayInfo.length-1, sel+d)); if(n===sel) return false; sel = n; drawDays();
+    if(later) setTimeout(drawDay, 220); else drawDay(); return true; };  // after a swipe the chart waits for the slide, so the card doesn't stutter
   det.onclick = e => { const b = e.target.closest("button[data-d]"); if(b) go(+b.dataset.d); };
   // Swipe the card left for the next day, right for the day before (Bryan, Oct 16); it follows the finger and slides the new day in.
+  // Touch events, not pointer events: iPhones cancel the pointer as soon as the page starts to scroll, which made the card snap or skip mid-swipe.
+  // Once a swipe is sideways, preventDefault keeps the page from scrolling under it.
   let sx = null, sy = 0, dx = 0, lock = null;
-  det.onpointerdown = e => { if(e.pointerType==="mouse") return; sx = e.clientX; sy = e.clientY; dx = 0; lock = null; det.style.transition = "none"; };
-  det.onpointermove = e => { if(sx==null) return; dx = e.clientX-sx;
-    if(lock==null && Math.hypot(dx, e.clientY-sy) > 8) lock = Math.abs(dx) > Math.abs(e.clientY-sy);
-    if(!lock) return; const edge = (dx>0 && sel===0) || (dx<0 && sel===dayInfo.length-1);
-    det.style.transform = `translateX(${edge ? dx/4 : dx}px)`; det.style.opacity = 1-Math.min(.5, Math.abs(dx)/600); };
-  det.onpointerup = det.onpointercancel = () => { if(sx==null) return; sx = null; const w = det.offsetWidth;
+  const end = ok => { if(sx==null) return; sx = null; const w = det.offsetWidth;
     det.style.transition = "transform .18s ease-out, opacity .18s ease-out";
-    if(lock && Math.abs(dx) > 50 && go(dx<0 ? 1 : -1)){ det.style.transition = "none"; det.style.transform = `translateX(${dx<0 ? w*.5 : -w*.5}px)`; det.style.opacity = .3;
+    if(ok && lock && Math.abs(dx) > 50 && go(dx<0 ? 1 : -1, true)){ det.style.transition = "none"; det.style.transform = `translateX(${dx<0 ? w*.5 : -w*.5}px)`; det.style.opacity = .3;
       det.offsetWidth; det.style.transition = "transform .2s ease-out, opacity .2s ease-out"; }
-    det.style.transform = ""; det.style.opacity = ""; }; }
+    det.style.transform = ""; det.style.opacity = ""; };
+  det.addEventListener("touchstart", e => { if(e.touches.length>1){ end(false); return; } const p = e.touches[0]; sx = p.clientX; sy = p.clientY; dx = 0; lock = null; det.style.transition = "none"; }, {passive: true});
+  det.addEventListener("touchmove", e => { if(sx==null) return; const p = e.touches[0]; dx = p.clientX-sx;
+    if(lock==null && Math.hypot(dx, p.clientY-sy) > 8) lock = Math.abs(dx) > Math.abs(p.clientY-sy);
+    if(!lock){ if(lock===false) sx = null; return; } e.preventDefault();
+    const edge = (dx>0 && sel===0) || (dx<0 && sel===dayInfo.length-1);
+    det.style.transform = `translateX(${edge ? dx/4 : dx}px)`; det.style.opacity = 1-Math.min(.5, Math.abs(dx)/600); }, {passive: false});
+  det.addEventListener("touchend", () => end(true));
+  det.addEventListener("touchcancel", () => end(false)); }
 // Dock: at rest the picked day is big; the pointer (or a finger dragged along) swells the day under it and, a little, its neighbours.
 const DOCK_G = () => 2.2;
 function dock(x){ const el = document.getElementById("days"), G = DOCK_G();

@@ -78,8 +78,7 @@ header{position:relative}
 /* Days */
 /* All 10 days in one row, like the Mac dock: small tiles, the picked day big, and the day under the pointer (or a finger dragged along) swells with its neighbours. */
 .days{display:flex;align-items:flex-end;gap:6px;height:158px;touch-action:pan-y;user-select:none;-webkit-user-select:none}
-.days .day{flex:var(--g,1) 1 0;min-width:0;padding:7px 6px;gap:4px;align-content:end;overflow:hidden;position:relative;transition:flex-grow .18s ease-out}
-.days.drag .day{transition:none} /* under a finger the tiles keep up with it every frame */
+.days .day{flex:var(--g,1) 1 0;min-width:0;padding:7px 6px;gap:4px;align-content:end;overflow:hidden;transition:flex-grow .12s ease-out}
 .days .day .dn{font-size:calc(12px + 3px*var(--m,0));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .days .day:not(.on) .dn .where{display:none}
 .days .day .big{font-size:calc(12.5px + 13.5px*var(--m,0));white-space:nowrap;letter-spacing:-.02em}
@@ -95,9 +94,8 @@ header{position:relative}
   /* Phone tiles are too narrow for the range: day, date and top height until a tile opens. */
   .days{height:150px;gap:3px}
   .days .day{padding:6px 1px}
-  /* Small and big views fade into each other as a tile swells, instead of switching all at once. */
-  .days .day > :not(.mini){opacity:calc(var(--k,0)*1.6 - .6)}
-  .days .day .mini{display:grid;position:absolute;left:0;right:0;bottom:7px;justify-items:center;gap:4px;font-size:10.5px;color:var(--muted);opacity:calc(1 - var(--k,0)*2);pointer-events:none}
+  .days .day:not(.on) > :not(.mini){display:none}
+  .days .day:not(.on) .mini{display:grid;justify-items:center;gap:4px;font-size:10.5px;color:var(--muted)}
   .day .mini i{font-style:normal}.day .mini b{font:800 11px var(--display);letter-spacing:-.03em;color:var(--ink)}.day.hist .mini b{color:var(--muted)}
   .day .mini u{display:block;width:12px;height:4px;border-radius:2px;text-decoration:none}
   .days .day.on .big{font-size:20px}.days .day.on .big small{display:none}
@@ -1296,22 +1294,21 @@ function drawDays(){
   dock();
 }
 // Dock: at rest the picked day is big; the pointer (or a finger dragged along) swells the day under it and, a little, its neighbours.
-// p is the spot under the pointer in days (0 = first tile), worked out from the strip's own width so no tile has to be measured;
-// tiles follow it once per screen frame with no easing while dragging, and ease back when it lets go.
-const DOCK_G = () => matchMedia("(max-width:560px)").matches ? 4.2 : 2.2;
-function dock(p){ const el = document.getElementById("days"), G = DOCK_G(), n = el.children.length, spread = 170/Math.max(1, el.clientWidth/n);
-  [...el.children].forEach((c,i) => { const m = p==null ? (i===sel ? 1 : 0) : Math.max(0, 1-Math.abs(i-p)/spread) ** 1.6;
-    c.style.setProperty("--g", 1+G*m); c.style.setProperty("--m", m>.55 ? 1 : m*.6); c.style.setProperty("--k", Math.max(0, Math.min(1, (m-.35)/.4))); c.classList.toggle("on", m>.55); }); }
-{ const el = document.getElementById("days"), pick = b => { if(!b) return; sel=+b.dataset.i; [...el.children].forEach((c,i) => c.setAttribute("aria-pressed", i===sel)); drawDay(); };
-  // A tap picks the tile it landed on; a finger dragged along picks the day under it when it lifts. Keyboard Enter/Space still clicks.
-  let down = null, at = null, raf = 0;
-  const pos = x => { const r = el.getBoundingClientRect(); return (x-r.left)/r.width*el.children.length - .5; };
-  const later = x => { at = x; if(!raf) raf = requestAnimationFrame(() => { raf = 0; dock(at==null ? undefined : pos(at)); }); };
-  el.onpointermove = e => { if(e.pointerType==="mouse" || e.buttons) { if(down) el.classList.add("drag"); later(e.clientX); } };
-  el.onpointerdown = e => { down = {x: e.clientX, b: e.target.closest(".day")}; if(e.pointerType!=="mouse") later(e.clientX); };
-  el.onpointerup = e => { const n = el.children.length, i = Math.max(0, Math.min(n-1, Math.round(pos(e.clientX))));
-    el.classList.remove("drag"); pick(down && Math.abs(e.clientX-down.x) < 10 ? down.b : el.children[i]); down = null; later(e.pointerType==="mouse" ? e.clientX : null); };
-  el.onpointerleave = el.onpointercancel = () => { down = null; el.classList.remove("drag"); later(null); };
+const DOCK_G = () => matchMedia("(max-width:560px)").matches ? 7.5 : 2.2;
+function dock(x){ const el = document.getElementById("days"), G = DOCK_G();
+  [...el.children].forEach((c,i) => { let m;
+    if(x==null) m = i===sel ? 1 : 0;
+    else { const r = c.getBoundingClientRect(); m = Math.max(0, 1-Math.abs(x-(r.left+r.width/2))/170) ** 1.6; }
+    c.style.setProperty("--g", 1+G*m); c.style.setProperty("--m", m>.55 ? 1 : m*.6); c.classList.toggle("on", m>.55); }); }
+{ const el = document.getElementById("days"), pick = b => { if(!b) return; sel=+b.dataset.i; drawDays(); drawDay(); };
+  // Tiles move while the pointer does: a tap picks the tile it landed on, a finger dragged along picks the biggest tile when it lifts.
+  // Keyboard Enter/Space still clicks.
+  let down = null;
+  el.onpointermove = e => { if(e.pointerType==="mouse" || e.buttons) dock(e.clientX); };
+  el.onpointerdown = e => { down = {x: e.clientX, b: e.target.closest(".day")}; if(e.pointerType!=="mouse") dock(e.clientX); };
+  el.onpointerup = e => { const tiles = [...el.children], big = tiles.reduce((a,c) => +c.style.getPropertyValue("--g") > +a.style.getPropertyValue("--g") ? c : a, tiles[0]);
+    pick(down && Math.abs(e.clientX-down.x) < 10 ? down.b : big); down = null; dock(e.pointerType==="mouse" ? e.clientX : undefined); };
+  el.onpointerleave = el.onpointercancel = () => dock();
   el.onclick = e => { if(e.detail===0) pick(e.target.closest(".day")); }; }
 
 // ---- day chart

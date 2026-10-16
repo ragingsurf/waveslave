@@ -90,17 +90,27 @@ header{position:relative}
 .day .tag{font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--muted);text-transform:uppercase}
 .day.hist .tag{color:var(--ink)}
 .day .mini{display:none}
+.daydet{display:none}
 @media (max-width:560px){
-  /* Phone tiles are too narrow for the range: day, date and top height until a tile opens. */
-  .days{height:150px;gap:3px}
-  .days .day{padding:6px 1px}
-  .days .day:not(.on) > :not(.mini){display:none}
-  .days .day:not(.on) .mini{display:grid;justify-items:center;gap:4px;font-size:10.5px;color:var(--muted)}
-  .day .mini i{font-style:normal}.day .mini b{font:800 11px var(--display);letter-spacing:-.03em;color:var(--ink)}.day.hist .mini b{color:var(--muted)}
-  .day .mini u{display:block;width:12px;height:4px;border-radius:2px;text-decoration:none}
-  .days .day.on .big{font-size:20px}.days .day.on .big small{display:none}
-  .days .day.on{padding:8px 9px}
-  .day .per{font-size:12px}.day .w{font-size:11.5px}
+  /* Phones get chips instead of the dock (Bryan, Oct 16): nine equal buttons that never move, and the picked day in a wide card underneath. */
+  .days{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));align-items:stretch;height:auto;gap:5px;touch-action:auto}
+  .days .day{padding:0;height:76px;align-content:center;border-radius:12px;transition:none}
+  .days .day > :not(.mini){display:none}
+  .days .day .mini{display:grid;justify-items:center;gap:4px;font-size:11px;color:var(--muted)}
+  .day .mini i{font-style:normal}.day .mini b{font:800 12.5px var(--display);letter-spacing:-.03em;color:var(--ink)}.day.hist .mini b{color:var(--muted)}
+  .day .mini u{display:block;width:14px;height:4px;border-radius:2px;text-decoration:none}
+  .days .day[aria-pressed="true"]{background:var(--ink);border-color:var(--ink)}
+  .days .day[aria-pressed="true"] .mini,.days .day[aria-pressed="true"] .mini b{color:var(--bg)}
+  .daydet{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 14px;align-items:center;margin-top:10px;padding:12px 14px;border-radius:14px;background:var(--panel);border:1px solid var(--ink)}
+  .daydet.hist{border-style:dashed;background:transparent}
+  .daydet .k{grid-column:1/-1;display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-weight:600}
+  .daydet .k small{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+  .daydet .big{font:800 28px/1 var(--display);font-stretch:115%;white-space:nowrap}.daydet.hist .big{color:var(--muted)}
+  .daydet .big small{font-size:14px;color:var(--muted)}
+  .daydet .s{display:grid;gap:3px;font-size:13px;color:var(--muted)}.daydet .s .per{color:var(--swell);font-weight:600}
+  .daydet .bar{grid-column:1/-1}
+  .daydet .nav{grid-column:1/-1;display:flex;justify-content:space-between}
+  .daydet .nav button{appearance:none;border:0;background:none;color:var(--muted);font:inherit;font-size:13px;padding:6px 0;cursor:pointer}
 }
 .day{appearance:none;font:inherit;color:inherit;text-align:left;cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;display:grid;gap:6px}
 .day:hover{border-color:var(--sea)}
@@ -312,6 +322,7 @@ html{overscroll-behavior-y:none}
   <section aria-label="Last 4 days and 5-day outlook">
     <div class="label" id="outH" style="margin-bottom:8px">Last 4 days · 5-day outlook</div>
     <div class="days" id="days"></div>
+    <div class="daydet" id="dayDet"></div>
     <div class="where" id="acc" style="font-size:12px;margin-top:8px"></div>
   </section>
 
@@ -1297,23 +1308,32 @@ function drawDays(){
       <span class="bar"><i style="width:${(d.peakS/8*100).toFixed(0)}%;background:${RATE[r][1]}"></i></span>
       <span class="mini"><i>${DOW[new Date(d.key+"T00:00Z").getUTCDay()].slice(isZh()?1:0, 2)}</i><i>${+d.key.slice(8)}</i><b>${r1(hi)}</b><u style="background:${RATE[r][1]}"></u></span>
       <span class="w">${RATE[r][0]}${isZh() ? (d.avgKt!=null?` · 風 ${Math.round(d.avgKt)} kt`:" · 無風力資料") : d.avgKt!=null?` · ${Math.round(d.avgKt)} kt wind`:" · no wind data"}</span></button>`; }).join("");
+  // Phone card for the picked day (hidden on computers, where the dock tile itself opens up), with ‹ › to step a day.
+  const b = el.children[sel], q = c => b.querySelector(c), nm = i => dayInfo[i] ? dayName(dayInfo[i].key,todayKey) : "", det = document.getElementById("dayDet");
+  det.className = "daydet"+(dayInfo[sel].hist?" hist":"");
+  det.innerHTML = `<div class="k"><span>${q(".dn").innerHTML}</span><small>${q(".tag")?q(".tag").textContent:""}</small></div>
+    <span class="big mono">${q(".big").innerHTML}</span><span class="s"><span class="per mono">${q(".per").textContent}</span><span>${q(".w").textContent}</span></span>${q(".bar").outerHTML}
+    <span class="nav"><button data-d="-1"${sel>0?"":" hidden"}>‹ ${nm(sel-1)}</button><button data-d="1"${sel<dayInfo.length-1?"":" hidden"}>${nm(sel+1)} ›</button></span>`;
   dock();
 }
+document.getElementById("dayDet").onclick = e => { const b = e.target.closest("button[data-d]"); if(!b) return; sel = Math.max(0, Math.min(dayInfo.length-1, sel + +b.dataset.d)); drawDays(); drawDay(); };
 // Dock: at rest the picked day is big; the pointer (or a finger dragged along) swells the day under it and, a little, its neighbours.
-const DOCK_G = () => matchMedia("(max-width:560px)").matches ? 7.5 : 2.2;
+const DOCK_G = () => 2.2;
 function dock(x){ const el = document.getElementById("days"), G = DOCK_G();
+  if(matchMedia("(max-width:560px)").matches){ [...el.children].forEach(c => { c.style.removeProperty("--g"); c.style.removeProperty("--m"); c.classList.remove("on"); }); return; }  // phones: chips, no dock
   [...el.children].forEach((c,i) => { let m;
     if(x==null) m = i===sel ? 1 : 0;
     else { const r = c.getBoundingClientRect(); m = Math.max(0, 1-Math.abs(x-(r.left+r.width/2))/170) ** 1.6; }
     c.style.setProperty("--g", 1+G*m); c.style.setProperty("--m", m>.55 ? 1 : m*.6); c.classList.toggle("on", m>.55); }); }
 { const el = document.getElementById("days"), pick = b => { if(!b) return; sel=+b.dataset.i; drawDays(); drawDay(); };
-  // Tiles move while the pointer does: a tap picks the tile it landed on, a finger dragged along picks the biggest tile when it lifts.
+  // Dock tiles move while the pointer does: a tap picks the tile it landed on, a finger dragged along picks the biggest tile when it lifts.
+  // Phone chips never move, so a tap there is just that chip.
   // Keyboard Enter/Space still clicks.
   let down = null;
   el.onpointermove = e => { if(e.pointerType==="mouse" || e.buttons) dock(e.clientX); };
   el.onpointerdown = e => { down = {x: e.clientX, b: e.target.closest(".day")}; if(e.pointerType!=="mouse") dock(e.clientX); };
   el.onpointerup = e => { const tiles = [...el.children], big = tiles.reduce((a,c) => +c.style.getPropertyValue("--g") > +a.style.getPropertyValue("--g") ? c : a, tiles[0]);
-    pick(down && Math.abs(e.clientX-down.x) < 10 ? down.b : big); down = null; dock(e.pointerType==="mouse" ? e.clientX : undefined); };
+    pick(down && Math.abs(e.clientX-down.x) < 10 ? down.b : matchMedia("(max-width:560px)").matches ? null : big); down = null; dock(e.pointerType==="mouse" ? e.clientX : undefined); };
   el.onpointerleave = el.onpointercancel = () => dock();
   el.onclick = e => { if(e.detail===0) pick(e.target.closest(".day")); }; }
 

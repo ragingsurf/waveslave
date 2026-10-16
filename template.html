@@ -73,22 +73,37 @@ header{position:relative}
 .dir{display:inline-block;transition:transform .3s}
 
 /* Days */
-.days{display:grid;grid-auto-flow:column;grid-auto-columns:176px;gap:8px;overflow-x:auto;padding-bottom:6px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+/* All 10 days in one row, like the Mac dock: small tiles, the picked day big, and the day under the pointer (or a finger dragged along) swells with its neighbours. */
+.days{display:flex;align-items:flex-end;gap:6px;height:158px;touch-action:pan-y;user-select:none;-webkit-user-select:none}
+.days .day{flex:var(--g,1) 1 0;min-width:0;padding:7px 6px;gap:4px;align-content:end;overflow:hidden;transition:flex-grow .12s ease-out}
+.days .day .dn{font-size:calc(12px + 3px*var(--m,0));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.days .day:not(.on) .dn .where{display:none}
+.days .day .big{font-size:calc(12.5px + 13.5px*var(--m,0));white-space:nowrap;letter-spacing:-.02em}
+.days .day:not(.on) .big small{display:none}
+.days .day :is(.tag,.per,.w){white-space:nowrap;overflow:hidden;opacity:var(--m,0);max-height:calc(18px*var(--m,0))}
+.days .day.on{padding:8px 10px}
 .day.hist{background:transparent;border-style:dashed}
 .day.hist .big{color:var(--muted)}
 .day .tag{font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--muted);text-transform:uppercase}
 .day.hist .tag{color:var(--ink)}
+.day .mini{display:none}
 @media (max-width:560px){
-  .days{grid-auto-columns:148px}
-  .day{padding:10px 12px;gap:5px;grid-template-columns:minmax(0,1fr)}
-  .day .big{font-size:20px;font-stretch:100%;letter-spacing:-.01em;white-space:nowrap}.day .big small{font-size:11px}
-  .day .per{font-size:12px;white-space:nowrap}.day .w{font-size:11.5px}
+  /* Phone tiles are too narrow for the range: day, date and top height until a tile opens. */
+  .days{height:150px;gap:3px}
+  .days .day{padding:6px 1px}
+  .days .day:not(.on) > :not(.mini){display:none}
+  .days .day:not(.on) .mini{display:grid;justify-items:center;gap:4px;font-size:10.5px;color:var(--muted)}
+  .day .mini i{font-style:normal}.day .mini b{font:800 11px var(--display);letter-spacing:-.03em;color:var(--ink)}.day.hist .mini b{color:var(--muted)}
+  .day .mini u{display:block;width:12px;height:4px;border-radius:2px;text-decoration:none}
+  .days .day.on .big{font-size:20px}.days .day.on .big small{display:none}
+  .days .day.on{padding:8px 9px}
+  .day .per{font-size:12px}.day .w{font-size:11.5px}
 }
-.day{appearance:none;font:inherit;color:inherit;text-align:left;cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;display:grid;gap:6px;scroll-snap-align:start}
+.day{appearance:none;font:inherit;color:inherit;text-align:left;cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;display:grid;gap:6px}
 .day:hover{border-color:var(--sea)}
 .day[aria-pressed="true"]{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
 .day .dn{font-weight:600}
-.day .big{font-family:var(--display);font-weight:800;font-stretch:115%;font-size:26px;line-height:1}
+.day .big{font-family:var(--display);font-weight:800;font-stretch:115%;line-height:1}
 .day .big small{font-size:13px;color:var(--muted);font-weight:600}
 .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden}.bar i{display:block;height:100%;border-radius:3px}
 .day .w{font-size:12px;color:var(--muted)}
@@ -1219,7 +1234,7 @@ const dayInfo = dayKeys.map(key => {
   return {key, hs, top, win, primo, past, hist, obs, maxH, minH, maxP, minP, obsMax: bs.length ? Math.max(...bs.map(x=>x.b.h)) : 0, peakS: Math.max(...pool.map(x=>x.s)), avgKt: ws.length? ws.reduce((a,w)=>a+w.kt,0)/ws.length : null, hasWind: lit.length>0};
 });
 let sel = Math.max(0, dayKeys.indexOf(todayKey));
-function drawDays(center){
+function drawDays(){
   const el = document.getElementById("days");
   el.innerHTML = dayInfo.map((d,i)=>{ const r=rate(d.peakS), o=d.obs, lo=o?o.minH:d.minH, hi=o?o.maxH:d.maxH, pa=o&&o.ps.length?Math.min(...o.ps):d.minP, pb=o&&o.ps.length?Math.max(...o.ps):d.maxP;
     return `<button class="day${d.hist?" hist":""}" aria-pressed="${i===sel}" data-i="${i}">
@@ -1228,11 +1243,27 @@ function drawDays(center){
       <span class="big mono">${r1(lo)}–${r1(hi)}<small> m</small></span>
       <span class="per mono">${isZh()?"週期 ":""}${Math.round(pa)===Math.round(pb)?Math.round(pb):Math.round(pa)+"–"+Math.round(pb)} s${isZh()?"":" period"}</span>
       <span class="bar"><i style="width:${(d.peakS/8*100).toFixed(0)}%;background:${RATE[r][1]}"></i></span>
+      <span class="mini"><i>${DOW[new Date(d.key+"T00:00Z").getUTCDay()].slice(isZh()?1:0, 2)}</i><i>${+d.key.slice(8)}</i><b>${r1(hi)}</b><u style="background:${RATE[r][1]}"></u></span>
       <span class="w">${RATE[r][0]}${isZh() ? (d.avgKt!=null?` · 風 ${Math.round(d.avgKt)} kt`:" · 無風力資料") : d.avgKt!=null?` · ${Math.round(d.avgKt)} kt wind`:" · no wind data"}</span></button>`; }).join("");
-  // Open with today in the middle of the strip, the past to its left.
-  if(center){ const c = el.children[sel]; if(c) el.scrollLeft = c.offsetLeft - el.offsetLeft - (el.clientWidth - c.offsetWidth)/2; }
+  dock();
 }
-document.getElementById("days").onclick = (e => { const b=e.target.closest(".day"); if(!b) return; sel=+b.dataset.i; drawDays(); drawDay(); });
+// Dock: at rest the picked day is big; the pointer (or a finger dragged along) swells the day under it and, a little, its neighbours.
+const DOCK_G = () => matchMedia("(max-width:560px)").matches ? 7.5 : 2.2;
+function dock(x){ const el = document.getElementById("days"), G = DOCK_G();
+  [...el.children].forEach((c,i) => { let m;
+    if(x==null) m = i===sel ? 1 : 0;
+    else { const r = c.getBoundingClientRect(); m = Math.max(0, 1-Math.abs(x-(r.left+r.width/2))/170) ** 1.6; }
+    c.style.setProperty("--g", 1+G*m); c.style.setProperty("--m", m>.55 ? 1 : m*.6); c.classList.toggle("on", m>.55); }); }
+{ const el = document.getElementById("days"), pick = b => { if(!b) return; sel=+b.dataset.i; drawDays(); drawDay(); };
+  // Tiles move while the pointer does: a tap picks the tile it landed on, a finger dragged along picks the biggest tile when it lifts.
+  // Keyboard Enter/Space still clicks.
+  let down = null;
+  el.onpointermove = e => { if(e.pointerType==="mouse" || e.buttons) dock(e.clientX); };
+  el.onpointerdown = e => { down = {x: e.clientX, b: e.target.closest(".day")}; if(e.pointerType!=="mouse") dock(e.clientX); };
+  el.onpointerup = e => { const tiles = [...el.children], big = tiles.reduce((a,c) => +c.style.getPropertyValue("--g") > +a.style.getPropertyValue("--g") ? c : a, tiles[0]);
+    pick(down && Math.abs(e.clientX-down.x) < 10 ? down.b : big); down = null; dock(e.pointerType==="mouse" ? e.clientX : undefined); };
+  el.onpointerleave = el.onpointercancel = () => dock();
+  el.onclick = e => { if(e.detail===0) pick(e.target.closest(".day")); }; }
 
 // ---- day chart
 const P={l:34,r:12}; let W=720, CW=W-P.l-P.r, lastBoxW=0;
@@ -1407,7 +1438,7 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
   document.title = `WaveSlave · ${nm}`;
 })();
 
-drawDays(true); drawDay();
+drawDays(); drawDay();
 }
 applyLang();
 document.querySelectorAll("#lang button").forEach(b=>b.onclick=()=>setLang(b.dataset.l));

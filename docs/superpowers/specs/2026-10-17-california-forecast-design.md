@@ -43,7 +43,7 @@ buoy more than 40 km away says how far away it is, as Ichinomiya does.
 |---|---|---|
 | Wave height, period, direction, water temp | NOAA NDBC (CDIP buoys) | `ndbc.noaa.gov/data/realtime2/<id>.txt`: 45 days of 30-minute rows, so no rolling cache is needed (unlike NOWPHAS). `MM` means no reading. |
 | Wind now | NDBC shore stations (same `.txt` format), and NWS airport stations where NDBC has none | `api.weather.gov/stations/<id>/observations/latest` (km/h, needs a User-Agent) |
-| Wind forecast | Open-Meteo, NOAA HRRR 3 km model (`models=gfs_hrrr`, falling back to `gfs_seamless`) | same call shape as `openjma`; answered live from here |
+| Wind forecast | Open-Meteo `models=gfs_seamless`: NOAA HRRR 3 km for the first ~2 days, then GFS (HRRR alone stops at ~48 h) | same call shape as `openjma`; answered live from here |
 | Swell forecast, model check | Open-Meteo, as for Taiwan and Japan | existing calls with California coordinates |
 | Tides | NOAA CO-OPS predictions | `api.tidesandcurrents.noaa.gov/api/prod/datagetter?product=predictions&interval=hilo&time_zone=lst_ldt&datum=MLLW&units=metric`, 10 days per call |
 | Sun times | computed (`sun_times` from jp.py) | no network |

@@ -55,7 +55,7 @@ if [ -n "$(jpids lat)" ]; then
   python3 -I "$HERE/jp.py" "$W/dl" "$W/snap.json" "$HERE/spots.json" "$G" || echo "japan skipped" >&2
 fi
 # California spots (optional, never block the build): NOAA NDBC buoys (CDIP), NDBC shore and NWS airport wind, NOAA tide predictions,
-# NOAA HRRR wind via Open-Meteo; ca.py writes them under the same keys as CWA's.
+# NOAA HRRR/GFS wind via Open-Meteo; ca.py writes them under the same keys as CWA's.
 caids(){ python3 -I -c "import json,sys;S=[s for s in json.load(open(sys.argv[1])) if s.get('country')=='ca'];f=sys.argv[2]
 if f=='ndbc': v=[b for s in S for b in s['ndbc']]+[s['windStation'][5:] for s in S if s['windStation'].startswith('ndbc:')]
 elif f=='nws': v=[s['windStation'][4:] for s in S if s['windStation'].startswith('nws:')]
@@ -67,7 +67,8 @@ if [ -n "$(caids lat)" ]; then
   for s in $(caids nws | tr ',' ' '); do curl -fsSL --retry 2 -m 60 -A "waveslave.tw" -o "$W/dl/nws-$s.json" "https://api.weather.gov/stations/$s/observations/latest" || echo "nws $s fetch failed" >&2; done
   for t in $(caids tideStation | tr ',' ' '); do get "tide-$t" "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?product=predictions&station=$t&begin_date=$(TZ=America/Los_Angeles date -d '-5 days' +%Y%m%d)&range=360&datum=MLLW&interval=hilo&units=metric&time_zone=lst_ldt&format=json&application=waveslave.tw" || echo "tide $t fetch failed" >&2; done
   CQ="latitude=$(caids lat)&longitude=$(caids lon)&hourly=wind_speed_10m,wind_direction_10m,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=4"
-  get openca "https://api.open-meteo.com/v1/forecast?$CQ&models=gfs_hrrr" || get openca "https://api.open-meteo.com/v1/forecast?$CQ&models=gfs_seamless" || echo "openca fetch failed" >&2
+  # gfs_seamless is HRRR for the first ~2 days, then GFS, so the wind covers all 4 days (HRRR alone stops at ~48 h).
+  get openca "https://api.open-meteo.com/v1/forecast?$CQ&models=gfs_seamless" || get openca "https://api.open-meteo.com/v1/forecast?$CQ" || echo "openca fetch failed" >&2
   python3 -I "$HERE/ca.py" "$W/dl" "$W/snap.json" "$HERE/spots.json" || echo "california skipped" >&2
 fi
 # West Pacific wind + wave grid for the Map tab (3-hourly model, so refetched only every ~3 h; a failed fetch keeps the last grid).

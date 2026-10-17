@@ -13,7 +13,8 @@
 ## Global Constraints
 
 - All changes in `ragingsurf/waveslave`, on a branch, merged by PR. Never republish the old WaveSlave artifact page.
-- The forecast-vs-buoy log must never stop: `log.py`'s record shape, Taipei-date file names and `logstore.sh` stay as they are.
+- The forecast-vs-buoy log must never stop: `log.py`'s record shape and Taipei-date file names stay as they are.
+- Each country keeps its own log: Taiwan stays in `log/` exactly as today, Japan goes to `log-jp/` with the same record format, so the two can be read together later with no conversion. Corrections and past days for a country read only that country's log.
 - Every Japan fetch and step is optional: a failure prints one line to stderr and the build carries on (`|| echo "... failed" >&2`).
 - Every time string in `snap.json` stays Taipei wall clock, `"YYYY-MM-DDTHH:MM"` (UTC+8). JST sources are shifted −1 h on the way in.
 - Python standard library only; no new packages. Tests use `unittest`.
@@ -165,7 +166,47 @@ def test_fill_changes_src_key(self):
 - [ ] **Step 7: Run the real build.** `sh refresh.sh /tmp/surf`. Expected: a `jp:` summary line per Japan spot with a buoy id for every spot but `shonan`, a non-empty `dwind`, `wind` and `tides`, and `built /tmp/surf/taitung-surf.html`. Record whether `jma_msm` answered.
 - [ ] **Step 8: Commit** with "jp.py fills Japan spots from NOWPHAS, AMeDAS, JMA and Open-Meteo".
 
-### Task 5: Country switch and local time on the page
+### Task 5: Separate log per country
+
+**Files:**
+- Modify: `log.py`, `correct.py`, `history.py` (optional last argument: a country code)
+- Modify: `logstore.sh` (optional second argument: the log folder, default `log`)
+- Modify: `refresh.sh` (run log, correct and history once per country)
+- Modify: `.github/workflows/refresh.yml` (cache and store `log-jp` too)
+- Test: `tests/test_logsplit.py`
+
+**Interfaces:**
+- Consumes: `spots[id].country` in `snap.json` (Task 1).
+- Produces: `log.py <snap> <logdir> [country]`, `correct.py <snap> <logdir> [country]`, `history.py <snap> <logdir> <cache> [country]`. With a country, each touches only spots whose `country` matches (missing counts as `tw`); with none, all spots as today. `log.py` with a country also limits `src.spots` in the record and the `.last` key to those spots. `history.py` keeps tides in `cache/tides.json` for `tw` and `cache/tides-<country>.json` otherwise. `logstore.sh restore|save [dir]` works on `<dir>/20*` and the same folder name on the `data` branch.
+
+- [ ] **Step 1: Write failing tests.**
+
+```python
+def test_log_tw_only(self):
+    run(['log.py', SNAP, tmp + '/log', 'tw']); rec = last_record(tmp + '/log')
+    self.assertEqual(sorted(rec['spots']), TW_IDS)
+    self.assertEqual(sorted(rec['src']['spots']), TW_IDS)
+def test_log_jp_only(self):
+    run(['log.py', SNAP, tmp + '/log-jp', 'jp']); self.assertEqual(sorted(last_record(tmp + '/log-jp')['spots']), JP_IDS)
+def test_tw_record_unchanged_by_japan(self):
+    # the same snapshot with Japan readings changed must not append a second Taiwan record
+    run(['log.py', SNAP, tmp + '/log', 'tw']); run(['log.py', SNAP_JP_CHANGED, tmp + '/log', 'tw'])
+    self.assertEqual(count_records(tmp + '/log'), 1)
+def test_no_country_logs_all(self):
+    run(['log.py', SNAP, tmp + '/all']); self.assertEqual(sorted(last_record(tmp + '/all')['spots']), sorted(TW_IDS + JP_IDS))
+def test_correct_jp_leaves_tw(self):
+    before = load(SNAP)['spots']['donghe']; run(['correct.py', SNAP_COPY, tmp + '/log-jp', 'jp'])
+    self.assertEqual(load(SNAP_COPY)['spots']['donghe'], before)
+```
+
+- [ ] **Step 2: Run** `python3 -m unittest tests.test_logsplit -v`. Expected: FAIL.
+- [ ] **Step 3: Add the country filter** to the three scripts (`sys.argv[3]`/`[4]` if present; filter `d['spots']` items by `s.get('country','tw')`).
+- [ ] **Step 4: Run the tests.** Expected: OK.
+- [ ] **Step 5: Wire it up.** In `refresh.sh`, replace the single history, log and correct calls with a `tw` call on `log` and a `jp` call on `log-jp`, keeping today's order (history, log, correct) and each one's `|| ...` fallback. In `logstore.sh`, take the folder from `$2` (default `log`) in place of every literal `log`. In `refresh.yml`, add `log-jp` to both cache `path` lists and call `logstore.sh restore log-jp` and `save log-jp` next to the existing calls, each with its own `|| echo` fallback.
+- [ ] **Step 6: Check Taiwan's log is untouched.** Run `sh refresh.sh /tmp/surf` twice with a copy of `/mnt/project-files/surf-app/log` as `log/`. Expected: `log/<today>.jsonl.gz` gains records whose `spots` are only the 4 Taiwan ids; `log-jp/<today>.jsonl.gz` exists with the 8 Japan ids; `sh logstore.sh save log-jp` with no `data` branch remote prints `saved 0 log files` without error.
+- [ ] **Step 7: Commit** with "Separate forecast-vs-buoy log per country (Taiwan stays in log/, Japan in log-jp/)".
+
+### Task 6: Country switch and local time on the page
 
 **Files:**
 - Modify: `template.html` (CSS near `.picker` lines 158-163; markup at line 315; `boot()` time helpers near line 1149; Map tab helpers using `8*36e5` near lines 488, 855-874, 902-1019; spot picker near 1507-1523)
@@ -179,7 +220,7 @@ def test_fill_changes_src_key(self):
 - [ ] **Step 3: Check in a browser.** Build with `sh build-site.sh /tmp/site`, serve `/tmp/site` with `python3 -m http.server`, open in Playwright at 390×844. Expected: Taiwan view unchanged against a `main` build screenshot; Japan view shows 8 Japan spots, "Today" and tide times in JST (a tide at 23:34 Taipei shows 00:34 next day), no console errors.
 - [ ] **Step 4: Commit** with "Page: Taiwan / Japan switch and local times".
 
-### Task 6: Japanese as a third language
+### Task 7: Japanese as a third language
 
 **Files:**
 - Modify: `template.html` (head script line 2; `LANG`, `isZh`, `TR`, `SPT`, `camName`, `applyLang`, `setLang` near lines 403-437; `#lang` markup line 311; every `data-zh` element and every `isZh()` sentence)
@@ -194,7 +235,7 @@ def test_fill_changes_src_key(self):
 - [ ] **Step 5: Browser check** in Japanese at 390×844 on a Taiwan and a Japan spot, plus a reload with `ja` saved. Expected: no English labels left except brand and model names, no English flash on reload, no console errors.
 - [ ] **Step 6: Commit** with "Page: Japanese as a third language".
 
-### Task 7: Japan sources on the page
+### Task 8: Japan sources on the page
 
 **Files:**
 - Modify: `template.html` (spot picker labels near 1507-1520; legend lines 343-350; model table row near line 888 and line 1467; buoy check text)
@@ -208,12 +249,12 @@ def test_fill_changes_src_key(self):
 - [ ] **Step 4: Browser check** on `shonan`, `ichinomiya`, `ikumi` in all three languages. Expected: the texts above, a JMA row in the model chart, no "CWA" anywhere on Japan spots, no console errors.
 - [ ] **Step 5: Commit** with "Page: Japan source labels, JMA wave row and buoy notes".
 
-### Task 8: Ship
+### Task 9: Ship
 
 **Files:**
 - Modify: `.github/workflows/refresh.yml` comment line 3 only ("CWA + Open-Meteo" → "CWA, NOWPHAS, JMA + Open-Meteo")
 
 - [ ] **Step 1: Full build and tests.** `python3 -m unittest discover -s tests -v` → all OK; `sh build-site.sh /tmp/site` → `site ready`.
-- [ ] **Step 2: Log check.** Run `python3 -I log.py` on the new `snap.json` against a copy of the restored log. Expected: one record appended containing all 12 spot ids; Taiwan records have the same keys as yesterday's.
+- [ ] **Step 2: Log check.** After a full build on a copy of the restored log: `log/` gained Taiwan-only records with the same keys as yesterday's; `log-jp/` holds Japan-only records. A one-off read of both folders together gives all 12 spot ids, which is the later merge.
 - [ ] **Step 3: Phone screenshots** (390×844) of Taiwan and Japan in each language into `/mnt/project-files/surf-app/japan/`.
 - [ ] **Step 4: Open the PR** to `main`, subscribe to its activity, drive CI green. After merge, check the first Actions run's log for the `jp:` lines and whether `jma_msm` answered.

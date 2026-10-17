@@ -72,7 +72,8 @@ The rule: everything after `snap.json` stays country-blind. Japan only adds a wa
    stored as Taipei wall clock ("YYYY-MM-DDTHH:MM", UTC+8) like every other field, so log, history and
    corrections stay unchanged; the page shifts them to Japan time for display.
 4. **snap.py and more.py** skip spots whose country is not `tw` for their CWA-only parts.
-5. **log.py, correct.py, history.py** need no logic change: they read `buoy`, `dwind`, `hourly`, `wind` per spot.
+5. **Separate logs.** Taiwan keeps `log/` exactly as today; Japan logs to `log-jp/` in the same record format, also kept for good on the `data` branch. `log.py`, `correct.py` and `history.py` take an optional country so each country learns only from its own log. Merging later is reading both folders together.
+   **log.py, correct.py, history.py** otherwise need no logic change: they read `buoy`, `dwind`, `hourly`, `wind` per spot.
    The log keeps Taipei-date files and the same record shape, so the forecast-vs-buoy log never stops and old
    days stay readable. `correct.py`'s wind factor compares station wind to `wind`, which for Japan is the JMA model.
 6. **template.html** gets:

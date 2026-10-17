@@ -56,3 +56,35 @@ def merge_buoy(old, new, keep_hours=24):
     if not rows: return []
     last = datetime.datetime.fromisoformat(max(rows))
     return [rows[t] for t in sorted(rows) if datetime.datetime.fromisoformat(t) > last - datetime.timedelta(hours=keep_hours)]
+
+
+def tide_table(txt, point):
+    """JMA yearly tide table text -> {Taipei date: [[HH:MM, 'H'|'L', cm], ...]} for one tide point.
+    Each line: 24 hourly heights (3 chars each), date YYMMDD (space padded) at 72, point code at 78, then four highs and four lows
+    of HHMM + 3-char cm each from 80 (9999 = none)."""
+    out = {}
+    for l in txt.splitlines():
+        if len(l) < 136 or l[78:80] != point: continue
+        day = datetime.date(2000 + int(l[72:74]), int(l[74:76]), int(l[76:78]))
+        for k in range(8):
+            f = l[80 + 7 * k:87 + 7 * k]
+            if f[:4] == '9999' or not f[:4].strip(): continue
+            dt = datetime.datetime(day.year, day.month, day.day, int(f[:2]), int(f[2:4]), tzinfo=JST).astimezone(TPE)
+            out.setdefault(dt.strftime('%Y-%m-%d'), []).append([dt.strftime('%H:%M'), 'H' if k < 4 else 'L', int(f[4:7])])
+    return {d: sorted(v) for d, v in sorted(out.items())}
+
+
+def sun_times(lat, lon, date):
+    """Sunrise, sunset and civil twilight (-6 deg) for a Taipei calendar date, NOAA solar equations, Taipei wall clock 'HH:MM'."""
+    import math
+    d = datetime.date.fromisoformat(date)
+    g = 2 * math.pi / 365 * (d.timetuple().tm_yday - 1)
+    eqt = 229.18 * (0.000075 + 0.001868 * math.cos(g) - 0.032077 * math.sin(g) - 0.014615 * math.cos(2 * g) - 0.040849 * math.sin(2 * g))
+    dec = (0.006918 - 0.399912 * math.cos(g) + 0.070257 * math.sin(g) - 0.006758 * math.cos(2 * g) + 0.000907 * math.sin(2 * g)
+           - 0.002697 * math.cos(3 * g) + 0.00148 * math.sin(3 * g))
+    noon = 720 - 4 * lon - eqt  # minutes after UTC midnight
+    def at(alt, sign):
+        c = (math.sin(math.radians(alt)) - math.sin(math.radians(lat)) * math.sin(dec)) / (math.cos(math.radians(lat)) * math.cos(dec))
+        m = noon + sign * 4 * math.degrees(math.acos(max(-1, min(1, c)))) + 8 * 60
+        return '%02d:%02d' % divmod(round(m) % 1440, 60)
+    return {'first': at(-6, -1), 'rise': at(-0.833, -1), 'set': at(-0.833, 1), 'last': at(-6, 1), 'phen': []}

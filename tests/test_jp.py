@@ -4,7 +4,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import jp
 FIXDIR = os.path.join(HERE, 'fixtures', 'jp')
-FIX = lambda f: open(os.path.join(FIXDIR, f), encoding='utf-8').read()
+def FIX(f):
+    with open(os.path.join(FIXDIR, f), encoding='utf-8') as fh: return fh.read()
 
 
 class Nowphas(unittest.TestCase):
@@ -42,6 +43,30 @@ class MergeBuoy(unittest.TestCase):
     def test_new_reading_replaces_same_time(self):
         old = [['2026-10-16T23:20', 1.0, 6, 90, None]]
         self.assertEqual(jp.merge_buoy(old, [['2026-10-16T23:20', 1.2, 7, 90, None]]), [['2026-10-16T23:20', 1.2, 7, 90, None]])
+
+
+class Tides(unittest.TestCase):
+    def setUp(self):
+        self.t = jp.tide_table(FIX('tide.txt'), 'TK')
+
+    def test_highs_lows_shift_to_taipei(self):
+        # a 00:42 JST high on 11 May lands on 10 May at 23:42 Taipei
+        self.assertIn(['23:42', 'H', 151], self.t['2026-05-10'])
+        self.assertEqual(self.t['2026-05-11'], [['06:02', 'L', 107], ['10:47', 'H', 133], ['17:33', 'L', 70]])
+
+    def test_skips_9999(self):
+        self.assertTrue(all(cm < 999 for v in self.t.values() for _, _, cm in v))
+
+    def test_other_point_ignored(self):
+        self.assertEqual(jp.tide_table(FIX('tide.txt'), 'CS'), {})
+
+
+class Sun(unittest.TestCase):
+    def test_tokyo_midsummer(self):
+        s = jp.sun_times(35.68, 139.77, '2026-06-21')
+        self.assertTrue('03:23' <= s['rise'] <= '03:27', s)   # 04:25 JST by NAOJ
+        self.assertTrue('17:59' <= s['set'] <= '18:03', s)    # 19:01 JST
+        self.assertLess(s['first'], s['rise']); self.assertLess(s['set'], s['last']); self.assertEqual(s['phen'], [])
 
 
 if __name__ == '__main__':

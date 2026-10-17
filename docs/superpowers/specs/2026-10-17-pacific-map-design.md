@@ -1,6 +1,6 @@
 # One Pacific map for WaveSlave: design
 
-Date: 2026-10-17. Status: awaiting Bryan's review.
+Date: 2026-10-17. Status: approved by Bryan (2026-10-17). Plan: `docs/superpowers/plans/2026-10-17-pacific-map.md`.
 
 ## Goal
 
@@ -69,11 +69,11 @@ The country grids are unchanged: West Pacific 3°, California and Hawaii 1°, Au
 
 ## Architecture
 
-1. **refresh.sh**: a Pacific block next to the existing `regrid` calls. It writes `cache/grid-pac.json`. Each API is
-   requested in two chunks split at the dateline (16 and 15 columns, 368 and 345 points, close to today's 336-point
-   West Pacific request), because Open-Meteo wants longitudes between −180 and 180. The two halves are joined back
-   into one west-to-east grid. The page gets it through a new `__GRIDPAC__` placeholder in the existing
-   template-filling step.
+1. **pacific.sh** (new), called from refresh.sh next to the existing `regrid` calls, writes `cache/grid-pac.json`.
+   Each API is requested in two chunks of rows (rows 0–11 and 12–22: 372 and 341 points, close to today's 336-point
+   West Pacific request). Longitudes past 180 go out as negative, because Open-Meteo refuses anything outside −180
+   to 180 (checked 2026-10-17). The two chunks are joined back in order. The page gets the grid through a new
+   `__GRIDPAC__` placeholder in the existing template-filling step.
 2. **grid.py**: an optional `every` argument that keeps every n-th time step and writes `dt` to match (6 for the
    Pacific layer). Grid longitudes run east from `lon0 = 100` past 180 to 250, so the grid has no break at the
    dateline. Called without the argument, it gives byte-identical output for the existing grids.
@@ -95,8 +95,9 @@ The country grids are unchanged: West Pacific 3°, California and Hawaii 1°, Au
    - **View**: `REGION`, `mapRegion` and the cross-region reload in `switchSpot` go. The zoom-out limit becomes "the
      whole Pacific box fits". Saved-view keys stay the same per country (`waveslave-mapview`, `-ca`, `-hi`,
      `-au-w`, `-au-e`), so the views people have saved carry over, with old negative longitudes converted.
-   - **Coast drawing**: the outlines record the box they were cut to. Segments lying exactly on a cut edge are left
-     out of the stroke but kept in the land fill. Outlines entirely off screen are skipped while drawing.
+   - **Coast drawing**: the map keeps the list of lines the outlines were cut along (box edges, and 180° where
+     Natural Earth splits islands). Segments lying exactly on one of those lines are left out of the stroke but kept
+     in the land fill. Outlines entirely off screen are skipped while drawing.
 4. **Coastline data**: a one-off script, not part of the build, cuts Natural Earth 50 m land to the Pacific box
    minus the detailed areas and simplifies it to stay under about 80 KB. The result goes into `template.html` next
    to the other coasts, the same way they were added.
@@ -115,8 +116,8 @@ The country grids are unchanged: West Pacific 3°, California and Hawaii 1°, Au
 ## Testing
 
 - `tests/test_grid.py` (unittest, like the others):
-  - the request coordinates for the two chunks, wrapping correctly at the dateline;
-  - joining the chunks back in west-to-east order;
+  - the request coordinates for the two chunks, with longitudes past 180 written as negative;
+  - joining the chunks back in order;
   - `every=2` keeping every second step with `dt = 6`;
   - the output header's `lon0` running past 180;
   - the existing grids' output unchanged without `every`.

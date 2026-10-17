@@ -19,6 +19,9 @@ const NOW = Date.now();
 const HOMES = [["tw", "donghe", "waveslave-mapview", 120.9, 23.75], ["jp", "ichinomiya", "waveslave-mapview", 135.6, 33.4], ["ca", "trestles", "waveslave-mapview-ca", -119.5, 35.3],
   ["hi", "pipeline", "waveslave-mapview-hi", -157.3, 20.6], ["au-e", "snapper", "waveslave-mapview-au-e", 152, -32.5], ["au-w", "margaret", "waveslave-mapview-au-w", 115.5, -32.5]];
 const OLD_CA = { key: "waveslave-mapview-ca", view: { cx: -119.5, cy: 35.3, k: 1 } }; // saved before the map ran east
+const home = name => { const [, spot, key, cx, cy] = HOMES.find(h => h[0] === name); return { spot, saved: { key, view: { cx, cy, k: 1 } } }; }; // open(home("tw"))
+// Whether the page carries the Pacific grid: a page built without one has `pac: null` filled in (tool.py writes null, refresh.sh null and a newline).
+const PAC = !/\bpac: null\s*\}/.test(fs.readFileSync(file, "utf8"));
 
 class Skip extends Error {}
 const skip = why => { throw new Skip(why); };
@@ -35,6 +38,24 @@ const CHECKS = {
   async roundTrip(open) {
     const page = await open({ spot: "trestles", saved: OLD_CA }), [lon, lat] = await page.evaluate(() => { const { px, ll } = window.__ws; return ll(...px(241.5, 33.4)); });
     if (!near(lon, 241.5) || !near(lat, 33.4)) throw new Error(`ll(px(241.5, 33.4)) is ${lon}, ${lat}`);
+  },
+  // Every grid is made, finest first, with the Pacific layer last when the page carries it.
+  async gridsLoaded(open) {
+    const page = await open(home("tw")), got = JSON.stringify(await page.evaluate(() => window.__ws.grids()));
+    const want = JSON.stringify(["hi", "ca", "au", "wp", ...(PAC ? ["pac"] : [])]);
+    if (got !== want) throw new Error(`grids() is ${got}, want ${want}`);
+  },
+  // The Taiwan home view sits inside the West Pacific grid, so its pressure lines come from that grid.
+  async isoSource(open) {
+    const page = await open(home("tw")), src = await page.evaluate(() => window.__ws.iso());
+    if (src !== "wp") throw new Error(`iso() is ${src}, want wp`);
+  },
+  // Either side of 180° the Pacific layer has wind, and about the same wind: no seam at the dateline.
+  async datelineSeam(open) {
+    if (!PAC) skip("the page has no Pacific grid");
+    const page = await open(home("tw")), [a, b] = await page.evaluate(() => [window.__ws.val(179.5, 30, "wind"), window.__ws.val(180.5, 30, "wind")]);
+    if (!a || !b) throw new Error(`val(179.5, 30, "wind") is ${JSON.stringify(a)} and val(180.5, 30, "wind") is ${JSON.stringify(b)}`);
+    if (!(Math.abs(a.u - b.u) < 10 && Math.abs(a.v - b.v) < 10)) throw new Error(`the wind jumps across 180°: ${JSON.stringify(a)}, then ${JSON.stringify(b)}`);
   },
 };
 

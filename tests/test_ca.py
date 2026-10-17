@@ -106,6 +106,13 @@ class Fill(unittest.TestCase):
         ca.fill(self.snap, SPOTS, FIXDIR, self.now)
         self.assertEqual(sorted(self.snap['spots']['blacks']['sun']), ['2026-10-17', '2026-10-18'])
 
+    def test_silent_buoy(self):
+        # a buoy that stopped reporting more than 6 hours ago shows no "right now" reading
+        import ca, datetime
+        ca.fill(self.snap, SPOTS, FIXDIR, self.now + datetime.timedelta(hours=7))
+        b = self.snap['spots']['blacks']
+        self.assertEqual((b['buoyId'], b['buoy'], b['buoyAt']), (None, [], ''))
+
     def test_nothing_downloaded(self):
         import ca, tempfile
         ca.fill(self.snap, SPOTS, tempfile.mkdtemp(), self.now)

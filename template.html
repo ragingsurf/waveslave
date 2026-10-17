@@ -484,7 +484,7 @@ const MAPM = (() => {
   const lonLabel = lon => { const w = W180(lon); return Math.abs(w).toFixed(2) + "°" + (w < 0 ? "W" : "E"); }; // "118.50°W", "121.31°E"
   // Mercator y in degrees of longitude, ln(tan(45° + lat/2)), written as atanh(sin(lat)) so the equator is exactly 0; iy goes back.
   const my = lat => Math.atanh(Math.sin(lat*Math.PI/180))*180/Math.PI, iy = y => Math.atan(Math.sinh(y*Math.PI/180))*180/Math.PI;
-  // The one map's box, the whole Pacific (50°S–60°N, 100°E–110°W): the view never leaves it and nothing is drawn outside it.
+  // The one map's box, the whole Pacific (50°S–60°N, 100°E–110°W): the view never leaves it, and the map's own layers are drawn only inside it.
   const PBOX = {l: 100, r: 250, s: -50, n: 60}, WPB = {l: 100, r: 160, s: 0, n: 45};
   // Each country's old map (Taiwan and Japan shared the West Pacific one): a first open with no saved view still shows it.
   const OLDBOX = {tw: WPB, jp: WPB, ca: {l: 232, r: 244, s: 30, n: 42}, hi: {l: 198, r: 208, s: 15, n: 26}, au: {l: 110, r: 156, s: -44, n: -20}};
@@ -931,8 +931,8 @@ const WS = (() => {
     g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(LC.c, 0, 0); g.restore(); }
   function drawBase() { const g = base.getContext("2d"), t = times[ti], S = sample(t), cell = Math.max(6, Math.round(Math.sqrt(W*H/40000))), close = z >= z0*0.6;
     g.fillStyle = "#0e0824"; g.fillRect(0, 0, W, H);
-    // The map itself is drawn only inside the Pacific box: zoomed out on a phone held upright, plain dark sea above and below it.
-    // The spots (all inside it) and the pin's flag, which can hang over its edge, go on top unclipped.
+    // The map's own layers (colours, swell arrows, land, pressure lines, typhoon tracks) are drawn only inside the Pacific box: zoomed out on a phone held upright, plain dark sea above and below it.
+    // The overlays drawn after them (spot markers, tags, towns, the open spot's dial and the pin) are not clipped and may cross the box's edge: cut off there, they would look broken.
     const B = MAPM.PBOX, [bl, bt] = px(B.l, B.n), [br, bb] = px(B.r, B.s); g.save(); g.beginPath(); g.rect(bl, bt, br-bl, bb-bt); g.clip();
     heat(g, S, TLF != null ? Math.round(cell*1.6) : cell, TLF != null); // coarser colours while the time bar is dragged, full detail once it lets go
     if (layer === "swell") swellArrows(g, S);
@@ -1180,7 +1180,7 @@ const WS = (() => {
         if (PIN && PINX && Math.hypot(was[0]-PINX[0], was[1]-PINX[1]) < 16) { PIN = null; PINBTN = PINX = null; document.getElementById("wsSheet").hidden = true; drawBase(); if (!P.size) downAt = null; return; }
         if (PIN && PINBTN && Math.hypot(was[0]-PINBTN[0], was[1]-PINBTN[1]) < 20) { pinOpen(!PIN.open); if (!P.size) downAt = null; return; }
         const tag = TAGHIT.find(b => was[0] >= b[0] && was[0] <= b[0]+b[2] && was[1] >= b[1] && was[1] <= b[1]+b[3]); if (tag) { bd = 0; best = SP.find(s => s.id===tag[4]); }
-        // A tap on a spot opens it; anywhere else in the Pacific box drops a pin there (outside the box is plain dark sea, with nothing to ask about).
+        // A tap on a spot opens it; anywhere else in the Pacific box drops a pin there (outside the box there is no map, so nothing to ask about).
         for (const s of SP) { const [sx,sy] = px(s.lon, s.lat), dd = Math.hypot(sx-was[0], sy-was[1]); if (dd < bd) { bd = dd; best = s; } } if (best) { PIN = null; PINBTN = PINX = null; switchSpot(best.id); openSheet(best.id); }
         else { const [lon, lat] = ll(was[0], was[1]), B = MAPM.PBOX; if (lon >= B.l && lon <= B.r && lat >= B.s && lat <= B.n) dropPin(lon, lat); } }
       if (!P.size) downAt = null; };

@@ -21,5 +21,55 @@ class Spots(unittest.TestCase):
         self.assertEqual(sum(s.get('country') == 'jp' for s in SPOTS), 8)
 
 
+FIXDIR = os.path.join(HERE, 'fixtures', 'ca')
+FIX = lambda n: open(os.path.join(FIXDIR, n), encoding='utf-8').read()
+HDR = '#YY  MM DD hh mm WDIR WSPD GST  WVHT   DPD   APD MWD   PRES  ATMP  WTMP  DEWP  VIS PTDY  TIDE\n#yr  mo dy hr mn degT m/s  m/s     m   sec   sec degT   hPa  degC  degC  degC  nmi  hPa    ft\n'
+ROW = '2026 10 17 %s %s  MM   MM   MM   %s    13   %s 285     MM    MM  %s    MM   MM   MM    MM\n'
+
+
+class Readers(unittest.TestCase):
+    def test_ndbc_one_row_per_hour(self):
+        import ca
+        txt = HDR + ROW % ('12', '26', '0.4', '7.6', '22.5') + ROW % ('11', '56', '0.3', '7.0', '22.6') + ROW % ('11', '30', '0.5', '7.2', '22.4') + ROW % ('11', '00', '0.6', '7.1', '22.3')
+        r = ca.ndbc_rows(txt)
+        self.assertEqual([x[0] for x in r], ['2026-10-17T19:00', '2026-10-17T20:00'])
+        self.assertEqual(r[-1], ['2026-10-17T20:00', 0.3, 7.0, 285.0, 22.6])  # 11:56 is nearer 12:00 UTC than 12:26
+        self.assertEqual(r[0][1], 0.6)  # 11:00 beats 11:30 for the 11:00 UTC hour
+
+    def test_ndbc_drops_mm(self):
+        import ca
+        txt = HDR + ROW % ('12', '00', 'MM', '7.6', '22.5') + ROW % ('11', '00', '0.6', '7.1', 'MM')
+        self.assertEqual(ca.ndbc_rows(txt), [['2026-10-17T19:00', 0.6, 7.1, 285.0, None]])
+
+    def test_ndbc_fixture(self):
+        import ca
+        r = ca.ndbc_rows(FIX('ndbc-46254.txt'))
+        self.assertEqual(len({x[0] for x in r}), len(r))
+        self.assertLessEqual(len(r), 24)
+        self.assertEqual(r[-1][0], '2026-10-17T20:00')
+
+    def test_ndbc_wind_kt(self):
+        import ca
+        self.assertEqual(ca.ndbc_wind(FIX('ndbc-FTPC1.txt')), [['2026-10-17T21:00', 1.9, 150.0]])
+        self.assertEqual(ca.ndbc_wind(HDR), [])
+
+    def test_nws_wind(self):
+        import ca
+        self.assertEqual(ca.nws_wind(json.loads(FIX('nws-KSNA.json'))), [['2026-10-17T21:00', 3.0, 110]])
+        self.assertEqual(ca.nws_wind({'properties': {'timestamp': '2026-10-17T12:45:00+00:00', 'windSpeed': {'value': None}, 'windDirection': {'value': None}}}), [])
+
+    def test_tide_days(self):
+        import ca
+        t = ca.tide_days(json.loads(FIX('tide-9410230.json')))
+        self.assertIn(['13:15', 'H', 133], t['2026-10-17'])
+        self.assertEqual(sorted(t), sorted(set(t)))
+
+    def test_pacific_offset(self):
+        import ca, datetime
+        U = datetime.timezone.utc
+        self.assertEqual(ca.pacific_offset(datetime.datetime(2026, 10, 17, 12, tzinfo=U)), -7)
+        self.assertEqual(ca.pacific_offset(datetime.datetime(2026, 11, 2, 12, tzinfo=U)), -8)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -65,7 +65,7 @@ pipeline 21.665,-158.053 [51201] 7 ["nws:PHHI","nws:PHJR"] 1612668; waikiki 21.2
 
 - `caids` becomes `noaaids <country> <field>`; ndbc/nws fields read string-or-list `windStation`. NWS fetch uses `observations?limit=6`.
 - Hawaii block after California's: same fetches with `TZ=Pacific/Honolulu` tide start, `get openhi ...models=gfs_seamless`, `ca.py ... hi`.
-- Hawaii grid `cache/grid-hi.json`: lat 18..23, lon -161..-154 step 0.5 (11 × 15), `grid.py ... 18 0.5 11 -161 0.5 15`, every ~170 min; null fallback `GH`; render replaces `__GRIDHI__` (before `__GRID__`).
+- Hawaii grid `cache/grid-hi.json`: lat 15..26, lon -162..-152 step 1 (12 × 11), `grid.py ... 15 1 12 -162 1 11`, every ~170 min; null fallback `GH`; render replaces `__GRIDHI__` (before `__GRID__`).
 - history/log/correct with `hi` on `log-hi`; workflow caches, restores and saves `log-hi`; `.gitignore` `log-hi/`.
 
 - [ ] **Step 1:** `LogSplitHawaii` in test_logsplit: a snap with tw/jp/ca/hi spots logged with `hi` holds only the 8 Hawaii ids. Run → FAIL only if log.py needed a change (else passes as a guard; note it).

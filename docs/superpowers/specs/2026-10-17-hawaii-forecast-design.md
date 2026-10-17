@@ -49,7 +49,7 @@ The same readers as California, so no new source types:
 | Swell forecast, model check | Open-Meteo, as for every country |
 | Tides | NOAA CO-OPS high/low predictions |
 | Sun times | computed |
-| Map | a third small Open-Meteo grid around the islands (18-23 N, 161-154 W, 0.5 degree), fetched every ~3 h |
+| Map | a third small Open-Meteo grid around the islands (15-26 N, 162-152 W, 1 degree, wide enough to frame the whole chain on a phone), fetched every ~3 h |
 
 Hurricanes: the typhoon panel is West Pacific only, so for Hawaii it shows a link to the Central Pacific Hurricane
 Center instead of tracks.

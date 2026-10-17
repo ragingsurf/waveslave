@@ -69,5 +69,72 @@ class Sun(unittest.TestCase):
         self.assertLess(s['first'], s['rise']); self.assertLess(s['set'], s['last']); self.assertEqual(s['phen'], [])
 
 
+SPOTS = json.load(open(os.path.join(os.path.dirname(HERE), 'spots.json')))
+
+
+class JmaWave(unittest.TestCase):
+    def test_text(self):
+        self.assertEqual(jp.jma_wave_m('１．５メートル　後　２メートル'), 2.0)
+        self.assertEqual(jp.jma_wave_m('３メートル　うねりを伴う'), 3.0)
+        self.assertEqual(jp.jma_wave_m('０．５メートル'), 0.5)
+        self.assertIsNone(jp.jma_wave_m(''))
+
+    def test_rows_every_3h_taipei(self):
+        r = jp.jmawave_rows(json.loads(FIX('jmafc-080000.json')), '080020')
+        # first period starts 17:00 JST = 16:00 Taipei, so the first 3-hourly Taipei slot is 18:00
+        self.assertEqual(r[0], ['2026-10-17T18:00', 1.5, None, None])
+        self.assertIn(['2026-10-19T00:00', 2.0, None, None], r)   # third period: from 19th 00:00 JST (18th 23:00 Taipei), max of "1.5 後 2"
+        self.assertIn(['2026-10-18T21:00', 1.5, None, None], r)
+        self.assertTrue(all(int(x[0][11:13]) % 3 == 0 for x in r))
+
+    def test_rows_unknown_area(self):
+        self.assertEqual(jp.jmawave_rows(json.loads(FIX('jmafc-080000.json')), '999999'), [])
+
+
+class Wind(unittest.TestCase):
+    def test_rows(self):
+        r = jp.wind_rows(json.loads(FIX('openjma.json'))[0])
+        self.assertEqual(r[0], ['2026-10-17T00:00', 8.0, 300, None, None])
+        self.assertEqual(r[4], ['2026-10-17T12:00', 14.0, 300, 'Rain', None])
+        self.assertEqual(len(r), 8)
+
+
+class Fill(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.snap = json.loads(FIX('snap_in.json'))
+
+    def test_nothing_downloaded(self):
+        tw = copy.deepcopy(self.snap['spots']['donghe'])
+        jp.fill(self.snap, SPOTS, '/nonexistent', self.tmp)
+        self.assertEqual(self.snap['spots']['donghe'], tw)
+        h = self.snap['spots']['hasaki']
+        self.assertEqual((h['buoy'], h['dwind'], h['wind'], h['tides'], h['buoyId']), ([], [], [], {}, None))
+        self.assertTrue(h['hourly'])
+        self.assertEqual(sorted(h['sun']), ['2026-10-17', '2026-10-18', '2026-10-19'])
+
+    def test_fills_from_downloads_and_changes_src(self):
+        before = json.dumps(self.snap['src'], sort_keys=True)
+        jp.fill(self.snap, SPOTS, FIXDIR, self.tmp)
+        h = self.snap['spots']['hasaki']
+        self.assertNotEqual(json.dumps(self.snap['src'], sort_keys=True), before)
+        self.assertEqual((h['buoyId'], h['buoy'][-1][1], h['buoyAt']), ('222', 0.83, '2026-10-16T23:20'))
+        self.assertEqual(h['dwind'], [['2026-10-17T20:10', 0.0, None]])   # Choshi, calm in the fixture (21:10 JST)
+        self.assertEqual(h['wind'][0][1], 8.0)
+        self.assertEqual(h['jmawave'][0][1], 1.5)
+        self.assertEqual(self.snap['src']['spots']['hasaki'], '2026-10-16T23:20/2026-10-17T20:10')
+
+    def test_buoy_history_kept_between_runs(self):
+        jp.fill(self.snap, SPOTS, FIXDIR, self.tmp)
+        cache = json.load(open(os.path.join(self.tmp, 'jp-buoy.json')))
+        self.assertIn('222', cache)
+
+    def test_tides_from_cache(self):
+        with open(os.path.join(self.tmp, 'jp-tide-CS-2026.txt'), 'w') as f:
+            f.write(FIX('tide.txt').replace('TK', 'CS').replace('26 511', '261018').replace('26 510', '261017'))
+        jp.fill(self.snap, SPOTS, '/nonexistent', self.tmp)
+        self.assertIn(['10:47', 'H', 133], self.snap['spots']['hasaki']['tides']['2026-10-18'])
+
+
 if __name__ == '__main__':
     unittest.main()

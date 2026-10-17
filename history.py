@@ -2,7 +2,8 @@
 #   spots[id].hist.buoy    : buoy readings [time, height m, period s, from deg], from the forecast-vs-buoy log plus the latest feed
 #   spots[id].hist.station : wind station readings [time, kt, from deg], from the same log
 #   spots[id].tides        : gains the past days' highs and lows, kept in cache/tides.json (CWA only serves tides from today on)
-# Reads the log only; never writes to it. Usage: python3 -I history.py <snap.json> <logdir> <cachedir>
+# With a country code (tw, jp), only that country's spots are filled, from its own log; tides other than Taiwan's go to cache/tides-<country>.json.
+# Reads the log only; never writes to it. Usage: python3 -I history.py <snap.json> <logdir> <cachedir> [country]
 import sys, os, json, gzip, glob, datetime
 snap, logdir, cache = sys.argv[1], sys.argv[2], sys.argv[3]
 d = json.load(open(snap))
@@ -25,10 +26,12 @@ for f in sorted(glob.glob(os.path.join(logdir, '20*.jsonl.gz'))):
     except (OSError, EOFError): pass  # a cut-off gzip still gave its earlier lines
 
 os.makedirs(cache, exist_ok=True)
-tf = os.path.join(cache, 'tides.json')
+COUNTRY = sys.argv[4] if len(sys.argv) > 4 else None
+tf = os.path.join(cache, 'tides.json' if COUNTRY in (None, 'tw') else 'tides-%s.json' % COUNTRY)
 try: TH = json.load(open(tf))
 except (OSError, ValueError): TH = {}
 for k, sp in d['spots'].items():
+    if COUNTRY and sp.get('country', 'tw') != COUNTRY: continue
     B = buoy.get(k, {})
     for b in sp.get('buoy') or []: B[b[0][:16]] = b[:4]
     W = station.get(k, {})
@@ -42,4 +45,4 @@ for k, sp in d['spots'].items():
     sp['tides'] = dict(sorted({**{x: v for x, v in th.items() if x < TODAY.isoformat()}, **(sp.get('tides') or {})}.items()))
 json.dump(TH, open(tf + '.new', 'w'), separators=(',', ':')); os.replace(tf + '.new', tf)
 json.dump(d, open(snap, 'w'), ensure_ascii=False, separators=(',', ':'))
-print('history:', {k: (len(s['hist'].get('wave') or []), len(s['hist']['buoy']), len(s['hist']['station'])) for k, s in d['spots'].items()}, file=sys.stderr)
+print('history:', {k: (len(s['hist'].get('wave') or []), len(s['hist']['buoy']), len(s['hist']['station'])) for k, s in d['spots'].items() if not COUNTRY or s.get('country', 'tw') == COUNTRY}, file=sys.stderr)

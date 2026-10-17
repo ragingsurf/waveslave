@@ -1,6 +1,6 @@
 name: Refresh WaveSlave
 
-# Rebuild the forecast from CWA + Open-Meteo every half hour and publish it to GitHub Pages.
+# Rebuild the forecast from CWA, NOWPHAS, JMA + Open-Meteo every half hour and publish it to GitHub Pages.
 # GitHub often skips scheduled runs (only 2 ran overnight on Oct 13-14), so two slots an hour keeps the data fresher.
 on:
   schedule:
@@ -23,16 +23,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # The West Pacific map grid (refetched every ~3 h) and the forecast-vs-buoy log carry over between runs.
+      # The West Pacific map grid (refetched every ~3 h) and the forecast-vs-buoy logs (Taiwan log/, Japan log-jp/) carry over between runs.
       - uses: actions/cache/restore@v4
         with:
           path: |
             cache
             log
+            log-jp
           key: state-${{ github.run_id }}
           restore-keys: state-
       - name: Restore log days the cache lost
-        run: sh logstore.sh restore || echo "log restore failed" >&2
+        run: |
+          sh logstore.sh restore || echo "log restore failed" >&2
+          sh logstore.sh restore log-jp || echo "japan log restore failed" >&2
       - name: Build
         env:
           CWA_KEY: ${{ secrets.CWA_KEY }}
@@ -40,13 +43,16 @@ jobs:
         run: sh build-site.sh _site
       - name: Save finished log days for good
         if: always()
-        run: sh logstore.sh save || echo "log save failed" >&2
+        run: |
+          sh logstore.sh save || echo "log save failed" >&2
+          sh logstore.sh save log-jp || echo "japan log save failed" >&2
       - uses: actions/cache/save@v4
         if: always()
         with:
           path: |
             cache
             log
+            log-jp
           key: state-${{ github.run_id }}
       - uses: actions/upload-pages-artifact@v3
         with:

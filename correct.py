@@ -12,7 +12,8 @@
 #                    days: days of buoy data, acc: % of hours the next-day forecast (12-36 h ahead, as published)
 #                    was within 0.3 m of the buoy, miss: typical miss in m, n: hours scored}
 # Each run's factors go to log/<Taipei date>.adj.jsonl so the score uses what the site actually showed.
-# Usage: python3 -I correct.py <snap.json> <logdir>
+# With a country code (tw, jp), only that country's spots are corrected, from that country's own log folder.
+# Usage: python3 -I correct.py <snap.json> <logdir> [country]
 import sys, os, json, gzip, glob, datetime
 snap, logdir = sys.argv[1], sys.argv[2]
 d = json.load(open(snap))
@@ -53,7 +54,9 @@ def shown(run, k, p):
     return ((a.get('bands') or {}).get(k) or {}).get(band(p)) or (a.get('adj') or {}).get(k, 1)
 
 out, outb, outw = {}, {}, {}
+COUNTRY = sys.argv[3] if len(sys.argv) > 3 else None
 for k, sp in d['spots'].items():
+    if COUNTRY and sp.get('country', 'tw') != COUNTRY: continue
     O = obs.get(k, {}); W = stn.get(k, {}); so = sf = 0; hits = n = miss = 0
     B = {}  # band -> [buoy sum, forecast sum, set of days]
     wo, wf, wdays = 0, 0, set()
@@ -99,7 +102,8 @@ for k, sp in d['spots'].items():
                  'acc': round(100 * hits / n) if n else None, 'miss': round(miss / n, 2) if n else None, 'n': n}
     out[k], outb[k], outw[k] = f, bands, w
 
+os.makedirs(logdir, exist_ok=True)
 with open(os.path.join(logdir, now.strftime('%Y-%m-%d') + '.adj.jsonl'), 'a') as fh:
     fh.write(json.dumps({'run': d['updated'], 'adj': out, 'bands': outb, 'wind': outw}, separators=(',', ':')) + '\n')
 json.dump(d, open(snap, 'w'), ensure_ascii=False, separators=(',', ':'))
-print('corrections:', {k: (v['adj']['f'], v['adj']['bands'], v['adj']['wf'], v['adj']['days'], v['adj']['acc']) for k, v in d['spots'].items()}, file=sys.stderr)
+print('corrections:', {k: (v['adj']['f'], v['adj']['bands'], v['adj']['wf'], v['adj']['days'], v['adj']['acc']) for k, v in d['spots'].items() if k in out}, file=sys.stderr)

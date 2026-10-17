@@ -64,11 +64,14 @@ if [ -z "$(find "$G/grid.json" -mmin -170 2>/dev/null)" ]; then
 fi
 GJ="$G/grid.json"; [ -f "$GJ" ] || { echo null > "$W/gridnull.json"; GJ="$W/gridnull.json"; }
 # The last 5 days for the Forecast tab: buoy and wind station readings from the log, past tides kept in cache/; never blocks the build.
-python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log" "$G" || echo "history skipped" >&2
-# Forecast vs buoy log for later corrections; never blocks the build.
-python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log" || true
+python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log" "$G" tw || echo "history skipped" >&2
+python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log-jp" "$G" jp || echo "japan history skipped" >&2
+# Forecast vs buoy log for later corrections, one folder per country (Taiwan log/, Japan log-jp/); never blocks the build.
+python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log" tw || true
+python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-jp" jp || true
 # Tune each spot's wave heights to its buoy from that log and score the forecast (after log.py, so the log stays raw).
-python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log" || echo "corrections skipped" >&2
+python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log" tw || echo "corrections skipped" >&2
+python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-jp" jp || echo "japan corrections skipped" >&2
 # Wave of the week photo (wotw.jpg) is embedded inline.
 python3 -I -c "import sys,base64;t=open(sys.argv[1]).read();d=open(sys.argv[2]).read();img='data:image/jpeg;base64,'+base64.b64encode(open(sys.argv[4],'rb').read()).decode();open(sys.argv[3],'w').write(t.replace('__DATA__',d).replace('__WOTW__',img).replace('__GRID__',open(sys.argv[5]).read()))" "$HERE/template.html" "$W/snap.json" "$W/taitung-surf.html" "$HERE/wotw.jpg" "$GJ"
 echo "built $W/taitung-surf.html"

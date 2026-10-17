@@ -1,6 +1,7 @@
 // Browser checks and phone screenshots of a built page (build one with tests/map/tool.py).
 // Usage: node tests/map/check.js <page.html> <outdir> shots|checks [land]
 //   shots   the six home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
+//           On a page whose hook can zoom, also the whole Pacific in each layer (out-wind, out-waves, out-swell, out-rain) and a swell across 180° (dateline).
 //   checks  prints ok / FAIL / skip for each check, and exits 1 on any FAIL or page error. Needs the page's test hook, window.__ws.
 // Every page opens in its own fresh browser context, offline (only the page itself loads, no service worker): a phone 390x844 (844x390 with land),
 // dpr 2, touch, reduced motion (so no streaks, and moves jump), the intro done, English, and the map open full screen on load.
@@ -20,17 +21,26 @@ const HOMES = [["tw", "donghe", "waveslave-mapview", 120.9, 23.75], ["jp", "ichi
   ["hi", "pipeline", "waveslave-mapview-hi", -157.3, 20.6], ["au-e", "snapper", "waveslave-mapview-au-e", 152, -32.5], ["au-w", "margaret", "waveslave-mapview-au-w", 115.5, -32.5]];
 const OLD_CA = { key: "waveslave-mapview-ca", view: { cx: -119.5, cy: 35.3, k: 1 } }; // saved before the map ran east
 const home = name => { const [, spot, key, cx, cy] = HOMES.find(h => h[0] === name); return { spot, saved: { key, view: { cx, cy, k: 1 } } }; }; // open(home("tw"))
+// Shots that need the hook's zoom: name, layer, saved view (none: zoomed all the way out from Donghe's first open).
+const OUT = [...["wind", "waves", "swell", "rain"].map(l => ["out-" + l, l, null]), ["dateline", "swell", { key: "waveslave-mapview", view: { cx: 180, cy: 35, k: 0.3 } }]];
 // Whether the page carries the Pacific grid: a page built without one has `pac: null` filled in (tool.py writes null, refresh.sh null and a newline).
 const PAC = !/\bpac: null\s*\}/.test(fs.readFileSync(file, "utf8"));
 
 class Skip extends Error {}
 const skip = why => { throw new Skip(why); };
 const near = (a, b, tol = 1e-9) => Math.abs(a - b) < tol;
+// Two screen frames, so a move has been drawn; zoomOut zooms all the way out (the hook zooms about the centre) and waits for that.
+const settle = page => page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+const zoomOut = async page => { await page.evaluate(() => window.__ws.zoom(1e-6)); await settle(page); };
+// The view's west, east, south and north edges: ll of the screen's corners.
+const edges = page => page.evaluate(() => { const { ll, view } = window.__ws, { W, H } = view(), [l, n] = ll(0, 0), [r, s] = ll(W, H); return { l, r, s, n }; });
+// A click on the map at a point's px (pixels in #wsFx), the way a tap lands.
+const tapAt = async (page, [x, y]) => { const b = await page.locator("#wsFx").boundingBox(); await page.mouse.click(b.x + x, b.y + y); };
 
 const CHECKS = {
-  // A California view saved with a negative centre opens on the California coast (the home view fits inside the grid, so nothing moves it).
+  // A California view saved with a negative centre opens on the California coast (the home view fits inside the Pacific box, so nothing moves it).
   async savedViewConverted(open) {
-    if (land) skip("portrait only: sideways, the screen is wider than the California grid and the view centres on it");
+    if (land) skip("portrait only: sideways the view would reach past the Pacific box's east edge (110°W), so it opens west of 240.5");
     const page = await open({ spot: "trestles", saved: OLD_CA }), v = await page.evaluate(() => window.__ws.view());
     if (!near(v.cx, 240.5)) throw new Error(`view().cx is ${v.cx}, want 240.5`);
   },
@@ -45,10 +55,12 @@ const CHECKS = {
     const want = JSON.stringify(["hi", "ca", "au", "wp", ...(PAC ? ["pac"] : [])]);
     if (got !== want) throw new Error(`grids() is ${got}, want ${want}`);
   },
-  // The Taiwan home view sits inside the West Pacific grid, so its pressure lines come from that grid.
+  // The Taiwan home view sits inside the West Pacific grid, so its pressure lines come from that grid; zoomed out they come from the Pacific layer (none without it).
   async isoSource(open) {
     const page = await open(home("tw")), src = await page.evaluate(() => window.__ws.iso());
     if (src !== "wp") throw new Error(`iso() is ${src}, want wp`);
+    await zoomOut(page); const out = await page.evaluate(() => window.__ws.iso()), want = PAC ? "pac" : null;
+    if (out !== want) throw new Error(`zoomed out, iso() is ${out}, want ${want}`);
   },
   // Either side of 180° the Pacific layer has wind, and about the same wind: no seam at the dateline.
   async datelineSeam(open) {
@@ -56,6 +68,95 @@ const CHECKS = {
     const page = await open(home("tw")), [a, b] = await page.evaluate(() => [window.__ws.val(179.5, 30, "wind"), window.__ws.val(180.5, 30, "wind")]);
     if (!a || !b) throw new Error(`val(179.5, 30, "wind") is ${JSON.stringify(a)} and val(180.5, 30, "wind") is ${JSON.stringify(b)}`);
     if (!(Math.abs(a.u - b.u) < 10 && Math.abs(a.v - b.v) < 10)) throw new Error(`the wind jumps across 180°: ${JSON.stringify(a)}, then ${JSON.stringify(b)}`);
+  },
+  // Zoomed all the way out, px and ll are still inverses either side of 180° and out at California.
+  async roundTripDateline(open) {
+    const page = await open(home("tw")); await zoomOut(page);
+    const off = await page.evaluate(() => { const { px, ll } = window.__ws, out = [];
+      for (const lon of [175, 180, 185, 241.5]) for (const lat of [-40, 0, 21, 35]) { const [a, b] = ll(...px(lon, lat)); if (!(Math.abs(a - lon) < 1e-6 && Math.abs(b - lat) < 1e-6)) out.push(`ll(px(${lon}, ${lat})) is ${a}, ${b}`); }
+      return out; });
+    if (off.length) throw new Error(off.join("; "));
+  },
+  // Zooming out stops once the whole Pacific box (100°E–110°W, 50°S–60°N) fits on the screen.
+  async zoomOutFitsPacific(open) {
+    const page = await open(home("tw")); await zoomOut(page);
+    const v = await page.evaluate(() => window.__ws.view()), e = await edges(page);
+    if (v.z !== v.zmin) throw new Error(`z is ${v.z}, want zmin ${v.zmin}`);
+    if (!(e.l <= 100 + 1e-9 && e.r >= 250 - 1e-9 && e.s <= -50 + 1e-9 && e.n >= 60 - 1e-9)) throw new Error(`the view spans ${e.l}..${e.r} by ${e.s}..${e.n}, want at least 100..250 by -50..60`);
+  },
+  // With no saved view the map opens on the country's old map: inside Taiwan's West Pacific box and filling it one way; Australia at its home zoom or closer.
+  async firstOpenOldBox(open) {
+    let page = await open({ spot: "donghe" }); const e = await edges(page), b = await page.evaluate(() => MAPM.OLDBOX.tw), t = 0.05;
+    if (!(e.l >= b.l - 1e-9 && e.r <= b.r + 1e-9 && e.s >= b.s - 1e-9 && e.n <= b.n + 1e-9)) throw new Error(`Donghe opens on ${e.l}..${e.r} by ${e.s}..${e.n}, not inside the West Pacific box`);
+    if (!((near(e.l, b.l, t) && near(e.r, b.r, t)) || (near(e.s, b.s, t) && near(e.n, b.n, t)))) throw new Error(`Donghe opens on ${e.l}..${e.r} by ${e.s}..${e.n}, which meets the West Pacific box on neither axis`);
+    page = await open({ spot: "margaret" });
+    const a = await page.evaluate(() => { const v = window.__ws.view(); return { z: v.z, want: Math.max(MAPM.cover(MAPM.OLDBOX.au, v.W, v.H), v.z0) }; });
+    if (a.z !== a.want) throw new Error(`Margaret River opens at z ${a.z}, want ${a.want}`);
+  },
+  // Changing country moves the one map to the new country's home view, with no reload.
+  async noReloadCountry(open) {
+    const page = await open(home("tw"));
+    await page.evaluate(() => { window.__mark = 1; switchCountry("hi"); }); await page.waitForTimeout(500);
+    const v = await page.evaluate(() => ({ mark: window.__mark, ...(window.__ws ? window.__ws.view() : {}) }));
+    if (v.mark !== 1) throw new Error("the page reloaded (window.__mark is gone)");
+    if (v.MC !== "hi") throw new Error(`view().MC is ${v.MC}, want hi`);
+    if (!(Math.abs(v.cx - 202.7) < 0.01)) throw new Error(`view().cx is ${v.cx}, want 202.7 (Hawaii's home)`);
+  },
+  // With the map open, changing country keeps the view being left under its own key, as the reload between countries used to.
+  async countryKeepsView(open) {
+    const page = await open(home("tw")); await page.evaluate(() => window.__ws.zoom(0.5)); await settle(page);
+    const v = await page.evaluate(() => window.__ws.view()); await page.evaluate(() => switchCountry("hi")); await settle(page);
+    const kept = await page.evaluate(() => JSON.parse(localStorage.getItem("waveslave-mapview")));
+    if (!kept || !near(kept.cx, v.cx) || !near(kept.cy, v.cy) || !near(kept.k, v.z/v.z0)) throw new Error(`waveslave-mapview holds ${JSON.stringify(kept)}, want cx ${v.cx}, cy ${v.cy}, k ${v.z/v.z0}`);
+  },
+  // Zoomed out from Taiwan, tapping Pipeline switches the page to it and opens its table, with no reload.
+  async tapOtherCountrySpot(open) {
+    const page = await open(home("tw")); await zoomOut(page);
+    await tapAt(page, await page.evaluate(() => { window.__mark = 1; const s = ALL.spots.pipeline; return window.__ws.px(MAPM.E(s.lon), s.lat); })); await page.waitForTimeout(500);
+    const r = await page.evaluate(() => ({ mark: window.__mark, cur: CUR, shut: document.getElementById("wsSheet").hidden }));
+    if (r.mark !== 1) throw new Error("the page reloaded (window.__mark is gone)");
+    if (r.cur !== "pipeline") throw new Error(`CUR is ${r.cur}, want pipeline`);
+    if (r.shut) throw new Error("#wsSheet is hidden: Pipeline's table did not open");
+  },
+  // From the Taiwan home view the home button goes out to the whole Pacific, and a second tap comes back (straight there, with reduced motion).
+  async homeButton(open) {
+    const page = await open(home("tw"));
+    await page.click("#wsHome"); const a = await page.evaluate(() => window.__ws.view());
+    if (a.z !== a.zmin || !near(a.cx, 175, 1e-6)) throw new Error(`after one tap z is ${a.z} and cx ${a.cx}, want zmin ${a.zmin} and 175`);
+    await page.click("#wsHome"); const b = await page.evaluate(() => window.__ws.view());
+    if (b.z !== b.z0 || !near(b.cx, 120.9, 1e-6)) throw new Error(`after two taps z is ${b.z} and cx ${b.cx}, want z0 ${b.z0} and 120.9`);
+  },
+  // A pin dropped east of 180° asks Open-Meteo for a longitude in -180..180: 200°E goes out as -160.
+  async pinRequestWraps(open) {
+    const page = await open(home("tw")); await zoomOut(page);
+    let got; const asked = new Promise(r => { got = r; }), wait = setTimeout(() => got(null), 3000);
+    await page.route("**/api.open-meteo.com/**", r => { got(r.request().url()); return r.abort(); });
+    await tapAt(page, await page.evaluate(() => window.__ws.px(200, 40))); const url = await asked; clearTimeout(wait);
+    if (!url) throw new Error("no request reached api.open-meteo.com");
+    const q = new URL(url).searchParams.get("longitude"), lon = +q;
+    if (!(lon >= -180 && lon <= 180 && Math.abs(lon + 160) < 0.5)) throw new Error(`the pin asked for longitude=${q}, want about -160`);
+  },
+  // Zoomed out, the box clips the map but not the pin: a tap on the dark sea outside the box drops no pin, and a pin
+  // near the box's edge shows its flag over that edge (upright over the north edge, sideways over the east edge).
+  async pinAndBoxEdge(open) {
+    const page = await open(home("tw")); await zoomOut(page);
+    let asked = null; await page.route("**/api.open-meteo.com/**", r => { asked = r.request().url(); return r.abort(); });
+    // Upright the box leaves dark sea above and below it, sideways to its west and east; the pins are well clear of the spots.
+    const { out, pin } = await page.evaluate(() => { const { px, view } = window.__ws, { W, H } = view(), [l, t] = px(100, 60);
+      return t > 8 ? { out: [W/2, t/2], pin: [245, 55] } : l > 8 ? { out: [l/2, H/2], pin: [248, 5] } : {}; });
+    if (!out) skip("the Pacific box fills the screen");
+    await tapAt(page, out); await page.waitForTimeout(800);
+    if (asked) throw new Error(`a tap outside the box dropped a pin (it asked ${asked})`);
+    // Pixels of the map picture outside the box that aren't the plain dark sea (#0e0824).
+    const lit = () => page.evaluate(() => { const c = document.getElementById("wsBase"), k = c.width / window.__ws.view().W, { px } = window.__ws, [l, t] = px(100, 60), [r, b] = px(250, -50);
+      const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; let n = 0;
+      for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++) { if (x >= l*k - 2 && x <= r*k + 2 && y >= t*k - 2 && y <= b*k + 2) continue;
+        const o = (y*c.width + x)*4; if (Math.abs(d[o] - 14) + Math.abs(d[o+1] - 8) + Math.abs(d[o+2] - 36) > 24) n++; }
+      return n; });
+    const before = await lit();
+    await tapAt(page, await page.evaluate(([lon, lat]) => window.__ws.px(lon, lat), pin)); await settle(page);
+    const after = await lit();
+    if (!(after > before)) throw new Error(`the pin's flag is cut off at the box's edge (${after} lit pixels outside the box, ${before} before the pin)`);
   },
 };
 
@@ -72,9 +173,14 @@ const CHECKS = {
     const page = await ctx.newPage(); page.on("pageerror", e => errs.push(String(e)));
     await page.goto(PAGE + "#" + spot, { waitUntil: "load" });
     await page.waitForFunction(() => (document.getElementById("wsTime") || {}).textContent); // the map has drawn once
-    await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))); // and its next-frame resize
+    await settle(page); // and its next-frame resize
     if (hook && !await page.evaluate(() => !!window.__ws)) throw new Error("the page has no test hook (window.__ws): build it from this branch's template");
     return page;
+  }
+  // A picture of #wsBox as <outdir>/<name>.png; it returns the time bar's hour, to see two runs sat on the same one.
+  async function shot(page, name) {
+    await page.locator("#wsBox").screenshot({ path: path.join(outdir, name + ".png"), animations: "disabled" });
+    return await page.evaluate(() => document.getElementById("wsTime").textContent);
   }
   // Runs one check or shot and prints `ok <name>`, `skip <name> (why)` or `FAIL <name>: why`; a page error during it fails it.
   async function step(name, run) {
@@ -86,11 +192,16 @@ const CHECKS = {
     await Promise.all(ctxs.map(c => c.close())); ctxs = [];
   }
   try {
-    if (mode === "shots") for (const [name, spot, key, cx, cy] of HOMES) await step(name, async () => {
-      const page = await open({ spot, saved: { key, view: { cx, cy, k: 1 } }, hook: false });
-      await page.locator("#wsBox").screenshot({ path: path.join(outdir, name + ".png"), animations: "disabled" });
-      return await page.evaluate(() => document.getElementById("wsTime").textContent); // the time bar's hour, to see two runs sat on the same one
-    });
+    if (mode === "shots") {
+      for (const [name, spot, key, cx, cy] of HOMES) await step(name, async () => shot(await open({ spot, saved: { key, view: { cx, cy, k: 1 } }, hook: false }), name));
+      for (const [name, layer, saved] of OUT) await step(name, async () => {
+        const page = await open({ spot: "donghe", saved, hook: false });
+        if (!await page.evaluate(() => !!(window.__ws && window.__ws.zoom))) skip("the page's hook can't zoom");
+        if (!saved) await zoomOut(page);
+        await page.click(`#wsLayers button[data-o="${layer}"]`); await settle(page);
+        return await shot(page, name);
+      });
+    }
     else for (const [name, run] of Object.entries(CHECKS)) await step(name, () => run(open));
   } finally { await browser.close(); }
   process.exitCode = bad ? 1 : 0;

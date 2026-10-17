@@ -148,3 +148,36 @@ test("mkGrid null", () => {
   const M = load();
   assert.equal(M.mkGrid("pac", null), null);
 });
+
+test("my and iy", () => {
+  const M = load();
+  for (const lat of [-60, -50, -32.5, 0, 23.75, 45, 60]) near(M.iy(M.my(lat)), lat);
+  assert.equal(M.my(0), 0);
+  near(M.my(60), 75.4561, 1e-3);
+  near(M.my(-60), -M.my(60));
+});
+
+test("contain and cover", () => {
+  const M = load();
+  assert.deepEqual(M.PBOX, {l: 100, r: 250, s: -50, n: 60});
+  const wp = {l: 100, r: 160, s: 0, n: 45};
+  assert.deepEqual(M.OLDBOX, {tw: wp, jp: wp, ca: {l: 232, r: 244, s: 30, n: 42}, hi: {l: 198, r: 208, s: 15, n: 26}, au: {l: 110, r: 156, s: -44, n: -20}});
+  near(M.contain(M.PBOX, 390, 844), 2.6);
+  near(M.contain(M.PBOX, 844, 390), 390/(M.my(60) - M.my(-50)));
+  near(M.contain(M.PBOX, 844, 390), 2.924, 1e-3);
+  near(M.cover(M.OLDBOX.ca, 390, 844), 844/(M.my(42) - M.my(30)));
+  near(M.cover(M.PBOX, 390, 844), 844/(M.my(60) - M.my(-50)));
+});
+
+test("clampTo", () => {
+  const M = load(), Y = M.iy((M.my(60) + M.my(-50))/2);
+  // Zoomed all the way out the box is no bigger than the screen either way, so the view centres on it.
+  const [cx, cy] = M.clampTo(M.PBOX, 390, 844, M.contain(M.PBOX, 390, 844), 120, 23.75);
+  near(cx, 175); near(cy, Y);
+  // Zoomed in it keeps the view inside the box, the y axis in Mercator y: half the screen is 422/20 of it.
+  const [ex, ey] = M.clampTo(M.PBOX, 390, 844, 20, 95, 0);
+  near(ex, 100 + 390/2/20); near(ey, 0);
+  const [nx, ny] = M.clampTo(M.PBOX, 390, 844, 20, 251, 59);
+  near(nx, 250 - 390/2/20); near(ny, M.iy(M.my(60) - 844/2/20));
+  assert.deepEqual(M.clampTo(M.PBOX, 390, 844, 20, 175, 23.75), [175, 23.75]);
+});

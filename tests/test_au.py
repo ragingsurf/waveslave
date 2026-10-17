@@ -78,6 +78,19 @@ class Readers(unittest.TestCase):
         flat = au.tide_days(['2026-10-17T00:00', '2026-10-17T01:00', '2026-10-17T02:00', '2026-10-17T03:00'], [0.1, 0.5, 0.5, 0.1], 10)
         self.assertEqual(sum(len(v) for v in flat.values()), 1)
 
+    def test_tide_pause_mid_slope_is_not_a_turn(self):
+        # two equal hours on a rising tide (Perth's slow small tides) are not a high; the real high at 05:00 UTC is
+        import au
+        times = ['2026-10-17T%02d:00' % h for h in range(8)]
+        d = au.tide_days(times, [.1, .2, .3, .3, .4, .5, .4, .3], 8)
+        self.assertEqual(d, {'2026-10-17': [['13:00', 'H', 50]]})
+
+    def test_tide_flat_top_sits_mid_run(self):
+        import au
+        times = ['2026-10-17T%02d:00' % h for h in range(5)]
+        d = au.tide_days(times, [.1, .5, .5, .5, .1], 8)
+        self.assertEqual(d, {'2026-10-17': [['10:00', 'H', 50]]})
+
 
 class Fill(unittest.TestCase):
     def setUp(self):

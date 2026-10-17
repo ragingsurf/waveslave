@@ -75,22 +75,28 @@ def bom_wind(js, now=None):
 
 
 def tide_days(times, levels, tz):
-    """Hourly UTC sea level (m) -> {local date: [[HH:MM, 'H'|'L', cm]]}. Each turning point is refined with a parabola
-    through its hour and the two around it; on a flat top only the first hour counts."""
-    out = {}
-    for i in range(1, len(levels) - 1):
-        y0, y1, y2 = levels[i - 1], levels[i], levels[i + 1]
-        if None in (y0, y1, y2): continue
-        d1, d2 = y1 - y0, y2 - y1
-        kind = 'H' if d1 > 0 and d2 <= 0 else 'L' if d1 < 0 and d2 >= 0 else None
-        if not kind: continue
-        den = y0 - 2 * y1 + y2
-        dx = (y0 - y2) / (2 * den) if den else 0
-        dx = max(-0.5, min(0.5, dx))
-        y = y1 - (y0 - y2) * dx / 4
-        t = datetime.datetime.fromisoformat(times[i]) + datetime.timedelta(hours=dx + tz)
-        t = (t + datetime.timedelta(seconds=30)).replace(second=0, microsecond=0)
-        out.setdefault(t.date().isoformat(), []).append([t.strftime('%H:%M'), kind, round(y * 100)])
+    """Hourly UTC sea level (m) -> {local date: [[HH:MM, 'H'|'L', cm]]}. A run of equal hours counts as one point, a
+    turn only when the level rises into it and falls out of it (or the reverse), placed at the middle of the run; a
+    single-hour turn is refined with a parabola through its hour and the two around it."""
+    out, n, i = {}, len(levels), 1
+    while i < n - 1:
+        y1 = levels[i]
+        j = i
+        while j + 1 < n and levels[j + 1] == y1: j += 1
+        y0, y2 = levels[i - 1], levels[j + 1] if j + 1 < n else None
+        nxt = j + 1
+        if None in (y0, y1, y2): i = nxt; continue
+        kind = 'H' if y0 < y1 > y2 else 'L' if y0 > y1 < y2 else None
+        if kind:
+            if j > i: x, y = (i + j) / 2, y1
+            else:
+                den = y0 - 2 * y1 + y2
+                dx = max(-0.5, min(0.5, (y0 - y2) / (2 * den) if den else 0))
+                x, y = i + dx, y1 - (y0 - y2) * dx / 4
+            t = datetime.datetime.fromisoformat(times[i]) + datetime.timedelta(hours=x - i + tz)
+            t = (t + datetime.timedelta(seconds=30)).replace(second=0, microsecond=0)
+            out.setdefault(t.date().isoformat(), []).append([t.strftime('%H:%M'), kind, round(y * 100)])
+        i = nxt
     return {d: sorted(v) for d, v in sorted(out.items())}
 
 

@@ -41,6 +41,16 @@ class Readers(unittest.TestCase):
         self.assertEqual(ca.nws_wind(json.loads(FIX('nws-PHJR.json'))), [['2026-10-17T20:00', 5.1, 70]])
         self.assertEqual(ca.nws_wind(json.loads(FIX('nws-PHHI.json'))), [])
 
+    def test_stale_wind_dropped(self):
+        # a wind reading over 3 hours old is not "wind now"
+        import ca, datetime
+        U = datetime.timezone.utc
+        js = json.loads(FIX('nws-PHJR.json'))
+        self.assertEqual(ca.nws_wind(js, now=datetime.datetime(2026, 10, 17, 14, 30, tzinfo=U)), [['2026-10-17T20:00', 5.1, 70]])
+        self.assertEqual(ca.nws_wind(js, now=datetime.datetime(2026, 10, 17, 15, 30, tzinfo=U)), [])
+        self.assertEqual(ca.ndbc_wind(FIX('ndbc-ILOH1.txt'), now=datetime.datetime(2026, 10, 18, tzinfo=U)), [])
+        self.assertTrue(ca.ndbc_wind(FIX('ndbc-ILOH1.txt'), now=datetime.datetime(2026, 10, 17, 13, 30, tzinfo=U)))
+
     def test_stale_buoy_rows_dropped(self):
         import ca, datetime
         now = datetime.datetime(2026, 10, 17, 13, 30, tzinfo=datetime.timezone.utc)
@@ -87,7 +97,9 @@ class Fill(unittest.TestCase):
         ca.fill(self.snap, SPOTS, FIXDIR, self.now, 'hi')
         h = self.snap['spots']['hanalei']
         self.assertEqual((h['buoyId'], h['buoy'], h['buoyAt']), (None, [], ''))
+        self.assertTrue(h['buoyQuiet'])   # the page says the Hanalei buoy has no reading right now, not that there is no buoy
         self.assertTrue(h['tides'])
+        self.assertFalse(self.snap['spots']['pipeline'].get('buoyQuiet'))
 
     def test_runs_isolated_like_refresh(self):
         import subprocess, tempfile, shutil

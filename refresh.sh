@@ -58,7 +58,7 @@ fi
 # wind, NOAA tide predictions, NOAA HRRR/GFS wind via Open-Meteo; ca.py writes them under the same keys as CWA's.
 # noaaids <country> <field>: a spot's windStation may be one "ndbc:ID"/"nws:ID" or a list tried in order.
 noaaids(){ python3 -I -c "import json,sys;S=[s for s in json.load(open(sys.argv[1])) if s.get('country')==sys.argv[2]];f=sys.argv[3]
-W=[w for s in S for w in (s['windStation'] if isinstance(s['windStation'],list) else [s['windStation']])]
+W=[w for s in S for w in (lambda v: v if isinstance(v,list) else [v] if v else [])(s.get('windStation'))]
 if f=='ndbc': v=[b for s in S for b in s['ndbc']]+[w[5:] for w in W if w.startswith('ndbc:')]
 elif f=='nws': v=[w[4:] for w in W if w.startswith('nws:')]
 else: v=[str(s[f]) for s in S]
@@ -88,8 +88,8 @@ fi
 # California 1° apart (30–42°N, 128–116°W); Hawaii 1° apart (15–26°N, 162–152°W), wide enough to frame the whole chain on a phone.
 regrid(){ C=$1; shift
   [ -n "$(noaaids $C lat)" ] && [ -z "$(find "$G/grid-$C.json" -mmin -170 2>/dev/null)" ] || return 0
-  LA=$(python3 -I -c "import sys;a0,da,na,o0,do,no=map(float,sys.argv[1:]);print(','.join(str(round(a0+i*da,2)) for i in range(int(na)) for j in range(int(no))))" "$@")
-  LO=$(python3 -I -c "import sys;a0,da,na,o0,do,no=map(float,sys.argv[1:]);print(','.join(str(round(o0+j*do,2)) for i in range(int(na)) for j in range(int(no))))" "$@")
+  LA=$(python3 -I -c "import sys;a0,da,na,o0,do,no=map(float,sys.argv[1:]);print(','.join(str(round(a0+i*da,2)) for i in range(int(na)) for j in range(int(no))))" "$@") || return 0
+  LO=$(python3 -I -c "import sys;a0,da,na,o0,do,no=map(float,sys.argv[1:]);print(','.join(str(round(o0+j*do,2)) for i in range(int(na)) for j in range(int(no))))" "$@") || return 0
   { curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwind-$C.json" "https://api.open-meteo.com/v1/forecast?latitude=$LA&longitude=$LO&hourly=wind_speed_10m,wind_direction_10m,pressure_msl,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
     curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwave-$C.json" "https://marine-api.open-meteo.com/v1/marine?latitude=$LA&longitude=$LO&hourly=wave_height,wave_direction,swell_wave_height,swell_wave_direction,swell_wave_period&models=meteofrance_wave&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
     python3 -I "$HERE/grid.py" "$G/gwind-$C.json" "$G/gwave-$C.json" "$G/grid-$C.new" "$@" && mv "$G/grid-$C.new" "$G/grid-$C.json"; } || echo "$C grid fetch failed, keeping last grid" >&2; }

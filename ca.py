@@ -6,7 +6,7 @@
 #   tides  : NOAA CO-OPS highs and lows {local date: [[local HH:MM, 'H'|'L', cm]]}
 #   sun    : computed {local date: {first, rise, set, last, phen}} in local time
 #   tz     : the offset in force at build time (California -7 or -8, Hawaii always -10); the page draws every time with it
-# A buoy silent for more than STALE_HOURS shows no reading. A spot's windStation (and its stationName) may be a list tried in order.
+# A buoy silent for more than STALE_HOURS shows no reading (buoyQuiet), and a wind reading over WIND_STALE_HOURS old is skipped. A spot's windStation (and its stationName) may be a list tried in order.
 # Data times are Taipei wall clock ("YYYY-MM-DDTHH:MM", UTC+8) like the rest of snap.json, readings on the nearest hour.
 # Tides and sun are the spot's own clock by its own date, as for Taiwan and Japan.
 # Usage: python3 -I ca.py <dl dir> <snap.json> <spots.json> [ca|hi]   (each source is optional: a missing one only blanks its own fields)
@@ -17,7 +17,7 @@ import jp
 
 UTC, LA = datetime.timezone.utc, ZoneInfo('America/Los_Angeles')
 ZONES = {'ca': LA, 'hi': ZoneInfo('Pacific/Honolulu')}
-STALE_HOURS = 6
+STALE_HOURS, WIND_STALE_HOURS = 6, 3
 
 
 def utc_to_tpe(dt):
@@ -66,24 +66,31 @@ def ndbc_rows(txt, keep_hours=24, now=None):
     return jp.merge_buoy([], rows, keep_hours)
 
 
-def ndbc_wind(txt):
-    """NDBC shore station text -> [[time, kt, from deg|None]] from the newest row with a wind speed, or []."""
+def _old(t, now):
+    return now is not None and now - t > datetime.timedelta(hours=WIND_STALE_HOURS)
+
+
+def ndbc_wind(txt, now=None):
+    """NDBC shore station text -> [[time, kt, from deg|None]] from the newest row with a wind speed, or [] (also when that
+    row is too old to count as wind now)."""
     for t, d in _ndbc(txt):
         w = _f(d.get('WSPD'))
         if w is None: continue
+        if _old(t, now): return []
         return [[jp.on_hour(utc_to_tpe(t)), round(w * 1.944, 1), _f(d.get('WDIR'))]]
     return []
 
 
-def nws_wind(js):
+def nws_wind(js, now=None):
     """NWS observations (a list of recent reports, or the latest one) -> [[time, kt, from deg|None]] from the newest report
-    with a wind speed, or [] when none has one."""
+    with a wind speed, or [] when none has one recent enough."""
     js = js or {}
     reports = [f.get('properties') or {} for f in js['features']] if 'features' in js else [js.get('properties') or {}]
     for p in sorted(reports, key=lambda p: p.get('timestamp') or '', reverse=True):
         w = (p.get('windSpeed') or {}).get('value')
         if w is None or not p.get('timestamp'): continue
         t = datetime.datetime.fromisoformat(p['timestamp'])
+        if _old(t, now): return []
         return [[jp.on_hour(utc_to_tpe(t)), round(w / 1.852, 1), (p.get('windDirection') or {}).get('value')]]
     return []
 
@@ -118,11 +125,12 @@ def fill(snap, spots, dl, now, country='ca'):
             rows = part('buoy ' + b, lambda: ndbc_rows(txt('ndbc-%s.txt' % b), now=now)) or []
             if rows: bid, buoy = b, rows; break
         sp['buoyId'], sp['buoy'], sp['buoyAt'] = bid, buoy, buoy[-1][0] if buoy else ''
+        sp['buoyQuiet'] = bool(S.get('ndbc')) and not buoy   # the spot has a buoy, it just isn't reporting
         ws = S.get('windStation') or []; ws = ws if isinstance(ws, list) else [ws]; dw, used = [], 0
         for i, w in enumerate(ws):
             kind, sid = w.split(':', 1)
-            if kind == 'ndbc': dw = part('wind ' + sid, lambda: ndbc_wind(txt('ndbc-%s.txt' % sid)))
-            else: dw = part('wind ' + sid, lambda: nws_wind(jp._load(os.path.join(dl, 'nws-%s.json' % sid))))
+            if kind == 'ndbc': dw = part('wind ' + sid, lambda: ndbc_wind(txt('ndbc-%s.txt' % sid), now))
+            else: dw = part('wind ' + sid, lambda: nws_wind(jp._load(os.path.join(dl, 'nws-%s.json' % sid)), now))
             if dw: used = i; break
         sp['dwind'] = dw or []
         # the wind label names the station that answered (the first one when none did)

@@ -1284,7 +1284,11 @@ const updated = Date.parse(DATA.updated);
   const dw = DATA.dwind[DATA.dwind.length-1];
   const w = dw ? {kt:dw[1], from:dw[2]} : null;
   if(!b){ document.getElementById("nowH1").innerHTML = "–";
-    document.getElementById("nowSub").textContent = isZh() ? "附近沒有浪況浮標，請看下方預報。" : isJa() ? "近くに波浪ブイがありません。下の予報をご覧ください。" : "No nearby wave buoy. See the forecast below.";
+    // buoyQuiet: the spot has a buoy that isn't reporting right now (NOAA spots), as opposed to no buoy at all.
+    const qb = SPT(DATA,"buoyName");
+    document.getElementById("nowSub").textContent = DATA.buoyQuiet
+      ? (isZh() ? `${qb}浮標目前沒有資料，請看下方預報。` : isJa() ? `${qb}ブイは現在データがありません。下の予報をご覧ください。` : `No reading from the ${qb} buoy right now. See the forecast below.`)
+      : isZh() ? "附近沒有浪況浮標，請看下方預報。" : isJa() ? "近くに波浪ブイがありません。下の予報をご覧ください。" : "No nearby wave buoy. See the forecast below.";
     document.getElementById("nowRating").innerHTML = ""; }
   else {
   document.getElementById("nowH1").innerHTML = r1(b[1])+"<small>m</small>";

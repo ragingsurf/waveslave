@@ -45,7 +45,8 @@ class Readers(unittest.TestCase):
         self.assertEqual(len({x[0] for x in r}), len(r))
         self.assertLessEqual(len(r), 24)
         self.assertIn(['2026-10-17T20:00', 1.64, 4.9, 68.0, None], r)
-        self.assertEqual(r[-1], ['2026-10-17T21:00', 1.55, None, None, None])  # 12:30 UTC, nearest 13:00, height only
+        # 12:30 UTC, nearest 13:00, height only: period and direction carry over from the full reading half an hour before
+        self.assertEqual(r[-1], ['2026-10-17T21:00', 1.55, 4.9, 68.0, None])
 
     def test_aodn_stale(self):
         import au

@@ -35,10 +35,11 @@ def offset(zone, at):
 def aodn_rows(txt, keep_hours=24, now=None):
     """AODN real-time wave CSV -> [[time, height m, mean period s, from deg, None]], one per hour.
     Height is WSSH (IMOS buoys) or WHTH (NSW and Queensland), mean period WPFM or WPMH, direction SSWMD or WPDI.
-    A 0 period means the row carries height only (Queensland's half-hour rows); its direction is dropped with it.
+    A 0 period means the row carries height only (Queensland's half-hour rows); it takes the period and direction of a
+    full reading up to an hour before, else neither.
     Of the readings near an hour, a full one beats a nearer height-only one. With now, a buoy silent for more than
     ca.STALE_HOURS gives []."""
-    best, newest = {}, None
+    read = []
     for d in csv.DictReader(io.StringIO(txt or '')):
         try: t = datetime.datetime.fromisoformat(d['TIME']).replace(tzinfo=UTC)
         except (KeyError, ValueError): continue
@@ -46,12 +47,17 @@ def aodn_rows(txt, keep_hours=24, now=None):
         if not h: continue
         p = _f(d.get('WPFM')) or _f(d.get('WPMH')) or None
         r = _f(d.get('SSWMD')) if _f(d.get('SSWMD')) is not None else _f(d.get('WPDI'))
-        if not p: r = None
-        newest = max(newest or t, t)
+        read.append((t, h, p, r if p else None))
+    best, newest, full = {}, None, None
+    for t, h, p, r in sorted(read, key=lambda x: x[0]):
+        newest = t
+        full = (t, p, r) if p else full
+        # a height-only reading borrows period and direction from a full one up to an hour before it
+        q, s = (p, r) if p else (full[1], full[2]) if full and t - full[0] <= datetime.timedelta(hours=1) else (None, None)
         hr = (t + datetime.timedelta(minutes=30)).replace(minute=0, second=0)
         score = abs((t - hr).total_seconds()) + (0 if p else 3600)
         if hr not in best or score < best[hr][0]:
-            best[hr] = (score, [ca.utc_to_tpe(hr), h, p, r, None])
+            best[hr] = (score, [ca.utc_to_tpe(hr), h, q, s, None])
     if now and newest and now - newest > datetime.timedelta(hours=ca.STALE_HOURS): return []
     return jp.merge_buoy([], [best[k][1] for k in sorted(best)], keep_hours)
 

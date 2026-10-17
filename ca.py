@@ -11,6 +11,7 @@
 # Usage: python3 -I ca.py <dl dir> <snap.json> <spots.json>   (each source is optional: a missing one only blanks its own fields)
 import sys, os, json, datetime
 from zoneinfo import ZoneInfo
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # python3 -I leaves this folder off the path; jp.py lives here
 import jp
 
 UTC, LA = datetime.timezone.utc, ZoneInfo('America/Los_Angeles')
@@ -80,3 +81,43 @@ def tide_days(js):
     for e in (js or {}).get('predictions') or []:
         out.setdefault(e['t'][:10], []).append([e['t'][11:16], e['type'], round(float(e['v']) * 100)])
     return {d: sorted(v) for d, v in sorted(out.items())}
+
+
+def fill(snap, spots, dl, now):
+    """Fill every California spot of snap (in place) from the downloads in dl; now (aware datetime) sets the Pacific offset."""
+    C = [S for S in spots if S.get('country') == 'ca' and S['id'] in snap['spots']]
+    tz = pacific_offset(now)
+    def part(name, f):
+        try: return f()
+        except Exception as e: print('ca:', name, 'skipped:', e, file=sys.stderr)
+    txt = lambda n: jp._load(os.path.join(dl, n), 'txt')
+    om = jp._load(os.path.join(dl, 'openca.json')); om = om if isinstance(om, list) else [om] if om else []
+    for n, S in enumerate(C):
+        sp = snap['spots'][S['id']]
+        sp['tz'] = tz
+        bid, buoy = None, []
+        for b in S.get('ndbc') or []:
+            rows = part('buoy ' + b, lambda: ndbc_rows(txt('ndbc-%s.txt' % b))) or []
+            if rows: bid, buoy = b, rows; break
+        sp['buoyId'], sp['buoy'], sp['buoyAt'] = bid, buoy, buoy[-1][0] if buoy else ''
+        kind, sid = (S.get('windStation') or ':').split(':', 1)
+        if kind == 'ndbc': dw = part('wind ' + sid, lambda: ndbc_wind(txt('ndbc-%s.txt' % sid)))
+        else: dw = part('wind ' + sid, lambda: nws_wind(jp._load(os.path.join(dl, 'nws-%s.json' % sid))))
+        sp['dwind'] = dw or []
+        sp['wind'] = (part('forecast ' + S['id'], lambda: jp.wind_rows(om[n])) or []) if n < len(om) and om[n] else []
+        sp['tides'] = part('tides ' + S['id'], lambda: tide_days(jp._load(os.path.join(dl, 'tide-%s.json' % S['tideStation'])))) or {}
+        local = lambda t: (datetime.datetime.fromisoformat(t) + datetime.timedelta(hours=tz - 8)).date().isoformat()
+        days = sorted({local(r[0]) for r in sp.get('hourly') or []})
+        sp['sun'] = {d: jp.sun_times(S['lat'], S['lon'], d, tz) for d in days}
+        snap['src']['spots'][S['id']] = sp['buoyAt'] + '/' + (sp['dwind'][-1][0] if sp['dwind'] else '')
+
+
+if __name__ == '__main__':
+    dl, snapf, spotsf = sys.argv[1:4]
+    d = json.load(open(snapf)); S = json.load(open(spotsf))
+    fill(d, S, dl, datetime.datetime.now(UTC))
+    json.dump(d, open(snapf, 'w'), ensure_ascii=False, separators=(',', ':'))
+    for s in S:
+        if s.get('country') == 'ca' and s['id'] in d['spots']:
+            v = d['spots'][s['id']]
+            print('ca:', s['id'], v['buoyId'], len(v['buoy']), len(v['dwind']), len(v['wind']), len(v['tides']))

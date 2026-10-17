@@ -22,7 +22,8 @@ class Spots(unittest.TestCase):
 
 
 FIXDIR = os.path.join(HERE, 'fixtures', 'ca')
-FIX = lambda n: open(os.path.join(FIXDIR, n), encoding='utf-8').read()
+def FIX(n):
+    with open(os.path.join(FIXDIR, n), encoding='utf-8') as f: return f.read()
 HDR = '#YY  MM DD hh mm WDIR WSPD GST  WVHT   DPD   APD MWD   PRES  ATMP  WTMP  DEWP  VIS PTDY  TIDE\n#yr  mo dy hr mn degT m/s  m/s     m   sec   sec degT   hPa  degC  degC  degC  nmi  hPa    ft\n'
 ROW = '2026 10 17 %s %s  MM   MM   MM   %s    13   %s 285     MM    MM  %s    MM   MM   MM    MM\n'
 
@@ -69,6 +70,57 @@ class Readers(unittest.TestCase):
         U = datetime.timezone.utc
         self.assertEqual(ca.pacific_offset(datetime.datetime(2026, 10, 17, 12, tzinfo=U)), -7)
         self.assertEqual(ca.pacific_offset(datetime.datetime(2026, 11, 2, 12, tzinfo=U)), -8)
+
+
+class Fill(unittest.TestCase):
+    NOW = None
+
+    def setUp(self):
+        import datetime, copy
+        self.now = datetime.datetime(2026, 10, 17, 12, tzinfo=datetime.timezone.utc)
+        with open(os.path.join(FIXDIR, 'snap_in.json')) as f: self.snap = json.load(f)
+        self.before = copy.deepcopy(self.snap)
+
+    def test_fill_from_downloads(self):
+        import ca
+        ca.fill(self.snap, SPOTS, FIXDIR, self.now)
+        b = self.snap['spots']['blacks']
+        self.assertEqual((b['buoyId'], b['tz']), ('46254', -7))
+        self.assertEqual(b['buoy'][-1][0], '2026-10-17T20:00')
+        self.assertEqual(b['buoyAt'], '2026-10-17T20:00')
+        self.assertEqual(b['dwind'], [['2026-10-17T21:00', 1.9, 40.0]])
+        self.assertEqual(b['wind'][0][:3], ['2026-10-18T00:00', 8.0, 300])
+        self.assertIn(['13:15', 'H', 133], b['tides']['2026-10-17'])
+        self.assertEqual(self.snap['src']['spots']['blacks'], '2026-10-17T20:00/2026-10-17T21:00')
+
+    def test_rincon_no_buoy(self):
+        import ca
+        ca.fill(self.snap, SPOTS, FIXDIR, self.now)
+        r = self.snap['spots']['rincon']
+        self.assertEqual((r['buoyId'], r['buoy'], r['buoyAt']), (None, [], ''))
+        self.assertEqual(r['wind'][0][1], 5.0)
+        self.assertTrue(r['tides'] and r['dwind'])
+
+    def test_sun_uses_local_date(self):
+        import ca
+        ca.fill(self.snap, SPOTS, FIXDIR, self.now)
+        self.assertEqual(sorted(self.snap['spots']['blacks']['sun']), ['2026-10-17', '2026-10-18'])
+
+    def test_nothing_downloaded(self):
+        import ca, tempfile
+        ca.fill(self.snap, SPOTS, tempfile.mkdtemp(), self.now)
+        b = self.snap['spots']['blacks']
+        self.assertEqual((b['buoy'], b['dwind'], b['tides'], b['wind']), ([], [], {}, []))
+        for k in ('donghe', 'hasaki'): self.assertEqual(self.snap['spots'][k], self.before['spots'][k])
+
+
+    def test_runs_isolated_like_refresh(self):
+        # refresh.sh runs python3 -I, which leaves the script's folder off sys.path; ca.py must still find jp.py
+        import subprocess, tempfile, shutil
+        tmp = tempfile.mkdtemp(); f = os.path.join(tmp, 'snap.json'); shutil.copy(os.path.join(FIXDIR, 'snap_in.json'), f)
+        r = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'ca.py'), FIXDIR, f, os.path.join(ROOT, 'spots.json')], capture_output=True, text=True, cwd=tmp)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('ca: blacks 46254', r.stdout)
 
 
 if __name__ == '__main__':

@@ -1,7 +1,7 @@
 # Japan sources for the Japan spots, written into snap.json under the same keys snap.py writes for Taiwan from CWA:
-#   buoy   : NOWPHAS wave gauges and offshore GPS buoys [time, height m, period s, from deg, None], last 24 h (kept in cache/jp-buoy.json,
+#   buoy   : NOWPHAS wave gauges and offshore GPS buoys [time, height m, period s, from deg, None], last 24 h, each on its nearest hour (kept in cache/jp-buoy.json,
 #            since the NOWPHAS map feed only carries the latest 20-minute reading)
-#   dwind  : JMA AMeDAS wind station [time, kt, from deg]
+#   dwind  : JMA AMeDAS wind station [time on the nearest hour, kt, from deg]
 #   wind   : JMA MSM wind forecast via Open-Meteo, 3-hourly [time, kt, from deg, 'Rain'|None, None] (the shape of CWA's forecast)
 #   tides  : JMA tide table highs and lows {JST date: [[JST HH:MM, 'H'|'L', cm]]} (the yearly file is kept in cache/)
 #   sun    : computed {JST date: {first, rise, set, last, phen}} in JST
@@ -25,6 +25,12 @@ def jst_to_tpe(s):
     return fmt(dt if dt.tzinfo else dt.replace(tzinfo=JST))
 
 
+def on_hour(t):
+    """Taipei 'YYYY-MM-DDTHH:MM' -> the nearest whole hour: the page and correct.py match readings to hourly forecast keys."""
+    dt = datetime.datetime.fromisoformat(t) + datetime.timedelta(minutes=30)
+    return dt.strftime('%Y-%m-%dT%H:00')
+
+
 def num(v):
     try: x = float(v)
     except (TypeError, ValueError): return None
@@ -34,7 +40,7 @@ def num(v):
 def nowphas_rows(xml):
     """NOWPHAS real-time map XML -> {station code: [time, height m, period s, from deg, None]}; stations without a reading are left out."""
     root = ET.fromstring(xml.lstrip('﻿').encode('utf-8'))
-    t = jst_to_tpe(root.get('time20min'))
+    t = on_hour(jst_to_tpe(root.get('time20min')))
     out = {}
     for m in root.iter('mapdata'):
         h, p = num(m.findtext('yugiha')), num(m.findtext('shiyuki'))
@@ -45,7 +51,7 @@ def nowphas_rows(xml):
 
 def amedas_wind(js, time_jst):
     """AMeDAS map JSON -> {station id: [time, kt, from deg]}. Direction is in 16ths (16 = N); 0 with no wind is calm."""
-    t, out = jst_to_tpe(time_jst), {}
+    t, out = on_hour(jst_to_tpe(time_jst)), {}
     for sid, v in js.items():
         w, d = v.get('wind'), v.get('windDirection')
         if not w or w[0] is None or w[1] != 0: continue

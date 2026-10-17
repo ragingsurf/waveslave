@@ -16,7 +16,12 @@ class Nowphas(unittest.TestCase):
     def test_nowphas_drops_missing(self):
         r = jp.nowphas_rows(FIX('nowphas.xml'))
         self.assertEqual(sorted(r), ['222', '609'])
-        self.assertEqual(r['609'], ['2026-10-16T23:20', 1.35, 5.7, 112.5, None])  # ESE
+        self.assertEqual(r['609'], ['2026-10-16T23:00', 1.35, 5.7, 112.5, None])  # ESE, 23:20 kept on its nearest hour
+
+    def test_readings_land_on_the_hour(self):
+        # the page and correct.py match hourly keys, so a :20 or :40 reading goes on the nearest hour
+        self.assertEqual(jp.nowphas_rows(FIX('nowphas.xml').replace('202610170020', '202610170040'))['609'][0], '2026-10-17T00:00')
+        self.assertEqual(jp.amedas_wind({'1': {'wind': [3, 0]}}, '2026-10-17T21:10:00+09:00')['1'][0], '2026-10-17T20:00')
 
 
 class Amedas(unittest.TestCase):
@@ -24,7 +29,7 @@ class Amedas(unittest.TestCase):
         self.w = jp.amedas_wind(json.loads(FIX('amedas.json')), '2026-10-17T20:50:00+09:00')
 
     def test_kt_and_direction(self):
-        self.assertEqual(self.w['11001'], ['2026-10-17T19:50', round(14.1 * 1.944, 1), 13 * 22.5])
+        self.assertEqual(self.w['11001'], ['2026-10-17T20:00', round(14.1 * 1.944, 1), 13 * 22.5])
 
     def test_calm(self):
         self.assertEqual(self.w['45148'][1:], [0.0, None])
@@ -117,11 +122,11 @@ class Fill(unittest.TestCase):
         jp.fill(self.snap, SPOTS, FIXDIR, self.tmp)
         h = self.snap['spots']['hasaki']
         self.assertNotEqual(json.dumps(self.snap['src'], sort_keys=True), before)
-        self.assertEqual((h['buoyId'], h['buoy'][-1][1], h['buoyAt']), ('222', 0.83, '2026-10-16T23:20'))
-        self.assertEqual(h['dwind'], [['2026-10-17T20:10', 0.0, None]])   # Choshi, calm in the fixture (21:10 JST)
+        self.assertEqual((h['buoyId'], h['buoy'][-1][1], h['buoyAt']), ('222', 0.83, '2026-10-16T23:00'))
+        self.assertEqual(h['dwind'], [['2026-10-17T20:00', 0.0, None]])   # Choshi, calm in the fixture (21:10 JST, nearest hour)
         self.assertEqual(h['wind'][0][1], 8.0)
         self.assertEqual(h['jmawave'][0][1], 1.5)
-        self.assertEqual(self.snap['src']['spots']['hasaki'], '2026-10-16T23:20/2026-10-17T20:10')
+        self.assertEqual(self.snap['src']['spots']['hasaki'], '2026-10-16T23:00/2026-10-17T20:00')
 
     def test_buoy_history_kept_between_runs(self):
         jp.fill(self.snap, SPOTS, FIXDIR, self.tmp)

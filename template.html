@@ -899,7 +899,7 @@ const WS = (() => {
     const td = (c, inner, st="") => `<td class="${night(c)?"n":""}${far(c.t)?" far":""}${Math.abs(c.t-times[ti])<90*6e4?" cur":""}" data-t="${c.t}" style="${st}">${inner}</td>`;
     const row = (label, unit, f) => `<tr><th>${T(label)}${unit?`<small>${unit}</small>`:""}</th>${cols.map(f).join("")}</tr>`;
     // Tide curve across the whole table (cosine between highs and lows).
-    const ev = Object.entries(s.tides).flatMap(([d,e]) => e.map(x => ({t: pt(d+"T"+x[0]), cm: x[2], hl: x[1]}))).sort((a,b) => a.t-b.t);
+    const ev = Object.entries(s.tides).flatMap(([d,e]) => e.map(x => ({t: pt(d+"T"+x[0]) + 8*36e5 - (s.tz||8)*36e5, cm: x[2], hl: x[1]}))).sort((a,b) => a.t-b.t);
     const tideAt = t => { for (let i = 1; i < ev.length; i++) if (ev[i].t >= t && ev[i-1].t <= t) { const a = ev[i-1], b = ev[i], f = (t-a.t)/(b.t-a.t); return a.cm + (b.cm-a.cm)*(1-Math.cos(Math.PI*f))/2; } return null; };
     const CW = 46, TW = cols.length*CW, t0 = cols[0].t - 1.5*36e5, xs = t => (t-t0)/(3*36e5)*CW, cms = ev.map(e => e.cm), lo = Math.min(...cms), hi = Math.max(...cms), ys = cm => 42 - (cm-lo)/(hi-lo||1)*26;
     let tp = ""; for (let x = 0; x <= TW; x += 3) { const v = tideAt(t0 + x/CW*3*36e5); if (v != null) tp += `${tp?"L":"M"}${x},${ys(v).toFixed(1)}`; }
@@ -1216,7 +1216,9 @@ const bObs = new Map();
 const sw2 = new Map((HIST.swell2||[]).concat(DATA.swell2||[]).filter(r=>r[1]!=null).map(r => [tp(r[0]), {h:r[1], p:r[2]!=null?r[2]*BUOY_P:null, dir:r[3]}]));
 hours.forEach(x => { x.s2 = sw2.get(x.t) || null; });
 // Tides (like sun times) are in the spot's own clock, so they parse with TZ, not Taipei time.
-const tideEv = Object.entries(DATA.tides).flatMap(([d,evs]) => evs.map(e => ({t:tp(d+"T"+e[0])+8*3600e3-TZ, type:e[1], cm:e[2]}))).sort((a,b)=>a.t-b.t);
+// The spot's own clock (JST in Japan): day keys, tides and sun are local strings, unlike the Taipei-clock data rows.
+const lp = s => tp(s)+8*3600e3-TZ;
+const tideEv = Object.entries(DATA.tides).flatMap(([d,evs]) => evs.map(e => ({t:lp(d+"T"+e[0]), type:e[1], cm:e[2]}))).sort((a,b)=>a.t-b.t);
 // Mid tide: at least 1 h from any high or low. Hours past the tide table count as mid tide.
 // Big (spring) tides run from about 2 days before to 4 days after a new or full moon; the mid-tide rule only applies then.
 
@@ -1413,7 +1415,7 @@ function drawDay(){
   const box = document.querySelector(".chart-box"); lastBoxW = box.clientWidth;
   W = Math.round(Math.max(300, Math.min(720, lastBoxW || 720))); CW = W-P.l-P.r;
   document.getElementById("chart").setAttribute("viewBox", `0 0 ${W} 300`);
-  const d = dayInfo[sel], t0 = tp(d.key+"T00:00"), t1 = t0+24*3600e3;
+  const d = dayInfo[sel], t0 = lp(d.key+"T00:00"), t1 = t0+24*3600e3;
   const x = t => P.l + (t-t0)/(t1-t0)*CW;
   const hMax = Math.max(2, Math.ceil(Math.max(...dayInfo.map(q=>Math.max(q.maxH,q.obsMax)))*2)/2);
   const yw = h => Y.wBot - h/hMax*(Y.wBot-Y.wTop);
@@ -1421,10 +1423,10 @@ function drawDay(){
   const sun = DATA.sun[d.key];
   let s = "";
   // night shading
-  if(sun){ const a=tp(d.key+"T"+sun.first), b=tp(d.key+"T"+sun.last);
+  if(sun){ const a=lp(d.key+"T"+sun.first), b=lp(d.key+"T"+sun.last);
     s += `<rect x="${P.l}" y="${Y.wTop-8}" width="${x(a)-P.l}" height="${Y.tBot-Y.wTop+8}" fill="var(--night)"/>`;
     s += `<rect x="${x(b)}" y="${Y.wTop-8}" width="${P.l+CW-x(b)}" height="${Y.tBot-Y.wTop+8}" fill="var(--night)"/>`;
-    s += `<text x="${x(tp(d.key+"T"+sun.rise))}" y="${Y.wTop-1}" text-anchor="middle">☀ ${sun.rise}</text><text x="${x(tp(d.key+"T"+sun.set))}" y="${Y.wTop-1}" text-anchor="middle">${sun.set}</text>`; }
+    s += `<text x="${x(lp(d.key+"T"+sun.rise))}" y="${Y.wTop-1}" text-anchor="middle">☀ ${sun.rise}</text><text x="${x(lp(d.key+"T"+sun.set))}" y="${Y.wTop-1}" text-anchor="middle">${sun.set}</text>`; }
   // wave grid
   for(let h=0; h<=hMax; h+=hMax>3?1:0.5){ s += `<line x1="${P.l}" x2="${P.l+CW}" y1="${yw(h)}" y2="${yw(h)}" stroke="var(--line)" stroke-width="1"/><text x="${P.l-5}" y="${yw(h)+3}" text-anchor="end">${h}m</text>`; }
   const hs = hours.filter(q=>q.t>=t0 && q.t<=t1);

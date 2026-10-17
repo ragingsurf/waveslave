@@ -78,7 +78,16 @@ if [ -z "$(find "$G/grid.json" -mmin -170 2>/dev/null)" ]; then
     curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwave.json" "https://marine-api.open-meteo.com/v1/marine?latitude=$GLA&longitude=$GLO&hourly=wave_height,wave_direction,swell_wave_height,swell_wave_direction,swell_wave_period&models=meteofrance_wave&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
     python3 -I "$HERE/grid.py" "$G/gwind.json" "$G/gwave.json" "$G/grid.new" 0 3 16 100 3 21 && mv "$G/grid.new" "$G/grid.json"; } || echo "grid fetch failed, keeping last grid" >&2
 fi
+# California coast wind + wave grid (1° apart, 30–42°N, 128–116°W), the same way; only when there are California spots.
+if [ -n "$(caids lat)" ] && [ -z "$(find "$G/grid-ca.json" -mmin -170 2>/dev/null)" ]; then
+  CLA=$(python3 -I -c "print(','.join(str(a) for a in range(30,43) for o in range(-128,-115)))")
+  CLO=$(python3 -I -c "print(','.join(str(o) for a in range(30,43) for o in range(-128,-115)))")
+  { curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwind-ca.json" "https://api.open-meteo.com/v1/forecast?latitude=$CLA&longitude=$CLO&hourly=wind_speed_10m,wind_direction_10m,pressure_msl,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
+    curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwave-ca.json" "https://marine-api.open-meteo.com/v1/marine?latitude=$CLA&longitude=$CLO&hourly=wave_height,wave_direction,swell_wave_height,swell_wave_direction,swell_wave_period&models=meteofrance_wave&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
+    python3 -I "$HERE/grid.py" "$G/gwind-ca.json" "$G/gwave-ca.json" "$G/grid-ca.new" 30 1 13 -128 1 13 && mv "$G/grid-ca.new" "$G/grid-ca.json"; } || echo "california grid fetch failed, keeping last grid" >&2
+fi
 GJ="$G/grid.json"; [ -f "$GJ" ] || { echo null > "$W/gridnull.json"; GJ="$W/gridnull.json"; }
+GC="$G/grid-ca.json"; [ -f "$GC" ] || { echo null > "$W/gridnull.json"; GC="$W/gridnull.json"; }
 # The last 5 days for the Forecast tab: buoy and wind station readings from the log, past tides kept in cache/; never blocks the build.
 python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log" "$G" tw || echo "history skipped" >&2
 python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log-jp" "$G" jp || echo "japan history skipped" >&2
@@ -92,5 +101,5 @@ python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log" tw || echo "corrections
 python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-jp" jp || echo "japan corrections skipped" >&2
 python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-ca" ca || echo "california corrections skipped" >&2
 # Wave of the week photo (wotw.jpg) is embedded inline.
-python3 -I -c "import sys,base64;t=open(sys.argv[1]).read();d=open(sys.argv[2]).read();img='data:image/jpeg;base64,'+base64.b64encode(open(sys.argv[4],'rb').read()).decode();open(sys.argv[3],'w').write(t.replace('__DATA__',d).replace('__WOTW__',img).replace('__GRID__',open(sys.argv[5]).read()))" "$HERE/template.html" "$W/snap.json" "$W/taitung-surf.html" "$HERE/wotw.jpg" "$GJ"
+python3 -I -c "import sys,base64;t=open(sys.argv[1]).read();d=open(sys.argv[2]).read();img='data:image/jpeg;base64,'+base64.b64encode(open(sys.argv[4],'rb').read()).decode();open(sys.argv[3],'w').write(t.replace('__DATA__',d).replace('__WOTW__',img).replace('__GRIDCA__',open(sys.argv[6]).read()).replace('__GRID__',open(sys.argv[5]).read()))" "$HERE/template.html" "$W/snap.json" "$W/taitung-surf.html" "$HERE/wotw.jpg" "$GJ" "$GC"
 echo "built $W/taitung-surf.html"

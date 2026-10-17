@@ -22,7 +22,7 @@
 - Existing grids' `grid.py` output stays byte-identical. Their requests, spacing and refresh are unchanged.
 - Open-Meteo requests carry longitudes in −180..180. Inside the map every longitude runs east from 0 to 360 (California 241.5).
 - Mercator projection; `z` is pixels per degree of longitude. Each country's home view keeps today's framing.
-- Zoom-out stops when the whole Pacific box fits the screen. Nothing is drawn outside the box.
+- Zoom-out stops when the whole Pacific box fits the screen. The map's own layers (colours, swell arrows, land, pressure lines, typhoon tracks) are drawn only inside the box; the spot markers, tags, towns, the open spot's dial and the pin may cross its edge.
 - Saved-view keys unchanged: `waveslave-mapview` (Taiwan, Japan), `-ca`, `-hi`, `-au-w`, `-au-e`.
 - A finer grid fades into the next coarser one within two of its own steps of its edge.
 - Pressure lines come from the finest grid whose box contains the view (½° slack), else the Pacific grid.

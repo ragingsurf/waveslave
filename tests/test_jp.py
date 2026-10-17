@@ -46,13 +46,12 @@ class MergeBuoy(unittest.TestCase):
 
 
 class Tides(unittest.TestCase):
+    # Tides and sun stay in the spot's own clock (JST), keyed by its own date, like CWA's for Taiwan: the page shows them as local times.
     def setUp(self):
         self.t = jp.tide_table(FIX('tide.txt'), 'TK')
 
-    def test_highs_lows_shift_to_taipei(self):
-        # a 00:42 JST high on 11 May lands on 10 May at 23:42 Taipei
-        self.assertIn(['23:42', 'H', 151], self.t['2026-05-10'])
-        self.assertEqual(self.t['2026-05-11'], [['06:02', 'L', 107], ['10:47', 'H', 133], ['17:33', 'L', 70]])
+    def test_highs_lows_in_japan_time(self):
+        self.assertEqual(self.t['2026-05-11'], [['00:42', 'H', 151], ['07:02', 'L', 107], ['11:47', 'H', 133], ['18:33', 'L', 70]])
 
     def test_skips_9999(self):
         self.assertTrue(all(cm < 999 for v in self.t.values() for _, _, cm in v))
@@ -62,10 +61,10 @@ class Tides(unittest.TestCase):
 
 
 class Sun(unittest.TestCase):
-    def test_tokyo_midsummer(self):
+    def test_tokyo_midsummer_in_japan_time(self):
         s = jp.sun_times(35.68, 139.77, '2026-06-21')
-        self.assertTrue('03:23' <= s['rise'] <= '03:27', s)   # 04:25 JST by NAOJ
-        self.assertTrue('17:59' <= s['set'] <= '18:03', s)    # 19:01 JST
+        self.assertTrue('04:23' <= s['rise'] <= '04:27', s)   # 04:25 JST by NAOJ
+        self.assertTrue('18:59' <= s['set'] <= '19:03', s)    # 19:01 JST
         self.assertLess(s['first'], s['rise']); self.assertLess(s['set'], s['last']); self.assertEqual(s['phen'], [])
 
 
@@ -133,7 +132,7 @@ class Fill(unittest.TestCase):
         with open(os.path.join(self.tmp, 'jp-tide-CS-2026.txt'), 'w') as f:
             f.write(FIX('tide.txt').replace('TK', 'CS').replace('26 511', '261018').replace('26 510', '261017'))
         jp.fill(self.snap, SPOTS, '/nonexistent', self.tmp)
-        self.assertIn(['10:47', 'H', 133], self.snap['spots']['hasaki']['tides']['2026-10-18'])
+        self.assertIn(['11:47', 'H', 133], self.snap['spots']['hasaki']['tides']['2026-10-18'])
 
 
 if __name__ == '__main__':

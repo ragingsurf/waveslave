@@ -3,10 +3,11 @@
 #            since the NOWPHAS map feed only carries the latest 20-minute reading)
 #   dwind  : JMA AMeDAS wind station [time, kt, from deg]
 #   wind   : JMA MSM wind forecast via Open-Meteo, 3-hourly [time, kt, from deg, 'Rain'|None, None] (the shape of CWA's forecast)
-#   tides  : JMA tide table highs and lows {date: [[HH:MM, 'H'|'L', cm]]} (the yearly file is kept in cache/)
-#   sun    : computed {date: {first, rise, set, last, phen}}
+#   tides  : JMA tide table highs and lows {JST date: [[JST HH:MM, 'H'|'L', cm]]} (the yearly file is kept in cache/)
+#   sun    : computed {JST date: {first, rise, set, last, phen}} in JST
 #   jmawave: JMA forecasters' wave height for the spot's area, 3-hourly [time, m, None, None] (the Japan twin of cwawave)
 # Every time is Taipei wall clock ("YYYY-MM-DDTHH:MM", UTC+8) like the rest of snap.json; JST sources are shifted back an hour.
+# Tides and sun are the exception: like CWA's for Taiwan they are the spot's own clock (JST) by its own date, as the page shows them.
 # Usage: python3 -I jp.py <dl dir> <snap.json> <spots.json> <cache dir>   (each source is optional: a missing one only blanks its own fields)
 import sys, os, json, re, datetime
 import xml.etree.ElementTree as ET
@@ -63,7 +64,7 @@ def merge_buoy(old, new, keep_hours=24):
 
 
 def tide_table(txt, point):
-    """JMA yearly tide table text -> {Taipei date: [[HH:MM, 'H'|'L', cm], ...]} for one tide point.
+    """JMA yearly tide table text -> {date: [[HH:MM, 'H'|'L', cm], ...]} in JST for one tide point.
     Each line: 24 hourly heights (3 chars each), date YYMMDD (space padded) at 72, point code at 78, then four highs and four lows
     of HHMM + 3-char cm each from 80 (9999 = none)."""
     out = {}
@@ -73,13 +74,12 @@ def tide_table(txt, point):
         for k in range(8):
             f = l[80 + 7 * k:87 + 7 * k]
             if f[:4] == '9999' or not f[:4].strip(): continue
-            dt = datetime.datetime(day.year, day.month, day.day, int(f[:2]), int(f[2:4]), tzinfo=JST).astimezone(TPE)
-            out.setdefault(dt.strftime('%Y-%m-%d'), []).append([dt.strftime('%H:%M'), 'H' if k < 4 else 'L', int(f[4:7])])
+            out.setdefault(day.isoformat(), []).append(['%02d:%02d' % (int(f[:2]), int(f[2:4])), 'H' if k < 4 else 'L', int(f[4:7])])
     return {d: sorted(v) for d, v in sorted(out.items())}
 
 
-def sun_times(lat, lon, date):
-    """Sunrise, sunset and civil twilight (-6 deg) for a Taipei calendar date, NOAA solar equations, Taipei wall clock 'HH:MM'."""
+def sun_times(lat, lon, date, tz=9):
+    """Sunrise, sunset and civil twilight (-6 deg) for a local calendar date, NOAA solar equations, local wall clock 'HH:MM' (UTC+tz)."""
     import math
     d = datetime.date.fromisoformat(date)
     g = 2 * math.pi / 365 * (d.timetuple().tm_yday - 1)
@@ -89,7 +89,7 @@ def sun_times(lat, lon, date):
     noon = 720 - 4 * lon - eqt  # minutes after UTC midnight
     def at(alt, sign):
         c = (math.sin(math.radians(alt)) - math.sin(math.radians(lat)) * math.sin(dec)) / (math.cos(math.radians(lat)) * math.cos(dec))
-        m = noon + sign * 4 * math.degrees(math.acos(max(-1, min(1, c)))) + 8 * 60
+        m = noon + sign * 4 * math.degrees(math.acos(max(-1, min(1, c)))) + tz * 60
         return '%02d:%02d' % divmod(round(m) % 1440, 60)
     return {'first': at(-6, -1), 'rise': at(-0.833, -1), 'set': at(-0.833, 1), 'last': at(-6, 1), 'phen': []}
 
@@ -167,7 +167,7 @@ def fill(snap, spots, dl, cache):
                 if t: out.update(tide_table(t, S['tidePoint']))
             return {d: v for d, v in out.items() if d in days}
         sp['tides'] = part('tides ' + S['id'], tides) or {}
-        sp['sun'] = {d: sun_times(S['lat'], S['lon'], d) for d in days}
+        sp['sun'] = {d: sun_times(S['lat'], S['lon'], d, S.get('tz', 9)) for d in days}
         office, area = (S.get('jmaArea') or [None, None])
         fc = _load(os.path.join(dl, 'jmafc-%s.json' % office)) if office else None
         sp['jmawave'] = (part('jmawave ' + S['id'], lambda: jmawave_rows(fc, area)) or []) if fc else []

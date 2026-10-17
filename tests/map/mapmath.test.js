@@ -144,6 +144,19 @@ test("isoPick", () => {
   assert.equal(M.isoPick([grid("wp", null), grid("pac", null)], 119, 123, 21.75, 25.75), null);
 });
 
+test("cut", () => {
+  const M = load();
+  assert.deepEqual(M.CUTX, [100, 163, 180, 232, 246, 250]);
+  assert.deepEqual(M.CUTY, [-50, -5, 30, 43, 50, 60]);
+  assert.equal(M.cut(163, 10, 163, 12), true);
+  assert.equal(M.cut(163, 10, 163.01, 12), false);
+  assert.equal(M.cut(120, -5, 121, -5), true);
+  assert.equal(M.cut(120, 31, 121, 31), false);
+  // Within 1e-6; and a segment running from one cut line to another lies on neither.
+  assert.equal(M.cut(246 + 5e-7, 31, 246, 35), true);
+  assert.equal(M.cut(163, 30, 170, 43), false);
+});
+
 test("mkGrid null", () => {
   const M = load();
   assert.equal(M.mkGrid("pac", null), null);

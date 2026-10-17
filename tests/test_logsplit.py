@@ -79,5 +79,23 @@ class LogSplitCalifornia(unittest.TestCase):
         self.assertEqual(sorted(records(self.tmp + '/log')[-1]['spots']), ['donghe'])
 
 
+class LogSplitHawaii(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.snap = os.path.join(self.tmp, 'snap.json'); shutil.copy(os.path.join(HERE, 'fixtures', 'hi', 'snap_in.json'), self.snap)
+        d = json.load(open(self.snap))
+        d['spots']['pipeline']['buoy'] = [['2026-10-17T21:00', 2.2, 7.8, 351, 26.6]]
+        d['src']['spots']['pipeline'] = '2026-10-17T21:00/'
+        with open(self.snap, 'w') as f: json.dump(d, f)
+
+    def test_log_hi_only(self):
+        run(['log.py', self.snap, self.tmp + '/log-hi', 'hi'])
+        self.assertEqual(sorted(records(self.tmp + '/log-hi')[-1]['spots']), ['hanalei', 'pipeline'])
+
+    def test_ca_log_holds_no_hawaii(self):
+        run(['log.py', self.snap, self.tmp + '/log-ca', 'ca'])
+        self.assertEqual(sorted(records(self.tmp + '/log-ca')[-1]['spots']), ['blacks'])
+
+
 if __name__ == '__main__':
     unittest.main()

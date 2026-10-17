@@ -2,3 +2,4 @@ cwa_key.txt
 _site/
 cache/
 log/
+__pycache__/

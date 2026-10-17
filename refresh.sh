@@ -8,9 +8,10 @@ K=${CWA_KEY:-$(tr -d ' \n\r' < "$HERE/cwa_key.txt")}
 [ -n "$K" ] || { echo "no CWA key" >&2; exit 1; }
 A="https://opendata.cwa.gov.tw/api/v1/rest/datastore"
 TODAY=$(TZ=Asia/Taipei date +%Y-%m-%d); PAST=$(TZ=Asia/Taipei date -d '-5 days' +%Y-%m-%d); END=$(TZ=Asia/Taipei date -d '+10 days' +%Y-%m-%d)
-# Comma-joined id lists from spots.json (url-encoded where needed).
+# Comma-joined id lists from spots.json (url-encoded where needed). CWA fields list Taiwan spots only; lat/lon list every spot.
 ids(){ python3 -I -c "import json,sys,urllib.parse as u;S=json.load(open(sys.argv[1]));f=sys.argv[2];v=[]
 for s in S:
+  if f not in ('lat','lon') and s.get('country','tw')!='tw': continue
   for x in (s[f] if isinstance(s[f],list) else [s[f]]):
     if f in ('lat','lon') or x not in v: v.append(x)
 print(','.join(u.quote(str(x),safe='') for x in v))" "$HERE/spots.json" "$1"; }

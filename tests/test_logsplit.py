@@ -57,5 +57,27 @@ class LogSplit(unittest.TestCase):
         self.assertNotIn('buoy', json.load(open(self.snap))['spots']['donghe'].get('hist', {}))
 
 
+class LogSplitCalifornia(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.snap = os.path.join(self.tmp, 'snap.json'); shutil.copy(os.path.join(HERE, 'fixtures', 'ca', 'snap_in.json'), self.snap)
+        d = json.load(open(self.snap))
+        d['spots']['blacks']['buoy'] = [['2026-10-17T20:00', 0.3, 7.0, 285, 22.6]]; d['spots']['blacks']['country'] = 'ca'
+        d['src']['spots']['blacks'] = '2026-10-17T20:00/'
+        with open(self.snap, 'w') as f: json.dump(d, f)
+
+    def test_log_ca_only(self):
+        run(['log.py', self.snap, self.tmp + '/log-ca', 'ca'])
+        self.assertEqual(sorted(records(self.tmp + '/log-ca')[-1]['spots']), ['blacks', 'rincon'])
+
+    def test_tw_log_unchanged_by_ca(self):
+        run(['log.py', self.snap, self.tmp + '/log', 'tw'])
+        d = json.load(open(self.snap)); d['src']['spots']['blacks'] = '2026-10-17T21:00/'
+        with open(self.snap, 'w') as f: json.dump(d, f)
+        run(['log.py', self.snap, self.tmp + '/log', 'tw'])
+        self.assertEqual(len(records(self.tmp + '/log')), 1)
+        self.assertEqual(sorted(records(self.tmp + '/log')[-1]['spots']), ['donghe'])
+
+
 if __name__ == '__main__':
     unittest.main()

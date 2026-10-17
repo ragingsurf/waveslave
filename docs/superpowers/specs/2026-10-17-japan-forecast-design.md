@@ -69,7 +69,8 @@ The rule: everything after `snap.json` stays country-blind. Japan only adds a wa
 3. **jp.py** (new, one file) reads the Japan downloads and writes each Japan spot into `snap.json` with the same keys
    snap.py writes for Taiwan: `buoy` rows `[time, height, period, from deg, sea temp]`, `buoyId`, `dwind`, `wind`
    (forecast), `tides`, `sun`, plus `jmawave` (forecaster wave heights, the Japan twin of `cwawave`). Times are
-   stored as ISO with offset so the page can show local time.
+   stored as Taipei wall clock ("YYYY-MM-DDTHH:MM", UTC+8) like every other field, so log, history and
+   corrections stay unchanged; the page shifts them to Japan time for display.
 4. **snap.py and more.py** skip spots whose country is not `tw` for their CWA-only parts.
 5. **log.py, correct.py, history.py** need no logic change: they read `buoy`, `dwind`, `hourly`, `wind` per spot.
    The log keeps Taipei-date files and the same record shape, so the forecast-vs-buoy log never stops and old

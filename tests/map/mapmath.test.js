@@ -157,6 +157,25 @@ test("cut", () => {
   assert.equal(M.cut(163, 30, 170, 43), false);
 });
 
+test("coast edges along a cut line lie on it exactly", () => {
+  // Every outline in template.html's COAST lines, longitudes east. A segment over 0.75° long that keeps within 0.1° of a cut line all the way is a
+  // cut edge, so it has to lie on the line exactly (MAPM.cut), or the coast line draws it. Real coast and borders that close to one run shorter (0.52° at most).
+  const M = load(), src = fs.readFileSync(path.join(__dirname, "..", "..", "template.html"), "utf8"), off = [];
+  let n = 0;
+  for (const l of src.split("\n")) {
+    const m = /^  (?:const COAST = |COAST\.push\(\.\.\.)(\[.*\])\)?;$/.exec(l);
+    if (!m) continue;
+    n++;
+    for (const o of JSON.parse(m[1])) for (let i = 1; i < o.length; i++) {
+      const ax = M.E(o[i-1][0]), ay = o[i-1][1], bx = M.E(o[i][0]), by = o[i][1];
+      const along = M.CUTX.some(x => Math.abs(ax - x) < .1 && Math.abs(bx - x) < .1) || M.CUTY.some(y => Math.abs(ay - y) < .1 && Math.abs(by - y) < .1);
+      if (along && Math.hypot(bx - ax, by - ay) > .75 && !M.cut(ax, ay, bx, by)) off.push(`[${ax},${ay}] -> [${bx},${by}]`);
+    }
+  }
+  assert.ok(n >= 5, `only ${n} COAST lines found`);
+  assert.deepEqual(off, []);
+});
+
 test("mkGrid null", () => {
   const M = load();
   assert.equal(M.mkGrid("pac", null), null);

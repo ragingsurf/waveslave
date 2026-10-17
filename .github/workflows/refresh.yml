@@ -1,6 +1,6 @@
 name: Refresh WaveSlave
 
-# Rebuild the forecast from CWA, NOWPHAS, JMA, NOAA + Open-Meteo every half hour and publish it to GitHub Pages.
+# Rebuild the forecast from CWA, NOWPHAS, JMA, NOAA, IMOS, BoM + Open-Meteo every half hour and publish it to GitHub Pages.
 # GitHub often skips scheduled runs (only 2 ran overnight on Oct 13-14), so two slots an hour keeps the data fresher.
 on:
   schedule:
@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # The West Pacific map grid (refetched every ~3 h) and the forecast-vs-buoy logs (Taiwan log/, Japan log-jp/, California log-ca/, Hawaii log-hi/) carry over between runs.
+      # The West Pacific map grid (refetched every ~3 h) and the forecast-vs-buoy logs (Taiwan log/, Japan log-jp/, California log-ca/, Hawaii log-hi/, Australia log-au/) carry over between runs.
       - uses: actions/cache/restore@v4
         with:
           path: |
@@ -32,6 +32,7 @@ jobs:
             log-jp
             log-ca
             log-hi
+            log-au
           key: state-${{ github.run_id }}
           restore-keys: state-
       - name: Restore log days the cache lost
@@ -40,6 +41,7 @@ jobs:
           sh logstore.sh restore log-jp || echo "japan log restore failed" >&2
           sh logstore.sh restore log-ca || echo "california log restore failed" >&2
           sh logstore.sh restore log-hi || echo "hawaii log restore failed" >&2
+          sh logstore.sh restore log-au || echo "australia log restore failed" >&2
       - name: Build
         env:
           CWA_KEY: ${{ secrets.CWA_KEY }}
@@ -52,6 +54,7 @@ jobs:
           sh logstore.sh save log-jp || echo "japan log save failed" >&2
           sh logstore.sh save log-ca || echo "california log save failed" >&2
           sh logstore.sh save log-hi || echo "hawaii log save failed" >&2
+          sh logstore.sh save log-au || echo "australia log save failed" >&2
       - uses: actions/cache/save@v4
         if: always()
         with:
@@ -61,6 +64,7 @@ jobs:
             log-jp
             log-ca
             log-hi
+            log-au
           key: state-${{ github.run_id }}
       - uses: actions/upload-pages-artifact@v3
         with:

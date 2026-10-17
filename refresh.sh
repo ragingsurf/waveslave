@@ -76,6 +76,23 @@ for C in ca hi; do
   get open$C "https://api.open-meteo.com/v1/forecast?$CQ&models=gfs_seamless" || get open$C "https://api.open-meteo.com/v1/forecast?$CQ" || echo "open$C fetch failed" >&2
   python3 -I "$HERE/ca.py" "$W/dl" "$W/snap.json" "$HERE/spots.json" $C || echo "$C skipped" >&2
 done
+# Australian spots (optional, never block the build): IMOS/AODN real-time wave buoys (one request per buoy, newest readings
+# first), Bureau of Meteorology station wind, Open-Meteo wind forecast and tide model; au.py writes them under the same keys.
+auids(){ python3 -I -c "import json,sys;S=[s for s in json.load(open(sys.argv[1])) if s.get('country')=='au'];f=sys.argv[2]
+v=[b for s in S for b in s['aodn']] if f=='aodn' else [str(s[f]) for s in S]
+print('|'.join(v if f in ('lat','lon') else dict.fromkeys(v)))" "$HERE/spots.json" "$1"; }
+if [ -n "$(auids lat)" ]; then
+  rm -f "$W/dl"/aodn-*.csv "$W/dl"/bom-*.json
+  OLDIFS=$IFS; IFS='|'
+  for b in $(auids aodn); do curl -fsSL --retry 2 -m 60 -G -o "$W/dl/aodn-$(echo "$b" | tr ' ' _).csv" "https://geoserver-123.aodn.org.au/geoserver/ows" --data-urlencode "service=WFS" --data-urlencode "version=1.1.0" --data-urlencode "request=GetFeature" --data-urlencode "typeName=aodn:aodn_wave_nrt_v2_timeseries_data" --data-urlencode "outputFormat=csv" --data-urlencode "maxFeatures=48" --data-urlencode "sortBy=TIME D" --data-urlencode "CQL_FILTER=site_name='$b'" || echo "aodn $b fetch failed" >&2; done
+  for s in $(auids bomStation); do curl -fsSL --retry 2 -m 60 -A "waveslave.tw" -o "$W/dl/bom-$s.json" "https://www.bom.gov.au/fwo/${s%%.*}/$s.json" || echo "bom $s fetch failed" >&2; done
+  IFS=$OLDIFS
+  AQ="latitude=$(auids lat | tr '|' ,)&longitude=$(auids lon | tr '|' ,)"
+  # Open-Meteo's BoM ACCESS feed returns no data, so the wind forecast is its default blend.
+  get openau "https://api.open-meteo.com/v1/forecast?$AQ&hourly=wind_speed_10m,wind_direction_10m,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=4" || echo "openau fetch failed" >&2
+  get tideau "https://marine-api.open-meteo.com/v1/marine?$AQ&hourly=sea_level_height_msl&timezone=GMT&past_days=5&forecast_days=10" || echo "tideau fetch failed" >&2
+  python3 -I "$HERE/au.py" "$W/dl" "$W/snap.json" "$HERE/spots.json" || echo "australia skipped" >&2
+fi
 # West Pacific wind + wave grid for the Map tab (3-hourly model, so refetched only every ~3 h; a failed fetch keeps the last grid).
 if [ -z "$(find "$G/grid.json" -mmin -170 2>/dev/null)" ]; then
   GLA=$(python3 -I -c "print(','.join(str(a) for a in range(0,46,3) for o in range(100,161,3)))")
@@ -84,35 +101,41 @@ if [ -z "$(find "$G/grid.json" -mmin -170 2>/dev/null)" ]; then
     curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwave.json" "https://marine-api.open-meteo.com/v1/marine?latitude=$GLA&longitude=$GLO&hourly=wave_height,wave_direction,swell_wave_height,swell_wave_direction,swell_wave_period&models=meteofrance_wave&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
     python3 -I "$HERE/grid.py" "$G/gwind.json" "$G/gwave.json" "$G/grid.new" 0 3 16 100 3 21 && mv "$G/grid.new" "$G/grid.json"; } || echo "grid fetch failed, keeping last grid" >&2
 fi
-# Coast wind + wave grids for the NOAA countries, the same way; only when the country has spots.
-# California 1° apart (30–42°N, 128–116°W); Hawaii 1° apart (15–26°N, 162–152°W), wide enough to frame the whole chain on a phone.
-regrid(){ C=$1; shift
-  [ -n "$(noaaids $C lat)" ] && [ -z "$(find "$G/grid-$C.json" -mmin -170 2>/dev/null)" ] || return 0
+# Wind + wave grids for the other map regions, the same way; only when the country has spots. regrid <country> <minutes> <grid>.
+# California 1° apart (30–42°N, 128–116°W); Hawaii 1° apart (15–26°N, 162–152°W), wide enough to frame the whole chain on a phone;
+# Australia 2° apart (44–20°S, 110–156°E), refetched only every ~6 h to keep Open-Meteo calls down.
+regrid(){ C=$1; AGE=$2; shift 2
+  [ -n "$(python3 -I -c "import json,sys;print(any(s.get('country')==sys.argv[2] for s in json.load(open(sys.argv[1]))) or '')" "$HERE/spots.json" $C)" ] && [ -z "$(find "$G/grid-$C.json" -mmin -$AGE 2>/dev/null)" ] || return 0
   LA=$(python3 -I -c "import sys;a0,da,na,o0,do,no=map(float,sys.argv[1:]);print(','.join(str(round(a0+i*da,2)) for i in range(int(na)) for j in range(int(no))))" "$@") || return 0
   LO=$(python3 -I -c "import sys;a0,da,na,o0,do,no=map(float,sys.argv[1:]);print(','.join(str(round(o0+j*do,2)) for i in range(int(na)) for j in range(int(no))))" "$@") || return 0
   { curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwind-$C.json" "https://api.open-meteo.com/v1/forecast?latitude=$LA&longitude=$LO&hourly=wind_speed_10m,wind_direction_10m,pressure_msl,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
     curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwave-$C.json" "https://marine-api.open-meteo.com/v1/marine?latitude=$LA&longitude=$LO&hourly=wave_height,wave_direction,swell_wave_height,swell_wave_direction,swell_wave_period&models=meteofrance_wave&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
     python3 -I "$HERE/grid.py" "$G/gwind-$C.json" "$G/gwave-$C.json" "$G/grid-$C.new" "$@" && mv "$G/grid-$C.new" "$G/grid-$C.json"; } || echo "$C grid fetch failed, keeping last grid" >&2; }
-regrid ca 30 1 13 -128 1 13
-regrid hi 15 1 12 -162 1 11
+regrid ca 170 30 1 13 -128 1 13
+regrid hi 170 15 1 12 -162 1 11
+regrid au 350 -44 2 13 110 2 24
 GJ="$G/grid.json"; [ -f "$GJ" ] || { echo null > "$W/gridnull.json"; GJ="$W/gridnull.json"; }
 GC="$G/grid-ca.json"; [ -f "$GC" ] || { echo null > "$W/gridnull.json"; GC="$W/gridnull.json"; }
 GH="$G/grid-hi.json"; [ -f "$GH" ] || { echo null > "$W/gridnull.json"; GH="$W/gridnull.json"; }
+GA="$G/grid-au.json"; [ -f "$GA" ] || { echo null > "$W/gridnull.json"; GA="$W/gridnull.json"; }
 # The last 5 days for the Forecast tab: buoy and wind station readings from the log, past tides kept in cache/; never blocks the build.
 python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log" "$G" tw || echo "history skipped" >&2
 python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log-jp" "$G" jp || echo "japan history skipped" >&2
 python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log-ca" "$G" ca || echo "california history skipped" >&2
 python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log-hi" "$G" hi || echo "hawaii history skipped" >&2
-# Forecast vs buoy log for later corrections, one folder per country (Taiwan log/, Japan log-jp/, California log-ca/, Hawaii log-hi/); never blocks the build.
+python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log-au" "$G" au || echo "australia history skipped" >&2
+# Forecast vs buoy log for later corrections, one folder per country (Taiwan log/, Japan log-jp/, California log-ca/, Hawaii log-hi/, Australia log-au/); never blocks the build.
 python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log" tw || true
 python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-jp" jp || true
 python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-ca" ca || true
 python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-hi" hi || true
+python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-au" au || true
 # Tune each spot's wave heights to its buoy from that log and score the forecast (after log.py, so the log stays raw).
 python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log" tw || echo "corrections skipped" >&2
 python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-jp" jp || echo "japan corrections skipped" >&2
 python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-ca" ca || echo "california corrections skipped" >&2
 python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-hi" hi || echo "hawaii corrections skipped" >&2
+python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-au" au || echo "australia corrections skipped" >&2
 # Wave of the week photo (wotw.jpg) is embedded inline.
-python3 -I -c "import sys,base64;t=open(sys.argv[1]).read();d=open(sys.argv[2]).read();img='data:image/jpeg;base64,'+base64.b64encode(open(sys.argv[4],'rb').read()).decode();open(sys.argv[3],'w').write(t.replace('__DATA__',d).replace('__WOTW__',img).replace('__GRIDCA__',open(sys.argv[6]).read()).replace('__GRIDHI__',open(sys.argv[7]).read()).replace('__GRID__',open(sys.argv[5]).read()))" "$HERE/template.html" "$W/snap.json" "$W/taitung-surf.html" "$HERE/wotw.jpg" "$GJ" "$GC" "$GH"
+python3 -I -c "import sys,base64;t=open(sys.argv[1]).read();d=open(sys.argv[2]).read();img='data:image/jpeg;base64,'+base64.b64encode(open(sys.argv[4],'rb').read()).decode();open(sys.argv[3],'w').write(t.replace('__DATA__',d).replace('__WOTW__',img).replace('__GRIDCA__',open(sys.argv[6]).read()).replace('__GRIDHI__',open(sys.argv[7]).read()).replace('__GRIDAU__',open(sys.argv[8]).read()).replace('__GRID__',open(sys.argv[5]).read()))" "$HERE/template.html" "$W/snap.json" "$W/taitung-surf.html" "$HERE/wotw.jpg" "$GJ" "$GC" "$GH" "$GA"
 echo "built $W/taitung-surf.html"

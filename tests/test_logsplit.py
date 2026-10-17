@@ -97,5 +97,14 @@ class LogSplitHawaii(unittest.TestCase):
         self.assertEqual(sorted(records(self.tmp + '/log-ca')[-1]['spots']), ['blacks'])
 
 
+class LogSplitAustralia(unittest.TestCase):
+    def test_log_au_only(self):
+        tmp = tempfile.mkdtemp(); snap = os.path.join(tmp, 'snap.json'); shutil.copy(os.path.join(HERE, 'fixtures', 'au', 'snap_in.json'), snap)
+        d = json.load(open(snap)); d['spots']['snapper']['buoy'] = [['2026-10-17T21:00', 1.55, None, None, None]]; d['src']['spots']['snapper'] = '2026-10-17T21:00/'
+        with open(snap, 'w') as f: json.dump(d, f)
+        run(['log.py', snap, tmp + '/log-au', 'au'])
+        self.assertEqual(sorted(records(tmp + '/log-au')[-1]['spots']), ['byron', 'snapper'])
+
+
 if __name__ == '__main__':
     unittest.main()

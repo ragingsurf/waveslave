@@ -32,6 +32,7 @@ def cwawave():
     cw = L('coastal.json')['cwaopendata']
     C = {l['LocationName']: l for l in cw['Dataset']['Locations']['Location']}
     for S in SPOTS:
+        if S.get('country', 'tw') != 'tw': continue  # CWA covers Taiwan only; jp.py adds jmawave for Japan
         E = {e['ElementName']: e['Time'] for e in C[S['coast']]['WeatherElement']}
         rows = []
         for i, t in enumerate(E['浪高']):

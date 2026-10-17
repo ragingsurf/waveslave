@@ -8,9 +8,10 @@ K=${CWA_KEY:-$(tr -d ' \n\r' < "$HERE/cwa_key.txt")}
 [ -n "$K" ] || { echo "no CWA key" >&2; exit 1; }
 A="https://opendata.cwa.gov.tw/api/v1/rest/datastore"
 TODAY=$(TZ=Asia/Taipei date +%Y-%m-%d); PAST=$(TZ=Asia/Taipei date -d '-5 days' +%Y-%m-%d); END=$(TZ=Asia/Taipei date -d '+10 days' +%Y-%m-%d)
-# Comma-joined id lists from spots.json (url-encoded where needed).
+# Comma-joined id lists from spots.json (url-encoded where needed). CWA fields list Taiwan spots only; lat/lon list every spot.
 ids(){ python3 -I -c "import json,sys,urllib.parse as u;S=json.load(open(sys.argv[1]));f=sys.argv[2];v=[]
 for s in S:
+  if f not in ('lat','lon') and s.get('country','tw')!='tw': continue
   for x in (s[f] if isinstance(s[f],list) else [s[f]]):
     if f in ('lat','lon') or x not in v: v.append(x)
 print(','.join(u.quote(str(x),safe='') for x in v))" "$HERE/spots.json" "$1"; }
@@ -34,8 +35,26 @@ rm -f "$W/dl"/jtwc-*.txt
 { get jtwc "https://www.metoc.navy.mil/jtwc/rss/jtwc.rss" && for u in $(grep -o 'https://www.metoc.navy.mil/jtwc/products/wp[0-9]*web.txt' "$W/dl/jtwc.json" | sort -u); do
   curl -fsSL --retry 2 -m 60 -o "$W/dl/jtwc-$(basename "$u" web.txt).txt" "$u" || true; done; } || echo "jtwc fetch failed" >&2
 python3 -I "$HERE/more.py" "$W/dl" "$W/snap.json" "$HERE/spots.json" || echo "extras skipped" >&2
-# West Pacific wind + wave grid for the Map tab (3-hourly model, so refetched only every ~3 h; a failed fetch keeps the last grid).
+# Japan spots (optional, never block the build): NOWPHAS wave gauges, JMA AMeDAS wind, JMA forecasters' wave heights, JMA MSM wind
+# via Open-Meteo, JMA tide tables (one file per point and year, kept in cache/); jp.py writes them under the same keys as CWA's.
+jpids(){ python3 -I -c "import json,sys;S=[s for s in json.load(open(sys.argv[1])) if s.get('country')=='jp'];f=sys.argv[2]
+v=[str(s[f]) if f in ('lat','lon') else s[f][0] if f=='jmaArea' else s[f] for s in S]
+print(','.join(v if f in ('lat','lon') else dict.fromkeys(v)))" "$HERE/spots.json" "$1"; }
 G="$HERE/cache"; mkdir -p "$G"
+if [ -n "$(jpids lat)" ]; then
+  rm -f "$W/dl/nowphas.xml" "$W/dl/amedas_time.txt"
+  get nowphas "https://nowphas.mlit.go.jp/mapxml/$(date +%s)" && mv "$W/dl/nowphas.json" "$W/dl/nowphas.xml" || echo "nowphas fetch failed" >&2
+  { curl -fsSL --retry 2 -m 30 -o "$W/dl/amedas_time.txt" "https://www.jma.go.jp/bosai/amedas/data/latest_time.txt" &&
+    get amedas "https://www.jma.go.jp/bosai/amedas/data/map/$(TZ=Asia/Tokyo date -d "$(cat "$W/dl/amedas_time.txt")" +%Y%m%d%H%M%S).json"; } || echo "amedas fetch failed" >&2
+  for o in $(jpids jmaArea | tr ',' ' '); do get "jmafc-$o" "https://www.jma.go.jp/bosai/forecast/data/forecast/$o.json" || echo "jma forecast $o fetch failed" >&2; done
+  JQ="latitude=$(jpids lat)&longitude=$(jpids lon)&hourly=wind_speed_10m,wind_direction_10m,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=4"
+  get openjma "https://api.open-meteo.com/v1/forecast?$JQ&models=jma_msm" || get openjma "https://api.open-meteo.com/v1/forecast?$JQ&models=jma_seamless" || echo "openjma fetch failed" >&2
+  for y in $(TZ=Asia/Taipei date +%Y) $(TZ=Asia/Taipei date -d '+10 days' +%Y); do for p in $(jpids tidePoint | tr ',' ' '); do
+    [ -s "$G/jp-tide-$p-$y.txt" ] || curl -fsSL --retry 2 -m 60 -o "$G/jp-tide-$p-$y.txt" "https://www.data.jma.go.jp/kaiyou/data/db/tide/suisan/txt/$y/$p.txt" || { rm -f "$G/jp-tide-$p-$y.txt"; echo "tide $p $y fetch failed" >&2; }
+  done; done
+  python3 -I "$HERE/jp.py" "$W/dl" "$W/snap.json" "$HERE/spots.json" "$G" || echo "japan skipped" >&2
+fi
+# West Pacific wind + wave grid for the Map tab (3-hourly model, so refetched only every ~3 h; a failed fetch keeps the last grid).
 if [ -z "$(find "$G/grid.json" -mmin -170 2>/dev/null)" ]; then
   GLA=$(python3 -I -c "print(','.join(str(a) for a in range(0,46,3) for o in range(100,161,3)))")
   GLO=$(python3 -I -c "print(','.join(str(o) for a in range(0,46,3) for o in range(100,161,3)))")
@@ -45,11 +64,14 @@ if [ -z "$(find "$G/grid.json" -mmin -170 2>/dev/null)" ]; then
 fi
 GJ="$G/grid.json"; [ -f "$GJ" ] || { echo null > "$W/gridnull.json"; GJ="$W/gridnull.json"; }
 # The last 5 days for the Forecast tab: buoy and wind station readings from the log, past tides kept in cache/; never blocks the build.
-python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log" "$G" || echo "history skipped" >&2
-# Forecast vs buoy log for later corrections; never blocks the build.
-python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log" || true
+python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log" "$G" tw || echo "history skipped" >&2
+python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log-jp" "$G" jp || echo "japan history skipped" >&2
+# Forecast vs buoy log for later corrections, one folder per country (Taiwan log/, Japan log-jp/); never blocks the build.
+python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log" tw || true
+python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-jp" jp || true
 # Tune each spot's wave heights to its buoy from that log and score the forecast (after log.py, so the log stays raw).
-python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log" || echo "corrections skipped" >&2
+python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log" tw || echo "corrections skipped" >&2
+python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-jp" jp || echo "japan corrections skipped" >&2
 # Wave of the week photo (wotw.jpg) is embedded inline.
 python3 -I -c "import sys,base64;t=open(sys.argv[1]).read();d=open(sys.argv[2]).read();img='data:image/jpeg;base64,'+base64.b64encode(open(sys.argv[4],'rb').read()).decode();open(sys.argv[3],'w').write(t.replace('__DATA__',d).replace('__WOTW__',img).replace('__GRID__',open(sys.argv[5]).read()))" "$HERE/template.html" "$W/snap.json" "$W/taitung-surf.html" "$HERE/wotw.jpg" "$GJ"
 echo "built $W/taitung-surf.html"

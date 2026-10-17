@@ -57,7 +57,7 @@ noosa -26.383,153.093 Brisbane [Mooloolaba] IDQ60801.94570 22; snapper -28.163,1
 
 **Files:** `refresh.sh`, `.github/workflows/refresh.yml`, `.gitignore`, `tests/test_logsplit.py`.
 
-- Australia block after the NOAA loop: per AODN site one WFS GetFeature (`typeName=aodn:aodn_wave_nrt_v2_timeseries_data`, `version=1.1.0`, `outputFormat=csv`, `maxFeatures=48`, `sortBy=TIME D`, `CQL_FILTER=site_name='<site>'`); per BoM station `https://www.bom.gov.au/fwo/<product>/<product>.<wmo>.json` with `-A waveslave.tw`; `get tideau` from Open-Meteo marine `hourly=sea_level_height_msl&past_days=5&forecast_days=10&timezone=` per spot zone (one call per zone group is fine; simplest: `timezone=auto`); `get openau ...models=bom_access_global` falling back to the default model; then `au.py`.
+- Australia block after the NOAA loop: per AODN site one WFS GetFeature (`typeName=aodn:aodn_wave_nrt_v2_timeseries_data`, `version=1.1.0`, `outputFormat=csv`, `maxFeatures=48`, `sortBy=TIME D`, `CQL_FILTER=site_name='<site>'`); per BoM station `https://www.bom.gov.au/fwo/<product>/<product>.<wmo>.json` with `-A waveslave.tw`; `get tideau` from Open-Meteo marine `hourly=sea_level_height_msl&past_days=5&forecast_days=10&timezone=` per spot zone (one call per zone group is fine; simplest: `timezone=auto`); `get openau` with Open-Meteo's default model (its `bom_access_global` feed returns nulls); then `au.py`.
 - Australia grid `regrid au -44 2 13 110 2 24`, refreshed every ~350 min (pass the age to `regrid`); `GA` null fallback; render `__GRIDAU__`.
 - history/log/correct with `au` on `log-au`; workflow cache/restore/save `log-au`; `.gitignore`.
 
@@ -71,6 +71,6 @@ noosa -26.383,153.093 Brisbane [Mooloolaba] IDQ60801.94570 22; snapper -28.163,1
 - Fifth button `au`; `mapRegion` gains `au`; grid `__GRIDAU__`; `KX` at 32°S; map view key `-au`; clamp fallback `[110,156,-44,-20]`.
 - Home for Australia is the current spot's coast: `HOMES.au` east `{cx:151.5, cy:-31, span:12}`, west `{cx:115.5, cy:-32.5, span:6}` chosen by spot longitude; `WS.home` and switching spots inside Australia recentre.
 - Coastline: Natural Earth 50 m land clipped to 45-19 S, 109-157 E.
-- Labels: buoy source "IMOS/AODN" with the site name; legend "Offshore wind (BoM ACCESS forecast)"; tide line says "model tide"; "Back to Australia"; storm panel shows a BoM tropical cyclone link; footer mentions IMOS/AODN, BoM and Open-Meteo tides.
+- Labels: buoy source "IMOS/AODN" with the site name; legend "Offshore wind (Open-Meteo forecast)"; tide line says "model tide"; "Back to Australia"; storm panel shows a BoM tropical cyclone link; footer mentions IMOS/AODN, BoM and Open-Meteo tides.
 
 - [ ] **Step 1:** Phone screenshots in en/zh/ja for snapper and margaret, the map, and a switch Australia → Hawaii → Taiwan → Australia plus snapper → trigg: no console errors. Screenshots to `/mnt/project-files/surf-app/australia/`. Commit "Page: Australia on the country switch and map".

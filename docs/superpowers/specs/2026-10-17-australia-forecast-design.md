@@ -42,7 +42,7 @@ now" (the rule from Hawaii: a buoy with nothing in the last 6 hours counts as si
 |---|---|---|
 | Wave height, period, direction | IMOS/AODN national real-time wave feed (`aodn_wave_nrt_v2_timeseries_data`, one request per buoy for its newest ~30 readings) | Carries the Queensland, NSW (MHL), Victoria (Deakin, IMOS) and WA buoys in one place, about an hour behind. Open data, CC BY 4.0. No water temperature in this feed. |
 | Wind now | Bureau of Meteorology station observations (JSON, every 10-30 min) | Answers our plain `waveslave.tw` user agent. BoM's copyright page limits reuse of its website data, so please check it is fine for a free public site, as with NOWPHAS. |
-| Wind forecast | BoM's ACCESS model via Open-Meteo (`bom_access_global`) | Legend: "BoM ACCESS forecast". |
+| Wind forecast | Open-Meteo's best-match model | Open-Meteo's BoM ACCESS feed (`bom_access_global`) returned no data on 2026-10-17, so the default blend is used. Legend: "Open-Meteo forecast". |
 | Swell forecast, model check | Open-Meteo, as for every country | |
 | Tides | Open-Meteo marine `sea_level_height_msl` (a global tide model), highs and lows picked from the hourly curve | Australia has no open tide-table feed (BoM tide tables are copyright). Times should be within ~30 min; heights are relative to mean sea level and run smaller than the official tables, so the page labels them "model tide". |
 | Sun times | computed | |

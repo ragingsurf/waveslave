@@ -168,11 +168,14 @@ svg text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
 .quick{display:flex;flex-wrap:wrap;gap:10px}
 /* The country buttons fit a phone: their side padding shrinks on narrow screens (more in Japanese, whose names are longer), and if they still
    don't fit, the row scrolls sideways inside itself like the spot picker, so the page never slides sideways. */
-.ctry{display:flex;width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none;overscroll-behavior-x:contain;gap:2px;padding:3px;margin:0 0 8px;border-radius:99px;background:var(--panel);border:1px solid var(--line)}
+.ctry{position:relative;display:flex;width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none;overscroll-behavior-x:contain;gap:2px;padding:3px;margin:0 0 8px;border-radius:99px;background:var(--panel);border:1px solid var(--line)}
 .ctry::-webkit-scrollbar{display:none}
-.ctry button{flex:none;border:0;background:none;color:var(--muted);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP",sans-serif;padding:6px clamp(5px,calc((100vw - 310px)/10),12px);border-radius:99px;cursor:pointer}
+.ctry button{flex:none;border:0;background:none;color:var(--muted);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP",sans-serif;padding:6px clamp(5px,calc((100vw - 310px)/10),12px);border-radius:99px;cursor:pointer;position:relative;z-index:1;transition:color .36s,text-shadow .36s}
 html[lang="ja"] .ctry button{padding-inline:clamp(3px,calc((100vw - 350px)/10),12px)}
-.ctry button[aria-pressed="true"]{background:#0a0f12;color:#ffb347;text-shadow:0 0 6px rgba(255,140,0,.7)}
+.ctry button[aria-pressed="true"]{color:#ffb347;text-shadow:0 0 6px rgba(255,140,0,.7)}
+/* The highlight is one bubble under the buttons that glides (place and width) to the picked country; ctryPill() puts it there. */
+.ctry-pill{position:absolute;left:0;top:0;border-radius:99px;background:#0a0f12;pointer-events:none;will-change:transform,width}
+.ctry-pill.glide{transition:transform .36s cubic-bezier(.22,1,.36,1),width .36s cubic-bezier(.22,1,.36,1)}
 .picker{display:flex;gap:8px;overflow-x:auto;padding:2px 0 4px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .picker::-webkit-scrollbar{display:none}
 .picker a{flex:none;padding:7px 14px;border-radius:99px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-weight:600;font-size:14px;text-decoration:none;white-space:nowrap}
@@ -330,7 +333,7 @@ html{overscroll-behavior-y:none}
     <span class="fresh" id="fresh">Data snapshot</span>
   </header>
   <nav class="tabs" role="tablist" aria-label="View"><button role="tab" data-v="fc" aria-selected="true" data-zh="預報" data-ja="予報">Forecast</button><button role="tab" data-v="ws" aria-selected="false" data-zh="地圖" data-ja="地図">Map</button></nav>
-  <div class="ctry" id="ctry" role="group" aria-label="Country"><button data-c="tw" data-zh="台灣" data-ja="台湾">Taiwan</button><button data-c="jp" data-zh="日本" data-ja="日本">Japan</button><button data-c="ca" data-zh="加州" data-ja="カリフォルニア">California</button><button data-c="hi" data-zh="夏威夷" data-ja="ハワイ">Hawaii</button><button data-c="au" data-zh="澳洲" data-ja="オーストラリア">Australia</button></div>
+  <div class="ctry" id="ctry" role="group" aria-label="Country"><span class="ctry-pill" aria-hidden="true"></span><button data-c="tw" data-zh="台灣" data-ja="台湾">Taiwan</button><button data-c="jp" data-zh="日本" data-ja="日本">Japan</button><button data-c="ca" data-zh="加州" data-ja="カリフォルニア">California</button><button data-c="hi" data-zh="夏威夷" data-ja="ハワイ">Hawaii</button><button data-c="au" data-zh="澳洲" data-ja="オーストラリア">Australia</button></div>
   <nav class="picker" id="picker" aria-label="Choose a spot" data-zh-aria-label="選擇浪點" data-ja-aria-label="ポイントを選ぶ"></nav>
 
   <div id="viewFc">
@@ -492,6 +495,12 @@ function switchSpot(id){ if(!ALL.spots[id] || id===CUR) return; const other = sp
 // Country switch: back to the spot last open in that country, else its first spot.
 function switchCountry(c){ if(c===spotCountry(CUR)) return; let id; try{ id=localStorage.getItem("waveslave-spot-"+c); }catch(e){}
   switchSpot(ALL.spots[id] && spotCountry(id)===c ? id : countrySpots(c)[0]); }
+// The country switch's bubble: under whichever button is pressed, gliding there once the page is up (straight there the first time).
+function ctryPill(){ const box = document.getElementById("ctry"), pill = box && box.querySelector(".ctry-pill"), b = box && box.querySelector('button[aria-pressed="true"]');
+  if(!pill || !b) return; pill.style.transform = `translate(${b.offsetLeft}px,${b.offsetTop}px)`; pill.style.width = b.offsetWidth+"px"; pill.style.height = b.offsetHeight+"px";
+  // A country off the edge of a narrow switch scrolls into view with it.
+  if(b.offsetLeft < box.scrollLeft || b.offsetLeft+b.offsetWidth > box.scrollLeft+box.clientWidth) box.scrollTo({left: b.offsetLeft-(box.clientWidth-b.offsetWidth)/2, behavior: pill.classList.contains("glide") ? "smooth" : "auto"});
+  if(!pill.classList.contains("glide")) requestAnimationFrame(() => requestAnimationFrame(() => pill.classList.add("glide"))); }
 // ---- Map maths: plain functions with no page state, tested in Node (tests/map/mapmath.test.js). Inside the map every longitude runs east, 0–360.
 const MAPM = (() => {
   // California's -118.5 is 241.5, so the Pacific has no break at the dateline; W180 goes back for Open-Meteo and the pin's label.
@@ -1727,7 +1736,7 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
 (() => {
   const go = switchSpot;
   const ids = countrySpots(spotCountry(SPOT));
-  document.querySelectorAll("#ctry button").forEach(b => b.setAttribute("aria-pressed", b.dataset.c===spotCountry(SPOT)));
+  document.querySelectorAll("#ctry button").forEach(b => b.setAttribute("aria-pressed", b.dataset.c===spotCountry(SPOT))); ctryPill();
   const cwaBuoy = id => `https://www.cwa.gov.tw/V8/${isZh()?"C":"E"}/M/OBS_Marine_30day.html?MID=${id}`;
   const jp = DATA.country==="jp", hi = DATA.country==="hi", au = DATA.country==="au", ca = DATA.country==="ca" || hi, far = DATA.buoyKm>=40 ? ` · ${DATA.buoyKm} km${isZh()?"外":isJa()?"先":" away"}` : "";
   const windy = s => `https://www.windy.com/${s.lat}/${s.lon}/ecmwfWaves/waves?waves,${s.lat},${s.lon},10,p:surfspots`;
@@ -1769,7 +1778,12 @@ drawDays(); drawDay();
 }
 applyLang();
 document.querySelectorAll("#lang button").forEach(b=>b.onclick=()=>setLang(b.dataset.l));
-document.querySelectorAll("#ctry button").forEach(b=>b.onclick=()=>switchCountry(b.dataset.c));
+// A tap sends the bubble on its way first and redraws the page as it lands, so the redraw never stutters the glide; taps in a row go to the last one.
+{ let t; document.querySelectorAll("#ctry button").forEach(b=>b.onclick=()=>{ if(b.dataset.c===spotCountry(CUR)&&!t) return; clearTimeout(t);
+    document.querySelectorAll("#ctry button").forEach(x=>x.setAttribute("aria-pressed", x===b)); ctryPill();
+    t = setTimeout(()=>{ t=0; switchCountry(b.dataset.c); }, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 260); });
+  // Language and font changes resize the buttons, so the bubble follows them.
+  if(window.ResizeObserver){ const ro = new ResizeObserver(()=>ctryPill()); document.querySelectorAll("#ctry, #ctry button").forEach(e=>ro.observe(e)); } }
 boot(SPOT0);
 if(VIEW!=="fc") setView(VIEW, true);
 

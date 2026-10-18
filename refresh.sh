@@ -106,19 +106,20 @@ if [ -n "$(auids lat)" ]; then
   get tideau "https://marine-api.open-meteo.com/v1/marine?$AQ&hourly=sea_level_height_msl&timezone=GMT&past_days=5&forecast_days=10" || echo "tideau fetch failed" >&2
   python3 -I "$HERE/au.py" "$W/dl" "$W/snap.json" "$HERE/spots.json" || echo "australia skipped" >&2
 fi
-# Korean and Philippine spots (optional, never block the build): airport reports (METAR) from NOAA's Aviation Weather Center, the
-# last 3 hours, where a spot has an airport near enough (none does in the Philippines); a wind forecast and the tide model via
-# Open-Meteo, as for Japan and Australia; kr.py writes them under the same keys. No buoys: the Korea Meteorological
-# Administration's buoy feed needs a key, and the Philippines has no open one. The wind forecast is JMA's MSM for Korea, as for
-# Japan, and ECMWF's IFS for the Philippines, south of the MSM's area (Open-Meteo's default, the fallback, is ECMWF there too).
+# Korean, Philippine and Indonesian spots (optional, never block the build): airport reports (METAR) from NOAA's Aviation Weather
+# Center, the last 3 hours, where a spot has an airport near enough (none does in the Philippines; Bali's does in Indonesia); a wind
+# forecast and the tide model via Open-Meteo, as for Japan and Australia; kr.py writes them under the same keys. No buoys: the Korea
+# Meteorological Administration's buoy feed needs a key, and the Philippines and Indonesia have no open one. The wind forecast is
+# JMA's MSM for Korea, as for Japan, and ECMWF's IFS for the Philippines and Indonesia, south of the MSM's area (Open-Meteo's
+# default, the fallback, is ECMWF there too).
 # krids <country> <field>: the spots' lat or lon, or metar for their airports (a spot's windStation may be one "metar:ICAO" or a list).
 krids(){ python3 -I -c "import json,sys;S=[s for s in json.load(open(sys.argv[1])) if s.get('country')==sys.argv[2]];f=sys.argv[3]
 W=[w for s in S for w in (lambda v: v if isinstance(v,list) else [v] if v else [])(s.get('windStation'))]
 v=[w[6:] for w in W if w.startswith('metar:')] if f=='metar' else [str(s[f]) for s in S]
 print(','.join(v if f in ('lat','lon') else dict.fromkeys(v)))" "$HERE/spots.json" "$1" "$2"; }
-for C in kr ph; do
+for C in kr ph id; do
   [ -n "$(krids $C lat)" ] || continue
-  M=jma_msm M2=jma_seamless; [ $C = ph ] && M=ecmwf_ifs M2=best_match
+  M=jma_msm M2=jma_seamless; [ $C = kr ] || M=ecmwf_ifs M2=best_match
   [ -z "$(krids $C metar)" ] || curl -fsSL --retry 2 -m 60 -A "waveslave.tw" -o "$W/dl/metar-$C.json" "https://aviationweather.gov/api/data/metar?ids=$(krids $C metar)&format=json&hours=3" || echo "metar $C fetch failed" >&2
   KQ="latitude=$(krids $C lat)&longitude=$(krids $C lon)"
   get open$C "https://api.open-meteo.com/v1/forecast?$KQ&hourly=wind_speed_10m,wind_direction_10m,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=4&models=$M" ||
@@ -138,7 +139,8 @@ fi
 # Wind + wave grids for the other map regions, the same way; only when the country has spots. regrid <country> <minutes> <grid>.
 # California 1° apart (30–42°N, 128–116°W); Hawaii 1° apart (15–26°N, 162–152°W), wide enough to frame the whole chain on a phone;
 # the Pacific Northwest 1° apart (41–51°N, 129–122°W);
-# Australia 2° apart (44–20°S, 110–156°E), refetched only every ~6 h to keep Open-Meteo calls down.
+# Australia 2° apart (44–20°S, 110–156°E) and Indonesia 2° apart (16–2°S, 100–132°E, its home view either way up on phones as wide as 20:9), both
+# refetched only every ~6 h to keep Open-Meteo calls down.
 regrid(){ C=$1; AGE=$2; shift 2
   [ -n "$(python3 -I -c "import json,sys;print(any(s.get('country')==sys.argv[2] for s in json.load(open(sys.argv[1]))) or '')" "$HERE/spots.json" $C)" ] && [ -z "$(find "$G/grid-$C.json" -mmin -$AGE 2>/dev/null)" ] || return 0
   LA=$(python3 -I -c "import sys;a0,da,na,o0,do,no=map(float,sys.argv[1:]);print(','.join(str(round(a0+i*da,2)) for i in range(int(na)) for j in range(int(no))))" "$@") || return 0
@@ -150,6 +152,7 @@ regrid ca 170 30 1 13 -128 1 13
 regrid hi 170 15 1 12 -162 1 11
 regrid nw 170 41 1 11 -129 1 8
 regrid au 350 -44 2 13 110 2 24
+regrid id 350 -16 2 8 100 2 17
 # The whole Pacific, 5° apart (50°S–60°N, 100°E–110°W), by pacific.sh: refetched only every ~6 h, and never in a run that refetched the West Pacific grid, so the two biggest requests don't land together.
 [ -n "$WPNEW" ] || [ -n "$(find "$G/grid-pac.json" -mmin -350 2>/dev/null)" ] || sh "$HERE/pacific.sh" "$G" || echo "pacific grid fetch failed, keeping last grid" >&2
 GJ="$G/grid.json"; [ -f "$GJ" ] || { echo null > "$W/gridnull.json"; GJ="$W/gridnull.json"; }
@@ -157,6 +160,7 @@ GC="$G/grid-ca.json"; [ -f "$GC" ] || { echo null > "$W/gridnull.json"; GC="$W/g
 GH="$G/grid-hi.json"; [ -f "$GH" ] || { echo null > "$W/gridnull.json"; GH="$W/gridnull.json"; }
 GN="$G/grid-nw.json"; [ -f "$GN" ] || { echo null > "$W/gridnull.json"; GN="$W/gridnull.json"; }
 GA="$G/grid-au.json"; [ -f "$GA" ] || { echo null > "$W/gridnull.json"; GA="$W/gridnull.json"; }
+GI="$G/grid-id.json"; [ -f "$GI" ] || { echo null > "$W/gridnull.json"; GI="$W/gridnull.json"; }
 GP="$G/grid-pac.json"; [ -f "$GP" ] || { echo null > "$W/gridnull.json"; GP="$W/gridnull.json"; }
 # The last 5 days for the Forecast tab: buoy and wind station readings from the log, past tides kept in cache/; never blocks the build.
 python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log" "$G" tw || echo "history skipped" >&2
@@ -167,7 +171,8 @@ python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log-au" "$G" au || echo "aus
 python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log-nw" "$G" nw || echo "pacific northwest history skipped" >&2
 python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log-kr" "$G" kr || echo "korea history skipped" >&2
 python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log-ph" "$G" ph || echo "philippines history skipped" >&2
-# Forecast vs buoy log for later corrections, one folder per country (Taiwan log/, Japan log-jp/, California log-ca/, Hawaii log-hi/, Australia log-au/, Pacific Northwest log-nw/, Korea log-kr/, the Philippines log-ph/); never blocks the build.
+python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log-id" "$G" id || echo "indonesia history skipped" >&2
+# Forecast vs buoy log for later corrections, one folder per country (Taiwan log/, Japan log-jp/, California log-ca/, Hawaii log-hi/, Australia log-au/, Pacific Northwest log-nw/, Korea log-kr/, the Philippines log-ph/, Indonesia log-id/); never blocks the build.
 python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log" tw || true
 python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-jp" jp || true
 python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-ca" ca || true
@@ -176,6 +181,7 @@ python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-au" au || true
 python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-nw" nw || true
 python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-kr" kr || true
 python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-ph" ph || true
+python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-id" id || true
 # Tune each spot's wave heights to its buoy from that log and score the forecast (after log.py, so the log stays raw).
 python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log" tw || echo "corrections skipped" >&2
 python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-jp" jp || echo "japan corrections skipped" >&2
@@ -185,6 +191,7 @@ python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-au" au || echo "australi
 python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-nw" nw || echo "pacific northwest corrections skipped" >&2
 python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-kr" kr || echo "korea corrections skipped" >&2
 python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-ph" ph || echo "philippines corrections skipped" >&2
+python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-id" id || echo "indonesia corrections skipped" >&2
 # Wave of the week photo (wotw.jpg) is embedded inline.
-python3 -I -c "import sys,base64;t=open(sys.argv[1]).read();d=open(sys.argv[2]).read();img='data:image/jpeg;base64,'+base64.b64encode(open(sys.argv[4],'rb').read()).decode();open(sys.argv[3],'w').write(t.replace('__DATA__',d).replace('__WOTW__',img).replace('__GRIDCA__',open(sys.argv[6]).read()).replace('__GRIDHI__',open(sys.argv[7]).read()).replace('__GRIDAU__',open(sys.argv[8]).read()).replace('__GRIDPAC__',open(sys.argv[9]).read()).replace('__GRIDNW__',open(sys.argv[10]).read()).replace('__GRID__',open(sys.argv[5]).read()))" "$HERE/template.html" "$W/snap.json" "$W/taitung-surf.html" "$HERE/wotw.jpg" "$GJ" "$GC" "$GH" "$GA" "$GP" "$GN"
+python3 -I -c "import sys,base64;t=open(sys.argv[1]).read();d=open(sys.argv[2]).read();img='data:image/jpeg;base64,'+base64.b64encode(open(sys.argv[4],'rb').read()).decode();open(sys.argv[3],'w').write(t.replace('__DATA__',d).replace('__WOTW__',img).replace('__GRIDCA__',open(sys.argv[6]).read()).replace('__GRIDHI__',open(sys.argv[7]).read()).replace('__GRIDAU__',open(sys.argv[8]).read()).replace('__GRIDPAC__',open(sys.argv[9]).read()).replace('__GRIDNW__',open(sys.argv[10]).read()).replace('__GRIDID__',open(sys.argv[11]).read()).replace('__GRID__',open(sys.argv[5]).read()))" "$HERE/template.html" "$W/snap.json" "$W/taitung-surf.html" "$HERE/wotw.jpg" "$GJ" "$GC" "$GH" "$GA" "$GP" "$GN" "$GI"
 echo "built $W/taitung-surf.html"

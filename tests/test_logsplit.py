@@ -221,5 +221,40 @@ class LogSplitPhilippines(unittest.TestCase):
         self.assertEqual(d['spots']['cloud9']['hourly'], before['cloud9']['hourly'])
 
 
+class LogSplitIndonesia(unittest.TestCase):
+    # Indonesian spots have no buoy: their log holds the forecast, and Bali's airport wind where a spot has it
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.snap = os.path.join(self.tmp, 'snap.json'); shutil.copy(os.path.join(HERE, 'fixtures', 'id', 'snap_in.json'), self.snap)
+        d = json.load(open(self.snap))
+        d['spots']['uluwatu']['dwind'] = [['2026-10-18T21:00', 8.0, 140.0]]
+        d['src']['spots']['uluwatu'] = '/2026-10-18T21:00'
+        with open(self.snap, 'w') as f: json.dump(d, f)
+
+    def test_log_id_only(self):
+        run(['log.py', self.snap, self.tmp + '/log-id', 'id'])
+        rec = records(self.tmp + '/log-id')[-1]
+        self.assertEqual(sorted(rec['spots']), ['gland', 'kuta', 'lakey', 'uluwatu'])
+        u, g = rec['spots']['uluwatu'], rec['spots']['gland']
+        self.assertEqual((u['buoyId'], u['buoy'], u['station'], len(u['fc'])), (None, [], [['2026-10-18T21:00', 8.0, 140.0]], 24))
+        self.assertEqual((g['buoy'], g['station']), ([], []))
+
+    def test_other_logs_hold_no_indonesia(self):
+        for c, d, ids in (('tw', 'log', ['donghe']), ('kr', 'log-kr', ['jukdo']), ('ph', 'log-ph', ['cloud9'])):
+            run(['log.py', self.snap, self.tmp + '/' + d, c])
+            self.assertEqual(sorted(records(self.tmp + '/' + d)[-1]['spots']), ids, c)
+
+    def test_correct_and_history_id(self):
+        before = json.load(open(self.snap))['spots']
+        run(['log.py', self.snap, self.tmp + '/log-id', 'id'])
+        run(['correct.py', self.snap, self.tmp + '/log-id', 'id'])
+        run(['history.py', self.snap, self.tmp + '/log-id', self.tmp + '/cache', 'id'])
+        d = json.load(open(self.snap))
+        for k in ('donghe', 'blacks', 'jukdo', 'cloud9'): self.assertEqual(d['spots'][k], before[k])
+        self.assertEqual(sorted(json.load(open(self.tmp + '/cache/tides-id.json'))), ['gland', 'kuta', 'lakey', 'uluwatu'])
+        # with no buoy the wave heights stay as forecast
+        self.assertEqual((d['spots']['uluwatu']['adj']['f'], d['spots']['uluwatu']['adj']['days']), (1.0, 0))
+        self.assertEqual(d['spots']['uluwatu']['hourly'], before['uluwatu']['hourly'])
+
 if __name__ == '__main__':
     unittest.main()

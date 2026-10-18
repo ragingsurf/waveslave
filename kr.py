@@ -1,19 +1,21 @@
-# Sources for the countries with no open buoy feed, Korea and the Philippines, written into snap.json under the same keys
-# snap.py writes for Taiwan from CWA:
+# Sources for the countries with no open buoy feed, Korea, the Philippines and Indonesia, written into snap.json under the same
+# keys snap.py writes for Taiwan from CWA:
 #   dwind  : airport reports (METAR) from NOAA's Aviation Weather Center (aviationweather.gov) [time, kt, from deg|None], the
 #            newest report of the spot's airport; variable wind (VRB) and calm have no direction. No Philippine spot has an
-#            airport near enough
+#            airport near enough; in Indonesia only Bali's west-coast spots do
 #   wind   : a wind forecast model via Open-Meteo, 3-hourly [time, kt, from deg, 'Rain'|None, None]: JMA's MSM for Korea
-#            (Open-Meteo's KMA models answered with no data when this was built), ECMWF's IFS for the Philippines
+#            (Open-Meteo's KMA models answered with no data when this was built), ECMWF's IFS for the Philippines and Indonesia
 #   tides  : highs and lows picked from Open-Meteo's tide model (sea level, hourly), as for Australia
 #            {local date: [[local HH:MM, 'H'|'L', cm]]}
 #   sun    : computed {local date: {first, rise, set, last, phen}} in local time
-#   tz     : each spot's offset at build time (Asia/Seoul keeps UTC+9 all year, Asia/Manila UTC+8)
-#   buoy   : none: the Korea Meteorological Administration's buoy feed needs a key, and the Philippines has no open one
+#   tz     : each spot's offset at build time (Asia/Seoul keeps UTC+9 all year, Asia/Manila and Asia/Makassar UTC+8, Asia/Jakarta
+#            UTC+7)
+#   buoy   : none: the Korea Meteorological Administration's buoy feed needs a key, and the Philippines and Indonesia have no
+#            open one
 # Data times are Taipei wall clock ("YYYY-MM-DDTHH:MM", UTC+8) like the rest of snap.json, readings on the nearest hour.
 # Stale wind follows ca.py's rule (ca.WIND_STALE_HOURS). A spot's windStation may be one "metar:ICAO" or a list tried in order
 # (its stationName likewise).
-# Usage: python3 -I kr.py <dl dir> <snap.json> <spots.json> [kr|ph]   (Korea when no country is given; it reads metar-<c>.json,
+# Usage: python3 -I kr.py <dl dir> <snap.json> <spots.json> [kr|ph|id]   (Korea when no country is given; it reads metar-<c>.json,
 #        open<c>.json and tide<c>.json, and each is optional: a missing one only blanks its own fields)
 import sys, os, json, datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # python3 -I leaves this folder off the path
@@ -41,7 +43,7 @@ def metar_wind(reports, icao, now=None):
 
 
 def fill(snap, spots, dl, now, c='kr'):
-    """Fill every spot of country c (kr or ph) of snap (in place) from the downloads in dl; now (aware datetime) sets each
+    """Fill every spot of country c (kr, ph or id) of snap (in place) from the downloads in dl; now (aware datetime) sets each
     spot's offset and the cut-off for stale wind. The Open-Meteo replies list every spot of c in spots.json, in its order."""
     K = [S for S in spots if S.get('country') == c]
     def part(name, f):

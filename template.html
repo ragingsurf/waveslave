@@ -30,7 +30,9 @@ html.intro-on::after{content:"";position:fixed;inset:0;z-index:9997;background:#
   --good:#4cc78b; --fair:#e0b040; --bad:#ff7a66; color-scheme:dark}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5}
-.wrap{max-width:940px;margin:0 auto;padding-inline:16px;padding-block:20px 48px;display:grid;gap:22px}
+/* One column the page's width whatever is in it, and anything still too wide (a value drawn in a fallback font, say) is cut off at the page's
+   edge, so the page only ever scrolls up and down, never sideways. */
+.wrap{max-width:940px;margin:0 auto;padding-inline:16px;padding-block:20px 48px;display:grid;grid-template-columns:minmax(0,1fr);gap:22px;overflow-x:clip}
 .wrap>*,.two>*{min-width:0}
 h1,h2,h3{margin:0;text-wrap:balance}
 .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
@@ -155,8 +157,12 @@ svg text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
 .legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--muted);margin-top:8px}
 .legend span{display:inline-flex;align-items:center;gap:6px}.legend i{width:12px;height:4px;border-radius:2px;display:inline-block}
 .quick{display:flex;flex-wrap:wrap;gap:10px}
-.ctry{display:flex;width:max-content;gap:2px;padding:3px;margin:0 0 8px;border-radius:99px;background:var(--panel);border:1px solid var(--line)}
-.ctry button{border:0;background:none;color:var(--muted);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP",sans-serif;padding:6px 12px;border-radius:99px;cursor:pointer}
+/* The country buttons fit a phone: their side padding shrinks on narrow screens (more in Japanese, whose names are longer), and if they still
+   don't fit, the row scrolls sideways inside itself like the spot picker, so the page never slides sideways. */
+.ctry{display:flex;width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none;overscroll-behavior-x:contain;gap:2px;padding:3px;margin:0 0 8px;border-radius:99px;background:var(--panel);border:1px solid var(--line)}
+.ctry::-webkit-scrollbar{display:none}
+.ctry button{flex:none;border:0;background:none;color:var(--muted);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP",sans-serif;padding:6px clamp(5px,calc((100vw - 310px)/10),12px);border-radius:99px;cursor:pointer}
+html[lang="ja"] .ctry button{padding-inline:clamp(3px,calc((100vw - 350px)/10),12px)}
 .ctry button[aria-pressed="true"]{background:#0a0f12;color:#ffb347;text-shadow:0 0 6px rgba(255,140,0,.7)}
 .picker{display:flex;gap:8px;overflow-x:auto;padding:2px 0 4px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .picker::-webkit-scrollbar{display:none}

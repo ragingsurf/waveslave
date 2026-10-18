@@ -111,6 +111,18 @@ const CHECKS = {
     if (v.MC !== "hi") throw new Error(`view().MC is ${v.MC}, want hi`);
     if (!(Math.abs(v.cx - 202.7) < 0.01)) throw new Error(`view().cx is ${v.cx}, want 202.7 (Hawaii's home)`);
   },
+  // Back on the Forecast page the page is no wider than the phone, so it only scrolls up and down: in English, Chinese and Japanese nothing
+  // in the page column reaches past the column, and the country buttons fit, or scroll inside their own row, instead of pushing it wider.
+  async forecastFitsWidth(open) {
+    const page = await open(home("tw")); await page.evaluate(() => setView("fc", true)); await settle(page);
+    for (const l of ["en", "zh", "ja"]) {
+      await page.click(`#lang button[data-l="${l}"]`); await settle(page);
+      const r = await page.evaluate(() => { const d = document.documentElement, w = document.querySelector(".wrap"), edge = w.getBoundingClientRect().right - parseFloat(getComputedStyle(w).paddingRight);
+        return { sw: d.scrollWidth, cw: d.clientWidth, wide: [...w.children].map(e => [e.id || e.className || e.tagName, e.getBoundingClientRect().right]).filter(([, x]) => x > edge + 0.5).map(([e, x]) => `${e} ends at ${x}px, past the column's ${edge}px`) }; });
+      if (r.wide.length) throw new Error(`in ${l}, ${r.wide.join("; ")}`);
+      if (r.sw > r.cw) throw new Error(`in ${l} the page is ${r.sw}px wide on a ${r.cw}px screen`);
+    }
+  },
   // A finger dragged down the open map pans it and never pulls the page down to reload, which flashed the Forecast page on the way;
   // on the Forecast page the same drag from the top still pulls the sign past the line.
   async noPullRefreshOnMap(open) {

@@ -2,7 +2,7 @@
 <script>/* Language before first paint: the saved pick, else the browser's (zh → 中文, ja → 日本語). */try{var l=localStorage.getItem("waveslave-lang")||(/^zh/i.test(navigator.language)?"zh":/^ja/i.test(navigator.language)?"ja":"en");document.documentElement.lang=l==="zh"?"zh-Hant-TW":l==="ja"?"ja":"en";}catch(e){}</script>
 <style>/* Opening animation cover: dark from the first paint until the intro takes over; it lifts by itself after 6 s if the intro never runs. */
 html.intro-on::after{content:"";position:fixed;inset:0;z-index:9997;background:#07050f;animation:introSafe 0s 6s forwards}@keyframes introSafe{to{visibility:hidden}}</style>
-<script>/* Opening animation once per visit, never for reduced motion. */try{if(!sessionStorage.getItem("waveslave-intro")&&!matchMedia("(prefers-reduced-motion: reduce)").matches)document.documentElement.classList.add("intro-on")}catch(e){}</script>
+<script>/* Opening animation once per visit, never for reduced motion, and not behind the passcode screen (it plays after the unlock reload). */try{if(!document.documentElement.classList.contains("locked")&&!sessionStorage.getItem("waveslave-intro")&&!matchMedia("(prefers-reduced-motion: reduce)").matches)document.documentElement.classList.add("intro-on")}catch(e){}</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <style>html{background:#eef4f3}@media (prefers-color-scheme: dark){html{background:#07171d}}</style>

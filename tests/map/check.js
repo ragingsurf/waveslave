@@ -1,6 +1,6 @@
 // Browser checks and phone screenshots of a built page (build one with tests/map/tool.py).
 // Usage: node tests/map/check.js <page.html> <outdir> shots|checks [land]
-//   shots   the six home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
+//   shots   the seven home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
 //           On a page whose hook can zoom, also zoomed all the way out in each layer (out-wind, out-waves, out-swell, out-rain) and a swell across 180° (dateline).
 //   checks  prints ok / FAIL / skip for each check, and exits 1 on any FAIL or page error. Needs the page's test hook, window.__ws.
 // Every page opens in its own fresh browser context, offline (only the page itself loads, no service worker): a phone 390x844 (844x390 with land),
@@ -19,7 +19,8 @@ const NOW = Date.now();
 
 // Home views: name, spot, saved-view key, centre. Saved as {cx, cy, k: 1}, the way main and the branch both read it (California and Hawaii still negative).
 const HOMES = [["tw", "donghe", "waveslave-mapview", 120.9, 23.75], ["jp", "ichinomiya", "waveslave-mapview", 135.6, 33.4], ["ca", "trestles", "waveslave-mapview-ca", -119.5, 35.3],
-  ["hi", "pipeline", "waveslave-mapview-hi", -157.3, 20.6], ["au-e", "snapper", "waveslave-mapview-au-e", 152, -32.5], ["au-w", "margaret", "waveslave-mapview-au-w", 115.5, -32.5]];
+  ["hi", "pipeline", "waveslave-mapview-hi", -157.3, 20.6], ["au-e", "snapper", "waveslave-mapview-au-e", 152, -32.5], ["au-w", "margaret", "waveslave-mapview-au-w", 115.5, -32.5],
+  ["nw", "coxbay", "waveslave-mapview-nw", -124.7, 46.1]];
 const OLD_CA = { key: "waveslave-mapview-ca", view: { cx: -117.5, cy: 33.0, k: 2 } }; // saved before the map ran east, off California's home view and zoomed in
 const home = name => { const [, spot, key, cx, cy] = HOMES.find(h => h[0] === name); return { spot, saved: { key, view: { cx, cy, k: 1 } } }; }; // open(home("tw"))
 const MID = { key: "waveslave-mapview", view: { cx: 190, cy: 25, k: 1 } }; // Taiwan's map left in the middle of the Pacific, so zoomed out from there Hawaii is on screen
@@ -27,6 +28,8 @@ const MID = { key: "waveslave-mapview", view: { cx: 190, cy: 25, k: 1 } }; // Ta
 const OUT = [...["wind", "waves", "swell", "rain"].map(l => ["out-" + l, l, null]), ["dateline", "swell", { key: "waveslave-mapview", view: { cx: 180, cy: 35, k: 0.3 } }]];
 // Whether the page carries the Pacific grid: a page built without one has `pac: null` filled in (tool.py writes null, refresh.sh null and a newline).
 const PAC = !/\bpac: null\s*\}/.test(fs.readFileSync(file, "utf8"));
+// Whether it carries the Pacific Northwest grid (a grid is a JSON object, unlike the nw: {l: ...} boxes in the page's code).
+const NWG = /\bnw: \{"/.test(fs.readFileSync(file, "utf8"));
 
 class Skip extends Error {}
 const skip = why => { throw new Skip(why); };
@@ -59,7 +62,7 @@ const CHECKS = {
   // Every grid is made, finest first, with the Pacific layer last when the page carries it.
   async gridsLoaded(open) {
     const page = await open(home("tw")), got = JSON.stringify(await page.evaluate(() => window.__ws.grids()));
-    const want = JSON.stringify(["hi", "ca", "au", "wp", ...(PAC ? ["pac"] : [])]);
+    const want = JSON.stringify([...(NWG ? ["nw"] : []), "hi", "ca", "au", "wp", ...(PAC ? ["pac"] : [])]);
     if (got !== want) throw new Error(`grids() is ${got}, want ${want}`);
   },
   // The Taiwan home view sits inside the West Pacific grid, so its pressure lines come from that grid; zoomed out they come from the Pacific layer (none without it).
@@ -101,6 +104,22 @@ const CHECKS = {
     page = await open({ spot: "margaret" });
     const a = await page.evaluate(() => { const v = window.__ws.view(); return { z: v.z, want: Math.max(MAPM.cover(MAPM.OLDBOX.au, v.W, v.H), v.z0) }; });
     if (a.z !== a.want) throw new Error(`Margaret River opens at z ${a.z}, want ${a.want}`);
+  },
+  // Pacific NW: with nothing saved, Cox Bay opens on its old box; California then opens on its home view with the Pacific NW view kept
+  // under its own key, and coming back lands on the Pacific NW home.
+  async pacificNorthwest(open) {
+    const page = await open({ spot: "coxbay" });
+    if (!await page.evaluate(() => !!ALL.spots.coxbay)) skip("the page has no Pacific NW spots");
+    const e = await edges(page), b = await page.evaluate(() => MAPM.OLDBOX.nw), t = 0.05;
+    if (!(e.l >= b.l - 1e-9 && e.r <= b.r + 1e-9 && e.s >= b.s - 1e-9 && e.n <= b.n + 1e-9)) throw new Error(`Cox Bay opens on ${e.l}..${e.r} by ${e.s}..${e.n}, not inside the Pacific NW box`);
+    if (!((near(e.l, b.l, t) && near(e.r, b.r, t)) || (near(e.s, b.s, t) && near(e.n, b.n, t)))) throw new Error(`Cox Bay opens on ${e.l}..${e.r} by ${e.s}..${e.n}, which meets the Pacific NW box on neither axis`);
+    const v = await page.evaluate(() => window.__ws.view()); await page.evaluate(() => switchCountry("ca")); await settle(page);
+    const c = await page.evaluate(() => ({ ...window.__ws.view(), kept: JSON.parse(localStorage.getItem("waveslave-mapview-nw")) }));
+    if (c.MC !== "ca" || !near(c.cx, 240.5, 0.01)) throw new Error(`after switching to California view() is MC ${c.MC}, cx ${c.cx}, want ca, 240.5`);
+    if (!c.kept || !near(c.kept.cx, v.cx) || !near(c.kept.cy, v.cy) || !near(c.kept.k, v.z/v.z0)) throw new Error(`waveslave-mapview-nw holds ${JSON.stringify(c.kept)}, want cx ${v.cx}, cy ${v.cy}, k ${v.z/v.z0}`);
+    await page.evaluate(() => switchCountry("nw")); await settle(page);
+    const n = await page.evaluate(() => window.__ws.view());
+    if (n.MC !== "nw" || !near(n.cx, 235.3, 0.01) || n.z !== n.z0) throw new Error(`back on Pacific NW view() is MC ${n.MC}, cx ${n.cx}, z ${n.z}, want nw, 235.3, z0 ${n.z0}`);
   },
   // Changing country moves the one map to the new country's home view, with no reload.
   async noReloadCountry(open) {
@@ -207,7 +226,11 @@ const CHECKS = {
   }
   try {
     if (mode === "shots") {
-      for (const [name, spot, key, cx, cy] of HOMES) await step(name, async () => shot(await open({ spot, saved: { key, view: { cx, cy, k: 1 } }, hook: false }), name));
+      for (const [name, spot, key, cx, cy] of HOMES) await step(name, async () => {
+        const page = await open({ spot, saved: { key, view: { cx, cy, k: 1 } }, hook: false });
+        if (!await page.evaluate(s => !!ALL.spots[s], spot)) skip(`the page has no ${spot}`);  // a build from before that country
+        return await shot(page, name);
+      });
       for (const [name, layer, saved] of OUT) await step(name, async () => {
         const page = await open({ spot: "donghe", saved, hook: false });
         if (!await page.evaluate(() => !!(window.__ws && window.__ws.zoom))) skip("the page's hook can't zoom");

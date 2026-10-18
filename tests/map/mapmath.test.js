@@ -193,7 +193,7 @@ test("cover", () => {
   const M = load();
   assert.deepEqual(M.PBOX, {l: 100, r: 250, s: -50, n: 60});
   const wp = {l: 100, r: 160, s: 0, n: 45};
-  assert.deepEqual(M.OLDBOX, {tw: wp, jp: wp, ca: {l: 232, r: 244, s: 30, n: 42}, hi: {l: 198, r: 208, s: 15, n: 26}, au: {l: 110, r: 156, s: -44, n: -20}});
+  assert.deepEqual(M.OLDBOX, {tw: wp, jp: wp, ca: {l: 232, r: 244, s: 30, n: 42}, hi: {l: 198, r: 208, s: 15, n: 26}, au: {l: 110, r: 156, s: -44, n: -20}, nw: {l: 231, r: 238, s: 42, n: 50}});
   // Upright the Pacific box fills the screen top to bottom, sideways side to side.
   near(M.cover(M.PBOX, 390, 844), 844/(M.my(60) - M.my(-50)));
   near(M.cover(M.PBOX, 390, 844), 6.328, 1e-3);

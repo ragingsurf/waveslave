@@ -67,7 +67,7 @@
 
 **Files:** `template.html`, `tests/map/tool.py`, `tests/map/check.js`.
 
-- Sixth button `nw`; `OLDBOX.nw {l: 231, r: 238, s: 42.5, n: 50}`; `HOMES.nw {cx: 235.3, cy: 46.2, span: 7.5}`; `RAW.nw`/`GRIDS` with `nw` first (finest); view key `-nw`.
+- Sixth button `nw`; `OLDBOX.nw {l: 231, r: 238, s: 42, n: 50}`; `HOMES.nw {cx: 235.3, cy: 46.1, span: 8.2}` (Bastendorff clear of the time bar, Cox Bay of the layer buttons); `RAW.nw`/`GRIDS` with `nw` first (finest); view key `-nw`.
 - Storm panel hidden; legend "Offshore wind (NOAA HRRR forecast)"; buoy label NOAA, or Environment Canada for `buoyBy: "eccc"`; "Back to Pacific NW"; home outline `HOME_ICONS.nw`; footer.
 - A buoy row with no direction shows "–" in the Right now card and the table.
 - tool.py and check.js learn the `nw` grid and home view.

@@ -134,7 +134,7 @@ const CHECKS = {
     if (!(Math.abs(v.cx - 202.7) < 0.01)) throw new Error(`view().cx is ${v.cx}, want 202.7 (Hawaii's home)`);
   },
   // The map has a button for every country in the switch above the spot picker, in the same order, the current one pressed: the country's
-  // outline (the home button's drawing of it) with no words, its name read out and shown on hover.
+  // outline with no words, its name read out and shown on hover, and no other button on the map draws that outline again.
   // Tapping one moves the page to that country without leaving the map or reloading, closes the forecast card left open in the old one,
   // and the map goes to its home view (straight there, with reduced motion); tapping the pressed one when zoomed out brings the map back there.
   async mapCountryButtons(open) {
@@ -143,10 +143,10 @@ const CHECKS = {
     const r = await page.evaluate(() => ({ want: [...document.querySelectorAll("#ctry button")].map(b => b.dataset.c).join(), got: [...document.querySelectorAll("#wsCtry button")].map(b => b.dataset.c).join(),
       unlike: [...document.querySelectorAll("#wsCtry button")].filter(b => { const p = b.querySelector("svg path"), name = document.querySelector(`#ctry button[data-c="${b.dataset.c}"]`).textContent;
         return !p || !p.getAttribute("d") || p.getAttribute("d") !== HOME_ICONS[b.dataset.c] || b.textContent.trim() || b.getAttribute("aria-label") !== name || b.title !== name; }).map(b => b.dataset.c).join(", "),
-      twIcon: HOME_ICONS.tw === document.querySelector("#wsHome path").getAttribute("d") }));
+      twice: Object.keys(HOME_ICONS).filter(c => [...document.querySelectorAll("#viewWs svg path")].filter(p => p.getAttribute("d") === HOME_ICONS[c]).length > 1).join(", ") }));
     if (r.got !== r.want) throw new Error(`the map's country buttons are ${r.got || "missing"}, want ${r.want}`);
     if (r.unlike) throw new Error(`not the country's outline, named for it and with no words: ${r.unlike}`);
-    if (!r.twIcon) throw new Error("Taiwan's outline is not the home button's drawing of it");
+    if (r.twice) throw new Error(`the map draws these outlines more than once: ${r.twice}`);
     if (await pressed() !== "tw") throw new Error(`the pressed country button is ${await pressed() || "none"}, want tw`);
     await tapAt(page, await page.evaluate(() => { const s = ALL.spots.donghe; return window.__ws.px(MAPM.E(s.lon), s.lat); }));
     if (await page.evaluate(() => document.getElementById("wsSheet").hidden)) throw new Error("tapping Donghe did not open its forecast card");
@@ -272,15 +272,15 @@ const CHECKS = {
     if (r.cur !== "pipeline") throw new Error(`CUR is ${r.cur}, want pipeline`);
     if (r.shut) throw new Error("#wsSheet is hidden: Pipeline's table did not open");
   },
-  // From the Taiwan home view the home button goes all the way out with Taiwan still on screen (the view a pinch out ends on), and a second tap
-  // comes back (straight there, with reduced motion).
-  async homeButton(open) {
+  // The lit country does what the home button did: from the Taiwan home view one tap goes all the way out with Taiwan still on screen
+  // (the view a pinch out ends on), and a second tap comes back (straight there, with reduced motion).
+  async litCountryHome(open) {
     const page = await open(home("tw"));
-    await page.click("#wsHome");
+    await page.click('#wsCtry button[aria-pressed="true"]');
     const a = await page.evaluate(() => { const v = window.__ws.view(); return { ...v, want: MAPM.clampTo(MAPM.PBOX, v.W, v.H, v.zmin, 120.9, 23.75), at: window.__ws.px(120.9, 23.75) }; });
     if (a.z !== a.zmin || !near(a.cx, a.want[0], 1e-6) || !near(a.cy, a.want[1], 1e-6)) throw new Error(`after one tap the view is cx ${a.cx}, cy ${a.cy}, z ${a.z}, want cx ${a.want[0]}, cy ${a.want[1]}, zmin ${a.zmin}`);
     if (!(a.at[0] >= 0 && a.at[0] <= a.W && a.at[1] >= 0 && a.at[1] <= a.H)) throw new Error(`after one tap Taiwan is off screen, at ${a.at}`);
-    await page.click("#wsHome"); const b = await page.evaluate(() => window.__ws.view());
+    await page.click('#wsCtry button[aria-pressed="true"]'); const b = await page.evaluate(() => window.__ws.view());
     if (b.z !== b.z0 || !near(b.cx, 120.9, 1e-6)) throw new Error(`after two taps z is ${b.z} and cx ${b.cx}, want z0 ${b.z0} and 120.9`);
   },
   // A pin dropped east of 180° asks Open-Meteo for a longitude in -180..180: 200°E goes out as -160.

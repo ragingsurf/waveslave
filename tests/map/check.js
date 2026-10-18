@@ -37,6 +37,11 @@ const zoomOut = async page => { await page.evaluate(() => window.__ws.zoom(1e-6)
 const edges = page => page.evaluate(() => { const { ll, view } = window.__ws, { W, H } = view(), [l, n] = ll(0, 0), [r, s] = ll(W, H); return { l, r, s, n }; });
 // A click on the map at a point's px (pixels in #wsFx), the way a tap lands.
 const tapAt = async (page, [x, y]) => { const b = await page.locator("#wsFx").boundingBox(); await page.mouse.click(b.x + x, b.y + y); };
+// One finger dragged straight down from a point on the screen by dy pixels, in twelve moves a frame apart the way a phone sends them; lift = false leaves the finger down.
+const dragDown = async (page, [x, y], dy, lift = true) => { const s = await page.context().newCDPSession(page);
+  await s.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+  for (let i = 1; i <= 12; i++) { await s.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y + dy*i/12 }] }); await page.waitForTimeout(16); }
+  if (lift) await s.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }); };
 
 const CHECKS = {
   // A California view saved with a negative centre opens where it was left, upright and sideways: -117.5 at twice the home zoom is 242.5 at 2·z0
@@ -102,6 +107,18 @@ const CHECKS = {
     if (v.mark !== 1) throw new Error("the page reloaded (window.__mark is gone)");
     if (v.MC !== "hi") throw new Error(`view().MC is ${v.MC}, want hi`);
     if (!(Math.abs(v.cx - 202.7) < 0.01)) throw new Error(`view().cx is ${v.cx}, want 202.7 (Hawaii's home)`);
+  },
+  // A finger dragged down the open map pans it and never pulls the page down to reload, which flashed the Forecast page on the way;
+  // on the Forecast page the same drag from the top still pulls the sign past the line.
+  async noPullRefreshOnMap(open) {
+    const page = await open(home("tw")), b = await page.locator("#wsFx").boundingBox(); await page.evaluate(() => { window.__mark = 1; });
+    await dragDown(page, [b.x + b.width/2, b.y + b.height/4], b.height/2); await page.waitForTimeout(1200);
+    const r = await page.evaluate(() => ({ mark: window.__mark, sign: document.querySelector(".ptr").textContent })).catch(e => ({ err: String(e) }));
+    if (r.mark !== 1) throw new Error(`the drag reloaded the page (window.__mark is gone${r.sign ? ", the sign says " + r.sign : ""})`);
+    await page.evaluate(() => setView("fc", true)); await settle(page);
+    await dragDown(page, [b.x + b.width/2, 150], 216, false); await settle(page);
+    const sign = await page.evaluate(() => document.querySelector(".ptr").textContent);
+    if (sign !== "LET GO ▲") throw new Error(`on the Forecast page the drag leaves the sign saying ${sign}, want LET GO ▲`);
   },
   // With the map open, changing country keeps the view being left under its own key, as the reload between countries used to.
   async countryKeepsView(open) {

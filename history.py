@@ -19,8 +19,9 @@ for f in sorted(glob.glob(os.path.join(logdir, '20*.jsonl.gz'))):
                 try: r = json.loads(line)
                 except ValueError: continue
                 for k, s in r.get('spots', {}).items():
+                    main = (d['spots'].get(k) or {}).get('buoyMain')  # a spot with backup buoys keeps its main one's past readings only
                     for b in s.get('buoy') or []:
-                        if b and b[1] is not None: buoy.setdefault(k, {})[b[0][:16]] = b[:4]
+                        if b and b[1] is not None and (not main or s.get('buoyId') == main): buoy.setdefault(k, {})[b[0][:16]] = b[:4]
                     for w in s.get('station') or []:
                         if w and w[1] is not None: station.setdefault(k, {})[w[0][:16]] = w[:3]
     except (OSError, EOFError): pass  # a cut-off gzip still gave its earlier lines

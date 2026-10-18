@@ -115,7 +115,8 @@ const CHECKS = {
     if (!((near(e.l, b.l, t) && near(e.r, b.r, t)) || (near(e.s, b.s, t) && near(e.n, b.n, t)))) throw new Error(`Cox Bay opens on ${e.l}..${e.r} by ${e.s}..${e.n}, which meets the Pacific NW box on neither axis`);
     const v = await page.evaluate(() => window.__ws.view()); await page.evaluate(() => switchCountry("ca")); await settle(page);
     const c = await page.evaluate(() => ({ ...window.__ws.view(), kept: JSON.parse(localStorage.getItem("waveslave-mapview-nw")) }));
-    if (c.MC !== "ca" || !near(c.cx, 240.5, 0.01)) throw new Error(`after switching to California view() is MC ${c.MC}, cx ${c.cx}, want ca, 240.5`);
+    const caCx = land ? 238.07 : 240.5;  // sideways California's home is pulled west to keep the view inside the Pacific box
+    if (c.MC !== "ca" || !near(c.cx, caCx, 0.01)) throw new Error(`after switching to California view() is MC ${c.MC}, cx ${c.cx}, want ca, ${caCx}`);
     if (!c.kept || !near(c.kept.cx, v.cx) || !near(c.kept.cy, v.cy) || !near(c.kept.k, v.z/v.z0)) throw new Error(`waveslave-mapview-nw holds ${JSON.stringify(c.kept)}, want cx ${v.cx}, cy ${v.cy}, k ${v.z/v.z0}`);
     await page.evaluate(() => switchCountry("nw")); await settle(page);
     const n = await page.evaluate(() => window.__ws.view());

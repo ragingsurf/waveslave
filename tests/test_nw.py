@@ -28,7 +28,11 @@ class Spots(unittest.TestCase):
             self.assertRegex(s['tideStation'], r'^(\d{7}|chs:\d{5})$')
             self.assertTrue(43 < s['lat'] < 49.5 and -126 < s['lon'] < -123.5)
             bc = s['zone'] == 'America/Vancouver'
-            self.assertEqual(s.get('buoyBy'), 'eccc' if bc else None, s['id'])
+            # who runs each buoy when it isn't NOAA: one value for all of a spot's buoys, or a list that follows them
+            by = s.get('buoyBy'); by = by if isinstance(by, list) else [by] * n
+            self.assertEqual(len(by), n, s['id'])
+            self.assertTrue(set(by) <= {'eccc', 'cdip', None}, s['id'])
+            self.assertEqual(all(x == 'eccc' for x in by), bc, s['id'])
             self.assertEqual(s['tideStation'].startswith('chs:'), bc, s['id'])
         for c in ('tw', 'jp', 'ca', 'hi', 'au'): self.assertEqual(sum(s.get('country', 'tw') == c for s in SPOTS), 8)
 
@@ -44,12 +48,25 @@ class Readers(unittest.TestCase):
         self.now = datetime.datetime(2026, 10, 18, 2, 30, tzinfo=datetime.timezone.utc)
 
     def test_canadian_buoy_peak_period(self):
-        # Environment Canada buoys send height and peak period only: the period is stored as peak / 1.3 (the page shows
-        # average period x 1.3), and the direction stays empty rather than 0
+        # Environment Canada buoys send height and peak period only: the period is stored as peak / 1.3 rounded up to 0.01 s (the page
+        # shows average period x 1.3, so the 9 s peak comes back as 9.0), and the direction stays empty rather than 0
         import ca
-        r = ca.ndbc_rows(FIX('ndbc-46206.txt'), now=self.now)
-        self.assertEqual(r[-1], ['2026-10-18T09:00', 2.7, 6.9, None, 11.3])
+        r = ca.ndbc_rows(FIX('ndbc-46206.txt'), now=self.now, peak=True)
+        self.assertEqual(r[-1], ['2026-10-18T09:00', 2.7, 6.93, None, 11.3])
         self.assertEqual(len(r), 24)
+
+    def test_peak_period_round_trip(self):
+        # every whole or tenth-of-a-second peak comes back exactly on the page (stored x 1.3, to 0.1 s), and never below itself
+        import ca
+        for p in [x / 10 for x in range(30, 251)]:
+            st = ca._period({'APD': 'MM', 'DPD': str(p)}, peak=True)
+            self.assertEqual(round(st * ca.PEAK * 10) / 10, p, p)
+            self.assertGreaterEqual(st * ca.PEAK, p - 1e-9, p)
+
+    def test_peak_period_only_when_asked(self):
+        # a NOAA or CDIP buoy (California, Hawaii) that leaves out its average period keeps no period, as on main
+        import ca
+        self.assertEqual(ca.ndbc_rows(FIX('ndbc-46206.txt'), now=self.now)[-1], ['2026-10-18T09:00', 2.7, None, None, 11.3])
 
     def test_average_period_kept(self):
         # a buoy with an average period keeps it, peak period or not
@@ -125,7 +142,19 @@ class Fill(unittest.TestCase):
         self.assertEqual(s['buoy'][-1], ['2026-10-18T09:00', 2.5, 7.3, 281.0, 14.6])
         self.assertEqual((s['dwind'], s['stationName']), ([['2026-10-18T10:00', 10.0, 330]], 'Astoria Airport'))
         self.assertIn(['02:49', 'H', 220], s['tides']['2026-10-12'])
-        self.assertNotIn('buoyBy', s)
+        self.assertNotIn('buoyBy', s)                  # NOAA's own buoy
+        self.assertEqual(s['buoyMain'], '46243')        # the past days and corrections still follow Clatsop Spit
+        self.assertNotIn('buoyMain', self.snap['spots']['coxbay'])
+
+    def test_cdip_buoy_named(self):
+        # Clatsop Spit answering: it is CDIP's, as the label says
+        import ca, tempfile, shutil
+        tmp = tempfile.mkdtemp(); shutil.copytree(FIXDIR, tmp, dirs_exist_ok=True)
+        shutil.copy(os.path.join(FIXDIR, 'ndbc-46029.txt'), os.path.join(tmp, 'ndbc-46243.txt'))
+        ca.fill(self.snap, SPOTS, tmp, self.now, 'nw')
+        s = self.snap['spots']['seaside']
+        self.assertEqual((s['buoyId'], s['buoyName'], s['buoyBy'], s['buoyMain']), ('46243', 'Clatsop Spit', 'cdip', '46243'))
+        self.assertEqual(s['buoy'][-1], ['2026-10-18T09:00', 2.5, 7.3, 281.0, 14.6])
 
     def test_far_buoy_and_shore_wind(self):
         import ca

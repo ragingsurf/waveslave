@@ -43,8 +43,9 @@ for f in sorted(glob.glob(os.path.join(logdir, '20*.jsonl*'))):
 obs, stn = {}, {}  # spot -> {Taipei hour: buoy height / station kt}
 for r in runs:
     for k, s in r['spots'].items():
+        main = (d['spots'].get(k) or {}).get('buoyMain')  # a spot with backup buoys learns from its main one only: the others sit elsewhere
         for b in s.get('buoy') or []:
-            if b and b[1] is not None: obs.setdefault(k, {})[b[0][:16]] = b[1]
+            if b and b[1] is not None and (not main or s.get('buoyId') == main): obs.setdefault(k, {})[b[0][:16]] = b[1]
         for w in s.get('station') or []:
             if w and w[1] is not None: stn.setdefault(k, {})[w[0][:16]] = w[1]
 

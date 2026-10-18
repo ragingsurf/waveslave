@@ -134,6 +134,24 @@ class LogSplitPacificNorthwest(unittest.TestCase):
         self.assertEqual(d['spots']['blacks'], before)
         self.assertEqual(sorted(json.load(open(self.tmp + '/cache/tides-nw.json'))), ['coxbay', 'lapush', 'seaside'])
 
+    def test_backup_buoy_left_out_of_past_days_and_corrections(self):
+        # Seaside's readings from its backup buoy (Columbia River Bar, while Clatsop Spit was silent) go into the log, but its past days
+        # and its corrections use its main buoy's readings only
+        import datetime
+        day = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)).date()
+        yday, today = (day - datetime.timedelta(days=1)).isoformat(), day.isoformat()
+        d = json.load(open(self.snap)); s = d['spots']['seaside']
+        for bid, row in (('46029', [yday + 'T08:00', 3.1, 7.3, 281.0, 14.6]), ('46243', [today + 'T08:00', 2.0, 7.2, 280.0, 13.9])):
+            s.update(buoyId=bid, buoyMain='46243', buoy=[row]); d['src']['spots']['seaside'] = row[0] + '/'
+            with open(self.snap, 'w') as f: json.dump(d, f)
+            run(['log.py', self.snap, self.tmp + '/log-nw', 'nw'])
+        self.assertEqual([r['spots']['seaside']['buoyId'] for r in records(self.tmp + '/log-nw')], ['46029', '46243'])
+        run(['history.py', self.snap, self.tmp + '/log-nw', self.tmp + '/cache', 'nw'])
+        run(['correct.py', self.snap, self.tmp + '/log-nw', 'nw'])
+        s = json.load(open(self.snap))['spots']['seaside']
+        self.assertEqual([b[0] for b in s['hist']['buoy']], [today + 'T08:00'])
+        self.assertEqual(s['adj']['days'], 1)
+
 
 if __name__ == '__main__':
     unittest.main()

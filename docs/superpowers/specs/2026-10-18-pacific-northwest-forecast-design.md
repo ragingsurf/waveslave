@@ -46,7 +46,7 @@ wind.
 
 | What | Source | How |
 |---|---|---|
-| Wave height, period, direction, water temp | NOAA NDBC real-time files (NDBC, CDIP and Environment Canada buoys) | `ndbc.noaa.gov/data/realtime2/<id>.txt`, as for California. The Canadian buoys send height and peak period only (no average period, no direction), so their period is the peak period ÷ 1.3, which the page's ×1.3 turns back into the peak period. Their direction stays empty and the page shows a dash, not "N". |
+| Wave height, period, direction, water temp | NOAA NDBC real-time files (NDBC, CDIP and Environment Canada buoys) | `ndbc.noaa.gov/data/realtime2/<id>.txt`, as for California. The Canadian buoys send height and peak period only (no average period, no direction), so their period is the peak period ÷ 1.3 (rounded up to 0.01 s), which the page's ×1.3 turns back into the peak period. Their direction stays empty and the page shows a dash, not "N". |
 | Wind now (US) | NDBC shore stations and NWS airport stations | as for California |
 | Wind now (BC) | Environment and Climate Change Canada's real-time station feed (`api.weather.gc.ca`, collection `swob-realtime`) | the newest report from the last 3 hours, 10-minute average wind in km/h. The Tofino airport station is NAV CANADA's, whose reports ECCC passes on marked "All rights reserved"; the La Perouse Bank buoy (ECCC, open) is the backup. |
 | Wind forecast | Open-Meteo `models=gfs_seamless` (NOAA HRRR then GFS), one call for all 8 spots | as for California; answered for every spot on 2026-10-18 |
@@ -70,24 +70,30 @@ for Australia. The build needs tz data 2026b or newer (Ubuntu 24.04's current tz
 
 1. **spots.json**: 8 spots with `country: "nw"`, `zone`, `ndbc` (list), `buoyKm` and `buoyName` (lists matching `ndbc`),
    `windStation` (list of `ndbc:`, `nws:` or `eccc:<station>`), `stationName` (list), `tideStation` (NOAA id or
-   `chs:<code>`), names in zh and ja. BC spots also carry `buoyBy: "eccc"` for the buoy label.
+   `chs:<code>`), names in zh and ja. `buoyBy` (one value, or a list matching `ndbc`) names a buoy run by Environment Canada
+   (`eccc`) or CDIP (`cdip`) for the buoy label; only Environment Canada's take their peak period, so California and Hawaii
+   come out as before.
 2. **ca.py** reads `nw` too:
    - a spot's own `zone`, else the country's;
    - `buoyName` and `buoyKm` lists follow the buoy that answered, as `stationName` already follows the wind station;
    - peak period when a buoy has no average period;
-   - `eccc:` wind from the ECCC feed, and `chs:` tides from the CHS API.
+   - `eccc:` wind from the ECCC feed, and `chs:` tides from the CHS API;
+   - `buoyMain` (the first buoy) on a spot with backups: correct.py and history.py read only that buoy's logged readings, so a
+     backup's readings (logged as usual) don't skew the corrections or the past days.
 3. **refresh.sh**: `nw` joins the NOAA loop after Hawaii, with the ECCC and CHS fetches added to it (every fetch
    optional). `regrid nw`, a `__GRIDNW__` placeholder, and history, log and correct runs with `nw` on `log-nw/`.
 4. **Workflow**: `log-nw` joins the list of log folders restored from the data branch, so a lost cache can't drop its
    days. The cache path list already takes in any `log-*` folder by itself.
 5. **template.html**: the sixth button, the map home and first-open box, the grid, buoy labels (Environment Canada for
-   BC), the HRRR legend, a Pacific NW home-button outline (Oregon, Washington and Vancouver Island), the footer, and a
-   dash instead of "N" for a buoy with no wave direction.
+   BC, CDIP where it applies), the HRRR legend, a Pacific NW home-button outline (Oregon, Washington and Vancouver Island),
+   the footer, and a dash instead of "N" for a buoy with no wave direction (or no period). A station wind under half a knot
+   reads "Calm", and one with no direction gets no offshore or onshore call. The country row scrolls to the current country
+   and fades at an edge that hides buttons.
 
 ## Error handling
 
 - Any source down: that spot keeps its forecast without the missing piece; the build never fails on it and the other
-  countries are untouched.
+  countries are untouched. The Canadian fetches get one quick retry (30 s each), so a slow server can't hold up the run.
 - `MM` values are dropped, never logged as zero. A buoy silent for 6 hours counts as not reporting; a wind reading over
   3 hours old is skipped, as for California and Hawaii.
 

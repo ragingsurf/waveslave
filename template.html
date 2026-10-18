@@ -494,6 +494,9 @@ function switchSpot(id){ if(!ALL.spots[id] || id===CUR) return; const other = sp
   boot(id); if(other || spotCountry(id)==="au"){ WS.home(spotCountry(id)); if(other) WS.relang(); } WS.redraw(); }
 // The country row's faded edges: more-l / more-r while buttons are hidden that way.
 function ctryEdges(){ const r = document.getElementById("ctry"); r.classList.toggle("more-l", r.scrollLeft > 1); r.classList.toggle("more-r", r.scrollLeft + r.clientWidth < r.scrollWidth - 1); }
+// When the row scrolls, the current country's button sits clear of the 32 px fades (or right at an end of the row, where there is no fade).
+function ctryShow(){ const row = document.getElementById("ctry"), cb = row.querySelector('button[aria-pressed="true"]'), r = row.getBoundingClientRect(), d = cb && cb.getBoundingClientRect(), m = 36;
+  if (d && r.width) row.scrollLeft += d.right > r.right - m ? d.right - r.right + m : d.left < r.left + m ? d.left - r.left - m : 0; ctryEdges(); }
 // Country switch: back to the spot last open in that country, else its first spot.
 function switchCountry(c){ if(c===spotCountry(CUR)) return; let id; try{ id=localStorage.getItem("waveslave-spot-"+c); }catch(e){}
   switchSpot(ALL.spots[id] && spotCountry(id)===c ? id : countrySpots(c)[0]); }
@@ -1378,10 +1381,11 @@ function score(h,p,w,off=DATA.off){
   // Rain usually knocks the wind down, so rainy hours score the wind at half strength.
   // Offshore wind of 3-19 kt scores +3 (Bryan, Oct 13), so a clean offshore Good day reads as Firing.
   // Only near-calm wind (under 3 kt) counts as glassy from any direction; 3 kt+ onshore or cross-shore already hurts (Bryan, Oct 14).
-  if(w){ const k=windKind(w.from,off), kt=w.sky==="Rain"?w.kt/2:w.kt; if(k==="off" && kt>=3) s+= kt<20?3:1; else if(kt<3) s+=2; else if(k==="cross") s+= kt<10?0:-1; else s+= kt<10?-1:-2; }
+  // A station that sent no direction: near-calm still counts as glassy, a stronger wind neither helps nor hurts.
+  if(w){ const k=w.from==null?null:windKind(w.from,off), kt=w.sky==="Rain"?w.kt/2:w.kt; if(k==="off" && kt>=3) s+= kt<20?3:1; else if(kt<3) s+=2; else if(k==="cross") s+= kt<10?0:-1; else if(k) s+= kt<10?-1:-2; }
   s=Math.max(0,Math.min(8,s));
   // Firing needs an offshore wind (3 kt+; Bryan lowered it from 10 kt on Oct 13); anything else tops out at Good.
-  return s>=7 && !(w && windKind(w.from,off)==="off" && (w.sky==="Rain"?w.kt/2:w.kt)>=3) ? 6 : s;
+  return s>=7 && !(w && w.from!=null && windKind(w.from,off)==="off" && (w.sky==="Rain"?w.kt/2:w.kt)>=3) ? 6 : s;
 }
 const RATE = [["Flat","var(--muted)"],["Poor","var(--bad)"],["Fair","var(--fair)"],["Good","var(--good)"],["Firing","var(--buoy)"]].map(([n,c]) => [T(n),c]);
 const rate = s => s<=1?0 : s<=3?1 : s<=5?2 : s<=6?3 : 4;
@@ -1417,18 +1421,19 @@ const updated = Date.parse(DATA.updated);
     document.getElementById("nowRating").innerHTML = ""; document.getElementById("nowBoard").hidden = true; }
   else {
   document.getElementById("nowH1").innerHTML = r1(b[1])+"<small>m</small>";
-  // Environment Canada's buoys send no wave direction: no "from" or arrow, and the rating takes the forecast's direction for that hour.
-  const nd = b[3]==null, bdir = nd ? (hourByT.get(bt)||{}).dir : b[3];
+  // Environment Canada's buoys send no wave direction, and a reading can leave out its period: neither is made up (no "from" or arrow,
+  // a dash for the period), and the rating takes the forecast's value for that hour instead.
+  const fh = hourByT.get(bt) || {}, nd = b[3]==null, bdir = nd ? fh.dir : b[3], bp = b[2]!=null ? b[2]*BUOY_P : fh.p || 0, per = b[2]!=null ? `${r1(bp)} s` : "–";
   const arw = nd ? "" : ` <span class="dir" style="transform:rotate(${b[3]+180}deg)">↑</span>`;
-  document.getElementById("nowSub").innerHTML = isZh() ? `週期 <b class="mono">${r1(b[2]*BUOY_P)} s</b>${nd ? "" : `，浪來自<b>${compass(b[3])}</b>`}${arw} · ${hhmm(bt)} 測得`
-    : isJa() ? `周期 <b class="mono">${r1(b[2]*BUOY_P)} s</b>${nd ? "" : `、<b>${compass(b[3])}</b>からの波`}${arw} · ${hhmm(bt)} 観測`
-    : `<b class="mono">${r1(b[2]*BUOY_P)} s</b> period${nd ? "" : `, waves from the <b>${compass(b[3])}</b>`}${arw} · read at ${hhmm(bt)}`;
-  const r = rate(score(b[1]*exposure(bdir), b[2]*BUOY_P, w));
+  document.getElementById("nowSub").innerHTML = isZh() ? `週期 <b class="mono">${per}</b>${nd ? "" : `，浪來自<b>${compass(b[3])}</b>`}${arw} · ${hhmm(bt)} 測得`
+    : isJa() ? `周期 <b class="mono">${per}</b>${nd ? "" : `、<b>${compass(b[3])}</b>からの波`}${arw} · ${hhmm(bt)} 観測`
+    : `<b class="mono">${per}</b> period${nd ? "" : `, waves from the <b>${compass(b[3])}</b>`}${arw} · read at ${hhmm(bt)}`;
+  const r = rate(score(b[1]*exposure(bdir), bp, w));
   const v = document.getElementById("nowRating"); v.style.setProperty("--rc", RATE[r][1]);
   v.innerHTML = `<span class="dots">${[0,1,2,3,4].map(i=>`<i class="${i<=r?"on":""}"></i>`).join("")}</span>${RATE[r][0]}`;
   // Board pick from the same reading: under 0.7 m longboard, 0.7–1.2 m mid-length, over 1.2 m shortboard;
   // weak short-period waves (under 7 s) move it one board bigger. Height counts only the swell that reaches the spot.
-  const bh = b[1]*exposure(bdir), bp = b[2]*BUOY_P, bk = Math.max(0, (bh<0.7?0 : bh<1.2?1 : 2) - (bp<7?1:0));
+  const bh = b[1]*exposure(bdir), bk = Math.max(0, (bh<0.7?0 : bh<1.2?1 : 2) - (bp<7?1:0));
   const bd = document.getElementById("nowBoard"); bd.hidden = false;
   bd.innerHTML = `<svg viewBox="0 0 10 30" aria-hidden="true"><path d="M5 0C9 7 9.5 20 7.5 30h-5C.5 20 1 7 5 0z" fill="currentColor"/></svg>`
     + (isZh() ? ["長板浪","中長板浪","短板浪"] : isJa() ? ["ロングボード向き","ミッドレングス向き","ショートボード向き"] : ["Longboard day","Mid-length day","Shortboard day"])[bk];
@@ -1436,10 +1441,11 @@ const updated = Date.parse(DATA.updated);
     : isJa() ? "ブイの波高と周期から：0.7 m 未満はロング、0.7–1.2 m はミッドレングス、1.2 m 以上はショート。周期 7 秒未満なら一つ大きめの板。"
     : "From the buoy height and period: under 0.7 m longboard, 0.7–1.2 m mid-length, over 1.2 m shortboard; one board bigger when the period is under 7 s."; }
   const t = tideAt(nowMs) || tideAt(bt);
-  // A station that sends no wind direction (most often when calm) gets no offshore/onshore call and no "from".
-  const k = w ? (w.from!=null ? KIND[windKind(w.from)] : w.kt<1 ? [isZh() ? "無風" : isJa() ? "無風" : "Calm", "var(--good)"] : [isZh() ? "風向不明" : isJa() ? "風向不明" : "Wind", "var(--muted)"]) : null;
+  // Under half a knot is calm, whatever direction comes with it; a station that sends no direction gets no offshore/onshore call. Neither shows a "from".
+  const calm = w && Math.round(w.kt)===0, bare = calm || w && w.from==null;
+  const k = w ? (calm ? [isZh() ? "無風" : isJa() ? "無風" : "Calm", "var(--good)"] : w.from==null ? [isZh() ? "風向不明" : isJa() ? "風向不明" : "Direction unknown", "var(--muted)"] : KIND[windKind(w.from)]) : null;
   const facts = [
-    w ? [`<span style="color:${k[1]}">${Math.round(w.kt)} kt</span>`, isZh() ? `${w.from!=null ? compass(w.from) : ""}${k[0]} · ${SPT(DATA,"stationName")}測站 ${hhmm(tp(dw[0]))}` : isJa() ? `${w.from!=null ? compass(w.from)+"の" : ""}${k[0]} · ${SPT(DATA,"stationName")}観測所 ${hhmm(tp(dw[0]))}` : `${k[0]}${w.from!=null ? " from "+compass(w.from) : ""} · ${DATA.stationName} station ${hhmm(tp(dw[0]))}`] : null,
+    w ? [`<span style="color:${k[1]}">${Math.round(w.kt)} kt</span>`, isZh() ? `${bare ? "" : compass(w.from)}${k[0]} · ${SPT(DATA,"stationName")}測站 ${hhmm(tp(dw[0]))}` : isJa() ? `${bare ? "" : compass(w.from)+"の"}${k[0]} · ${SPT(DATA,"stationName")}観測所 ${hhmm(tp(dw[0]))}` : `${k[0]}${bare ? "" : " from "+compass(w.from)} · ${DATA.stationName} station ${hhmm(tp(dw[0]))}`] : null,
     t ? [`${Math.round(t.cm)} cm`, (DATA.country==="au" ? (isZh() ? "模式潮汐 · " : isJa() ? "モデル潮汐 · " : "Model tide · ") : "") + (isZh() ? `${t.rising?"漲潮中":"退潮中"} · ${hhmm(t.next.t)} ${t.next.type==="H"?"滿潮":"乾潮"}` : isJa() ? `${t.rising?"上げ潮":"下げ潮"} · ${hhmm(t.next.t)} ${t.next.type==="H"?"満潮":"干潮"}` : `Tide ${t.rising?"rising":"falling"} · ${t.next.type==="H"?"high":"low"} at ${hhmm(t.next.t)}`)] : null,
     b && b[4]!=null ? [`${r1(b[4])}°C`, (k => isZh() ? "水溫 · "+["穿海灘褲就好","短袖防寒衣","3/2 防寒衣","4/3 防寒衣","5/4 防寒衣加頭套"][k] : isJa() ? "水温 · "+["サーフパンツでOK","スプリング","3/2 フルスーツ","4/3 フルスーツ","5/4 フルスーツとフード"][k]
       : "Water · "+["boardshorts","springsuit","3/2 wetsuit","4/3 wetsuit","5/4 wetsuit and hood"][k])(DATA.country==="tw" ? 0 : [24,20,16,12,-99].findIndex(c => b[4]>=c))] : null,
@@ -1451,7 +1457,7 @@ const updated = Date.parse(DATA.updated);
 
 // ---- past 12 hours (spot's buoy)
 (() => {
-  const all = DATA.buoy.map(r=>({t:tp(r[0]), h:r[1], p:r[2]*BUOY_P, dir:r[3], sst:r[4]}));
+  const all = DATA.buoy.map(r=>({t:tp(r[0]), h:r[1], p:r[2]!=null?r[2]*BUOY_P:null, dir:r[3], sst:r[4]})), ps = r => r.p!=null ? r1(r.p)+" s" : "–";
   if(!all.length){ document.getElementById("pastSum").textContent = isZh() ? "附近沒有浪況浮標" : isJa() ? "近くに波浪ブイがありません" : "No nearby wave buoy";
     document.getElementById("pastChart").innerHTML = ""; document.getElementById("pastTbl").innerHTML = ""; return; }
   const end = all[all.length-1].t, rows = all.filter(r=>r.t>end-12*3600e3);
@@ -1465,11 +1471,11 @@ const updated = Date.parse(DATA.updated);
   let s="";
   for(let h=0;h<=hMax;h+=0.5){ s+=`<line x1="${pl}" x2="${W-pr}" y1="${y(h)}" y2="${y(h)}" stroke="var(--line)"/><text x="${pl-5}" y="${y(h)+3}" text-anchor="end">${h}m</text>`; }
   rows.forEach((r,i)=>{ const x=pl+i*bw;
-    s+=`<rect x="${(x+bw*.15).toFixed(1)}" y="${y(r.h).toFixed(1)}" width="${(bw*.7).toFixed(1)}" height="${(H-pb-y(r.h)).toFixed(1)}" rx="2" fill="${r===last?"var(--buoy)":"var(--sea)"}" fill-opacity="${r===last?1:.7}"><title>${hhmm(r.t)} · ${r1(r.h)} m · ${r1(r.p)} s</title></rect>`;
+    s+=`<rect x="${(x+bw*.15).toFixed(1)}" y="${y(r.h).toFixed(1)}" width="${(bw*.7).toFixed(1)}" height="${(H-pb-y(r.h)).toFixed(1)}" rx="2" fill="${r===last?"var(--buoy)":"var(--sea)"}" fill-opacity="${r===last?1:.7}"><title>${hhmm(r.t)} · ${r1(r.h)} m · ${ps(r)}</title></rect>`;
     if(i%3===0||r===last) s+=`<text x="${(x+bw/2).toFixed(1)}" y="${H-pb+14}" text-anchor="middle">${hhmm(r.t).slice(0,2)}</text>`; });
   document.getElementById("pastChart").innerHTML = s;
   document.getElementById("pastTbl").innerHTML = (isZh() ? `<thead><tr><th>時間</th><th>浪高</th><th>週期</th><th>方向</th><th>水溫</th></tr></thead><tbody>` : isJa() ? `<thead><tr><th>時刻</th><th>波高</th><th>周期</th><th>波向</th><th>水温</th></tr></thead><tbody>` : `<thead><tr><th>Time</th><th>Height</th><th>Period</th><th>From</th><th>Water</th></tr></thead><tbody>`)
-    + rows.slice().reverse().map(r=>`<tr><td>${hhmm(r.t)}</td><td class="hb">${r1(r.h)} m</td><td>${r1(r.p)} s</td><td>${r.dir!=null ? `${compass(r.dir)} <span class="dir" style="transform:rotate(${r.dir+180}deg)">↑</span>` : "–"}</td><td>${r.sst!=null?r1(r.sst)+"°C":"–"}</td></tr>`).join("") + "</tbody>";
+    + rows.slice().reverse().map(r=>`<tr><td>${hhmm(r.t)}</td><td class="hb">${r1(r.h)} m</td><td>${ps(r)}</td><td>${r.dir!=null ? `${compass(r.dir)} <span class="dir" style="transform:rotate(${r.dir+180}deg)">↑</span>` : "–"}</td><td>${r.sst!=null?r1(r.sst)+"°C":"–"}</td></tr>`).join("") + "</tbody>";
 })();
 
 // ---- days
@@ -1725,9 +1731,7 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
   const go = switchSpot;
   const ids = countrySpots(spotCountry(SPOT));
   document.querySelectorAll("#ctry button").forEach(b => b.setAttribute("aria-pressed", b.dataset.c===spotCountry(SPOT)));
-  // When the country row scrolls, the current country's button stays in view.
-  { const row = document.getElementById("ctry"), cb = row.querySelector('button[aria-pressed="true"]'), r = row.getBoundingClientRect(), d = cb && cb.getBoundingClientRect();
-    if (d && r.width) row.scrollLeft += d.right > r.right ? d.right - r.right + 4 : d.left < r.left ? d.left - r.left - 4 : 0; ctryEdges(); }
+  ctryShow();
   const cwaBuoy = id => `https://www.cwa.gov.tw/V8/${isZh()?"C":"E"}/M/OBS_Marine_30day.html?MID=${id}`;
   const jp = DATA.country==="jp", hi = DATA.country==="hi", au = DATA.country==="au", nw = DATA.country==="nw", ca = DATA.country==="ca" || hi || nw, far = DATA.buoyKm>=40 ? ` · ${DATA.buoyKm} km${isZh()?"外":isJa()?"先":" away"}` : "";
   const windy = s => `https://www.windy.com/${s.lat}/${s.lon}/ecmwfWaves/waves?waves,${s.lat},${s.lon},10,p:surfspots`;
@@ -1742,10 +1746,14 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
   document.getElementById("pastSrc").innerHTML = !DATA.buoyId ? "" : au
     ? (zh ? `${bn}浮標（IMOS/AODN 即時資料），每小時。${AODN}AODN 資料入口</a>` : ja ? `${bn}ブイ（IMOS/AODN リアルタイム）、1時間ごと。${AODN}AODN ポータル</a>`
       : `${bn} wave buoy (IMOS/AODN real-time feed), hourly. ${AODN}AODN portal</a>`)
+    : nw && DATA.buoyBy==="eccc"
+    // Environment Canada's buoys are on NOAA's buoy site too, which keeps only their last day
+    ? (zh ? `${bn}浮標（加拿大環境部 ${DATA.buoyId}），每小時。${NDBC}NOAA 上的最新紀錄</a>` : ja ? `${bn}ブイ（カナダ環境省 ${DATA.buoyId}）、1時間ごと。${NDBC}NOAA の最新記録</a>`
+      : `${bn} wave buoy (Environment Canada ${DATA.buoyId}), hourly. ${NDBC}Latest readings at NOAA</a>`)
     : nw
-    // Pacific Northwest buoys are NOAA's, CDIP's or Environment Canada's, all on NOAA's buoy site
-    ? (zh ? `${bn}浮標（${DATA.buoyBy==="eccc" ? "加拿大環境部" : "NOAA"} ${DATA.buoyId}），每小時。${NDBC}NOAA 45 天完整紀錄</a>` : ja ? `${bn}ブイ（${DATA.buoyBy==="eccc" ? "カナダ環境省" : "NOAA"} ${DATA.buoyId}）、1時間ごと。${NDBC}NOAA の45日間の記録</a>`
-      : `${bn} wave buoy (${DATA.buoyBy==="eccc" ? "Environment Canada" : "NOAA"} ${DATA.buoyId}), hourly. ${NDBC}Full 45-day record at NOAA</a>`)
+    // the other Pacific Northwest buoys are NOAA's own or CDIP's (buoyBy "cdip")
+    ? (zh ? `${bn}浮標（NOAA ${DATA.buoyId}${DATA.buoyBy==="cdip" ? "，CDIP" : ""}），每小時。${NDBC}NOAA 45 天完整紀錄</a>` : ja ? `${bn}ブイ（NOAA ${DATA.buoyId}${DATA.buoyBy==="cdip" ? "、CDIP" : ""}）、1時間ごと。${NDBC}NOAA の45日間の記録</a>`
+      : `${bn} wave buoy (NOAA ${DATA.buoyId}${DATA.buoyBy==="cdip" ? ", CDIP" : ""}), hourly. ${NDBC}Full 45-day record at NOAA</a>`)
     : ca
     ? (zh ? `${bn}浮標（NOAA ${DATA.buoyId}，CDIP），每小時。${NDBC}NOAA 45 天完整紀錄</a>` : ja ? `${bn}ブイ（NOAA ${DATA.buoyId}、CDIP）、1時間ごと。${NDBC}NOAA の45日間の記録</a>`
       : `${bn} wave buoy (NOAA ${DATA.buoyId}, CDIP), hourly. ${NDBC}Full 45-day record at NOAA</a>`)
@@ -1775,6 +1783,7 @@ applyLang();
 document.querySelectorAll("#lang button").forEach(b=>b.onclick=()=>setLang(b.dataset.l));
 document.querySelectorAll("#ctry button").forEach(b=>b.onclick=()=>switchCountry(b.dataset.c));
 document.getElementById("ctry").addEventListener("scroll", ctryEdges, {passive: true}); addEventListener("resize", ctryEdges);
+(document.fonts ? document.fonts.ready : Promise.resolve()).then(ctryShow);  // the buttons widen once Public Sans arrives
 boot(SPOT0);
 if(VIEW!=="fc") setView(VIEW, true);
 

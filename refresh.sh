@@ -75,12 +75,13 @@ for C in ca hi nw; do
   for b in $(noaaids $C ndbc | tr ',' ' '); do [ -s "$W/dl/ndbc-$b.txt" ] || curl -fsSL --retry 2 -m 60 -o "$W/dl/ndbc-$b.txt" "https://www.ndbc.noaa.gov/data/realtime2/$b.txt" || echo "ndbc $b fetch failed" >&2; done
   # the last few reports, since airport stations often leave the wind speed out of one
   for s in $(noaaids $C nws | tr ',' ' '); do curl -fsSL --retry 2 -m 60 -A "waveslave.tw" -o "$W/dl/nws-$s.json" "https://api.weather.gov/stations/$s/observations?limit=6" || echo "nws $s fetch failed" >&2; done
-  # BC: Environment Canada station reports from the last 3 hours, newest first (ca.py skips a reading over 3 hours old)
-  for s in $(noaaids $C eccc | tr ',' ' '); do get "eccc-$s" "https://api.weather.gc.ca/collections/swob-realtime/items?f=json&msc_id-value=$s&datetime=$(date -u -d '-3 hours' +%FT%TZ)/$(date -u +%FT%TZ)&sortby=-date_tm-value&limit=6" || echo "eccc $s fetch failed" >&2; done
+  # BC: Environment Canada station reports from the last 3 hours, newest first (ca.py skips a reading over 3 hours old). The Canadian
+  # fetches get one quick retry each, so a slow server costs a run its reading, never half an hour.
+  for s in $(noaaids $C eccc | tr ',' ' '); do curl -fsSL --retry 1 -m 30 -o "$W/dl/eccc-$s.json" "https://api.weather.gc.ca/collections/swob-realtime/items?f=json&msc_id-value=$s&datetime=$(date -u -d '-3 hours' +%FT%TZ)/$(date -u +%FT%TZ)&sortby=-date_tm-value&limit=6" || echo "eccc $s fetch failed" >&2; done
   # BC: Canadian Hydrographic Service highs and lows (UTC times) for the same 15 local days as NOAA's; the API takes the station's id, looked up by its code
   for c in $(noaaids $C chs | tr ',' ' '); do
-    { id=$(curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -m 60 "https://api-iwls.dfo-mpo.gc.ca/api/v1/stations?code=$c" | python3 -I -c "import json,sys;print(json.load(sys.stdin)[0]['id'])") &&
-      get "chs-$c" "https://api-iwls.dfo-mpo.gc.ca/api/v1/stations/$id/data?time-series-code=wlp-hilo&from=$(mid '-5 days')&to=$(mid '+10 days')"; } || echo "chs $c fetch failed" >&2
+    { id=$(curl -fsSL --retry 1 -m 30 "https://api-iwls.dfo-mpo.gc.ca/api/v1/stations?code=$c" | python3 -I -c "import json,sys;print(json.load(sys.stdin)[0]['id'])" 2>/dev/null) &&
+      curl -fsSL --retry 1 -m 30 -o "$W/dl/chs-$c.json" "https://api-iwls.dfo-mpo.gc.ca/api/v1/stations/$id/data?time-series-code=wlp-hilo&from=$(mid '-5 days')&to=$(mid '+10 days')"; } || echo "chs $c fetch failed" >&2
   done
   for t in $(noaaids $C tideStation | tr ',' ' '); do get "tide-$t" "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?product=predictions&station=$t&begin_date=$(TZ=$ZONE date -d '-5 days' +%Y%m%d)&range=360&datum=MLLW&interval=hilo&units=metric&time_zone=lst_ldt&format=json&application=waveslave.tw" || echo "tide $t fetch failed" >&2; done
   CQ="latitude=$(noaaids $C lat)&longitude=$(noaaids $C lon)&hourly=wind_speed_10m,wind_direction_10m,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=4"

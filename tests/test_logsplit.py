@@ -153,5 +153,41 @@ class LogSplitPacificNorthwest(unittest.TestCase):
         self.assertEqual(s['adj']['days'], 1)
 
 
+class LogSplitKorea(unittest.TestCase):
+    # Korean spots have no buoy yet: their log holds the forecast and the airport wind
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.snap = os.path.join(self.tmp, 'snap.json'); shutil.copy(os.path.join(HERE, 'fixtures', 'kr', 'snap_in.json'), self.snap)
+        d = json.load(open(self.snap))
+        d['spots']['jukdo']['dwind'] = [['2026-10-18T13:00', 6.0, 170.0]]
+        d['src']['spots']['jukdo'] = '/2026-10-18T13:00'
+        with open(self.snap, 'w') as f: json.dump(d, f)
+
+    def test_log_kr_only(self):
+        run(['log.py', self.snap, self.tmp + '/log-kr', 'kr'])
+        rec = records(self.tmp + '/log-kr')[-1]
+        self.assertEqual(sorted(rec['spots']), ['geumjin', 'iho', 'jukdo', 'manlipo'])
+        j = rec['spots']['jukdo']
+        self.assertEqual((j['buoyId'], j['buoy'], j['station'], len(j['fc'])), (None, [], [['2026-10-18T13:00', 6.0, 170.0]], 24))
+
+    def test_other_logs_hold_no_korea(self):
+        run(['log.py', self.snap, self.tmp + '/log', 'tw'])
+        run(['log.py', self.snap, self.tmp + '/log-ca', 'ca'])
+        self.assertEqual(sorted(records(self.tmp + '/log')[-1]['spots']), ['donghe'])
+        self.assertEqual(sorted(records(self.tmp + '/log-ca')[-1]['spots']), ['blacks'])
+
+    def test_correct_and_history_kr(self):
+        before = json.load(open(self.snap))['spots']
+        run(['log.py', self.snap, self.tmp + '/log-kr', 'kr'])
+        run(['correct.py', self.snap, self.tmp + '/log-kr', 'kr'])
+        run(['history.py', self.snap, self.tmp + '/log-kr', self.tmp + '/cache', 'kr'])
+        d = json.load(open(self.snap))
+        for k in ('donghe', 'blacks'): self.assertEqual(d['spots'][k], before[k])
+        self.assertEqual(sorted(json.load(open(self.tmp + '/cache/tides-kr.json'))), ['geumjin', 'iho', 'jukdo', 'manlipo'])
+        # with no buoy readings the wave heights stay as forecast
+        self.assertEqual((d['spots']['jukdo']['adj']['f'], d['spots']['jukdo']['adj']['days']), (1.0, 0))
+        self.assertEqual(d['spots']['jukdo']['hourly'], before['jukdo']['hourly'])
+
+
 if __name__ == '__main__':
     unittest.main()

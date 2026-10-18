@@ -193,12 +193,14 @@ test("cover", () => {
   const M = load();
   assert.deepEqual(M.PBOX, {l: 100, r: 250, s: -50, n: 60});
   const wp = {l: 100, r: 160, s: 0, n: 45};
-  assert.deepEqual(M.OLDBOX, {tw: wp, jp: wp, ca: {l: 232, r: 244, s: 30, n: 42}, hi: {l: 198, r: 208, s: 15, n: 26}, au: {l: 110, r: 156, s: -44, n: -20}, nw: {l: 231, r: 238, s: 42, n: 50}});
+  assert.deepEqual(M.OLDBOX, {tw: wp, jp: wp, kr: {l: 117.1, r: 138.4, s: 31.6, n: 39.6}, ca: {l: 232, r: 244, s: 30, n: 42}, hi: {l: 198, r: 208, s: 15, n: 26}, au: {l: 110, r: 156, s: -44, n: -20}, nw: {l: 231, r: 238, s: 42, n: 50}});
   // Upright the Pacific box fills the screen top to bottom, sideways side to side.
   near(M.cover(M.PBOX, 390, 844), 844/(M.my(60) - M.my(-50)));
   near(M.cover(M.PBOX, 390, 844), 6.328, 1e-3);
   near(M.cover(M.PBOX, 844, 390), 844/150);
   near(M.cover(M.OLDBOX.ca, 390, 844), 844/(M.my(42) - M.my(30)));
+  // Korea's box opens a phone on Korea's home view (cy 35.7, 8 degrees of latitude) both ways up, to within a part in a thousand.
+  for (const [W, H] of [[390, 844], [844, 390]]) near(M.cover(M.OLDBOX.kr, W, H) / (H*Math.cos(35.7*Math.PI/180)/8), 1, 1e-3);
 });
 
 test("clampTo", () => {

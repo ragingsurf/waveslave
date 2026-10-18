@@ -1,6 +1,6 @@
 // Browser checks and phone screenshots of a built page (build one with tests/map/tool.py).
 // Usage: node tests/map/check.js <page.html> <outdir> shots|checks [land]
-//   shots   the seven home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
+//   shots   the eight home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
 //           On a page whose hook can zoom, also zoomed all the way out in each layer (out-wind, out-waves, out-swell, out-rain) and a swell across 180° (dateline).
 //   checks  prints ok / FAIL / skip for each check, and exits 1 on any FAIL or page error. Needs the page's test hook, window.__ws.
 // Every page opens in its own fresh browser context, offline (only the page itself loads, no service worker): a phone 390x844 (844x390 with land),
@@ -20,7 +20,7 @@ const NOW = Date.now();
 // Home views: name, spot, saved-view key, centre. Saved as {cx, cy, k: 1}, the way main and the branch both read it (California and Hawaii still negative).
 const HOMES = [["tw", "donghe", "waveslave-mapview", 120.9, 23.75], ["jp", "ichinomiya", "waveslave-mapview", 135.6, 33.4], ["ca", "trestles", "waveslave-mapview-ca", -119.5, 35.3],
   ["hi", "pipeline", "waveslave-mapview-hi", -157.3, 20.6], ["au-e", "snapper", "waveslave-mapview-au-e", 152, -32.5], ["au-w", "margaret", "waveslave-mapview-au-w", 115.5, -32.5],
-  ["nw", "coxbay", "waveslave-mapview-nw", -124.7, 46.1]];
+  ["nw", "coxbay", "waveslave-mapview-nw", -124.7, 46.1], ["kr", "jukdo", "waveslave-mapview-kr", 127.75, 35.7]];
 const OLD_CA = { key: "waveslave-mapview-ca", view: { cx: -117.5, cy: 33.0, k: 2 } }; // saved before the map ran east, off California's home view and zoomed in
 const home = name => { const [, spot, key, cx, cy] = HOMES.find(h => h[0] === name); return { spot, saved: { key, view: { cx, cy, k: 1 } } }; }; // open(home("tw"))
 const MID = { key: "waveslave-mapview", view: { cx: 190, cy: 25, k: 1 } }; // Taiwan's map left in the middle of the Pacific, so zoomed out from there Hawaii is on screen
@@ -123,6 +123,25 @@ const CHECKS = {
     await page.click('#wsCtry button[data-c="nw"]'); await settle(page);
     const n = await page.evaluate(() => ({ c: spotCountry(CUR), ...window.__ws.view() }));
     if (n.c !== "nw" || n.MC !== "nw" || !near(n.cx, 235.3, 0.01) || n.z !== n.z0) throw new Error(`after the map's Pacific NW button the page is on ${n.c}, view() MC ${n.MC}, cx ${n.cx}, z ${n.z}; want nw, nw, 235.3, z0 ${n.z0}`);
+  },
+  // Korea: with nothing saved, Jukdo opens inside Korea's box with every Korean spot on the map and clear of the buttons and the time bar
+  // (on a phone its box is its home view); the map's Korea button brings it back to the Korea home from Japan's.
+  async korea(open) {
+    const page = await open({ spot: "jukdo" });
+    if (!await page.evaluate(() => !!ALL.spots.jukdo)) skip("the page has no Korean spots");
+    const e = await edges(page), b = await page.evaluate(() => MAPM.OLDBOX.kr), t = 0.05;
+    if (!(e.l >= b.l - 1e-9 && e.r <= b.r + 1e-9 && e.s >= b.s - 1e-9 && e.n <= b.n + 1e-9)) throw new Error(`Jukdo opens on ${e.l}..${e.r} by ${e.s}..${e.n}, not inside Korea's box`);
+    if (!((near(e.l, b.l, t) && near(e.r, b.r, t)) || (near(e.s, b.s, t) && near(e.n, b.n, t)))) throw new Error(`Jukdo opens on ${e.l}..${e.r} by ${e.s}..${e.n}, which meets Korea's box on neither axis`);
+    const hid = () => page.evaluate(() => { const rect = e => e.getBoundingClientRect(), fx = rect(document.getElementById("wsFx"));
+      const over = [...document.querySelectorAll("#wsLayers button, #wsCtry button, #viewWs .zoom button, #wsPlay, #wsTime, #wsTl")].filter(b => b.offsetParent).map(rect);
+      return countrySpots("kr").filter(id => { const s = ALL.spots[id], [x, y] = window.__ws.px(MAPM.E(s.lon), s.lat), X = fx.left + x, Y = fx.top + y;
+        return x < 0 || y < 0 || x > fx.width || y > fx.height || over.some(r => X > r.left - 6 && X < r.right + 6 && Y > r.top - 6 && Y < r.bottom + 6); }); });
+    let out = await hid(); if (out.length) throw new Error(`on Korea's first open ${out.join(", ")} is off the map or under a button`);
+    await page.click('#wsCtry button[data-c="jp"]'); await settle(page);
+    await page.click('#wsCtry button[data-c="kr"]'); await settle(page);
+    const n = await page.evaluate(() => ({ c: spotCountry(CUR), ...window.__ws.view() }));
+    if (n.c !== "kr" || n.MC !== "kr" || !near(n.cx, 127.75, 0.01) || n.z !== n.z0) throw new Error(`after the map's Japan then Korea buttons the page is on ${n.c}, view() MC ${n.MC}, cx ${n.cx}, z ${n.z}; want kr, kr, 127.75, z0 ${n.z0}`);
+    out = await hid(); if (out.length) throw new Error(`on Korea's home view ${out.join(", ")} is off the map or under a button`);
   },
   // Changing country moves the one map to the new country's home view, with no reload.
   async noReloadCountry(open) {

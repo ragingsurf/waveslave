@@ -329,8 +329,9 @@ html{overscroll-behavior-y:none}
 .wsmap.fs .wsctry button{padding:0;pointer-events:auto}
 .wsmap.fs .wsctry button:not(:has(svg)){width:auto;padding:0 8px;font-size:12px}
 .wsmap.fs .wsctry button[aria-pressed="true"]{border-color:#ffb347;color:#ffb347;background:#0a0f12;box-shadow:0 0 8px rgba(255,140,0,.4)}
-/* With a spot's card open the countries stay clear of it: sideways the card sits between them and the map tools, upright they stop above it. */
-@media (orientation:landscape){.wsmap.fs .sheet{left:calc(52px + env(safe-area-inset-left));right:calc(52px + env(safe-area-inset-right))}}
+/* With a spot's card open the countries stay clear of it: sideways the card sits between them (however many columns they take: --ctryr is their
+   right edge) and the map tools, upright they stop above it. */
+@media (orientation:landscape){.wsmap.fs .sheet{left:calc(var(--ctryr,calc(42px + env(safe-area-inset-left))) + 10px);right:calc(52px + env(safe-area-inset-right))}}
 @media (orientation:portrait){.wsmap.fs:has(.sheet:not([hidden])) .wsctry{bottom:calc(52% + 16px + env(safe-area-inset-bottom))}}
 /* The ✕ back to Forecast glows amber (like the selected tab), set apart from the pink map tools. */
 .wsmap.fs #wsFs{margin-top:10px;border-color:#ffb347;background:#0a0f12;color:#ffb347;font-size:20px;text-shadow:0 0 6px rgba(255,140,0,.8);box-shadow:0 0 8px rgba(255,140,0,.4)}
@@ -1266,6 +1267,10 @@ const WS = (() => {
     // The zoom buttons and the countries sit just under the top buttons, however many rows those take (a narrow phone, a longer language): --barb is the bar's bottom edge.
     const bar = document.getElementById("wsLayers"), sec = document.getElementById("viewWs");
     if (window.ResizeObserver) new ResizeObserver(() => sec.style.setProperty("--barb", bar.offsetTop + bar.offsetHeight + "px")).observe(bar);
+    // Sideways a spot's card sits just right of the countries, which take a second column when the first runs out of room (on a short screen,
+    // or once there are more of them): --ctryr is their right edge.
+    const ctry = document.getElementById("wsCtry");
+    if (window.ResizeObserver) new ResizeObserver(() => sec.style.setProperty("--ctryr", ctry.offsetLeft + ctry.offsetWidth + "px")).observe(ctry);
     // Zoom and pan: scroll wheel or the +/− buttons; pinch with two fingers; drag sideways with one (up/down still scrolls the page).
     const P = new Map(); let downAt = null, pinch = null, drag = null;
     const onPin = ([x, y]) => PIN && PINBOX && !(PINX && Math.hypot(x-PINX[0], y-PINX[1]) < 16) && !(PINBTN && Math.hypot(x-PINBTN[0], y-PINBTN[1]) < 20)

@@ -15,7 +15,8 @@ Defaults I picked (say if you want otherwise):
 
 - Country code `ph`, log folder `log-ph/`. Switch label Philippines / 菲律賓 / フィリピン, placed after Korea so the Asian
   countries sit together.
-- 8 spots: Siargao, La Union, Zambales, Baler, Daet, Catanduanes, Eastern Samar and Pagudpud.
+- 8 spots: Siargao first, as the country's best-known wave, then north to south down the west coast and the east: Pagudpud,
+  La Union, Zambales, Baler, Daet, Catanduanes and Eastern Samar.
 
 ## Spots
 
@@ -26,21 +27,21 @@ offshore wind, is the opposite way.
 | id | Spot | Faces | Best |
 |---|---|---|---|
 | cloud9 | Cloud 9, General Luna, Siargao | E | typhoon swells, September to November |
+| pagudpud | Blue Lagoon, Pagudpud, Ilocos Norte | ENE | October to March |
 | sanjuan | Urbiztondo Beach, San Juan, La Union | W | October to March, when the northeast monsoon blows offshore |
 | liwliwa | Liwliwa, San Felipe, Zambales | W | southwest monsoon and typhoon swells, June to October |
 | baler | Sabang Beach, Baler, Aurora | ENE | October to February |
 | bagasbas | Bagasbas Beach, Daet, Camarines Norte | ENE | northeast monsoon swells, October to March |
 | puraran | Puraran Beach, Baras, Catanduanes | E | typhoon swells, August to October |
 | borongan | Baybay Beach, Borongan, Eastern Samar | E | open to Pacific swells most of the year |
-| pagudpud | Blue Lagoon, Pagudpud, Ilocos Norte | ENE | October to March |
 
 ## Data sources (no key)
 
 | What | Source | How |
 |---|---|---|
 | Swell forecast, model check | Open-Meteo marine, as for every country | the shared `openwave` and `openmodels` calls take in the 8 spots |
-| Wind forecast | ECMWF's IFS (9 km) via Open-Meteo, then Open-Meteo's default | one call for the 8 spots. JMA's MSM, used for Japan and Korea, stops north of the Philippines; the default picks ECMWF here anyway |
-| Wind now | none | the Philippine airports in NOAA's feed (aviationweather.gov) are all far from the surf: Laoag is 55 km from Pagudpud, and Subic Bay sits at the head of its bay. Baler, Daet and Virac airports are listed but sent no report in a week. PAGASA's PANaHON map shows station wind but has no open API |
+| Wind forecast | ECMWF's IFS (9 km) via Open-Meteo, then Open-Meteo's default | one call for the 8 spots. JMA's MSM, used for Japan and Korea, stops north of the Philippines; the default picks ECMWF's IFS here anyway (checked: the same values at every hour) |
+| Wind now | none | the Philippine airports in NOAA's feed (aviationweather.gov) are all far from the surf: Laoag is 55 km from Pagudpud, and Subic Bay sits at the head of its bay. Baler, Daet and Virac airports, and those at San Fernando (La Union), Borongan and Siargao, sent no report in a week. PAGASA's PANaHON map shows station wind but has no open API |
 | Tides | Open-Meteo's tide model, as for Australia and Korea | highs and lows picked from the hourly level; the page says "Model tide". NAMRIA's tide tables are PDFs only |
 | Sun times | computed | |
 | Typhoons | the West Pacific feeds the page already uses (CWA, JTWC) | the storm panel links PAGASA's bulletins |

@@ -206,35 +206,45 @@ const CHECKS = {
     }
   },
   // The countries stand in a column down the left side, in the switch's order from just under the top buttons, each under the last with the
-  // map between them (a finger there drags it), and only when the column has no room left for the next does it start a second column, at the
-  // top just right of the first; in English, Chinese and Japanese each is named in the page's language. With a spot's forecast card open, a
-  // finger on any of them still lands on it, as it does on the map's tools down the right.
+  // map between them (a finger there drags it), and only when the column has no room left for the next does it start another column, at the
+  // top just right of the last; in English, Chinese and Japanese each is named in the page's language. With a spot's forecast card open, a
+  // finger on any of them still lands on it, as it does on the map's tools down the right; sideways that holds on a short screen too (a small
+  // phone in Safari, whose bar takes some of the height), where the countries take a second column three deep.
   async countryColumn(open) {
     const page = await open(home("tw"));
     for (const l of ["en", "zh", "ja"]) {
       await page.evaluate(l => setLang(l), l); await settle(page);
-      const r = await page.evaluate(() => { const rect = e => e.getBoundingClientRect(), bs = [...document.querySelectorAll("#wsCtry button")], cs = bs.map(rect);
+      const r = await page.evaluate(() => { const rect = e => e.getBoundingClientRect(), box = document.getElementById("wsCtry"), s = getComputedStyle(box), bs = [...box.querySelectorAll("button")], cs = bs.map(rect);
         const gap = cs.length > 1 ? document.elementFromPoint((cs[0].left + cs[0].right)/2, (cs[0].bottom + cs[1].top)/2) : null;
-        return { n: cs.length, left: cs.map(c => c.left), right: cs.map(c => c.right), top: cs.map(c => c.top), bottom: cs.map(c => c.bottom), room: rect(document.getElementById("wsCtry")).bottom,
-          bar: rect(document.getElementById("wsLayers")).bottom, gap: gap ? gap.id || gap.tagName : null,
+        return { n: cs.length, left: cs.map(c => c.left), right: cs.map(c => c.right), top: cs.map(c => c.top), bottom: cs.map(c => c.bottom), room: rect(box).bottom,
+          rowGap: parseFloat(s.rowGap), colGap: parseFloat(s.columnGap), bar: rect(document.getElementById("wsLayers")).bottom, gap: gap ? gap.id || gap.tagName : null,
           names: bs.map(b => b.getAttribute("aria-label") + "|" + b.title).join(), want: bs.map(b => { const n = document.querySelector(`#ctry button[data-c="${b.dataset.c}"]`).textContent; return n + "|" + n; }).join() }; });
       if (r.n < 2) throw new Error(`in ${l} the map has ${r.n} country buttons`);
       if (r.left[0] > 16) throw new Error(`in ${l} the country buttons start at x ${Math.round(r.left[0])}, want within 16px of the left edge`);
       if (r.top[0] < r.bar) throw new Error(`in ${l} the first country button starts at y ${r.top[0]}, above the top buttons' bottom at ${r.bar}`);
-      const step = r.top[1] - r.bottom[0];
-      for (let i = 1; i < r.n; i++) {
-        if (Math.abs(r.left[i] - r.left[i - 1]) <= 0.5) { if (r.top[i] < r.bottom[i - 1] + 2) throw new Error(`in ${l} country button ${i + 1} starts at y ${r.top[i]}, not under the one before it (bottom ${r.bottom[i - 1]})`); }
-        else if (!(r.left[i] >= r.right[i - 1] + 2 && Math.abs(r.top[i] - r.top[0]) <= 0.5 && r.bottom[i - 1] + step + r.bottom[i] - r.top[i] > r.room - 0.5))
-          throw new Error(`in ${l} country button ${i + 1} starts a column at x ${Math.round(r.left[i])}, y ${Math.round(r.top[i])}, though the one before it (x ${Math.round(r.left[i - 1])}, bottom ${Math.round(r.bottom[i - 1])}) had room under it down to ${Math.round(r.room)}`);
+      // colR is the right edge of the column so far.
+      for (let i = 1, colR = r.right[0]; i < r.n; i++) {
+        const at = `in ${l} country button ${i + 1} (x ${Math.round(r.left[i])}, y ${Math.round(r.top[i])})`;
+        if (Math.abs(r.left[i] - r.left[i - 1]) <= 0.5) {
+          if (r.top[i] < r.bottom[i - 1] + 2) throw new Error(`${at} is not under the one before it (bottom ${r.bottom[i - 1]})`);
+          colR = Math.max(colR, r.right[i]); continue;
+        }
+        if (Math.abs(r.left[i] - (colR + r.colGap)) > 1 || Math.abs(r.top[i] - r.top[0]) > 0.5) throw new Error(`${at} is neither under the one before it nor at the top of a new column just right of its column (right edge ${colR})`);
+        if (r.bottom[i - 1] + r.rowGap + r.bottom[i] - r.top[i] <= r.room - 0.5) throw new Error(`${at} starts a new column though the one before it (bottom ${Math.round(r.bottom[i - 1])}) had room under it down to ${Math.round(r.room)}`);
+        colR = r.right[i];
       }
       if (r.gap !== "wsFx") throw new Error(`in ${l} a finger between the first two country buttons lands on ${r.gap}, not the map`);
       if (r.names !== r.want) throw new Error(`in ${l} the country buttons are named ${r.names}, want ${r.want}`);
     }
-    await tapAt(page, await page.evaluate(() => { const s = ALL.spots.donghe; return window.__ws.px(MAPM.E(s.lon), s.lat); }));
-    if (await page.evaluate(() => document.getElementById("wsSheet").hidden)) throw new Error("tapping Donghe did not open its forecast card");
-    const hidden = await page.evaluate(() => [...document.querySelectorAll("#wsCtry button, #viewWs .zoom button")].filter(b => { const r = b.getBoundingClientRect(), at = document.elementFromPoint((r.left + r.right)/2, (r.top + r.bottom)/2);
-      return !at || at.closest("button") !== b; }).map(b => b.dataset.c || b.id));
-    if (hidden.length) throw new Error(`with Donghe's forecast card open, a finger on ${hidden.join(", ")} lands on something else`);
+    const cardOpen = async (page, where) => {
+      await tapAt(page, await page.evaluate(() => { const s = ALL.spots.donghe; return window.__ws.px(MAPM.E(s.lon), s.lat); }));
+      if (await page.evaluate(() => document.getElementById("wsSheet").hidden)) throw new Error(`${where}tapping Donghe did not open its forecast card`);
+      const hidden = await page.evaluate(() => [...document.querySelectorAll("#wsCtry button, #viewWs .zoom button")].filter(b => { const r = b.getBoundingClientRect(), at = document.elementFromPoint((r.left + r.right)/2, (r.top + r.bottom)/2);
+        return !at || at.closest("button") !== b; }).map(b => b.dataset.c || b.id));
+      if (hidden.length) throw new Error(`${where}with Donghe's forecast card open, a finger on ${hidden.join(", ")} lands on something else`);
+    };
+    await cardOpen(page, "");
+    if (land) await cardOpen(await open({ ...home("tw"), size: { width: 667, height: 320 } }), "on a 667x320 screen, ");
   },
   // Every button's words and outlines read over anything the map draws behind them. With the map under the buttons painted white (a pressure
   // line or a bright patch at its worst), each top button's own background behind its word still gives the word 4.5:1 contrast (WCAG AA)
@@ -329,8 +339,8 @@ const CHECKS = {
   fs.mkdirSync(outdir, { recursive: true });
   const browser = await chromium.launch(); let bad = false, ctxs = [], errs = [];
   // A fresh context for every page, so saved views and storage never carry over; the page itself is the only request let through.
-  async function open({ spot, saved, hook = true }) {
-    const ctx = await browser.newContext({ viewport: land ? { width: 844, height: 390 } : { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block" });
+  async function open({ spot, saved, hook = true, size }) {
+    const ctx = await browser.newContext({ viewport: size || (land ? { width: 844, height: 390 } : { width: 390, height: 844 }), deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block" });
     ctxs.push(ctx);
     await ctx.route("**/*", r => r.request().url().split("#")[0] === PAGE ? r.continue() : r.abort());
     await ctx.addInitScript(([saved, now, lock]) => { Date.now = () => now; try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", "ws"); localStorage.setItem("waveslave-lang", "en");

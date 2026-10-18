@@ -4,7 +4,7 @@ import os, sys, json, unittest, datetime
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 SPOTS = json.load(open(os.path.join(ROOT, 'spots.json')))
-PH_IDS = ['cloud9', 'sanjuan', 'liwliwa', 'baler', 'bagasbas', 'puraran', 'borongan', 'pagudpud']
+PH_IDS = ['cloud9', 'pagudpud', 'sanjuan', 'liwliwa', 'baler', 'bagasbas', 'puraran', 'borongan']
 KEYS = ['zone', 'buoyKm', 'buoyName', 'windStation', 'stationName', 'off', 'lat', 'lon', 'blurb', 'cams', 'zh', 'ja']
 
 
@@ -56,12 +56,15 @@ class Fill(unittest.TestCase):
         for k in ('donghe', 'blacks', 'jukdo'): self.assertEqual(self.snap['spots'][k], self.before['spots'][k])
 
     def test_downloads_follow_the_spot_list(self):
-        # the Open-Meteo replies hold every Philippine spot of spots.json in its order, so Pagudpud (8th) takes the 8th even with spots missing
+        # the Open-Meteo replies hold every Philippine spot of spots.json in its order, so Baler (5th) takes the 5th though Liwliwa (4th) is
+        # missing from the snap, and Pagudpud the 2nd
         import kr
         kr.fill(self.snap, SPOTS, FIXDIR, NOW, 'ph')
         om, tide = json.loads(FIX('openph.json')), json.loads(FIX('tideph.json'))
-        p = self.snap['spots']['pagudpud']
-        self.assertEqual(p['wind'][0][:3], ['2026-10-18T00:00', om[7]['hourly']['wind_speed_10m'][0], om[7]['hourly']['wind_direction_10m'][0]])
+        b, p = self.snap['spots']['baler'], self.snap['spots']['pagudpud']
+        self.assertEqual(b['wind'][0][:3], ['2026-10-18T00:00', om[4]['hourly']['wind_speed_10m'][0], om[4]['hourly']['wind_direction_10m'][0]])
+        self.assertEqual(b['wind'][0][:3], ['2026-10-18T00:00', 3.7, 264])
+        self.assertEqual(b['tides']['2026-10-19'], [['05:06', 'L', 40], ['12:30', 'H', 93], ['17:30', 'L', 75], ['23:30', 'H', 99]])
         self.assertEqual(p['wind'][0][:3], ['2026-10-18T00:00', 10.4, 101])
         # the South China Sea side has one high and one low a day
         self.assertEqual(p['tides']['2026-10-19'], [['01:10', 'H', 93], ['12:00', 'L', 45]])

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add 8 Philippine spots (Siargao, La Union, Zambales, Baler, Daet, Catanduanes, Eastern Samar, Pagudpud) to waveslave.tw behind a "Philippines" country button, with ECMWF's wind forecast, model tides, the map home view and a separate `log-ph/`. No buoys and no station wind: none is open near the surf.
+**Goal:** Add 8 Philippine spots (Siargao, Pagudpud, La Union, Zambales, Baler, Daet, Catanduanes, Eastern Samar) to waveslave.tw behind a "Philippines" country button, with ECMWF's wind forecast, model tides, the map home view and a separate `log-ph/`. No buoys and no station wind: none is open near the surf.
 
 **Architecture:** Same pattern as Korea. `kr.py` takes a country (`kr` or `ph`), as `ca.py` does for its three; refresh.sh runs it in a loop; log/history/correct run with `ph`; the page adds an eighth country after Korea.
 

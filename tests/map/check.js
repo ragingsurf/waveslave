@@ -4,7 +4,7 @@
 //           On a page whose hook can zoom, also zoomed all the way out in each layer (out-wind, out-waves, out-swell, out-rain) and a swell across 180° (dateline).
 //   checks  prints ok / FAIL / skip for each check, and exits 1 on any FAIL or page error. Needs the page's test hook, window.__ws.
 // Every page opens in its own fresh browser context, offline (only the page itself loads, no service worker): a phone 390x844 (844x390 with land),
-// dpr 2, touch, reduced motion (so no streaks, and moves jump), past the passcode screen, the intro done, English, and the map open full screen on load.
+// dpr 2, touch, reduced motion (so no streaks, and moves jump), the intro done, unlocked, English, and the map open full screen on load.
 // The time bar starts at the current hour, so take two runs you mean to compare (main and the branch) in one sitting, and look at the time printed after each shot.
 // Playwright wherever node finds it (npm install playwright), else the copy this container keeps.
 const { chromium } = (() => { try { return require("playwright"); } catch (e) { return require("/opt/node22/lib/node_modules/playwright"); } })();
@@ -26,13 +26,12 @@ const home = name => { const [, spot, key, cx, cy] = HOMES.find(h => h[0] === na
 const MID = { key: "waveslave-mapview", view: { cx: 190, cy: 25, k: 1 } }; // Taiwan's map left in the middle of the Pacific, so zoomed out from there Hawaii is on screen
 // Shots that need the hook's zoom: name, layer, saved view (none: zoomed all the way out from Donghe's first open).
 const OUT = [...["wind", "waves", "swell", "rain"].map(l => ["out-" + l, l, null]), ["dateline", "swell", { key: "waveslave-mapview", view: { cx: 180, cy: 35, k: 0.3 } }]];
-const TEXT = fs.readFileSync(file, "utf8");
 // Whether the page carries the Pacific grid: a page built without one has `pac: null` filled in (tool.py writes null, refresh.sh null and a newline).
-const PAC = !/\bpac: null\s*\}/.test(TEXT);
+const PAC = !/\bpac: null\s*\}/.test(fs.readFileSync(file, "utf8"));
 // Whether it carries the Pacific Northwest grid (a grid is a JSON object, unlike the nw: {l: ...} boxes in the page's code).
-const NWG = /\bnw: \{"/.test(TEXT);
-// The passcode screen (web/head.html) hides the page until the device holds the code's hash, so every page here opens holding it.
-const UNLOCK = (TEXT.match(/\bvar H="([0-9a-f]{64})"/) || [])[1] || null;
+const NWG = /\bnw: \{"/.test(fs.readFileSync(file, "utf8"));
+// A site build (web/head.html on top) opens on the passcode screen; each fresh context starts unlocked with the page's own code hash.
+const LOCK = (fs.readFileSync(file, "utf8").match(/var H="([0-9a-f]{64})"/) || [])[1];
 
 class Skip extends Error {}
 const skip = why => { throw new Skip(why); };
@@ -304,11 +303,10 @@ const CHECKS = {
     const ctx = await browser.newContext({ viewport: land ? { width: 844, height: 390 } : { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block" });
     ctxs.push(ctx);
     await ctx.route("**/*", r => r.request().url().split("#")[0] === PAGE ? r.continue() : r.abort());
-    await ctx.addInitScript(([saved, now, unlock]) => { Date.now = () => now; try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", "ws"); localStorage.setItem("waveslave-lang", "en");
-      if (unlock) localStorage.setItem("waveslave-unlock", unlock); if (saved) localStorage.setItem(saved.key, JSON.stringify(saved.view)); } catch (e) {} }, [saved, NOW, UNLOCK]);
+    await ctx.addInitScript(([saved, now, lock]) => { Date.now = () => now; try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", "ws"); localStorage.setItem("waveslave-lang", "en");
+      if (lock) localStorage.setItem("waveslave-unlock", lock); if (saved) localStorage.setItem(saved.key, JSON.stringify(saved.view)); } catch (e) {} }, [saved, NOW, LOCK]);
     const page = await ctx.newPage(); page.on("pageerror", e => errs.push(String(e)));
     await page.goto(PAGE + "#" + spot, { waitUntil: "load" });
-    if (await page.evaluate(() => document.documentElement.classList.contains("locked"))) throw new Error("the page is behind its passcode screen: check.js found no code hash (var H=\"...\") in it to open it with");
     await page.waitForFunction(() => (document.getElementById("wsTime") || {}).textContent); // the map has drawn once
     await settle(page); // and its next-frame resize
     if (hook && !await page.evaluate(() => !!window.__ws)) throw new Error("the page has no test hook (window.__ws): build it from this branch's template");

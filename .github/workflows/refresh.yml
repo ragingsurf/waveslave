@@ -1,6 +1,6 @@
 name: Refresh WaveSlave
 
-# Rebuild the forecast from CWA, NOWPHAS, JMA, NOAA, Environment Canada, CHS, IMOS, BoM + Open-Meteo every half hour and publish it to GitHub Pages.
+# Rebuild the forecast from CWA, NOWPHAS, JMA, NOAA, Environment Canada, CHS, IMOS, BoM, South Island Waves, LINZ + Open-Meteo every half hour and publish it to GitHub Pages.
 # GitHub often skips scheduled runs (only 2 ran overnight on Oct 13-14), so two slots an hour keeps the data fresher.
 on:
   schedule:
@@ -51,7 +51,7 @@ jobs:
           restore-keys: state-
       - name: Restore log days the cache lost
         run: |
-          for d in $(printf '%s\n' log log-jp log-ca log-hi log-au log-nw log-kr log-ph log-id $(ls -d log-*/ 2>/dev/null | tr -d /) | sort -u); do
+          for d in $(printf '%s\n' log log-jp log-ca log-hi log-au log-nw log-kr log-ph log-id log-nz $(ls -d log-*/ 2>/dev/null | tr -d /) | sort -u); do
             sh logstore.sh restore "$d" || echo "$d restore failed" >&2
           done
       - name: Build

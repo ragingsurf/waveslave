@@ -256,5 +256,41 @@ class LogSplitIndonesia(unittest.TestCase):
         self.assertEqual((d['spots']['uluwatu']['adj']['f'], d['spots']['uluwatu']['adj']['days']), (1.0, 0))
         self.assertEqual(d['spots']['uluwatu']['hourly'], before['uluwatu']['hourly'])
 
+
+class LogSplitNewZealand(unittest.TestCase):
+    # New Zealand's log holds the forecast, the buoy readings at New Brighton and St Clair and the airport wind at Lyall Bay and New Brighton
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.snap = os.path.join(self.tmp, 'snap.json'); shutil.copy(os.path.join(HERE, 'fixtures', 'nz', 'snap_in.json'), self.snap)
+        d = json.load(open(self.snap)); b = d['spots']['brighton']
+        b['buoyId'], b['buoyAt'] = '31020', '2026-10-18T23:00'
+        b['buoy'] = [['2026-10-18T%02d:00' % h, 0.8, 6.7, 124.0, 13.2] for h in range(20, 24)]
+        b['dwind'] = [['2026-10-19T00:00', 4.0, 300.0]]
+        d['src']['spots']['brighton'] = '2026-10-18T23:00/2026-10-19T00:00'
+        with open(self.snap, 'w') as f: json.dump(d, f)
+
+    def test_log_nz_only(self):
+        run(['log.py', self.snap, self.tmp + '/log-nz', 'nz'])
+        rec = records(self.tmp + '/log-nz')[-1]
+        self.assertEqual(sorted(rec['spots']), ['brighton', 'lyall', 'raglan', 'stclair'])
+        b = rec['spots']['brighton']
+        self.assertEqual((b['buoyId'], len(b['buoy']), b['buoy'][-1], b['station'], len(b['fc'])), ('31020', 3, ['2026-10-18T23:00', 0.8, 6.7, 124.0, 13.2], [['2026-10-19T00:00', 4.0, 300.0]], 24))
+
+    def test_other_logs_hold_no_new_zealand(self):
+        for c, d, ids in (('tw', 'log', ['donghe']), ('id', 'log-id', ['uluwatu']), ('ph', 'log-ph', ['cloud9'])):
+            run(['log.py', self.snap, self.tmp + '/' + d, c])
+            self.assertEqual(sorted(records(self.tmp + '/' + d)[-1]['spots']), ids, c)
+
+    def test_correct_and_history_nz(self):
+        before = json.load(open(self.snap))['spots']
+        run(['log.py', self.snap, self.tmp + '/log-nz', 'nz'])
+        run(['correct.py', self.snap, self.tmp + '/log-nz', 'nz'])
+        run(['history.py', self.snap, self.tmp + '/log-nz', self.tmp + '/cache', 'nz'])
+        d = json.load(open(self.snap))
+        for k in ('donghe', 'blacks', 'jukdo', 'cloud9', 'uluwatu'): self.assertEqual(d['spots'][k], before[k])
+        self.assertEqual(sorted(json.load(open(self.tmp + '/cache/tides-nz.json'))), ['brighton', 'lyall', 'raglan', 'stclair'])
+        self.assertIn('adj', d['spots']['brighton'])
+
+
 if __name__ == '__main__':
     unittest.main()

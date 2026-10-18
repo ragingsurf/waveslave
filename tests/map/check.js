@@ -1,6 +1,6 @@
 // Browser checks and phone screenshots of a built page (build one with tests/map/tool.py).
 // Usage: node tests/map/check.js <page.html> <outdir> shots|checks [land]
-//   shots   the ten home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
+//   shots   the eleven home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
 //           On a page whose hook can zoom, also zoomed all the way out in each layer (out-wind, out-waves, out-swell, out-rain) and a swell across 180° (dateline).
 //   checks  prints ok / FAIL / skip for each check, and exits 1 on any FAIL or page error. Needs the page's test hook, window.__ws.
 // Every page opens in its own fresh browser context, offline (only the page itself loads, no service worker): a phone 390x844 (844x390 with land),
@@ -21,7 +21,7 @@ const NOW = Date.now();
 const HOMES = [["tw", "donghe", "waveslave-mapview", 120.9, 23.75], ["jp", "ichinomiya", "waveslave-mapview", 135.6, 33.4], ["ca", "trestles", "waveslave-mapview-ca", -119.5, 35.3],
   ["hi", "pipeline", "waveslave-mapview-hi", -157.3, 20.6], ["au-e", "snapper", "waveslave-mapview-au-e", 152, -32.5], ["au-w", "margaret", "waveslave-mapview-au-w", 115.5, -32.5],
   ["nw", "coxbay", "waveslave-mapview-nw", -124.7, 46.1], ["kr", "jukdo", "waveslave-mapview-kr", 127.75, 35.7],
-  ["ph", "cloud9", "waveslave-mapview-ph", 122.6, 13.8], ["id", "uluwatu", "waveslave-mapview-id", 116, -8.75]];
+  ["ph", "cloud9", "waveslave-mapview-ph", 122.6, 13.8], ["id", "uluwatu", "waveslave-mapview-id", 116, -8.75], ["nz", "raglan", "waveslave-mapview-nz", 174.3, -41.8]];
 const OLD_CA = { key: "waveslave-mapview-ca", view: { cx: -117.5, cy: 33.0, k: 2 } }; // saved before the map ran east, off California's home view and zoomed in
 const home = name => { const [, spot, key, cx, cy] = HOMES.find(h => h[0] === name); return { spot, saved: { key, view: { cx, cy, k: 1 } } }; }; // open(home("tw"))
 const MID = { key: "waveslave-mapview", view: { cx: 190, cy: 25, k: 1 } }; // Taiwan's map left in the middle of the Pacific, so zoomed out from there Hawaii is on screen
@@ -31,8 +31,9 @@ const OUT = [...["wind", "waves", "swell", "rain"].map(l => ["out-" + l, l, null
 const PAC = !/\bpac: null\s*\}/.test(fs.readFileSync(file, "utf8"));
 // Whether it carries the Pacific Northwest grid (a grid is a JSON object, unlike the nw: {l: ...} boxes in the page's code).
 const NWG = /\bnw: \{"/.test(fs.readFileSync(file, "utf8"));
-// And Indonesia's (none in a build from before Indonesia, or before its first grid fetch).
+// And Indonesia's (none in a build from before Indonesia, or before its first grid fetch), and New Zealand's likewise.
 const IDG = /\bid: \{"/.test(fs.readFileSync(file, "utf8"));
+const NZG = /\bnz: \{"/.test(fs.readFileSync(file, "utf8"));
 // A site build (web/head.html on top) opens on the passcode screen; each fresh context starts unlocked with the page's own code hash.
 const LOCK = (fs.readFileSync(file, "utf8").match(/var H="([0-9a-f]{64})"/) || [])[1];
 
@@ -86,7 +87,7 @@ const CHECKS = {
   // Every grid is made, finest first, with the Pacific layer last when the page carries it.
   async gridsLoaded(open) {
     const page = await open(home("tw")), got = JSON.stringify(await page.evaluate(() => window.__ws.grids()));
-    const want = JSON.stringify([...(NWG ? ["nw"] : []), "hi", "ca", "au", ...(IDG ? ["id"] : []), "wp", ...(PAC ? ["pac"] : [])]);
+    const want = JSON.stringify([...(NWG ? ["nw"] : []), "hi", "ca", "au", ...(IDG ? ["id"] : []), ...(NZG ? ["nz"] : []), "wp", ...(PAC ? ["pac"] : [])]);
     if (got !== want) throw new Error(`grids() is ${got}, want ${want}`);
   },
   // The Taiwan home view sits inside the West Pacific grid, so its pressure lines come from that grid; zoomed out they come from the Pacific layer (none without it).
@@ -102,6 +103,13 @@ const CHECKS = {
     const page = await open(home("id"));
     if (!await page.evaluate(() => !!ALL.spots.uluwatu)) skip("the page has no Indonesian spots");
     const src = await page.evaluate(() => window.__ws.iso()), want = IDG ? "id" : PAC ? "pac" : null;
+    if (src !== want) throw new Error(`iso() is ${src}, want ${want}`);
+  },
+  // New Zealand's likewise, inside its own grid (50–32°S, 150°E–162°W), which runs past 180°.
+  async newZealandIso(open) {
+    const page = await open(home("nz"));
+    if (!await page.evaluate(() => !!ALL.spots.raglan)) skip("the page has no New Zealand spots");
+    const src = await page.evaluate(() => window.__ws.iso()), want = NZG ? "nz" : PAC ? "pac" : null;
     if (src !== want) throw new Error(`iso() is ${src}, want ${want}`);
   },
   // Either side of 180° the Pacific layer has wind, and about the same wind: no seam at the dateline.
@@ -154,11 +162,12 @@ const CHECKS = {
     const n = await page.evaluate(() => ({ c: spotCountry(CUR), ...window.__ws.view() }));
     if (n.c !== "nw" || n.MC !== "nw" || !near(n.cx, 235.3, 0.01) || n.z !== n.z0) throw new Error(`after the map's Pacific NW button the page is on ${n.c}, view() MC ${n.MC}, cx ${n.cx}, z ${n.z}; want nw, nw, 235.3, z0 ${n.z0}`);
   },
-  // Korea, the Philippines and Indonesia: with nothing saved, the first spot opens inside the country's box with every spot of the country on the map and
+  // Korea, the Philippines, Indonesia and New Zealand: with nothing saved, the first spot opens inside the country's box with every spot of the country on the map and
   // clear of the buttons and the time bar (on a phone its box is its home view); the map's country button brings it back to that home from Japan's.
   async korea(open) { await homeBox(open, "kr", "jukdo", 127.75); },
   async philippines(open) { await homeBox(open, "ph", "cloud9", 122.6); },
   async indonesia(open) { await homeBox(open, "id", "uluwatu", 116); },
+  async newZealand(open) { await homeBox(open, "nz", "raglan", 174.3); },
   // Changing country moves the one map to the new country's home view, with no reload.
   async noReloadCountry(open) {
     const page = await open(home("tw"));

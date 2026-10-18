@@ -1,6 +1,6 @@
 // Browser checks and phone screenshots of a built page (build one with tests/map/tool.py).
 // Usage: node tests/map/check.js <page.html> <outdir> shots|checks [land]
-//   shots   the eight home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
+//   shots   the nine home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
 //           On a page whose hook can zoom, also zoomed all the way out in each layer (out-wind, out-waves, out-swell, out-rain) and a swell across 180° (dateline).
 //   checks  prints ok / FAIL / skip for each check, and exits 1 on any FAIL or page error. Needs the page's test hook, window.__ws.
 // Every page opens in its own fresh browser context, offline (only the page itself loads, no service worker): a phone 390x844 (844x390 with land),
@@ -20,7 +20,8 @@ const NOW = Date.now();
 // Home views: name, spot, saved-view key, centre. Saved as {cx, cy, k: 1}, the way main and the branch both read it (California and Hawaii still negative).
 const HOMES = [["tw", "donghe", "waveslave-mapview", 120.9, 23.75], ["jp", "ichinomiya", "waveslave-mapview", 135.6, 33.4], ["ca", "trestles", "waveslave-mapview-ca", -119.5, 35.3],
   ["hi", "pipeline", "waveslave-mapview-hi", -157.3, 20.6], ["au-e", "snapper", "waveslave-mapview-au-e", 152, -32.5], ["au-w", "margaret", "waveslave-mapview-au-w", 115.5, -32.5],
-  ["nw", "coxbay", "waveslave-mapview-nw", -124.7, 46.1], ["kr", "jukdo", "waveslave-mapview-kr", 127.75, 35.7]];
+  ["nw", "coxbay", "waveslave-mapview-nw", -124.7, 46.1], ["kr", "jukdo", "waveslave-mapview-kr", 127.75, 35.7],
+  ["ph", "cloud9", "waveslave-mapview-ph", 122.6, 13.8]];
 const OLD_CA = { key: "waveslave-mapview-ca", view: { cx: -117.5, cy: 33.0, k: 2 } }; // saved before the map ran east, off California's home view and zoomed in
 const home = name => { const [, spot, key, cx, cy] = HOMES.find(h => h[0] === name); return { spot, saved: { key, view: { cx, cy, k: 1 } } }; }; // open(home("tw"))
 const MID = { key: "waveslave-mapview", view: { cx: 190, cy: 25, k: 1 } }; // Taiwan's map left in the middle of the Pacific, so zoomed out from there Hawaii is on screen
@@ -48,6 +49,25 @@ const dragDown = async (page, [x, y], dy, lift = true) => { const s = await page
   await s.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
   for (let i = 1; i <= 12; i++) { await s.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y + dy*i/12 }] }); await page.waitForTimeout(16); }
   if (lift) await s.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }); };
+
+// One country's first open and home view (see the korea check): c, its first spot, its home centre's longitude.
+async function homeBox(open, c, spot, cx) {
+  const page = await open({ spot });
+  if (!await page.evaluate(id => !!ALL.spots[id], spot)) skip(`the page has no ${spot}`);
+  const e = await edges(page), b = await page.evaluate(c => MAPM.OLDBOX[c], c), t = 0.05;
+  if (!(e.l >= b.l - 1e-9 && e.r <= b.r + 1e-9 && e.s >= b.s - 1e-9 && e.n <= b.n + 1e-9)) throw new Error(`${spot} opens on ${e.l}..${e.r} by ${e.s}..${e.n}, not inside ${c}'s box`);
+  if (!((near(e.l, b.l, t) && near(e.r, b.r, t)) || (near(e.s, b.s, t) && near(e.n, b.n, t)))) throw new Error(`${spot} opens on ${e.l}..${e.r} by ${e.s}..${e.n}, which meets ${c}'s box on neither axis`);
+  const hid = () => page.evaluate(c => { const rect = e => e.getBoundingClientRect(), fx = rect(document.getElementById("wsFx"));
+    const over = [...document.querySelectorAll("#wsLayers button, #wsCtry button, #viewWs .zoom button, #wsPlay, #wsTime, #wsTl")].filter(b => b.offsetParent).map(rect);
+    return countrySpots(c).filter(id => { const s = ALL.spots[id], [x, y] = window.__ws.px(MAPM.E(s.lon), s.lat), X = fx.left + x, Y = fx.top + y;
+      return x < 0 || y < 0 || x > fx.width || y > fx.height || over.some(r => X > r.left - 6 && X < r.right + 6 && Y > r.top - 6 && Y < r.bottom + 6); }); }, c);
+  let out = await hid(); if (out.length) throw new Error(`on ${c}'s first open ${out.join(", ")} is off the map or under a button`);
+  await page.click('#wsCtry button[data-c="jp"]'); await settle(page);
+  await page.click(`#wsCtry button[data-c="${c}"]`); await settle(page);
+  const n = await page.evaluate(() => ({ c: spotCountry(CUR), ...window.__ws.view() }));
+  if (n.c !== c || n.MC !== c || !near(n.cx, cx, 0.01) || n.z !== n.z0) throw new Error(`after the map's Japan then ${c} buttons the page is on ${n.c}, view() MC ${n.MC}, cx ${n.cx}, z ${n.z}; want ${c}, ${c}, ${cx}, z0 ${n.z0}`);
+  out = await hid(); if (out.length) throw new Error(`on ${c}'s home view ${out.join(", ")} is off the map or under a button`);
+}
 
 const CHECKS = {
   // A California view saved with a negative centre opens where it was left, upright and sideways: -117.5 at twice the home zoom is 242.5 at 2·z0
@@ -124,25 +144,10 @@ const CHECKS = {
     const n = await page.evaluate(() => ({ c: spotCountry(CUR), ...window.__ws.view() }));
     if (n.c !== "nw" || n.MC !== "nw" || !near(n.cx, 235.3, 0.01) || n.z !== n.z0) throw new Error(`after the map's Pacific NW button the page is on ${n.c}, view() MC ${n.MC}, cx ${n.cx}, z ${n.z}; want nw, nw, 235.3, z0 ${n.z0}`);
   },
-  // Korea: with nothing saved, Jukdo opens inside Korea's box with every Korean spot on the map and clear of the buttons and the time bar
-  // (on a phone its box is its home view); the map's Korea button brings it back to the Korea home from Japan's.
-  async korea(open) {
-    const page = await open({ spot: "jukdo" });
-    if (!await page.evaluate(() => !!ALL.spots.jukdo)) skip("the page has no Korean spots");
-    const e = await edges(page), b = await page.evaluate(() => MAPM.OLDBOX.kr), t = 0.05;
-    if (!(e.l >= b.l - 1e-9 && e.r <= b.r + 1e-9 && e.s >= b.s - 1e-9 && e.n <= b.n + 1e-9)) throw new Error(`Jukdo opens on ${e.l}..${e.r} by ${e.s}..${e.n}, not inside Korea's box`);
-    if (!((near(e.l, b.l, t) && near(e.r, b.r, t)) || (near(e.s, b.s, t) && near(e.n, b.n, t)))) throw new Error(`Jukdo opens on ${e.l}..${e.r} by ${e.s}..${e.n}, which meets Korea's box on neither axis`);
-    const hid = () => page.evaluate(() => { const rect = e => e.getBoundingClientRect(), fx = rect(document.getElementById("wsFx"));
-      const over = [...document.querySelectorAll("#wsLayers button, #wsCtry button, #viewWs .zoom button, #wsPlay, #wsTime, #wsTl")].filter(b => b.offsetParent).map(rect);
-      return countrySpots("kr").filter(id => { const s = ALL.spots[id], [x, y] = window.__ws.px(MAPM.E(s.lon), s.lat), X = fx.left + x, Y = fx.top + y;
-        return x < 0 || y < 0 || x > fx.width || y > fx.height || over.some(r => X > r.left - 6 && X < r.right + 6 && Y > r.top - 6 && Y < r.bottom + 6); }); });
-    let out = await hid(); if (out.length) throw new Error(`on Korea's first open ${out.join(", ")} is off the map or under a button`);
-    await page.click('#wsCtry button[data-c="jp"]'); await settle(page);
-    await page.click('#wsCtry button[data-c="kr"]'); await settle(page);
-    const n = await page.evaluate(() => ({ c: spotCountry(CUR), ...window.__ws.view() }));
-    if (n.c !== "kr" || n.MC !== "kr" || !near(n.cx, 127.75, 0.01) || n.z !== n.z0) throw new Error(`after the map's Japan then Korea buttons the page is on ${n.c}, view() MC ${n.MC}, cx ${n.cx}, z ${n.z}; want kr, kr, 127.75, z0 ${n.z0}`);
-    out = await hid(); if (out.length) throw new Error(`on Korea's home view ${out.join(", ")} is off the map or under a button`);
-  },
+  // Korea and the Philippines: with nothing saved, the first spot opens inside the country's box with every spot of the country on the map and
+  // clear of the buttons and the time bar (on a phone its box is its home view); the map's country button brings it back to that home from Japan's.
+  async korea(open) { await homeBox(open, "kr", "jukdo", 127.75); },
+  async philippines(open) { await homeBox(open, "ph", "cloud9", 122.6); },
   // Changing country moves the one map to the new country's home view, with no reload.
   async noReloadCountry(open) {
     const page = await open(home("tw"));
@@ -200,22 +205,28 @@ const CHECKS = {
       if (r.off.length) throw new Error(`in ${l} ${r.off.join(", ")} sits off the screen`);
     }
   },
-  // The countries stand in one column down the left side, in the switch's order from just under the top buttons, each under the last with the
-  // map between them (a finger there drags it); in English, Chinese and Japanese each is named in the page's language. With a spot's
-  // forecast card open, a finger on any of them still lands on it, as it does on the map's tools down the right.
+  // The countries stand in a column down the left side, in the switch's order from just under the top buttons, each under the last with the
+  // map between them (a finger there drags it), and only when the column has no room left for the next does it start a second column, at the
+  // top just right of the first; in English, Chinese and Japanese each is named in the page's language. With a spot's forecast card open, a
+  // finger on any of them still lands on it, as it does on the map's tools down the right.
   async countryColumn(open) {
     const page = await open(home("tw"));
     for (const l of ["en", "zh", "ja"]) {
       await page.evaluate(l => setLang(l), l); await settle(page);
       const r = await page.evaluate(() => { const rect = e => e.getBoundingClientRect(), bs = [...document.querySelectorAll("#wsCtry button")], cs = bs.map(rect);
         const gap = cs.length > 1 ? document.elementFromPoint((cs[0].left + cs[0].right)/2, (cs[0].bottom + cs[1].top)/2) : null;
-        return { n: cs.length, left: cs.map(c => c.left), top: cs.map(c => c.top), bottom: cs.map(c => c.bottom), bar: rect(document.getElementById("wsLayers")).bottom, gap: gap ? gap.id || gap.tagName : null,
+        return { n: cs.length, left: cs.map(c => c.left), right: cs.map(c => c.right), top: cs.map(c => c.top), bottom: cs.map(c => c.bottom), room: rect(document.getElementById("wsCtry")).bottom,
+          bar: rect(document.getElementById("wsLayers")).bottom, gap: gap ? gap.id || gap.tagName : null,
           names: bs.map(b => b.getAttribute("aria-label") + "|" + b.title).join(), want: bs.map(b => { const n = document.querySelector(`#ctry button[data-c="${b.dataset.c}"]`).textContent; return n + "|" + n; }).join() }; });
       if (r.n < 2) throw new Error(`in ${l} the map has ${r.n} country buttons`);
-      if (r.left.some(x => Math.abs(x - r.left[0]) > 0.5) || r.left[0] > 16) throw new Error(`in ${l} the country buttons start at x ${r.left.map(Math.round)}, want one column within 16px of the left edge`);
+      if (r.left[0] > 16) throw new Error(`in ${l} the country buttons start at x ${Math.round(r.left[0])}, want within 16px of the left edge`);
       if (r.top[0] < r.bar) throw new Error(`in ${l} the first country button starts at y ${r.top[0]}, above the top buttons' bottom at ${r.bar}`);
-      const up = r.top.findIndex((t, i) => i && t < r.bottom[i - 1] + 2);
-      if (up > 0) throw new Error(`in ${l} country button ${up + 1} starts at y ${r.top[up]}, not under the one before it (bottom ${r.bottom[up - 1]})`);
+      const step = r.top[1] - r.bottom[0];
+      for (let i = 1; i < r.n; i++) {
+        if (Math.abs(r.left[i] - r.left[i - 1]) <= 0.5) { if (r.top[i] < r.bottom[i - 1] + 2) throw new Error(`in ${l} country button ${i + 1} starts at y ${r.top[i]}, not under the one before it (bottom ${r.bottom[i - 1]})`); }
+        else if (!(r.left[i] >= r.right[i - 1] + 2 && Math.abs(r.top[i] - r.top[0]) <= 0.5 && r.bottom[i - 1] + step + r.bottom[i] - r.top[i] > r.room - 0.5))
+          throw new Error(`in ${l} country button ${i + 1} starts a column at x ${Math.round(r.left[i])}, y ${Math.round(r.top[i])}, though the one before it (x ${Math.round(r.left[i - 1])}, bottom ${Math.round(r.bottom[i - 1])}) had room under it down to ${Math.round(r.room)}`);
+      }
       if (r.gap !== "wsFx") throw new Error(`in ${l} a finger between the first two country buttons lands on ${r.gap}, not the map`);
       if (r.names !== r.want) throw new Error(`in ${l} the country buttons are named ${r.names}, want ${r.want}`);
     }

@@ -189,5 +189,37 @@ class LogSplitKorea(unittest.TestCase):
         self.assertEqual(d['spots']['jukdo']['hourly'], before['jukdo']['hourly'])
 
 
+class LogSplitPhilippines(unittest.TestCase):
+    # Philippine spots have no buoy and no wind now: their log holds the forecast only
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.snap = os.path.join(self.tmp, 'snap.json'); shutil.copy(os.path.join(HERE, 'fixtures', 'ph', 'snap_in.json'), self.snap)
+
+    def test_log_ph_only(self):
+        run(['log.py', self.snap, self.tmp + '/log-ph', 'ph'])
+        rec = records(self.tmp + '/log-ph')[-1]
+        self.assertEqual(sorted(rec['spots']), ['baler', 'cloud9', 'pagudpud', 'sanjuan'])
+        c = rec['spots']['cloud9']
+        self.assertEqual((c['buoyId'], c['buoy'], c['station'], len(c['fc'])), (None, [], [], 24))
+
+    def test_other_logs_hold_no_philippines(self):
+        run(['log.py', self.snap, self.tmp + '/log', 'tw'])
+        run(['log.py', self.snap, self.tmp + '/log-kr', 'kr'])
+        self.assertEqual(sorted(records(self.tmp + '/log')[-1]['spots']), ['donghe'])
+        self.assertEqual(sorted(records(self.tmp + '/log-kr')[-1]['spots']), ['jukdo'])
+
+    def test_correct_and_history_ph(self):
+        before = json.load(open(self.snap))['spots']
+        run(['log.py', self.snap, self.tmp + '/log-ph', 'ph'])
+        run(['correct.py', self.snap, self.tmp + '/log-ph', 'ph'])
+        run(['history.py', self.snap, self.tmp + '/log-ph', self.tmp + '/cache', 'ph'])
+        d = json.load(open(self.snap))
+        for k in ('donghe', 'blacks', 'jukdo'): self.assertEqual(d['spots'][k], before[k])
+        self.assertEqual(sorted(json.load(open(self.tmp + '/cache/tides-ph.json'))), ['baler', 'cloud9', 'pagudpud', 'sanjuan'])
+        # with no buoy and no station the forecast stays as it is
+        self.assertEqual((d['spots']['cloud9']['adj']['f'], d['spots']['cloud9']['adj']['days']), (1.0, 0))
+        self.assertEqual(d['spots']['cloud9']['hourly'], before['cloud9']['hourly'])
+
+
 if __name__ == '__main__':
     unittest.main()

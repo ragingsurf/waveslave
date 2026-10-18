@@ -11,8 +11,8 @@
 <meta name="apple-mobile-web-app-title" content="WaveSlave">
 <script>if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));</script>
 <!-- Passcode screen: the page stays hidden until the 4-digit code is entered, then stays unlocked on that device.
-     Only a SHA-256 of "waveslave:" + the code is kept here. To change the code: printf 'waveslave:1234' | sha256sum, and put the result in H. -->
-<script>/* Locked unless this device already holds the current code's hash. */(function(){var H="9ce703461ba3b584a69bd3eabb70ebadcb06e3e5c11ebf11b06c7184e2aba77b";window.__lockHash=H;try{if(localStorage.getItem("waveslave-unlock")===H)return}catch(e){}document.documentElement.classList.add("locked")})();</script>
+     Only a SHA-256 of "waveslave:" + the code is kept here. To change the code: printf 'waveslave:XXXX' | sha256sum, and put the result in H. -->
+<script>/* Locked unless this device already holds the current code's hash. */(function(){var H="b200079bce89b4d2c4e55f2ef5812f58c1b9827f5086ae8a08bdf78b0d43bcde";window.__lockHash=H;try{if(localStorage.getItem("waveslave-unlock")===H)return}catch(e){}document.documentElement.classList.add("locked")})();</script>
 <style>/* Classified Terminal: green screen, TOP SECRET banners; a wrong code flashes everything red. */
 html.locked,html.locked body{overflow:hidden}html.locked body>*{visibility:hidden}
 html.locked::before{content:"";position:fixed;inset:0;z-index:9998;background:#020604}

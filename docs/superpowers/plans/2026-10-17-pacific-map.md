@@ -358,7 +358,7 @@
     - `glide(tx, ty, tz)` runs 700 ms, ease-in-out cubic, cx linear, Mercator y linear, z log-linear;
     - with reduced motion it jumps;
     - a pointerdown, a wheel or a new glide cancels it.
-  - **Clip:** `drawBase()` clips its drawing to the rectangle `px(100, 60)`–`px(250, -50)`.
+  - **Clip:** `drawBase()` clips the map's own layers (colours, swell arrows, land, pressure lines, typhoon tracks) to the rectangle `px(100, 60)`–`px(250, -50)`; the overlays (spot markers, tags, towns, the open spot's dial, the pin) draw after it, unclipped.
 
 - [ ] **Step 3: Add the browser checks.**
   - **`roundTripDateline`:** zoomed out, `ll(px(lon, lat))` comes back within 1e-6 for lon 175, 180, 185 and 241.5, each at lat −40, 0, 21 and 35.

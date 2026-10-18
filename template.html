@@ -48,6 +48,8 @@ header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-be
   -webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;
   -webkit-text-stroke:1px #200300;
   filter:drop-shadow(0 0 8px rgba(255,60,0,.7)) drop-shadow(2px 3px 0 #200300);will-change:transform}
+/* Under 390px wide the wordmark shrinks faster than the screen, so it still ends where the language switch in the corner begins, as at 390px. */
+@media (max-width:389px){.brand{font-size:max(28px,calc(23.75vw - 45.8px))}}
 /* The flicker is a glow behind the wordmark that fades in and out (opacity only), so the phone draws the logo once and never repaints it
    while the page moves. Animating the logo's own blur filter repainted it every frame and made it glitch during pull-to-refresh on iPhone. */
 .brandbox{position:relative;isolation:isolate;display:inline-block}

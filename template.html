@@ -660,7 +660,7 @@ const MAPM = (() => {
 // ---- WaveSlave map tab: our own wind and wave map, in 90s neon. Pinch or scroll to zoom out to the whole Pacific.
 // Big picture: Open-Meteo 3-hourly wind and wave grid (3° apart, 0–45°N, 100–160°E), smoothed between grid points.
 // California spots get their own grid (1° apart, 30–42°N, 128–116°W), Hawaii too (1° apart, 15–26°N, 162–152°W), the Pacific Northwest too (1° apart, 41–51°N, 129–122°W);
-// Australia too (2° apart, 44–20°S, 110–156°E), and under them all a 6-hourly Pacific layer (5° apart, 50°S–60°N, 100°E–110°W).
+// Australia too (2° apart, 44–20°S, 110–156°E), Indonesia too (2° apart, 16–2°S, 102–130°E), and under them all a 6-hourly Pacific layer (5° apart, 50°S–60°N, 100°E–110°W).
 // Every grid loads; each fades into the next coarser one at its edge. One Mercator map of the whole Pacific box, every country on it.
 // Near the spots: CWA coastal wind and Open-Meteo waves at each spot, blended in over the grid.
 const WS = (() => {

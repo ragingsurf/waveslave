@@ -49,7 +49,7 @@ Bali, Lombok and Sumbawa keep UTC+8 all year (`Asia/Makassar`), Taipei's clock; 
 | Tides | Open-Meteo's tide model, as for Australia, Korea and the Philippines | the page says "Model tide". Against the Benoa tide gauge (IOC), the model's highs and lows came 18 to 39 minutes off over two days, and its rise and fall between them within 13 cm. BIG's own predictions aren't an open API |
 | Sun times | computed | |
 | Cyclones | BMKG's TCWC Jakarta and the Bureau of Meteorology | a "Cyclone watch" panel with both links, as Australia's has BoM's: the typhoon feeds the page uses cover the North Pacific only |
-| Map | a new Open-Meteo grid, 2° apart (16–2°S, 102–130°E), refetched every ~6 h like Australia's | the West Pacific grid stops at the equator and Australia's at 20°S |
+| Map | a new Open-Meteo grid, 2° apart (16–2°S, 100–132°E), refetched every ~6 h like Australia's | the West Pacific grid stops at the equator and Australia's at 20°S |
 
 Indonesia has no open live wave buoy (NDBC and OSMC list none near the surf; BMKG's station data needs a login), so the
 Right now card shows a dash and "No nearby wave buoy", as for the Philippines, and the log keeps the forecast and the
@@ -61,7 +61,8 @@ airport's wind. The wind corrections start at Uluwatu, Canggu and Kuta once the 
   buttons both ways up (at least 41 px upright, 132 px sideways).
 - First-open box: `{l: 101.77, r: 130.23, s: -15.18, n: -2.21}`, the home view on a phone both ways up, as for Korea and the
   Philippines.
-- The grid covers both phone views, so the pressure lines come from it there.
+- The grid runs from the map's 100°E edge to 132°E, so it holds the home view either way up, even on a 20:9 phone held
+  sideways (101.4–130.6°E), and the pressure lines there come from it.
 - The button's icon is Indonesia's outline from Natural Earth's provinces.
 
 ## Architecture

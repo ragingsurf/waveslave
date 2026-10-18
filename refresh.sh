@@ -139,7 +139,7 @@ fi
 # Wind + wave grids for the other map regions, the same way; only when the country has spots. regrid <country> <minutes> <grid>.
 # California 1° apart (30–42°N, 128–116°W); Hawaii 1° apart (15–26°N, 162–152°W), wide enough to frame the whole chain on a phone;
 # the Pacific Northwest 1° apart (41–51°N, 129–122°W);
-# Australia 2° apart (44–20°S, 110–156°E) and Indonesia 2° apart (16–2°S, 102–130°E, a phone's home view either way up), both
+# Australia 2° apart (44–20°S, 110–156°E) and Indonesia 2° apart (16–2°S, 100–132°E, its home view either way up on phones as wide as 20:9), both
 # refetched only every ~6 h to keep Open-Meteo calls down.
 regrid(){ C=$1; AGE=$2; shift 2
   [ -n "$(python3 -I -c "import json,sys;print(any(s.get('country')==sys.argv[2] for s in json.load(open(sys.argv[1]))) or '')" "$HERE/spots.json" $C)" ] && [ -z "$(find "$G/grid-$C.json" -mmin -$AGE 2>/dev/null)" ] || return 0
@@ -152,7 +152,7 @@ regrid ca 170 30 1 13 -128 1 13
 regrid hi 170 15 1 12 -162 1 11
 regrid nw 170 41 1 11 -129 1 8
 regrid au 350 -44 2 13 110 2 24
-regrid id 350 -16 2 8 102 2 15
+regrid id 350 -16 2 8 100 2 17
 # The whole Pacific, 5° apart (50°S–60°N, 100°E–110°W), by pacific.sh: refetched only every ~6 h, and never in a run that refetched the West Pacific grid, so the two biggest requests don't land together.
 [ -n "$WPNEW" ] || [ -n "$(find "$G/grid-pac.json" -mmin -350 2>/dev/null)" ] || sh "$HERE/pacific.sh" "$G" || echo "pacific grid fetch failed, keeping last grid" >&2
 GJ="$G/grid.json"; [ -f "$GJ" ] || { echo null > "$W/gridnull.json"; GJ="$W/gridnull.json"; }

@@ -221,7 +221,6 @@ class LogSplitPhilippines(unittest.TestCase):
         self.assertEqual(d['spots']['cloud9']['hourly'], before['cloud9']['hourly'])
 
 
-
 class LogSplitIndonesia(unittest.TestCase):
     # Indonesian spots have no buoy: their log holds the forecast, and Bali's airport wind where a spot has it
     def setUp(self):

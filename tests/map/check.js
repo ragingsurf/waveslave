@@ -1,6 +1,6 @@
 // Browser checks and phone screenshots of a built page (build one with tests/map/tool.py).
 // Usage: node tests/map/check.js <page.html> <outdir> shots|checks [land]
-//   shots   the nine home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
+//   shots   the ten home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
 //           On a page whose hook can zoom, also zoomed all the way out in each layer (out-wind, out-waves, out-swell, out-rain) and a swell across 180° (dateline).
 //   checks  prints ok / FAIL / skip for each check, and exits 1 on any FAIL or page error. Needs the page's test hook, window.__ws.
 // Every page opens in its own fresh browser context, offline (only the page itself loads, no service worker): a phone 390x844 (844x390 with land),
@@ -96,7 +96,7 @@ const CHECKS = {
     await zoomOut(page); const out = await page.evaluate(() => window.__ws.iso()), want = PAC ? "pac" : null;
     if (out !== want) throw new Error(`zoomed out, iso() is ${out}, want ${want}`);
   },
-  // Indonesia's home view, both ways up, sits inside its own grid (16–2°S, 102–130°E), so its pressure lines come from that grid,
+  // Indonesia's home view, both ways up, sits inside its own grid (16–2°S, 100–132°E), so its pressure lines come from that grid,
   // or from the Pacific layer when the page has no Indonesia grid.
   async indonesiaIso(open) {
     const page = await open(home("id"));
@@ -220,7 +220,7 @@ const CHECKS = {
   // map between them (a finger there drags it), and only when the column has no room left for the next does it start another column, at the
   // top just right of the last; in English, Chinese and Japanese each is named in the page's language. With a spot's forecast card open, a
   // finger on any of them still lands on it, as it does on the map's tools down the right; sideways that holds on a short screen too (a small
-  // phone in Safari, whose bar takes some of the height), where the countries take a second column three deep.
+  // phone in Safari, whose bar takes some of the height), where the countries take a second column four deep.
   async countryColumn(open) {
     const page = await open(home("tw"));
     for (const l of ["en", "zh", "ja"]) {

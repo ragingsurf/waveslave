@@ -129,10 +129,10 @@ test("layered", () => {
 
 test("isoPick", () => {
   // The real grids' headers: lat0, dlat, nlat, lon0, dlon, nlon.
-  const M = load(), real = {hi: [15, 1, 12, -162, 1, 11], ca: [30, 1, 13, -128, 1, 13], au: [-44, 2, 13, 110, 2, 24], id: [-16, 2, 8, 100, 2, 17], nz: [-50, 2, 10, 150, 2, 25], wp: [0, 3, 16, 100, 3, 21], pac: [-50, 5, 23, 100, 5, 31]};
+  const M = load(), real = {hi: [15, 1, 12, -162, 1, 11], ca: [30, 1, 13, -128, 1, 13], au: [-44, 2, 13, 110, 2, 24], id: [-16, 2, 8, 100, 2, 17], nz: [-50, 2, 10, 150, 2, 25], pi: [-24, 2, 8, 170, 2, 24], wp: [0, 3, 16, 100, 3, 21], pac: [-50, 5, 23, 100, 5, 31]};
   const grid = (n, pres = () => 1012) => { const [lat0, dlat, nlat, lon0, dlon, nlon] = real[n]; return M.mkGrid(n, packGrid({lat0, dlat, nlat, lon0, dlon, nlon, pres})); };
-  const G = ["hi", "ca", "au", "id", "nz", "wp", "pac"].map(n => grid(n)), name = g => g ? g.name : null;
-  assert.deepEqual(G.map(g => g.box), [{l: 198, r: 208, s: 15, n: 26}, {l: 232, r: 244, s: 30, n: 42}, {l: 110, r: 156, s: -44, n: -20}, {l: 100, r: 132, s: -16, n: -2}, {l: 150, r: 198, s: -50, n: -32}, {l: 100, r: 160, s: 0, n: 45}, {l: 100, r: 250, s: -50, n: 60}]);
+  const G = ["hi", "ca", "au", "id", "nz", "pi", "wp", "pac"].map(n => grid(n)), name = g => g ? g.name : null;
+  assert.deepEqual(G.map(g => g.box), [{l: 198, r: 208, s: 15, n: 26}, {l: 232, r: 244, s: 30, n: 42}, {l: 110, r: 156, s: -44, n: -20}, {l: 100, r: 132, s: -16, n: -2}, {l: 150, r: 198, s: -50, n: -32}, {l: 170, r: 216, s: -24, n: -10}, {l: 100, r: 160, s: 0, n: 45}, {l: 100, r: 250, s: -50, n: 60}]);
   assert.equal(name(M.isoPick(G, 119, 123, 21.75, 25.75)), "wp"); // Taiwan
   assert.equal(name(M.isoPick(G, 95, 170, -5, 50)), "pac"); // wider than the West Pacific
   assert.equal(name(M.isoPick(G, 199, 207, 16, 25)), "hi");
@@ -142,11 +142,19 @@ test("isoPick", () => {
   // New Zealand's home view on a phone, both ways up, and on a 20:9 phone held sideways: its grid runs past 180° (lon0 150, 25 columns)
   assert.equal(name(M.isoPick(G, 151.08, 197.52, -49.3, -33.31)), "nz");
   assert.equal(name(M.isoPick(G, 150.45, 198.15, -49.3, -33.31)), "nz");
-  assert.equal(M.isoPick(G.slice(0, 6), 95, 170, -5, 50), null); // no Pacific grid
+  // The South Pacific's two home views held sideways (west, then east), on a phone and a 20:9 phone: inside its grid, which runs past 180°.
+  // Upright their width sets the zoom and their height runs past the grid, so the Pacific layer draws there.
+  assert.equal(name(M.isoPick(G, 170.35, 195.35, -23.21, -12.22)), "pi");
+  assert.equal(name(M.isoPick(G, 170.02, 195.68, -23.21, -12.22)), "pi");
+  assert.equal(name(M.isoPick(G, 195.89, 214.25, -23.45, -15.45)), "pi");
+  assert.equal(name(M.isoPick(G, 195.65, 214.49, -23.45, -15.45)), "pi");
+  assert.equal(name(M.isoPick(G, 174.05, 191.65, -34.78, 0.95)), "pac");
+  assert.equal(name(M.isoPick(G, 197.47, 212.67, -34.12, -3.44)), "pac");
+  assert.equal(M.isoPick(G.slice(0, 7), 95, 170, -5, 50), null); // no Pacific grid
   // Half a degree of slack past a box edge, and a grid without pressure is passed over.
   assert.equal(name(M.isoPick(G, 99.6, 123, 21.75, 25.75)), "wp");
   assert.equal(name(M.isoPick(G, 99.4, 123, 21.75, 25.75)), "pac");
-  assert.equal(name(M.isoPick([grid("wp", null), G[6]], 119, 123, 21.75, 25.75)), "pac");
+  assert.equal(name(M.isoPick([grid("wp", null), G[7]], 119, 123, 21.75, 25.75)), "pac");
   assert.equal(M.isoPick([grid("wp", null), grid("pac", null)], 119, 123, 21.75, 25.75), null);
 });
 

@@ -61,7 +61,8 @@ def fill(snap, spots, dl, now):
         sp['buoyName'], sp['buoyKm'] = ca._pick(S['buoyName'], ub), ca._pick(S.get('buoyKm'), ub)
         for L in ('zh', 'ja'):
             if 'buoyName' in (S.get(L) or {}): sp[L] = dict(sp.get(L) or {}, buoyName=ca._pick(S[L]['buoyName'], ub))
-        if S.get('buoyBy'): sp['buoyBy'] = S['buoyBy']   # who runs the buoys: pacioos (the Pacific Islands Ocean Observing System)
+        by = ca._pick(S.get('buoyBy'), ub)
+        if by: sp['buoyBy'] = by   # who runs the buoy that answered: pacioos (the Pacific Islands Ocean Observing System)
         if len(S.get('ndbc') or []) > 1: sp['buoyMain'] = S['ndbc'][0]   # the past days and corrections leave out the backup's readings
         ws = S.get('windStation') or []; ws = ws if isinstance(ws, list) else [ws]; dw, used = [], 0
         for i, w in enumerate(ws):

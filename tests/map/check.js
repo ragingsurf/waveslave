@@ -182,10 +182,11 @@ const CHECKS = {
   async newZealand(open) { await homeBox(open, "nz", "raglan", 174.3); },
   // The South Pacific has two parts, west (Fiji to the Samoas) and east (Rarotonga and Tahiti), and the current spot picks the part. With nothing
   // saved, a spot opens on its part's home view with every spot of the part on the map and clear of the buttons and the time bar; upright the
-  // part's width sets the zoom, sideways its height. A spot in the other part moves the map to that part's home view and keeps the view left
-  // under its own part's key, and from Japan's the map's South Pacific button brings back the part of the spot last open.
+  // part's width sets the zoom, sideways its height. Another spot in the same part leaves the map where it is. A spot in the other part moves
+  // the map to that part's home view and keeps the view left under its own part's key, where the next open finds it, and from Japan's the
+  // map's South Pacific button brings back the part of the spot last open.
   async southPacific(open) {
-    const PARTS = { w: { spot: "cloudbreak", cx: 182.85, cy: -17.8, span: 11, wide: 17.6 }, e: { spot: "teahupoo", cx: 205.07, cy: -19.5, span: 8, wide: 15.2 } };
+    const PARTS = { w: { spot: "cloudbreak", mate: "amouli", cx: 182.85, cy: -17.8, span: 11, wide: 17.6 }, e: { spot: "teahupoo", mate: "papara", cx: 205.07, cy: -19.5, span: 8, wide: 15.2 } };
     for (const [part, other] of [["w", "e"], ["e", "w"]]) {
       const P = PARTS[part], O = PARTS[other], page = await open({ spot: P.spot });
       if (!await page.evaluate(id => !!ALL.spots[id], P.spot)) skip(`the page has no ${P.spot}`);
@@ -199,14 +200,31 @@ const CHECKS = {
           return x < 0 || y < 0 || x > fx.width || y > fx.height || over.some(r => X > r.left - 6 && X < r.right + 6 && Y > r.top - 6 && Y < r.bottom + 6); }); }, part === "e");
       if (out.length) throw new Error(`on the ${part} part's home view ${out.join(", ")} is off the map or under a button`);
       await page.evaluate(() => window.__ws.zoom(2)); await settle(page); const left = await page.evaluate(() => window.__ws.view());
+      await page.evaluate(id => switchSpot(id), P.mate); await settle(page);
+      const s = await page.evaluate(() => ({ cur: CUR, ...window.__ws.view() }));
+      if (s.cur !== P.mate || s.MC !== "pi" || !near(s.cx, left.cx) || !near(s.cy, left.cy) || !near(s.z, left.z)) throw new Error(`after ${P.mate}, in the same part, the page is on ${s.cur} and the map moved from ${left.cx}, ${left.cy}, z ${left.z} to ${s.MC} at ${s.cx}, ${s.cy}, z ${s.z}`);
       await page.evaluate(id => switchSpot(id), O.spot); await settle(page);
       const m = await page.evaluate(k => ({ ...window.__ws.view(), kept: JSON.parse(localStorage.getItem(k)) }), "waveslave-mapview-pi-" + part);
       if (m.MC !== "pi" || !near(m.cx, O.cx, 0.01) || m.z !== m.z0) throw new Error(`after ${O.spot} the map is ${m.MC} at cx ${m.cx}, z ${m.z}; want pi at ${O.cx}, z0 ${m.z0}`);
       if (!m.kept || !near(m.kept.cx, left.cx) || !near(m.kept.cy, left.cy) || !near(m.kept.k, 2, 1e-9)) throw new Error(`waveslave-mapview-pi-${part} holds ${JSON.stringify(m.kept)}, want cx ${left.cx}, cy ${left.cy}, k 2`);
+      const b = await (await open({ spot: P.spot, saved: { key: "waveslave-mapview-pi-" + part, view: m.kept } })).evaluate(() => window.__ws.view());
+      if (!near(b.cx, left.cx, 1e-6) || !near(b.cy, left.cy, 1e-6) || !near(b.z, 2*b.z0, 1e-9)) throw new Error(`${P.spot} opened with that view kept is at ${b.cx}, ${b.cy}, z ${b.z}; want ${left.cx}, ${left.cy}, z ${2*b.z0} (2·z0)`);
       await page.click('#wsCtry button[data-c="jp"]'); await settle(page);
       await page.click('#wsCtry button[data-c="pi"]'); await settle(page);
       const n = await page.evaluate(() => ({ cur: CUR, ...window.__ws.view() }));
       if (n.cur !== O.spot || n.MC !== "pi" || !near(n.cx, O.cx, 0.01) || n.z !== n.z0) throw new Error(`after the map's Japan then South Pacific buttons the page is on ${n.cur}, view() MC ${n.MC}, cx ${n.cx}, z ${n.z}; want ${O.spot}, pi, ${O.cx}, z0 ${n.z0}`);
+    }
+  },
+  // On the Forecast page the tide line says "Model tide" at a South Pacific spot that takes the tide model (Salani), and not at one that takes
+  // NOAA's tides (Cloudbreak).
+  async modelTide(open) {
+    for (const [spot, want] of [["salani", true], ["cloudbreak", false]]) {
+      const page = await open({ spot });
+      if (!await page.evaluate(id => !!ALL.spots[id], spot)) skip(`the page has no ${spot}`);
+      await page.evaluate(() => setView("fc", true)); await settle(page);
+      const t = await page.evaluate(() => document.getElementById("nowFacts").textContent);
+      if (!/\d cm/.test(t)) skip(`${spot} has no tide now`);
+      if (t.includes("Model tide") !== want) throw new Error(`${spot}'s Right now line reads "${t}", want ${want ? "" : "no "}"Model tide"`);
     }
   },
   // On every home view, a tag drawn for another country's spot keeps clear of the buttons over the map: at the screen's edge, one with nowhere
@@ -283,7 +301,7 @@ const CHECKS = {
   // map between them (a finger there drags it), and only when the column has no room left for the next does it start another column, at the
   // top just right of the last; in English, Chinese and Japanese each is named in the page's language. With a spot's forecast card open, a
   // finger on any of them still lands on it, as it does on the map's tools down the right; sideways that holds on a short screen too (a small
-  // phone in Safari, whose bar takes some of the height), where the countries take a second column five deep.
+  // phone in Safari, whose bar takes some of the height), where the countries take three columns five deep.
   async countryColumn(open) {
     const page = await open(home("tw"));
     for (const l of ["en", "zh", "ja"]) {

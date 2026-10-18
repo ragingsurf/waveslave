@@ -64,10 +64,12 @@ two home views, picked by the current spot's longitude:
 - West, Fiji to the Samoas: centre 182.85°E, 17.8°S.
 - East, Rarotonga and Tahiti: centre 205.07°E, 19.5°S.
 
-A home view can now give a width as well as a height (`w`, degrees of longitude), and its zoom is whichever fits. Upright
+A home view can now give a width as well as a height (`wide`, degrees of longitude), and its zoom is whichever fits. Upright
 the width decides (17.6° west, 15.2° east), sideways the height (11° west, 8° east). On a phone each holds its spots at least
 19 px clear of the buttons both ways up. The first open, with nothing saved, is the current part's home view; each part
-keeps its own saved view (`waveslave-mapview-pi-w`, `-pi-e`), as Australia's coasts do.
+keeps its own saved view (`waveslave-mapview-pi-w`, `-pi-e`), as Australia's coasts do. A spot in the other part moves the
+map to that part's home view; another spot in the same part leaves the map where it is, as in the other countries, so a
+close look at Tahiti's two spots stays put (any move inside Australia still recentres on its coast).
 
 The grid holds both home views sideways, and their middle band upright (beyond it the Pacific layer fills in). It runs
 between New Zealand's and the West Pacific's in the finest-first order. The button's icon is Tahiti's outline from

@@ -529,11 +529,12 @@ function spotCountry(id){ return (ALL.spots[id]||{}).country || "tw"; }
 function viewTz(){ return (ALL.spots[CUR]||{}).tz || 8; }
 const countrySpots = c => (ALL.order || Object.keys(ALL.spots)).filter(id => spotCountry(id)===c);
 // Every country is on the one Pacific map, so changing spot never reloads: a new country moves the map to its home view.
-function switchSpot(id){ if(!ALL.spots[id] || id===CUR) return; const other = spotCountry(id)!==spotCountry(CUR); CUR=id;
+function switchSpot(id){ if(!ALL.spots[id] || id===CUR) return; const was = CUR, other = spotCountry(id)!==spotCountry(was); CUR=id;
   try{ localStorage.setItem("waveslave-spot", id); localStorage.setItem("waveslave-spot-"+spotCountry(id), id); }catch(e){}
   try{ history.replaceState(null, "", "#"+id); }catch(e){ location.hash=id; }
-  // Australia's home is the current spot's coast and the South Pacific's its part (WS.parted), so moving between those recentres too.
-  boot(id); if(other || WS.parted(spotCountry(id))){ WS.home(spotCountry(id)); if(other) WS.relang(); } WS.redraw(); }
+  // Australia's home is the current spot's coast, and any move inside Australia recentres on it. The South Pacific's is the current spot's
+  // part (WS.part), and only a move to the other part recentres, so a close look at Tahiti's two spots stays put, as in the other countries.
+  boot(id); if(other || spotCountry(id)==="au" || WS.part(was)!==WS.part(id)){ WS.home(spotCountry(id)); if(other) WS.relang(); } WS.redraw(); }
 // The country row's faded edges: more-l / more-r while buttons are hidden that way.
 function ctryEdges(){ const r = document.getElementById("ctry"); r.classList.toggle("more-l", r.scrollLeft > 1); r.classList.toggle("more-r", r.scrollLeft + r.clientWidth < r.scrollWidth - 1); }
 // Country switch: back to the spot last open in that country, else its first spot.
@@ -1364,9 +1365,9 @@ const WS = (() => {
       try { if (FS && TRUEFS && !document.fullscreenElement && sec.requestFullscreen && document.fullscreenEnabled && (!ua || ua.isActive)) sec.requestFullscreen().catch(() => {}); } catch(e) {} },
     hide() { keep(); cancelAnimationFrame(raf); raf = 0; if (playing) { clearInterval(playing); playing = 0; document.getElementById("wsPlay").textContent = "▶"; } },
     redraw() { if (built && raf) drawBase(); },
-    // Whether a country's home is one of its parts (Australia's coasts, the South Pacific's west and east).
-    parted(c) { return c in PARTS; },
-    // Another country picked (or a spot in a country with parts): the map goes to its home view. With the map open, the view being left
+    // The part of its country a spot is in, as homeOf picks it ("w" or "e": Australia's coasts, the South Pacific's west and east), or "" in a country without parts.
+    part(id) { const p = PARTS[spotCountry(id)]; return p ? (MAPM.E(ALL.spots[id].lon) < p.at ? "w" : "e") : ""; },
+    // Another country picked (or the other part, or another spot in Australia): the map goes to its home view. With the map open, the view being left
     // is saved under the old country's (or part's) key first.
     home(c) { unglide(); if (FS) keep(); MC = c; HOME = homeOf(c); cx = HOME.cx; cy = HOME.cy; ctryOn(); if (built) { z0 = homeZ(HOME); z = z0; clampView(); moved(); } else z = 1; },
     // After a language switch: day labels, an open forecast table and the map's own text.

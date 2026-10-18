@@ -214,6 +214,26 @@ class Fill(unittest.TestCase):
                                'tideStation': 'TPT2871,1910000,1770000,1732417', 'mlat': '-21.072,-14.04,-21.265', 'mlon': '-175.336,-171.62,-159.81'})
         for name in ('ndbc-$b.txt', 'metar-pi.json', 'get openpi', 'get "tidepi-$t"', 'get tidepi '): self.assertIn(name, sh)
 
+    def test_refresh_asks_for_whole_days(self):
+        # pi.py reads NOAA's times and the tide model's as UTC, so refresh.sh asks for both in UTC. From there they reach back far enough
+        # that the oldest past day the page keeps (Taipei's today-5) is whole on every island's clock, UTC+13 to UTC-11, and run on past
+        # the last day tab (the spot's today+4), at any hour of the day
+        import re
+        with open(os.path.join(ROOT, 'refresh.sh'), encoding='utf-8') as f: sh = f.read()
+        block = re.search(r'^if \[ -n "\$\(piids lat\)" \]; then$.*?^fi$', sh, re.S | re.M).group(0)
+        back, hours = map(int, re.search(r"&begin_date=\$\(date -u -d '-(\d+) days' \+%Y%m%d\)&range=(\d+)&", block).groups())
+        self.assertIn('&time_zone=gmt&', block)
+        past, ahead = map(int, re.search(r'&timezone=GMT&past_days=(\d+)&forecast_days=(\d+)"', block).groups())
+        D, U = datetime.timedelta, datetime.timezone.utc
+        at = lambda d, tz: datetime.datetime.combine(d, datetime.time(), U) - D(hours=tz)   # midnight of date d on a UTC+tz clock, in UTC
+        for h in range(48):
+            now = datetime.datetime(2026, 10, 18, tzinfo=U) + D(hours=h); day = at(now.date(), 0)
+            asked = {'NOAA': (day - D(days=back), day - D(days=back) + D(hours=hours)), 'model': (day - D(days=past), day + D(days=ahead))}
+            kept = (now + D(hours=8)).date() - D(days=5)
+            for tz in set(OFFSETS):
+                need = (at(kept, tz), at((now + D(hours=tz)).date() + D(days=5), tz))
+                for k, (a, b) in asked.items(): self.assertTrue(a <= need[0] and b >= need[1], (k, now, tz))
+
 
 if __name__ == '__main__':
     unittest.main()

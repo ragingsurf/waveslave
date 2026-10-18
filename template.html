@@ -73,9 +73,13 @@ header{position:relative}
 .hero-num small{font-size:.35em;font-weight:600;margin-left:4px;color:var(--muted)}
 .hero-sub{font-size:16px;margin-top:8px}
 .rating-pill{display:inline-flex;align-items:center;gap:8px;margin-top:14px;padding:6px 12px 6px 8px;border-radius:99px;font-weight:600;font-size:14px;background:color-mix(in srgb,var(--rc) 14%,transparent);color:var(--rc)}
-.pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.pills .rating-pill{margin-top:0}
-.board-pill{display:inline-flex;align-items:center;gap:7px;padding:6px 12px 6px 9px;border-radius:99px;font-weight:600;font-size:14px;border:1px solid var(--line);color:var(--ink)}.board-pill[hidden]{display:none}
-.board-pill svg{width:9px;height:22px;transform:rotate(30deg);flex:none}
+/* The board pick (Bryan picked this quiver, Oct 18): shortboard, mid-length and longboard standing beside the wave height at their real
+   lengths, the pick lit. On a screen too narrow for both, the boards drop under the number. */
+.herorow{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 22px}
+.quiver{display:flex;align-items:flex-end;gap:8px;padding-bottom:2px}.quiver[hidden]{display:none}
+.quiver .q{display:flex;flex-direction:column;align-items:center;gap:5px;min-width:30px;font-size:11px;line-height:1.2;color:var(--muted);white-space:nowrap}
+.quiver .q.on{color:var(--ink);font-weight:700}
+.quiver svg{display:block;overflow:visible}
 .dots{display:inline-flex;gap:3px}.dots i{width:8px;height:8px;border-radius:50%;background:currentColor;opacity:.25}.dots i.on{opacity:1}
 .facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 16px;align-content:start}
 .fact .v{font-family:var(--display);font-weight:700;font-stretch:110%;font-size:24px;line-height:1.1}
@@ -164,15 +168,18 @@ svg text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
 .quick{display:flex;flex-wrap:wrap;gap:10px}
 /* The country buttons fit a phone: their side padding shrinks on narrow screens (more in Japanese, whose names are longer), and if they still
    don't fit, the row scrolls sideways inside itself like the spot picker, so the page never slides sideways. */
-.ctry{display:flex;width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none;overscroll-behavior-x:contain;gap:2px;padding:3px;margin:0 0 8px;border-radius:99px;background:var(--panel);border:1px solid var(--line)}
+.ctry{position:relative;display:flex;width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none;overscroll-behavior-x:contain;gap:2px;padding:3px;margin:0 0 8px;border-radius:99px;background:var(--panel);border:1px solid var(--line)}
 .ctry::-webkit-scrollbar{display:none}
 /* Six countries don't fit one row on most phones: the row's edge fades where buttons are hidden (more-l / more-r, set as it scrolls). */
 .ctry.more-r{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 32px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 32px),transparent)}
 .ctry.more-l{-webkit-mask-image:linear-gradient(to left,#000 calc(100% - 32px),transparent);mask-image:linear-gradient(to left,#000 calc(100% - 32px),transparent)}
 .ctry.more-l.more-r{-webkit-mask-image:linear-gradient(to right,transparent,#000 32px,#000 calc(100% - 32px),transparent);mask-image:linear-gradient(to right,transparent,#000 32px,#000 calc(100% - 32px),transparent)}
-.ctry button{flex:none;border:0;background:none;color:var(--muted);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP",sans-serif;padding:6px clamp(5px,calc((100vw - 310px)/10),12px);border-radius:99px;cursor:pointer}
+.ctry button{flex:none;border:0;background:none;color:var(--muted);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP",sans-serif;padding:6px clamp(5px,calc((100vw - 310px)/10),12px);border-radius:99px;cursor:pointer;position:relative;z-index:1;transition:color .36s,text-shadow .36s}
 html[lang="ja"] .ctry button{padding-inline:clamp(3px,calc((100vw - 350px)/10),12px)}
-.ctry button[aria-pressed="true"]{background:#0a0f12;color:#ffb347;text-shadow:0 0 6px rgba(255,140,0,.7)}
+.ctry button[aria-pressed="true"]{color:#ffb347;text-shadow:0 0 6px rgba(255,140,0,.7)}
+/* The highlight is one bubble under the buttons that glides (place and width) to the picked country; ctryPill() puts it there. */
+.ctry-pill{position:absolute;left:0;top:0;border-radius:99px;background:#0a0f12;pointer-events:none;will-change:transform,width}
+.ctry-pill.glide{transition:transform .36s cubic-bezier(.22,1,.36,1),width .36s cubic-bezier(.22,1,.36,1)}
 .picker{display:flex;gap:8px;overflow-x:auto;padding:2px 0 4px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .picker::-webkit-scrollbar{display:none}
 .picker a{flex:none;padding:7px 14px;border-radius:99px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-weight:600;font-size:14px;text-decoration:none;white-space:nowrap}
@@ -298,7 +305,7 @@ html{overscroll-behavior-y:none}
 .sh-scroll .ar{display:inline-block;font-style:normal;font-size:11px;margin-right:2px}
 .sh-scroll .rt{display:inline-block;min-width:22px;padding:3px 4px;border-radius:6px;color:#120b2e;font-weight:700;font-size:12px}
 .wsmap .sh-note{margin-top:8px}
-/* Full-screen map (opens when you tap Map): edge to edge, with the layer buttons and time bar floating over it on frosted glass. */
+/* Full-screen map (opens when you tap Map): edge to edge, with the time bar floating over it on frosted glass and the top buttons straight on the map. */
 .wsmap.fs{position:fixed;inset:0;z-index:100;margin:0;border:0;border-radius:0;padding:0;overflow:hidden;max-width:none}
 .wsmap.fs .box{position:absolute;inset:0}
 .wsmap.fs canvas{position:absolute;inset:0;height:100%!important;border-radius:0}
@@ -308,12 +315,18 @@ html{overscroll-behavior-y:none}
 .wsmap.fs .sh-scroll{background:transparent}
 .wsmap.fs .sh-scroll th{background:rgba(21,13,51,.55);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
 .wsmap.fs:has(.sheet:not([hidden])) .time,.wsmap.fs:has(.sheet:not([hidden])) .tl{display:none}
-.wsmap.fs .wsbar{position:absolute;z-index:5;top:calc(10px + env(safe-area-inset-top));left:calc(10px + env(safe-area-inset-left));right:calc(10px + env(safe-area-inset-right));margin:0;padding:6px;gap:4px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;border-radius:99px;border:1px solid rgba(255,43,214,.35);background:rgba(14,8,36,.55);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
-.wsmap.fs .wsbar::-webkit-scrollbar{display:none}
-.wsmap.fs .wsbar button{flex:none;padding:6px 8px}
+/* The top buttons have no strip behind them: each sits see-through on the map, the layers on the left, Pressure and the countries on the right.
+   When they don't all fit on one row, the countries drop to the next row under Pressure. A finger between the buttons drags the map. */
+.wsmap.fs .wsbar{position:absolute;z-index:5;top:calc(10px + env(safe-area-inset-top));left:calc(10px + env(safe-area-inset-left));right:calc(10px + env(safe-area-inset-right));margin:0;justify-content:flex-end;pointer-events:none}
+.wsmap.fs .wsbar button{flex:none;padding:6px 8px;pointer-events:auto;border-color:rgba(207,196,255,.4);background:rgba(14,8,36,.3);color:#fff;text-shadow:0 1px 2px #000,0 0 6px rgba(0,0,0,.7)}
+.wsmap.fs .wsbar button[data-o][aria-pressed="true"]{background:rgba(59,15,79,.5)}
+.wsmap.fs .wsbar .tog[aria-pressed="true"]{background:rgba(42,32,80,.5)}
+/* The countries, copied from the switch above the spot picker; the map's own country glows amber like the picked one there. */
+.wsmap .wsctry{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;margin-left:6px;pointer-events:none}
+.wsmap.fs .wsctry button[aria-pressed="true"]{border-color:#ffb347;color:#ffb347;background:rgba(10,15,18,.5);text-shadow:0 0 6px rgba(255,140,0,.7),0 1px 2px #000;box-shadow:0 0 8px rgba(255,140,0,.4)}
 /* The ✕ back to Forecast glows amber (like the selected tab), set apart from the pink map tools. */
 .wsmap.fs #wsFs{margin-top:10px;border-color:#ffb347;background:#0a0f12;color:#ffb347;font-size:20px;text-shadow:0 0 6px rgba(255,140,0,.8);box-shadow:0 0 8px rgba(255,140,0,.4)}
-.wsmap.fs .zoom{top:calc(70px + env(safe-area-inset-top));right:calc(8px + env(safe-area-inset-right))}
+.wsmap.fs .zoom{top:calc(var(--barb,calc(40px + env(safe-area-inset-top))) + 16px);right:calc(8px + env(safe-area-inset-right))}
 .wsmap.fs .time{position:absolute;z-index:5;margin:0;left:calc(10px + env(safe-area-inset-left));right:calc(10px + env(safe-area-inset-right));bottom:calc(72px + env(safe-area-inset-bottom))}
 .wsmap.fs .tl{position:absolute;z-index:5;margin:0;left:calc(10px + env(safe-area-inset-left));right:calc(10px + env(safe-area-inset-right));bottom:calc(20px + env(safe-area-inset-bottom));background:rgba(21,13,51,.6);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
 @media (orientation:landscape) and (max-height:540px){
@@ -331,16 +344,16 @@ html{overscroll-behavior-y:none}
     <span class="fresh" id="fresh">Data snapshot</span>
   </header>
   <nav class="tabs" role="tablist" aria-label="View"><button role="tab" data-v="fc" aria-selected="true" data-zh="預報" data-ja="予報">Forecast</button><button role="tab" data-v="ws" aria-selected="false" data-zh="地圖" data-ja="地図">Map</button></nav>
-  <div class="ctry" id="ctry" role="group" aria-label="Country"><button data-c="tw" data-zh="台灣" data-ja="台湾">Taiwan</button><button data-c="jp" data-zh="日本" data-ja="日本">Japan</button><button data-c="ca" data-zh="加州" data-ja="カリフォルニア">California</button><button data-c="hi" data-zh="夏威夷" data-ja="ハワイ">Hawaii</button><button data-c="au" data-zh="澳洲" data-ja="オーストラリア">Australia</button><button data-c="nw" data-zh="太平洋西北" data-ja="太平洋岸北西部">Pacific NW</button></div>
+  <div class="ctry" id="ctry" role="group" aria-label="Country"><span class="ctry-pill" aria-hidden="true"></span><button data-c="tw" data-zh="台灣" data-ja="台湾">Taiwan</button><button data-c="jp" data-zh="日本" data-ja="日本">Japan</button><button data-c="ca" data-zh="加州" data-ja="カリフォルニア">California</button><button data-c="hi" data-zh="夏威夷" data-ja="ハワイ">Hawaii</button><button data-c="au" data-zh="澳洲" data-ja="オーストラリア">Australia</button><button data-c="nw" data-zh="太平洋西北" data-ja="太平洋岸北西部">Pacific NW</button></div>
   <nav class="picker" id="picker" aria-label="Choose a spot" data-zh-aria-label="選擇浪點" data-ja-aria-label="ポイントを選ぶ"></nav>
 
   <div id="viewFc">
   <section class="now" aria-labelledby="nowH">
     <div>
       <div class="label" id="nowH">Right now</div>
-      <div class="hero-num mono" id="nowH1">–</div>
+      <div class="herorow"><div class="hero-num mono" id="nowH1">–</div><div class="quiver" id="nowBoard" role="img" hidden></div></div>
       <div class="hero-sub" id="nowSub"></div>
-      <div class="pills"><div class="rating-pill" id="nowRating"></div><div class="board-pill" id="nowBoard" hidden></div></div>
+      <div class="rating-pill" id="nowRating"></div>
     </div>
     <div class="facts" id="nowFacts"></div>
   </section>
@@ -402,7 +415,7 @@ html{overscroll-behavior-y:none}
   </div>
 
   <section class="panel wsmap" id="viewWs" hidden>
-    <div class="wsbar" id="wsLayers"><button data-o="wind" aria-pressed="true" data-zh="風" data-ja="風">Wind</button><button data-o="waves" aria-pressed="false" data-zh="浪" data-ja="波">Waves</button><button data-o="swell" aria-pressed="false" data-zh="湧浪" data-ja="うねり">Swell</button><button data-o="rain" aria-pressed="false" data-zh="雨" data-ja="雨">Rain</button><button data-p="iso" class="tog" aria-pressed="true" data-zh="氣壓" data-ja="気圧">Pressure</button></div>
+    <div class="wsbar" id="wsLayers"><button data-o="wind" aria-pressed="true" data-zh="風" data-ja="風">Wind</button><button data-o="waves" aria-pressed="false" data-zh="浪" data-ja="波">Waves</button><button data-o="swell" aria-pressed="false" data-zh="湧浪" data-ja="うねり">Swell</button><button data-o="rain" aria-pressed="false" data-zh="雨" data-ja="雨">Rain</button><button data-p="iso" class="tog" aria-pressed="true" data-zh="氣壓" data-ja="気圧">Pressure</button><div class="wsctry" id="wsCtry" role="group" aria-label="Country"></div></div>
     <div class="box" id="wsBox"><canvas id="wsBase"></canvas><canvas id="wsFx" aria-label="WaveSlave wind and wave map" data-zh-aria-label="WaveSlave 風浪地圖" data-ja-aria-label="WaveSlave 風と波の地図"></canvas><div class="zoom"><button id="wsIn" aria-label="Zoom in" data-zh-aria-label="放大" data-ja-aria-label="拡大">+</button><button id="wsOut" aria-label="Zoom out" data-zh-aria-label="縮小" data-ja-aria-label="縮小">−</button><button id="wsHome" aria-label="Back to Taiwan"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" style="display:block;margin:auto"><path d="M6.7,15.1 7.4,13.2 7.2,12.9 7.4,12.6 7.2,12.5 7.6,10.9 7.4,10.9 8.1,10.4 8.9,8.9 8.6,9.1 9.1,8.5 9.2,7.9 9.5,7.8 10.6,5.8 11.1,5.5 12.1,3.6 14.0,2.9 14.8,2.0 15.7,2.5 15.7,2.8 16.9,3.0 16.9,3.6 17.3,3.7 16.9,4.0 16.4,4.6 16.6,6.5 15.2,9.1 15.4,9.6 14.4,13.6 14.0,14.3 14.2,14.8 11.8,18.1 11.3,19.5 11.2,22.0 10.6,21.6 10.3,21.8 10.4,20.8 10.0,19.6 8.1,18.2 7.4,15.7Z" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg></button><button id="wsFs" aria-label="Full screen">⛶</button></div></div>
     <div class="time"><button id="wsPlay" aria-label="Play" data-zh-aria-label="播放" data-ja-aria-label="再生">▶</button><span id="wsTime">--</span><input type="range" id="wsSlider" min="0" max="0" value="0" aria-label="Forecast time" data-zh-aria-label="預報時間" data-ja-aria-label="予報時刻" hidden></div>
     <div class="tl" id="wsTl" role="slider" aria-label="Forecast day and time" data-zh-aria-label="預報日期與時間" data-ja-aria-label="予報の日時"></div>
@@ -494,12 +507,17 @@ function switchSpot(id){ if(!ALL.spots[id] || id===CUR) return; const other = sp
   boot(id); if(other || spotCountry(id)==="au"){ WS.home(spotCountry(id)); if(other) WS.relang(); } WS.redraw(); }
 // The country row's faded edges: more-l / more-r while buttons are hidden that way.
 function ctryEdges(){ const r = document.getElementById("ctry"); r.classList.toggle("more-l", r.scrollLeft > 1); r.classList.toggle("more-r", r.scrollLeft + r.clientWidth < r.scrollWidth - 1); }
-// When the row scrolls, the current country's button sits clear of the 32 px fades (or right at an end of the row, where there is no fade).
-function ctryShow(){ const row = document.getElementById("ctry"), cb = row.querySelector('button[aria-pressed="true"]'), r = row.getBoundingClientRect(), d = cb && cb.getBoundingClientRect(), m = 36;
-  if (d && r.width) row.scrollLeft += d.right > r.right - m ? d.right - r.right + m : d.left < r.left + m ? d.left - r.left - m : 0; ctryEdges(); }
 // Country switch: back to the spot last open in that country, else its first spot.
 function switchCountry(c){ if(c===spotCountry(CUR)) return; let id; try{ id=localStorage.getItem("waveslave-spot-"+c); }catch(e){}
   switchSpot(ALL.spots[id] && spotCountry(id)===c ? id : countrySpots(c)[0]); }
+// The country switch's bubble: under whichever button is pressed, gliding there once the page is up (straight there the first time).
+function ctryPill(){ const box = document.getElementById("ctry"), pill = box && box.querySelector(".ctry-pill"), b = box && box.querySelector('button[aria-pressed="true"]');
+  if(!pill || !b) return; pill.style.transform = `translate(${b.offsetLeft}px,${b.offsetTop}px)`; pill.style.width = b.offsetWidth+"px"; pill.style.height = b.offsetHeight+"px";
+  // A country off the edge of a narrow switch, or under one of its faded edges (32 px, see ctryEdges), scrolls into view with it.
+  const m = box.scrollWidth > box.clientWidth ? 36 : 0;
+  if(b.offsetLeft < box.scrollLeft+m || b.offsetLeft+b.offsetWidth > box.scrollLeft+box.clientWidth-m) box.scrollTo({left: b.offsetLeft-(box.clientWidth-b.offsetWidth)/2, behavior: pill.classList.contains("glide") ? "smooth" : "auto"});
+  ctryEdges();
+  if(!pill.classList.contains("glide")) requestAnimationFrame(() => requestAnimationFrame(() => pill.classList.add("glide"))); }
 // ---- Map maths: plain functions with no page state, tested in Node (tests/map/mapmath.test.js). Inside the map every longitude runs east, 0–360.
 const MAPM = (() => {
   // California's -118.5 is 241.5, so the Pacific has no break at the dateline; W180 goes back for Open-Meteo and the pin's label.
@@ -516,6 +534,13 @@ const MAPM = (() => {
   // The view's centre at zoom z, moved to keep the view inside the box on each axis, or onto the box's middle where the box is the smaller (y in Mercator y).
   const clampTo = (b, W, H, z, cx, cy) => { const hx = W/2/z, hy = H/2/z, s = my(b.s), n = my(b.n), y = my(cy);
     return [b.r - b.l > 2*hx ? Math.max(b.l + hx, Math.min(b.r - hx, cx)) : (b.l + b.r)/2, n - s > 2*hy ? (y < s + hy ? iy(s + hy) : y > n - hy ? iy(n - hy) : cy) : iy((s + n)/2)]; };
+  // A camera's flight from one view to another, each a centre (x, y) and a width w: out far enough to keep sight of both ends, across, and back in,
+  // on van Wijk and Nuij's smooth pan and zoom path ("Smooth and efficient zooming and panning", 2003). at(s) is the view s of the way (0 to 1) along it
+  // and S its length (larger for a longer trip). With no distance to go it is a plain zoom.
+  const flight = (x0, y0, w0, x1, y1, w1) => { const dx = x1 - x0, dy = y1 - y0, d = Math.hypot(dx, dy);
+    if (d < 1e-9) return {S: Math.abs(Math.log(w1/w0))/Math.SQRT2, at: s => [x0, y0, w0*Math.pow(w1/w0, s)]};
+    const r = b => Math.log(Math.sqrt(b*b + 1) - b), r0 = r((w1*w1 - w0*w0 + 4*d*d)/(4*w0*d)), r1 = r((w1*w1 - w0*w0 - 4*d*d)/(4*w1*d));
+    return {S: (r1 - r0)/Math.SQRT2, at: s => { const a = r0 + (r1 - r0)*s, u = w0/(2*d)*(Math.cosh(r0)*Math.tanh(a) - Math.sinh(r0)); return [x0 + u*dx, y0 + u*dy, w0*Math.cosh(r0)/Math.cosh(a)]; }}; };
   // The lines the outlines were cut along: the edges of the coast boxes, and 180° where Natural Earth splits islands (tools/pacific_coast.py).
   // A segment with both ends on one of them (lon/lat in degrees) is a cut, not coast, so the coast line leaves it out.
   const CUTX = [100, 163, 180, 232, 246, 250], CUTY = [-50, -5, 30, 43, 50, 60];
@@ -617,7 +642,7 @@ const MAPM = (() => {
   // Pressure lines come from one grid: the first country grid with pressure whose box holds the view (half a degree to spare), else the Pacific layer.
   const isoPick = (grids, vl, vr, vb, vt) => grids.find(g => g.name !== "pac" && g.hasP && vl >= g.box.l-.5 && vr <= g.box.r+.5 && vb >= g.box.s-.5 && vt <= g.box.n+.5)
     || grids.find(g => g.name === "pac" && g.hasP) || null;
-  return {E, W180, lonLabel, my, iy, PBOX, OLDBOX, cover, clampTo, CUTX, CUTY, cut, pt, mkGrid, fade, layered, isoPick};
+  return {E, W180, lonLabel, my, iy, PBOX, OLDBOX, cover, clampTo, flight, CUTX, CUTY, cut, pt, mkGrid, fade, layered, isoPick};
 })();
 // ---- end map maths
 // ---- WaveSlave map tab: our own wind and wave map, in 90s neon. Pinch or scroll to zoom out to the whole Pacific.
@@ -973,7 +998,8 @@ const WS = (() => {
       const c = LC ? LC.c : document.createElement("canvas"); c.width = base.width; c.height = base.height; const x = c.getContext("2d"), r = base.width/W;
       x.setTransform(r, 0, 0, r, 0, 0); draw(x); LC = {key, c}; }
     g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(LC.c, 0, 0); g.restore(); }
-  function drawBase() { const g = base.getContext("2d"), t = times[ti], S = sample(t), cell = Math.max(6, Math.round(Math.sqrt(W*H/40000))), close = z >= z0*0.6;
+  let hold = false; // the map keeps its picture while a country button switches the page (see flyTo)
+  function drawBase() { if (hold) return; const g = base.getContext("2d"), t = times[ti], S = sample(t), cell = Math.max(6, Math.round(Math.sqrt(W*H/40000))), close = z >= z0*0.6;
     g.fillStyle = "#0e0824"; g.fillRect(0, 0, W, H);
     // The map's own layers (colours, swell arrows, land, pressure lines, typhoon tracks) are drawn only inside the Pacific box: zoomed out on a phone held upright, plain dark sea above and below it.
     // The overlays drawn after them (spot markers, tags, towns, the open spot's dial and the pin) are not clipped and may cross the box's edge: cut off there, they would look broken.
@@ -983,7 +1009,9 @@ const WS = (() => {
     landLayer(g, close);
     isobars(g); tracks(g, t); g.restore();
     // Spot markers: neon dot and swell arrow; tags in the TAG style when zoomed in near Taiwan (placed so tags never overlap).
-    g.textBaseline = "middle"; const boxes = [[W-64, 0, 64, 132]]; TAGHIT = []; // zoom buttons stay clear
+    // Tags keep clear of the buttons over the map (the top bar, however many rows it takes, and the zoom buttons), measured where they are now.
+    const cv = base.getBoundingClientRect(), boxes = [...document.querySelectorAll("#wsLayers button, #viewWs .zoom button")].map(b => b.getBoundingClientRect()).filter(r => r.width).map(r => [r.left-cv.left, r.top-cv.top, r.width, r.height]);
+    g.textBaseline = "middle"; TAGHIT = [];
     if (close) for (const q of S) { const [x,y] = px(q.s.lon, q.s.lat); boxes.push([x-5, y-5, 10, 10]); } // and so do the spot dots
     for (const q of S) { const [x,y] = px(q.s.lon, q.s.lat), cur = q.s.id===CUR;
       if (close && q.v && q.v.dir != null) { const a = (q.v.dir+180)*Math.PI/180, dx = Math.sin(a), dy = -Math.cos(a);
@@ -1161,13 +1189,28 @@ const WS = (() => {
   let mvRaf = 0; // without streaks running, moves still redraw at most once per screen frame
   function moved() { clampView(); if (raf) dirty = true; else if (!mvRaf) mvRaf = requestAnimationFrame(() => { mvRaf = 0; drawBase(); }); }
   // The home button's move: 700 ms eased in and out, the centre straight across in longitude and Mercator y, the zoom by the same factor each moment; with reduced motion, a jump.
-  // A finger or the mouse on the map, any zoom, a change of country or the next glide stops it.
+  // A finger or the mouse on the map, any zoom, a change of country or the next glide (or flight, below) stops it.
   let gl = 0; const unglide = () => { cancelAnimationFrame(gl); gl = 0; };
   function glide(tx, ty, tz) { unglide(); if (matchMedia("(prefers-reduced-motion: reduce)").matches) { [cx, cy, z] = [tx, ty, tz]; moved(); return; }
     const x0 = cx, y0 = my(cy), y1 = my(ty), zs = z, t0 = performance.now();
     const step = now => { const p = Math.min(1, Math.max(0, now - t0)/700), e = p < .5 ? 4*p*p*p : 1 - Math.pow(2 - 2*p, 3)/2;
       [cx, cy, z] = p < 1 ? [x0 + (tx-x0)*e, iy(y0 + (y1-y0)*e), zs*Math.pow(tz/zs, e)] : [tx, ty, tz]; moved(); gl = p < 1 ? requestAnimationFrame(step) : 0; };
     gl = requestAnimationFrame(step); }
+  // A country button's trip flies like a camera (MAPM.flight), the view's width being W/z degrees: eased gently in and out so it sets off at once,
+  // and the further it goes the longer it takes, 0.8 to 1.6 s. Zoomed out past the whole Pacific, the map holds at its widest. With reduced motion, a jump.
+  function fly(tx, ty, tz) { if (matchMedia("(prefers-reduced-motion: reduce)").matches) return glide(tx, ty, tz); unglide();
+    const f = MAPM.flight(cx, my(cy), W/z, tx, my(ty), W/tz), ms = Math.min(1600, Math.max(800, f.S*250)), t0 = performance.now();
+    const step = now => { const p = Math.min(1, Math.max(0, now - t0)/ms), [x, y, w] = f.at((1 - Math.cos(Math.PI*p))/2);
+      [cx, cy, z] = p < 1 ? [x, iy(y), W/w] : [tx, ty, tz]; moved(); gl = p < 1 ? requestAnimationFrame(step) : 0; };
+    gl = requestAnimationFrame(step); }
+  // The map's country buttons: the pressed one is the map's country.
+  const ctryOn = () => document.querySelectorAll("#wsCtry button").forEach(b => b.setAttribute("aria-pressed", b.dataset.c === MC));
+  // A country button switches the page to that country (as the switch above the spot picker does) without leaving the map, and the map flies there
+  // from where it is. An open forecast card or pin belongs to the place being left, so it closes. The pressed country flies back to its home view.
+  function flyTo(c) { if (c === MC) return glide(HOME.cx, HOME.cy, z0);
+    const from = [cx, cy, z]; PIN = null; PINBTN = PINX = null; SHEET = null; document.getElementById("wsSheet").hidden = true;
+    // switchCountry moves the map to the new home view: it isn't drawn there (hold), and goes back to where it was to fly from.
+    hold = true; try { switchCountry(c); } finally { hold = false; } const to = [cx, cy, z]; [cx, cy, z] = from; fly(...to); }
   function zoomAt(f, x, y) { unglide(); const [lon,lat] = ll(x, y); z *= f; clampView(); const [nx,ny] = px(lon, lat); cx += (nx-x)/z; cy = iy(my(cy) - (ny-y)/z); moved(); }
   function legend() { const L = LAY[layer], el = document.getElementById("wsLegend");
     el.innerHTML = `<i style="background:linear-gradient(90deg,${PAL[layer].map(([f,c])=>`${c} ${f*100}%`).join(",")})"></i>` + L.ticks.map(v=>`<span style="left:${lf(v, L)*100}%">${v}${v===L.max?"+ "+L.unit:""}</span>`).join(""); }
@@ -1202,6 +1245,11 @@ const WS = (() => {
       document.querySelectorAll("#wsLayers button[data-o]").forEach(x => x.setAttribute("aria-pressed", x===b)); legend(); drawBase(); });
     const ib = document.querySelector("#wsLayers button[data-p]"); ib.hidden = !GRIDS.some(g => g.hasP); ib.setAttribute("aria-pressed", iso);
     ib.onclick = () => { iso = !iso; ib.setAttribute("aria-pressed", iso); try { localStorage.setItem("waveslave-iso", iso ? "1" : "0"); } catch(e) {} drawBase(); warm(); };
+    // A button for each country in the switch above the spot picker (#ctry), copied from it so that a country added there shows up here too.
+    document.getElementById("wsCtry").replaceChildren(...[...document.querySelectorAll("#ctry button")].map(b => { const n = b.cloneNode(true); n.onclick = () => flyTo(n.dataset.c); return n; })); ctryOn();
+    // The zoom buttons sit just under the top buttons, however many rows those take (a narrow phone, a longer language): --barb is the bar's bottom edge.
+    const bar = document.getElementById("wsLayers"), sec = document.getElementById("viewWs");
+    if (window.ResizeObserver) new ResizeObserver(() => sec.style.setProperty("--barb", bar.offsetTop + bar.offsetHeight + "px")).observe(bar);
     // Zoom and pan: scroll wheel or the +/− buttons; pinch with two fingers; drag sideways with one (up/down still scrolls the page).
     const P = new Map(); let downAt = null, pinch = null, drag = null;
     const onPin = ([x, y]) => PIN && PINBOX && !(PINX && Math.hypot(x-PINX[0], y-PINX[1]) < 16) && !(PINBTN && Math.hypot(x-PINBTN[0], y-PINBTN[1]) < 20)
@@ -1257,7 +1305,7 @@ const WS = (() => {
     redraw() { if (built && raf) drawBase(); },
     // Another country picked (or Australia's other coast): the map goes to its home view. With the map open, the view being left
     // is saved under the old country's key first.
-    home(c) { unglide(); if (FS) keep(); MC = c; HOME = homeOf(c); cx = HOME.cx; cy = HOME.cy; if (built) { z0 = homeZ(HOME); z = z0; clampView(); moved(); } else z = 1; },
+    home(c) { unglide(); if (FS) keep(); MC = c; HOME = homeOf(c); cx = HOME.cx; cy = HOME.cy; ctryOn(); if (built) { z0 = homeZ(HOME); z = z0; clampView(); moved(); } else z = 1; },
     // After a language switch: day labels, an open forecast table and the map's own text.
     relang() { if (!built) return; timeline(); tlMark(); const el = document.getElementById("wsSheet"); if (!el.hidden) { if (SHEET) { const k = [cx, cy, z]; openSheet(SHEET); [cx, cy, z] = k; clampView(); } else if (PIN && PIN.open) showPin(); }
       document.getElementById("wsFs").setAttribute("aria-label", T(FS ? "Back to Forecast" : "Full screen")); if (!document.getElementById("viewWs").hidden) drawBase(); } };
@@ -1407,6 +1455,17 @@ const updated = Date.parse(DATA.updated);
   el.classList.remove("stale");
   if(ageH>12) el.classList.add("stale"); })();
 
+// A surfboard standing in a w x h box, nose at the top. Shape numbers are in board widths (x, -.5 to .5) and lengths (y, 0 nose to 1 tail):
+// nose 0 pointed .. 1 round; wide = where the widest point sits; full = how soon the nose fills out; hold = how long the rails stay parallel
+// behind the widest point; tw = tail width; tail round, square or swallow (notch = how deep). The nose leaves the tip at 55° (pointed) to 90°
+// (round) from the stringer and stays convex out to the widest point.
+function boardPath(w,h,p){ const X=x=>(w/2+x*(w-1.8)).toFixed(2), Y=y=>(.9+y*(h-1.8)).toFixed(2), bu={round:.06,square:.006,swallow:0}[p.tail], yt=1-bu, tw=p.tw/2;
+  const al=(55+35*p.nose)*Math.PI/180, l1=.12+.28*p.nose, a1x=l1*Math.sin(al), a1y=l1*Math.cos(al), a2y=Math.min(p.wide-.02, Math.max(p.wide*(1-p.full), a1y+(.5-a1x)/Math.tan(al)+.02));
+  const b1y=p.wide+(yt-p.wide)*p.hold, b2x=tw+(.5-tw)*.3, b2y=yt-(yt-p.wide)*.05;
+  return `M${X(0)},${Y(0)}C${X(a1x)},${Y(a1y)} ${X(.5)},${Y(a2y)} ${X(.5)},${Y(p.wide)}C${X(.5)},${Y(b1y)} ${X(b2x)},${Y(b2y)} ${X(tw)},${Y(yt)}`
+    + (p.tail==="swallow" ? `L${X(0)},${Y(yt-p.notch)}L${X(-tw)},${Y(yt)}` : `Q${X(0)},${Y(yt+2*bu)} ${X(-tw)},${Y(yt)}`)
+    + `C${X(-b2x)},${Y(b2y)} ${X(-.5)},${Y(b1y)} ${X(-.5)},${Y(p.wide)}C${X(-.5)},${Y(a2y)} ${X(-a1x)},${Y(a1y)} ${X(0)},${Y(0)}Z`; }
+
 // ---- right now
 (() => {
   const b = DATA.buoy[DATA.buoy.length-1], bt = b ? tp(b[0]) : nowMs;
@@ -1434,9 +1493,22 @@ const updated = Date.parse(DATA.updated);
   // Board pick from the same reading: under 0.7 m longboard, 0.7–1.2 m mid-length, over 1.2 m shortboard;
   // weak short-period waves (under 7 s) move it one board bigger. Height counts only the swell that reaches the spot.
   const bh = b[1]*exposure(bdir), bk = Math.max(0, (bh<0.7?0 : bh<1.2?1 : 2) - (bp<7?1:0));
-  const bd = document.getElementById("nowBoard"); bd.hidden = false;
-  bd.innerHTML = `<svg viewBox="0 0 10 30" aria-hidden="true"><path d="M5 0C9 7 9.5 20 7.5 30h-5C.5 20 1 7 5 0z" fill="currentColor"/></svg>`
-    + (isZh() ? ["長板浪","中長板浪","短板浪"] : isJa() ? ["ロングボード向き","ミッドレングス向き","ショートボード向き"] : ["Longboard day","Mid-length day","Shortboard day"])[bk];
+  // Shown as the quiver in retro shapes (Bryan picked these, Oct 18): a twin-fin fish with a swallow tail, an egg and a single-fin log
+  // (5'6", 7'2", 9'6" at 62 px for the log), fins showing underneath, the pick filled in sea blue with orange racing stripes and a stringer.
+  const bd = document.getElementById("nowBoard"), on = 2-bk, names = isZh() ? ["短板","中長板","長板"] : isJa() ? ["ショート","ミッド","ロング"] : ["Short","Mid","Long"];
+  bd.hidden = false;
+  bd.innerHTML = [[19,36,{nose:.35,wide:.45,full:.48,hold:.35,tw:.72,tail:"swallow",notch:.1},[[.18,.76,.25,.92],[-.18,.76,-.25,.92]]],
+    [18,47,{nose:.85,wide:.5,full:.62,hold:.4,tw:.42,tail:"round"},[[0,.8,0,.955]]],
+    [16.5,62,{nose:1,wide:.44,full:.88,hold:.78,tw:.66,tail:"square"},[[0,.76,0,.955]]]].map(([w,h,p,fins],i) => {
+    const d = boardPath(w,h,p), X = x=>(w/2+x*(w-1.8)).toFixed(2), Y = y=>(.9+y*(h-1.8)).toFixed(2), lit = i===on;
+    return `<div class="q${lit?" on":""}"><svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">` + (lit
+      ? `<clipPath id="boardClip"><path d="${d}"/></clipPath><path d="${d}" style="fill:var(--sea);stroke:var(--sea);stroke-width:1.5"/>`
+        + `<g clip-path="url(#boardClip)" style="stroke:#ffb347;stroke-width:1.4">${[.13,-.13].map(x => `<line x1="${X(x)}" x2="${X(x)}" y1="0" y2="${h}"/>`).join("")}</g>`
+        + `<line x1="${X(0)}" x2="${X(0)}" y1="${Y(.05)}" y2="${Y(.75)}" style="stroke:var(--panel);stroke-opacity:.6"/>`
+      : `<path d="${d}" style="fill:none;stroke:var(--muted);stroke-opacity:.55;stroke-width:1.3"/>`)
+      + `<g style="stroke-linecap:round;${lit ? "stroke:var(--panel);stroke-opacity:.75;stroke-width:1.7" : "stroke:var(--muted);stroke-opacity:.55;stroke-width:1.4"}">`
+      + fins.map(([x1,y1,x2,y2]) => `<line x1="${X(x1)}" y1="${Y(y1)}" x2="${X(x2)}" y2="${Y(y2)}"/>`).join("") + `</g></svg>${names[i]}</div>`; }).join("");
+  bd.setAttribute("aria-label", (isZh() ? ["長板浪","中長板浪","短板浪"] : isJa() ? ["ロングボード向き","ミッドレングス向き","ショートボード向き"] : ["Longboard day","Mid-length day","Shortboard day"])[bk]);
   bd.title = isZh() ? "依浮標浪高與週期建議：0.7 m 以下長板，0.7–1.2 m 中長板，1.2 m 以上短板；週期短於 7 秒時建議大一號的板。"
     : isJa() ? "ブイの波高と周期から：0.7 m 未満はロング、0.7–1.2 m はミッドレングス、1.2 m 以上はショート。周期 7 秒未満なら一つ大きめの板。"
     : "From the buoy height and period: under 0.7 m longboard, 0.7–1.2 m mid-length, over 1.2 m shortboard; one board bigger when the period is under 7 s."; }
@@ -1730,8 +1802,7 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
 (() => {
   const go = switchSpot;
   const ids = countrySpots(spotCountry(SPOT));
-  document.querySelectorAll("#ctry button").forEach(b => b.setAttribute("aria-pressed", b.dataset.c===spotCountry(SPOT)));
-  ctryShow();
+  document.querySelectorAll("#ctry button").forEach(b => b.setAttribute("aria-pressed", b.dataset.c===spotCountry(SPOT))); ctryPill();
   const cwaBuoy = id => `https://www.cwa.gov.tw/V8/${isZh()?"C":"E"}/M/OBS_Marine_30day.html?MID=${id}`;
   const jp = DATA.country==="jp", hi = DATA.country==="hi", au = DATA.country==="au", nw = DATA.country==="nw", ca = DATA.country==="ca" || hi || nw, far = DATA.buoyKm>=40 ? ` · ${DATA.buoyKm} km${isZh()?"外":isJa()?"先":" away"}` : "";
   const windy = s => `https://www.windy.com/${s.lat}/${s.lon}/ecmwfWaves/waves?waves,${s.lat},${s.lon},10,p:surfspots`;
@@ -1781,9 +1852,13 @@ drawDays(); drawDay();
 }
 applyLang();
 document.querySelectorAll("#lang button").forEach(b=>b.onclick=()=>setLang(b.dataset.l));
-document.querySelectorAll("#ctry button").forEach(b=>b.onclick=()=>switchCountry(b.dataset.c));
+// A tap sends the bubble on its way first and redraws the page as it lands, so the redraw never stutters the glide; taps in a row go to the last one.
+{ let t; document.querySelectorAll("#ctry button").forEach(b=>b.onclick=()=>{ if(b.dataset.c===spotCountry(CUR)&&!t) return; clearTimeout(t);
+    document.querySelectorAll("#ctry button").forEach(x=>x.setAttribute("aria-pressed", x===b)); ctryPill();
+    t = setTimeout(()=>{ t=0; switchCountry(b.dataset.c); }, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 260); });
+  // Language and font changes resize the buttons, so the bubble follows them.
+  if(window.ResizeObserver){ const ro = new ResizeObserver(()=>ctryPill()); document.querySelectorAll("#ctry, #ctry button").forEach(e=>ro.observe(e)); } }
 document.getElementById("ctry").addEventListener("scroll", ctryEdges, {passive: true}); addEventListener("resize", ctryEdges);
-(document.fonts ? document.fonts.ready : Promise.resolve()).then(ctryShow);  // the buttons widen once Public Sans arrives
 boot(SPOT0);
 if(VIEW!=="fc") setView(VIEW, true);
 

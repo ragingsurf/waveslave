@@ -106,7 +106,7 @@ const CHECKS = {
     if (a.z !== a.want) throw new Error(`Margaret River opens at z ${a.z}, want ${a.want}`);
   },
   // Pacific NW: with nothing saved, Cox Bay opens on its old box; California then opens on its home view with the Pacific NW view kept
-  // under its own key, and coming back lands on the Pacific NW home.
+  // under its own key, and the map's own Pacific NW button brings it back to the Pacific NW home.
   async pacificNorthwest(open) {
     const page = await open({ spot: "coxbay" });
     if (!await page.evaluate(() => !!ALL.spots.coxbay)) skip("the page has no Pacific NW spots");
@@ -118,9 +118,9 @@ const CHECKS = {
     const caCx = land ? 238.07 : 240.5;  // sideways California's home is pulled west to keep the view inside the Pacific box
     if (c.MC !== "ca" || !near(c.cx, caCx, 0.01)) throw new Error(`after switching to California view() is MC ${c.MC}, cx ${c.cx}, want ca, ${caCx}`);
     if (!c.kept || !near(c.kept.cx, v.cx) || !near(c.kept.cy, v.cy) || !near(c.kept.k, v.z/v.z0)) throw new Error(`waveslave-mapview-nw holds ${JSON.stringify(c.kept)}, want cx ${v.cx}, cy ${v.cy}, k ${v.z/v.z0}`);
-    await page.evaluate(() => switchCountry("nw")); await settle(page);
-    const n = await page.evaluate(() => window.__ws.view());
-    if (n.MC !== "nw" || !near(n.cx, 235.3, 0.01) || n.z !== n.z0) throw new Error(`back on Pacific NW view() is MC ${n.MC}, cx ${n.cx}, z ${n.z}, want nw, 235.3, z0 ${n.z0}`);
+    await page.click('#wsLayers button[data-c="nw"]'); await settle(page);
+    const n = await page.evaluate(() => ({ c: spotCountry(CUR), ...window.__ws.view() }));
+    if (n.c !== "nw" || n.MC !== "nw" || !near(n.cx, 235.3, 0.01) || n.z !== n.z0) throw new Error(`after the map's Pacific NW button the page is on ${n.c}, view() MC ${n.MC}, cx ${n.cx}, z ${n.z}; want nw, nw, 235.3, z0 ${n.z0}`);
   },
   // Changing country moves the one map to the new country's home view, with no reload.
   async noReloadCountry(open) {
@@ -130,6 +130,47 @@ const CHECKS = {
     if (v.mark !== 1) throw new Error("the page reloaded (window.__mark is gone)");
     if (v.MC !== "hi") throw new Error(`view().MC is ${v.MC}, want hi`);
     if (!(Math.abs(v.cx - 202.7) < 0.01)) throw new Error(`view().cx is ${v.cx}, want 202.7 (Hawaii's home)`);
+  },
+  // The map's top bar has a button for every country in the switch above the spot picker, in the same order, the current one pressed.
+  // Tapping one moves the page to that country without leaving the map or reloading, closes the forecast card left open in the old one,
+  // and the map goes to its home view (straight there, with reduced motion); tapping the pressed one when zoomed out brings the map back there.
+  async mapCountryButtons(open) {
+    const page = await open(home("tw")); await page.evaluate(() => { window.__mark = 1; });
+    const pressed = () => page.evaluate(() => [...document.querySelectorAll('#wsLayers button[data-c][aria-pressed="true"]')].map(b => b.dataset.c).join());
+    const r = await page.evaluate(() => ({ want: [...document.querySelectorAll("#ctry button")].map(b => b.dataset.c).join(), got: [...document.querySelectorAll("#wsLayers button[data-c]")].map(b => b.dataset.c).join() }));
+    if (r.got !== r.want) throw new Error(`the map's country buttons are ${r.got || "missing"}, want ${r.want}`);
+    if (await pressed() !== "tw") throw new Error(`the pressed country button is ${await pressed() || "none"}, want tw`);
+    await tapAt(page, await page.evaluate(() => { const s = ALL.spots.donghe; return window.__ws.px(MAPM.E(s.lon), s.lat); }));
+    if (await page.evaluate(() => document.getElementById("wsSheet").hidden)) throw new Error("tapping Donghe did not open its forecast card");
+    await page.click('#wsLayers button[data-c="hi"]'); await settle(page);
+    const v = await page.evaluate(() => ({ mark: window.__mark, c: spotCountry(CUR), view: VIEW, fs: document.getElementById("viewWs").classList.contains("fs"), shut: document.getElementById("wsSheet").hidden, ...window.__ws.view() }));
+    if (v.mark !== 1) throw new Error("the page reloaded (window.__mark is gone)");
+    if (v.c !== "hi" || v.view !== "ws" || !v.fs) throw new Error(`after tapping Hawaii the page is on ${v.c}, view ${v.view}, full screen ${v.fs}; want hi, ws, true`);
+    if (!v.shut) throw new Error("after tapping Hawaii, Donghe's forecast card is still open");
+    if (v.MC !== "hi" || !near(v.cx, 202.7, 0.01) || v.z !== v.z0) throw new Error(`after tapping Hawaii the map is ${v.MC} at cx ${v.cx}, z ${v.z}; want hi at 202.7, z0 ${v.z0}`);
+    if (await pressed() !== "hi") throw new Error(`after tapping Hawaii the pressed country button is ${await pressed() || "none"}, want hi`);
+    await zoomOut(page); await page.click('#wsLayers button[data-c="hi"]'); await settle(page);
+    const b = await page.evaluate(() => window.__ws.view());
+    if (b.z !== b.z0 || !near(b.cx, 202.7, 0.01)) throw new Error(`tapping Hawaii again when zoomed out leaves z ${b.z} and cx ${b.cx}, want z0 ${b.z0} and 202.7`);
+  },
+  // No strip runs across the top any more: the buttons sit straight on the map, a finger in the gap between them drags the map, and in English,
+  // Chinese and Japanese every button is on screen and none covers another or the zoom buttons down the right side.
+  async topBarSeeThrough(open) {
+    const page = await open(home("tw"));
+    for (const l of ["en", "zh", "ja"]) {
+      await page.evaluate(l => setLang(l), l); await settle(page);
+      const r = await page.evaluate(() => { const bar = document.getElementById("wsLayers"), s = getComputedStyle(bar), rect = b => b.getBoundingClientRect();
+        const boxes = [...document.querySelectorAll("#wsLayers button, #viewWs .zoom button")].filter(b => b.offsetParent).map(b => [b.dataset.o || b.dataset.p || b.dataset.c || b.id, rect(b)]);
+        const hits = []; boxes.forEach(([a, p], i) => boxes.slice(i + 1).forEach(([b, q]) => { if (p.left < q.right && q.left < p.right && p.top < q.bottom && q.top < p.bottom) hits.push(`${a} covers ${b}`); }));
+        const off = boxes.filter(([, p]) => p.left < 0 || p.top < 0 || p.right > innerWidth || p.bottom > innerHeight).map(([a]) => a);
+        // The gap between Rain and Pressure, halfway down Rain.
+        const rain = rect(bar.querySelector('[data-o="rain"]')), pres = rect(bar.querySelector("[data-p]")), at = document.elementFromPoint((rain.right + pres.left)/2, (rain.top + rain.bottom)/2);
+        return { bg: s.backgroundColor, border: parseFloat(s.borderTopWidth) > 0 && s.borderTopStyle !== "none", gap: pres.left - rain.right, at: at ? at.id || at.tagName : null, hits, off }; });
+      if (r.bg !== "rgba(0, 0, 0, 0)" || r.border) throw new Error(`in ${l} the top bar still has a strip behind its buttons (background ${r.bg}, border ${r.border})`);
+      if (r.gap > 8 && r.at !== "wsFx") throw new Error(`in ${l} a finger between Rain and Pressure lands on ${r.at}, not the map`);
+      if (r.hits.length) throw new Error(`in ${l}: ${r.hits.join("; ")}`);
+      if (r.off.length) throw new Error(`in ${l} ${r.off.join(", ")} sits off the screen`);
+    }
   },
   // Back on the Forecast page the page is no wider than the phone, so it only scrolls up and down: in English, Chinese and Japanese nothing
   // in the page column reaches past the column, and the country buttons fit, or scroll inside their own row, instead of pushing it wider.

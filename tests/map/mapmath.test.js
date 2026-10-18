@@ -216,3 +216,27 @@ test("clampTo", () => {
   near(nx, 250 - 390/2/20); near(ny, M.iy(M.my(60) - 844/2/20));
   assert.deepEqual(M.clampTo(M.PBOX, 390, 844, 20, 175, 23.75), [175, 23.75]);
 });
+
+test("flight", () => {
+  const M = load();
+  // A view is its centre (longitude, Mercator y) and its width in degrees: the home views of Taiwan, California and Japan on a phone held upright.
+  const view = (lon, lat, span) => [lon, M.my(lat), 390/(844*Math.cos(lat*Math.PI/180)/span)], tw = view(120.9, 23.75, 4), ca = view(240.5, 35.3, 9), jp = view(135.6, 33.4, 13);
+  for (const [a, b] of [[tw, ca], [ca, tw], [jp, tw], [tw, jp]]) {
+    const f = M.flight(...a, ...b), trip = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    // It starts and ends on the two views.
+    f.at(0).forEach((v, i) => near(v, a[i], 1e-9)); f.at(1).forEach((v, i) => near(v, b[i], 1e-9));
+    // The centre only ever moves on towards the end; at its widest the view takes in the whole trip; the start is in sight until the centre is
+    // halfway, and the end from then on.
+    let was = 0, widest = 0;
+    for (let i = 0; i <= 1000; i++) { const [x, y, w] = f.at(i/1000), gone = Math.hypot(x - a[0], y - a[1]), left = Math.hypot(b[0] - x, b[1] - y);
+      assert.ok(gone >= was - 1e-9, `the centre goes back at ${i/1000}`); was = gone; widest = Math.max(widest, w);
+      assert.ok((gone <= trip/2 ? gone : left) <= w/2, `at ${i/1000} the ${gone <= trip/2 ? "start" : "end"} is out of sight`); }
+    assert.ok(widest >= trip, `at its widest the view is ${widest}, short of the ${trip} trip`);
+  }
+  // A longer trip takes longer: Taiwan to California is longer than Taiwan to Japan.
+  assert.ok(M.flight(...tw, ...ca).S > M.flight(...tw, ...jp).S);
+  // No distance to go: a plain zoom about the centre.
+  const z = M.flight(150, 20, 10, 150, 20, 40);
+  assert.deepEqual(z.at(0.5), [150, 20, 20]);
+  near(z.S, Math.log(4)/Math.SQRT2);
+});

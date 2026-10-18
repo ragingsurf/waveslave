@@ -15,19 +15,19 @@
 # Silent buoys and stale wind follow ca.py's rules (ca.STALE_HOURS, ca.WIND_STALE_HOURS).
 # Usage: python3 -I nz.py <dl dir> <snap.json> <spots.json> <cache dir>   (each source is optional: a missing one only blanks its own
 #        fields)
-import sys, os, csv, io, json, datetime, urllib.parse
+import sys, os, csv, io, json, math, datetime, urllib.parse
 from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # python3 -I leaves this folder off the path
 import jp, ca, au, kr
 
 UTC, DAY = datetime.timezone.utc, datetime.timedelta(days=1)
-BAD = ('3', '4', '9')  # quality flags for suspect, failed and missing (QARTOD's); the feed sends 1
+BAD = (3, 4, 9)  # quality flags for suspect, failed and missing (QARTOD's), read as numbers; the feed sends 1
 
 
 def _f(v):
     try: x = float(v)
     except (TypeError, ValueError): return None
-    return None if x == -9999 else x
+    return x if math.isfinite(x) and x != -9999 else None   # -9999 is the feed's no data; nan and inf aren't readings either
 
 
 def siw_rows(txt, keep_hours=24, now=None):
@@ -46,9 +46,9 @@ def siw_rows(txt, keep_hours=24, now=None):
         try: t = datetime.datetime.fromtimestamp(int(float(get(r, 'Time (UNIX/UTC)'))), UTC)
         except (TypeError, ValueError, OverflowError, OSError): continue
         h = _f(get(r, 'Hsig (m)'))
-        if not h or h < 0 or get(r, 'QF_waves') in BAD: continue
+        if not h or h < 0 or _f(get(r, 'QF_waves')) in BAD: continue
         d = _f(get(r, 'Dp (deg)'))
-        sst = _f(get(r, 'SST (degC)')) if len(r) == len(head) and get(r, 'QF_sst') not in BAD else None
+        sst = _f(get(r, 'SST (degC)')) if len(r) == len(head) and _f(get(r, 'QF_sst')) not in BAD else None
         newest = max(newest or t, t)
         hr = (t + datetime.timedelta(minutes=30)).replace(minute=0, second=0)
         gap = abs((t - hr).total_seconds())
@@ -59,8 +59,8 @@ def siw_rows(txt, keep_hours=24, now=None):
 
 
 def linz_events(txt):
-    """One LINZ tide table (a CSV: three header lines, then a row per day of day, weekday, month, year and up to four pairs of local
-    time and height in metres) -> [(date, HH:MM, m)] in order."""
+    """One LINZ tide table (a CSV: three header lines, then a row per day of day, weekday, month, year and three to five pairs of local
+    time and height in metres, five only on the 25-hour day daylight saving ends) -> [(date, HH:MM, m)] in order."""
     ev = []
     for line in (txt or '').lstrip('﻿').splitlines():
         f = [x.strip() for x in line.split(',')]

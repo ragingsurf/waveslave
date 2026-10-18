@@ -127,12 +127,14 @@ for C in kr ph id; do
   get tide$C "https://marine-api.open-meteo.com/v1/marine?$KQ&hourly=sea_level_height_msl&timezone=GMT&past_days=5&forecast_days=10" || echo "tide$C fetch failed" >&2
   python3 -I "$HERE/kr.py" "$W/dl" "$W/snap.json" "$HERE/spots.json" $C || echo "$C skipped" >&2
 done
-# New Zealand spots (optional, never block the build): the University of Canterbury's South Island Waves buoys (the last 26 hours,
-# one CSV request per buoy), airport reports (METAR) for Wellington and Christchurch, the only airports near a spot that report to
-# NOAA's Aviation Weather Center, ECMWF's wind forecast via Open-Meteo, as for the Philippines and Indonesia, and LINZ's tide tables:
-# one file per port and year, kept in cache/ and fetched again once it is 30 days old, since LINZ reissues them (a failed fetch keeps
-# the old one). The years are those of a week before and 12 days after today on New Zealand's clock, enough for the forecast's past
-# days and its last. nz.py writes them under the same keys.
+# New Zealand spots (optional, never block the build): South Island Waves buoys (the University of Canterbury's and Dunedin City
+# Council's, the last 26 hours, one CSV request per buoy), airport reports (METAR) for Wellington and Christchurch, the only airports
+# near a spot that report to NOAA's Aviation Weather Center, ECMWF's wind forecast via Open-Meteo, as for the Philippines and
+# Indonesia, and LINZ's tide tables: one file per port and year, kept in cache/ and fetched again once it is 30 days old, since LINZ
+# reissues them. A failed fetch, or a reply with no tide rows for that year, keeps the old file; after a timeout the rest wait for the
+# next run, so a slow LINZ can't hold up the build. The years are those of a week before and 12 days after today on New Zealand's
+# clock, enough for the forecast's past days and its last (one year, or two around New Year). nz.py reads the tables under the same
+# names (tests/test_nz.py checks the two agree) and writes the spots under the same keys as the other countries.
 # nzids <field>: the spots' lat or lon, siw for their buoys, metar for their airports, or tidePort for their LINZ tables (url-encoded).
 nzids(){ python3 -I -c "import json,sys,urllib.parse as u;S=[s for s in json.load(open(sys.argv[1])) if s.get('country')=='nz'];f=sys.argv[2]
 W=[w for s in S for w in (lambda v: v if isinstance(v,list) else [v] if v else [])(s.get('windStation'))]
@@ -144,9 +146,13 @@ if [ -n "$(nzids lat)" ]; then
   [ -z "$(nzids metar)" ] || curl -fsSL --retry 2 -m 60 -A "waveslave.tw" -o "$W/dl/metar-nz.json" "https://aviationweather.gov/api/data/metar?ids=$(nzids metar)&format=json&hours=3" || echo "metar nz fetch failed" >&2
   NQ="latitude=$(nzids lat)&longitude=$(nzids lon)&hourly=wind_speed_10m,wind_direction_10m,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=4"
   get opennz "https://api.open-meteo.com/v1/forecast?$NQ&models=ecmwf_ifs" || get opennz "https://api.open-meteo.com/v1/forecast?$NQ" || echo "opennz fetch failed" >&2
-  for y in $(TZ=Pacific/Auckland date -d '-7 days' +%Y) $(TZ=Pacific/Auckland date -d '+12 days' +%Y); do for p in $(nzids tidePort | tr ',' ' '); do
-    f="$G/nz-tide-$p-$y.csv"
-    [ -n "$(find "$f" -mtime -30 2>/dev/null)" ] || { curl -fsSL --retry 2 -m 60 -A "waveslave.tw" -o "$f.new" "https://static.charts.linz.govt.nz/tide-tables/maj-ports/csv/$p%20$y.csv" && mv "$f.new" "$f"; } || { rm -f "$f.new"; echo "linz tide $p $y fetch failed" >&2; }
+  Y0=$(TZ=Pacific/Auckland date -d '-7 days' +%Y); Y1=$(TZ=Pacific/Auckland date -d '+12 days' +%Y); [ "$Y1" != "$Y0" ] || Y1=; LINZ=up
+  for y in $Y0 $Y1; do for p in $(nzids tidePort | tr ',' ' '); do
+    f="$G/nz-tide-$p-$y.csv"; e=0
+    [ -z "$(find "$f" -mtime -30 2>/dev/null)" ] && [ -n "$LINZ" ] || continue
+    curl -fsSL --retry 1 -m 30 -A "waveslave.tw" -o "$f.new" "https://static.charts.linz.govt.nz/tide-tables/maj-ports/csv/$p%20$y.csv" || e=$?
+    # a table has rows of day, weekday, month, year: one of those for this year, or the reply isn't kept (exit 28 is a timeout)
+    [ $e = 0 ] && grep -qE "^[0-9]+,[A-Za-z]+,[0-9]+,$y," "$f.new" && mv "$f.new" "$f" || { rm -f "$f.new"; echo "linz tide $p $y fetch failed" >&2; [ $e != 28 ] || LINZ=; }
   done; done
   python3 -I "$HERE/nz.py" "$W/dl" "$W/snap.json" "$HERE/spots.json" "$G" || echo "new zealand skipped" >&2
 fi

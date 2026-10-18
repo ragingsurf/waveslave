@@ -48,7 +48,7 @@ offset in force, as for Australia.
 | Wind forecast | ECMWF's IFS (9 km) via Open-Meteo, then Open-Meteo's default | one call for the 8 spots, as for the Philippines and Indonesia |
 | Wind now | Wellington (NZWN) and Christchurch (NZCH) airports via NOAA's aviationweather.gov | both report every 30 minutes. Over a week Wellington's wind tracked ECMWF's at Lyall Bay (r 0.93) and Christchurch's at New Brighton (0.74). Tauranga's, Gisborne's, New Plymouth's and Kaikōura's airports sent no report to that feed in 7 days; Dunedin's is 23 km inland and tracked St Clair's forecast poorly (0.39); Hamilton's is 46 km inland from Raglan |
 | Buoys | the University of Canterbury's South Island Waves network (CC BY 4.0, credit the University of Canterbury) | Pegasus Bay (31020, hourly, with water temperature) for New Brighton and White Island (31327, every 3 hours, Dunedin City Council's) for St Clair, one CSV request per buoy for the last 26 hours. Hourly rows like the other buoys: significant height, mean period, peak direction, water temperature where the buoy has it. The other spots have no open buoy: Wellington's Baring Head buoys need Greater Wellington's permission to republish, and Napier's allow non-commercial use only |
-| Tides | LINZ's official tide tables (Toitū Te Whenua Land Information New Zealand, CC BY 4.0) | one CSV per port and year (about 19 KB), kept in `cache/` and fetched again after 30 days because LINZ reissues them. Times are New Zealand's clock (NZDT in summer), kept as given like NOAA's; heights above chart datum. Highs and lows aren't labelled: each is a high when it is above the next. Open-Meteo's tide model ran 28 to 53 minutes early against LINZ at Manu Bay, Tauranga and Gisborne, so the page doesn't say "Model tide" here |
+| Tides | LINZ's official tide tables (Toitū Te Whenua Land Information New Zealand, CC BY 4.0) | one CSV per port and year (about 19 KB), kept in `cache/` and fetched again after 30 days because LINZ reissues them; a reply is kept only if it has a tide row for that year. Times are New Zealand's clock (NZDT in summer), kept as given like NOAA's; heights above chart datum. Highs and lows aren't labelled: each is a high when it is above the next. Open-Meteo's tide model ran 28 to 53 minutes early against LINZ at Manu Bay, Tauranga and Gisborne, so the page doesn't say "Model tide" here |
 | Sun times | computed | |
 | Cyclones | MetService (TCWC Wellington) and the Fiji Meteorological Service (RSMC Nadi) | a "Cyclone watch" panel with both links, as Australia's has BoM's: the typhoon feeds the page uses cover the North Pacific only |
 | Map | a new Open-Meteo grid, 2° apart (50–32°S, 150°E–162°W), refetched every ~6 h like Australia's | Open-Meteo takes longitudes up to 180°, so points past it are asked for as west longitudes, as pacific.sh does |
@@ -84,8 +84,9 @@ St Clair once the log holds enough buoy readings.
 ## Error handling
 
 As for Australia: a source that is down only blanks its own part, and the build never fails on it. A buoy silent for over
-6 hours shows "No reading from the … buoy right now". A LINZ table that fails to download keeps the cached one; with none
-the spot has no tides. A failed grid fetch keeps the last grid, and with none the map draws the Pacific layer there.
+6 hours shows "No reading from the … buoy right now". A LINZ table that fails to download, or comes back without a tide row
+for its year, keeps the cached one; with none the spot has no tides. After a timeout the other tables wait for the next run, so a
+slow LINZ costs one build a minute at most. A failed grid fetch keeps the last grid, and with none the map draws the Pacific layer there.
 
 ## Testing
 

@@ -78,6 +78,16 @@ class Readers(unittest.TestCase):
         self.assertEqual(nz.siw_rows(txt, now=NOW), [['2026-10-18T17:00', 0.97, 6.3, 121.0, None], ['2026-10-18T20:00', 0.92, 6.3, 121.0, None],
                                                       ['2026-10-18T21:00', 0.9, 6.4, 109.0, None], ['2026-10-18T22:00', 0.84, 6.48, 122.788, 13.28]])
 
+    def test_siw_flags_and_odd_numbers(self):
+        import nz
+        # a flag written as a decimal is still a flag, and nan or inf is no reading
+        txt = HEAD + '\n' + '\n'.join([
+            '1792330800,2026-10-18T13:40:00.000Z,S,S,0.84,12.8,nan,122.788,18.5,109.26,36.7,1,inf,1',       # no period or water temperature
+            '1792327200,2026-10-18T12:40:00.000Z,S,S,0.90,12.8,6.40,121.0,18.5,109.0,36.7,4.0,13.30,1',      # failed its check: left out
+            '1792323600,2026-10-18T11:40:00.000Z,S,S,NaN,12.8,6.30,121.0,18.5,108.0,36.7,1,13.31,1',          # no height: left out
+            '1792320000,2026-10-18T10:40:00.000Z,S,S,0.92,12.8,6.30,121.0,18.5,108.0,36.7,1,13.31,3.0'])     # suspect temperature
+        self.assertEqual(nz.siw_rows(txt, now=NOW), [['2026-10-18T19:00', 0.92, 6.3, 121.0, None], ['2026-10-18T22:00', 0.84, None, 122.788, None]])
+
     def test_siw_columns_by_name(self):
         import nz
         # Bluff's buoy puts Hmax and Tz ahead of the periods; the columns are found by name. -9999 is no data.
@@ -92,6 +102,14 @@ class Readers(unittest.TestCase):
         self.assertEqual(t['2026-10-18'], [['05:14', 'L', 80], ['11:31', 'H', 160], ['17:54', 'L', 70], ['23:48', 'H', 150]])
         self.assertEqual(t['2026-10-19'], [['05:54', 'L', 80], ['12:13', 'H', 160], ['18:33', 'L', 70]])  # the next high is after midnight
         self.assertEqual(sorted(nz.linz_tides([FIX('linz/nz-tide-Wellington-2026.csv')], '2026-10-17', '2026-10-20')), ['2026-10-17', '2026-10-18', '2026-10-19', '2026-10-20'])
+
+    def test_linz_daylight_saving_ends(self):
+        import nz
+        # Port Taranaki on 5 April 2026, the 25-hour day daylight saving ends, has five tides
+        txt = ('\ufeff076,Port Taranaki,39°03\'S,174°02\'E\r\nBased on constituent set with reference date:,01-Jul-2016\r\n'
+               'Local Std or Daylight Time,Tidal heights in metres.\r\n4,Sa,4,2026,05:57,0.6,12:00,3.4,18:15,0.5,,\r\n'
+               '5,Su,4,2026,00:18,3.4,05:29,0.7,11:32,3.3,17:48,0.7,23:50,3.3\r\n6,Mo,4,2026,06:03,0.8,12:05,3.1,18:21,0.8,,\r\n')
+        self.assertEqual(nz.linz_tides([txt])['2026-04-05'], [['00:18', 'H', 340], ['05:29', 'L', 70], ['11:32', 'H', 330], ['17:48', 'L', 70], ['23:50', 'H', 330]])
 
     def test_linz_across_years(self):
         import nz
@@ -146,6 +164,22 @@ class Fill(unittest.TestCase):
         self.assertEqual((l['buoyId'], l['buoy'], l['buoyAt'], l['buoyQuiet'], l['dwind']), (None, [], '', False, [['2026-10-19T00:00', 13.0, 30.0]]))
         self.assertEqual((l['stationName'], l['zh']['stationName'], l['ja']['stationName']), ('Wellington Airport', '威靈頓機場', 'ウェリントン空港'))
         self.assertEqual(l['tides']['2026-10-18'][1], ['11:31', 'H', 160])  # Wellington's
+
+    def test_tables_named_as_refresh_saves_them(self):
+        # refresh.sh saves each port's table as nz-tide-<port>-<year>.csv, the port url-encoded by its nzids function, and fill must look
+        # for the same name, Kaikōura's macron included. Wellington's table stands in for Kaikōura's, which isn't in the fixtures.
+        import re, shutil, subprocess, tempfile, urllib.parse
+        with open(os.path.join(ROOT, 'refresh.sh'), encoding='utf-8') as f: sh = f.read()
+        self.assertIn('f="$G/nz-tide-$p-$y.csv"', sh)
+        nzids = re.search(r'^nzids\(\)\{.*?; \}$', sh, re.S | re.M).group(0)
+        r = subprocess.run(['sh', '-c', 'HERE=$1\n' + nzids + '\nnzids tidePort', 'sh', ROOT], capture_output=True, text=True)
+        self.assertEqual(r.stdout.split(), [','.join(urllib.parse.quote(p) for p in PORTS)], r.stderr)
+        self.assertIn(',Kaik%C5%8Dura,', r.stdout)
+        tmp = tempfile.mkdtemp(); shutil.copy(os.path.join(CACHE, 'nz-tide-Wellington-2026.csv'), os.path.join(tmp, 'nz-tide-Kaik%C5%8Dura-2026.csv'))
+        self.snap['spots']['kaikoura'] = json.loads(json.dumps(self.snap['spots']['lyall']))
+        sp = self.fill(cache=tmp)
+        self.assertEqual(sp['kaikoura']['tides']['2026-10-18'], [['05:14', 'L', 80], ['11:31', 'H', 160], ['17:54', 'L', 70], ['23:48', 'H', 150]])
+        self.assertEqual(sp['lyall']['tides'], {})  # Wellington's own table isn't in that folder
 
     def test_tides_cover_past_days(self):
         # Raglan's snap also has the 16th and 17th (hist.wave): its tides start the day before them

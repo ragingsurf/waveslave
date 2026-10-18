@@ -60,9 +60,11 @@ No tropical cyclones reach this coast, so the storm panel is hidden, as for Cali
 
 ## Clocks
 
-Oregon, Washington and BC all keep Pacific time (UTC-7 now, UTC-8 from November 1). Each spot carries its own zone
-(`America/Los_Angeles`, or `America/Vancouver` in BC) and the build writes the offset in force, as for Australia. The
-week-around-a-change drift from California applies here too.
+Oregon and Washington keep Pacific time (UTC-7 now, UTC-8 from November 1). British Columbia moved to permanent UTC-7
+in March 2026 (tz database 2026b), so from November 1 Tofino is an hour ahead of Oregon and Washington. Each spot
+carries its own zone (`America/Los_Angeles`, or `America/Vancouver` in BC) and the build writes the offset in force, as
+for Australia. The build needs tz data 2026b or newer (Ubuntu 24.04's current tzdata is 2026c), and
+`test_offset_by_zone` fails on older data. The week-around-a-change drift from California applies to the US spots.
 
 ## Architecture
 

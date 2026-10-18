@@ -1,31 +1,38 @@
-# NOAA sources for the California and Hawaii spots, written into snap.json under the same keys snap.py writes for Taiwan from CWA:
-#   buoy   : NOAA NDBC (CDIP buoys) [time, height m, average period s, from deg, water °C], last 24 h, one row per hour
-#            (NDBC keeps 45 days of 30-minute rows, so no rolling cache is needed)
-#   dwind  : NDBC shore station or NWS airport station [time, kt, from deg]
-#   wind   : NOAA HRRR/GFS wind forecast via Open-Meteo (HRRR covers California only), 3-hourly [time, kt, from deg, 'Rain'|None, None]
-#   tides  : NOAA CO-OPS highs and lows {local date: [[local HH:MM, 'H'|'L', cm]]}
+# NOAA sources for the California, Hawaii and Pacific Northwest spots, written into snap.json under the same keys snap.py writes for Taiwan from CWA:
+#   buoy   : NOAA NDBC (NDBC, CDIP and Environment Canada buoys) [time, height m, average period s, from deg, water °C], last 24 h, one row
+#            per hour (NDBC keeps 45 days of 30-minute rows, so no rolling cache is needed). The Canadian buoys send only a peak period
+#            and no direction: their period is peak / PEAK, which the page's x1.3 turns back into the peak, and their direction is None.
+#   dwind  : NDBC shore station, NWS airport station or ECCC station (BC) [time, kt, from deg]
+#   wind   : NOAA HRRR/GFS wind forecast via Open-Meteo (HRRR covers the mainland coast only), 3-hourly [time, kt, from deg, 'Rain'|None, None]
+#   tides  : NOAA CO-OPS highs and lows, or the Canadian Hydrographic Service's for a "chs:" station {local date: [[local HH:MM, 'H'|'L', cm]]}
 #   sun    : computed {local date: {first, rise, set, last, phen}} in local time
-#   tz     : the offset in force at build time (California -7 or -8, Hawaii always -10); the page draws every time with it
-# A buoy silent for more than STALE_HOURS shows no reading (buoyQuiet), and a wind reading over WIND_STALE_HOURS old is skipped. A spot's windStation (and its stationName) may be a list tried in order.
+#   tz     : the offset in force at build time (California and the Pacific Northwest -7 or -8, Hawaii always -10); the page draws every time with it
+# A buoy silent for more than STALE_HOURS shows no reading (buoyQuiet), and a wind reading over WIND_STALE_HOURS old is skipped. A spot's windStation (and its stationName) may be a list tried in order;
+# so may its ndbc buoys, with buoyName and buoyKm lists that follow them. A spot's own zone (IANA name) wins over its country's.
 # Data times are Taipei wall clock ("YYYY-MM-DDTHH:MM", UTC+8) like the rest of snap.json, readings on the nearest hour.
 # Tides and sun are the spot's own clock by its own date, as for Taiwan and Japan.
-# Usage: python3 -I ca.py <dl dir> <snap.json> <spots.json> [ca|hi]   (each source is optional: a missing one only blanks its own fields)
+# Usage: python3 -I ca.py <dl dir> <snap.json> <spots.json> [ca|hi|nw]   (each source is optional: a missing one only blanks its own fields)
 import sys, os, json, datetime
 from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # python3 -I leaves this folder off the path; jp.py lives here
 import jp
 
 UTC, LA = datetime.timezone.utc, ZoneInfo('America/Los_Angeles')
-ZONES = {'ca': LA, 'hi': ZoneInfo('Pacific/Honolulu')}
+ZONES = {'ca': LA, 'hi': ZoneInfo('Pacific/Honolulu'), 'nw': LA}
 STALE_HOURS, WIND_STALE_HOURS = 6, 3
+PEAK = 1.3  # the page's BUOY_P: it shows average period x 1.3
 
 
 def utc_to_tpe(dt):
     return jp.fmt(dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt)
 
 
-def offset(country, at):
-    return int(at.astimezone(ZONES[country]).utcoffset().total_seconds() // 3600)
+def zone_of(country, zone=None):
+    return ZoneInfo(zone) if zone else ZONES[country]
+
+
+def offset(country, at, zone=None):
+    return int(at.astimezone(zone_of(country, zone)).utcoffset().total_seconds() // 3600)
 
 
 def pacific_offset(at):
@@ -50,6 +57,12 @@ def _ndbc(txt):
     return out
 
 
+def _period(d):
+    # the average period, else the peak period / PEAK (Environment Canada buoys send only the peak)
+    a, p = _f(d.get('APD')), _f(d.get('DPD'))
+    return a if a is not None else round(p / PEAK, 1) if p is not None else None
+
+
 def ndbc_rows(txt, keep_hours=24, now=None):
     """NDBC buoy text -> [[time, height m, average period s, from deg, water °C|None]], one per hour (the reading nearest it).
     With now, a buoy whose newest reading is more than STALE_HOURS old gives [] (it has gone silent)."""
@@ -61,7 +74,7 @@ def ndbc_rows(txt, keep_hours=24, now=None):
         hr = (t + datetime.timedelta(minutes=30)).replace(minute=0, second=0)
         gap = abs((t - hr).total_seconds())
         if hr not in best or gap < best[hr][0]:
-            best[hr] = (gap, [utc_to_tpe(hr), h, _f(d.get('APD')), _f(d.get('MWD')), _f(d.get('WTMP'))])
+            best[hr] = (gap, [utc_to_tpe(hr), h, _period(d), _f(d.get('MWD')), _f(d.get('WTMP'))])
     rows = [best[k][1] for k in sorted(best)]
     return jp.merge_buoy([], rows, keep_hours)
 
@@ -95,6 +108,37 @@ def nws_wind(js, now=None):
     return []
 
 
+# ECCC station report fields, best first: the 10-minute average wind at 10 m, else the 2-minute one, else a partner network's 10-minute one.
+ECCC_WIND = (('avg_wnd_spd_10m_pst10mts', 'avg_wnd_dir_10m_pst10mts'), ('avg_wnd_spd_10m_pst2mts', 'avg_wnd_dir_10m_pst2mts'), ('avg_wnd_spd_pst10mts', 'avg_wnd_dir_pst10mts'))
+TO_KT = {'km/h': 1 / 1.852, 'm/s': 1.944, 'knot': 1, 'kt': 1, 'kn': 1}
+
+
+def eccc_wind(js, now=None):
+    """ECCC real-time station reports (api.weather.gc.ca swob-realtime GeoJSON) -> [[time, kt, from deg|None]] from the newest report
+    with a wind speed, or [] when none has one recent enough."""
+    reports = [f.get('properties') or {} for f in (js or {}).get('features') or []]
+    for p in sorted(reports, key=lambda p: p.get('date_tm-value') or '', reverse=True):
+        k = next((k for k in ECCC_WIND if p.get(k[0]) is not None), None)
+        if not k or not p.get('date_tm-value'): continue
+        t = datetime.datetime.fromisoformat(p['date_tm-value'].replace('Z', '+00:00'))
+        if _old(t, now): return []
+        return [[jp.on_hour(utc_to_tpe(t)), round(p[k[0]] * TO_KT.get(p.get(k[0] + '-uom') or 'km/h', 1 / 1.852), 1), p.get(k[1])]]
+    return []
+
+
+def chs_tides(js, zone):
+    """Canadian Hydrographic Service high and low predictions ([{eventDate: UTC, value: m}]) -> {local date: [[HH:MM, 'H'|'L', cm]]}.
+    The reply doesn't say which is which; highs and lows take turns, so each is a high when it is above the next one (the last, the one before)."""
+    ev = sorted((datetime.datetime.fromisoformat(e['eventDate'].replace('Z', '+00:00')), float(e['value'])) for e in js or [] if e.get('value') is not None)
+    out = {}
+    for i, (t, v) in enumerate(ev):
+        if len(ev) < 2: break
+        other = ev[i + 1][1] if i + 1 < len(ev) else ev[i - 1][1]
+        lt = t.astimezone(zone)
+        out.setdefault(lt.date().isoformat(), []).append([lt.strftime('%H:%M'), 'H' if v > other else 'L', round(v * 100)])
+    return {d: sorted(v) for d, v in sorted(out.items())}
+
+
 def tide_days(js):
     """NOAA CO-OPS hilo predictions (local time) -> {local date: [[HH:MM, 'H'|'L', cm]]}."""
     out = {}
@@ -108,10 +152,9 @@ def _pick(v, i):
 
 
 def fill(snap, spots, dl, now, country='ca'):
-    """Fill every spot of one NOAA country (ca, hi) in snap (in place) from the downloads in dl; now (aware datetime) sets
+    """Fill every spot of one NOAA country (ca, hi, nw) in snap (in place) from the downloads in dl; now (aware datetime) sets
     the offset and the cut-off for a silent buoy."""
     C = [S for S in spots if S.get('country') == country and S['id'] in snap['spots']]
-    tz = offset(country, now)
     def part(name, f):
         try: return f()
         except Exception as e: print(country + ':', name, 'skipped:', e, file=sys.stderr)
@@ -119,17 +162,24 @@ def fill(snap, spots, dl, now, country='ca'):
     om = jp._load(os.path.join(dl, 'open%s.json' % country)); om = om if isinstance(om, list) else [om] if om else []
     for n, S in enumerate(C):
         sp = snap['spots'][S['id']]
-        sp['tz'] = tz
-        bid, buoy = None, []
-        for b in S.get('ndbc') or []:
+        zone = zone_of(country, S.get('zone'))
+        sp['tz'] = tz = offset(country, now, S.get('zone'))
+        bid, buoy, ub = None, [], 0
+        for i, b in enumerate(S.get('ndbc') or []):
             rows = part('buoy ' + b, lambda: ndbc_rows(txt('ndbc-%s.txt' % b), now=now)) or []
-            if rows: bid, buoy = b, rows; break
+            if rows: bid, buoy, ub = b, rows, i; break
         sp['buoyId'], sp['buoy'], sp['buoyAt'] = bid, buoy, buoy[-1][0] if buoy else ''
         sp['buoyQuiet'] = bool(S.get('ndbc')) and not buoy   # the spot has a buoy, it just isn't reporting
+        # the buoy label names the buoy that answered, with its distance (the first one when none did)
+        sp['buoyName'], sp['buoyKm'] = _pick(S['buoyName'], ub), _pick(S.get('buoyKm'), ub)
+        for L in ('zh', 'ja'):
+            if 'buoyName' in (S.get(L) or {}): sp[L] = dict(sp.get(L) or {}, buoyName=_pick(S[L]['buoyName'], ub))
+        if S.get('buoyBy'): sp['buoyBy'] = S['buoyBy']   # who runs the buoy, when it isn't NOAA or CDIP (eccc: Environment Canada)
         ws = S.get('windStation') or []; ws = ws if isinstance(ws, list) else [ws]; dw, used = [], 0
         for i, w in enumerate(ws):
             kind, sid = w.split(':', 1)
             if kind == 'ndbc': dw = part('wind ' + sid, lambda: ndbc_wind(txt('ndbc-%s.txt' % sid), now))
+            elif kind == 'eccc': dw = part('wind ' + sid, lambda: eccc_wind(jp._load(os.path.join(dl, 'eccc-%s.json' % sid)), now))
             else: dw = part('wind ' + sid, lambda: nws_wind(jp._load(os.path.join(dl, 'nws-%s.json' % sid)), now))
             if dw: used = i; break
         sp['dwind'] = dw or []
@@ -138,7 +188,9 @@ def fill(snap, spots, dl, now, country='ca'):
         for L in ('zh', 'ja'):
             if 'stationName' in (S.get(L) or {}): sp[L] = dict(sp.get(L) or {}, stationName=_pick(S[L]['stationName'], used))
         sp['wind'] = (part('forecast ' + S['id'], lambda: jp.wind_rows(om[n])) or []) if n < len(om) and om[n] else []
-        sp['tides'] = part('tides ' + S['id'], lambda: tide_days(jp._load(os.path.join(dl, 'tide-%s.json' % S['tideStation'])))) or {}
+        ts = S['tideStation']
+        if ts.startswith('chs:'): sp['tides'] = part('tides ' + S['id'], lambda: chs_tides(jp._load(os.path.join(dl, 'chs-%s.json' % ts[4:])), zone)) or {}
+        else: sp['tides'] = part('tides ' + S['id'], lambda: tide_days(jp._load(os.path.join(dl, 'tide-%s.json' % ts)))) or {}
         local = lambda t: (datetime.datetime.fromisoformat(t) + datetime.timedelta(hours=tz - 8)).date().isoformat()
         days = sorted({local(r[0]) for r in sp.get('hourly') or []})
         sp['sun'] = {d: jp.sun_times(S['lat'], S['lon'], d, tz) for d in days}

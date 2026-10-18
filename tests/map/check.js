@@ -4,7 +4,7 @@
 //           On a page whose hook can zoom, also zoomed all the way out in each layer (out-wind, out-waves, out-swell, out-rain) and a swell across 180° (dateline).
 //   checks  prints ok / FAIL / skip for each check, and exits 1 on any FAIL or page error. Needs the page's test hook, window.__ws.
 // Every page opens in its own fresh browser context, offline (only the page itself loads, no service worker): a phone 390x844 (844x390 with land),
-// dpr 2, touch, reduced motion (so no streaks, and moves jump), the intro done, English, and the map open full screen on load.
+// dpr 2, touch, reduced motion (so no streaks, and moves jump), past the passcode screen, the intro done, English, and the map open full screen on load.
 // The time bar starts at the current hour, so take two runs you mean to compare (main and the branch) in one sitting, and look at the time printed after each shot.
 // Playwright wherever node finds it (npm install playwright), else the copy this container keeps.
 const { chromium } = (() => { try { return require("playwright"); } catch (e) { return require("/opt/node22/lib/node_modules/playwright"); } })();
@@ -26,10 +26,13 @@ const home = name => { const [, spot, key, cx, cy] = HOMES.find(h => h[0] === na
 const MID = { key: "waveslave-mapview", view: { cx: 190, cy: 25, k: 1 } }; // Taiwan's map left in the middle of the Pacific, so zoomed out from there Hawaii is on screen
 // Shots that need the hook's zoom: name, layer, saved view (none: zoomed all the way out from Donghe's first open).
 const OUT = [...["wind", "waves", "swell", "rain"].map(l => ["out-" + l, l, null]), ["dateline", "swell", { key: "waveslave-mapview", view: { cx: 180, cy: 35, k: 0.3 } }]];
+const TEXT = fs.readFileSync(file, "utf8");
 // Whether the page carries the Pacific grid: a page built without one has `pac: null` filled in (tool.py writes null, refresh.sh null and a newline).
-const PAC = !/\bpac: null\s*\}/.test(fs.readFileSync(file, "utf8"));
+const PAC = !/\bpac: null\s*\}/.test(TEXT);
 // Whether it carries the Pacific Northwest grid (a grid is a JSON object, unlike the nw: {l: ...} boxes in the page's code).
-const NWG = /\bnw: \{"/.test(fs.readFileSync(file, "utf8"));
+const NWG = /\bnw: \{"/.test(TEXT);
+// The passcode screen (web/head.html) hides the page until the device holds the code's hash, so every page here opens holding it.
+const UNLOCK = (TEXT.match(/\bvar H="([0-9a-f]{64})"/) || [])[1] || null;
 
 class Skip extends Error {}
 const skip = why => { throw new Skip(why); };
@@ -118,7 +121,7 @@ const CHECKS = {
     const caCx = land ? 238.07 : 240.5;  // sideways California's home is pulled west to keep the view inside the Pacific box
     if (c.MC !== "ca" || !near(c.cx, caCx, 0.01)) throw new Error(`after switching to California view() is MC ${c.MC}, cx ${c.cx}, want ca, ${caCx}`);
     if (!c.kept || !near(c.kept.cx, v.cx) || !near(c.kept.cy, v.cy) || !near(c.kept.k, v.z/v.z0)) throw new Error(`waveslave-mapview-nw holds ${JSON.stringify(c.kept)}, want cx ${v.cx}, cy ${v.cy}, k ${v.z/v.z0}`);
-    await page.click('#wsLayers button[data-c="nw"]'); await settle(page);
+    await page.click('#wsCtry button[data-c="nw"]'); await settle(page);
     const n = await page.evaluate(() => ({ c: spotCountry(CUR), ...window.__ws.view() }));
     if (n.c !== "nw" || n.MC !== "nw" || !near(n.cx, 235.3, 0.01) || n.z !== n.z0) throw new Error(`after the map's Pacific NW button the page is on ${n.c}, view() MC ${n.MC}, cx ${n.cx}, z ${n.z}; want nw, nw, 235.3, z0 ${n.z0}`);
   },
@@ -131,38 +134,45 @@ const CHECKS = {
     if (v.MC !== "hi") throw new Error(`view().MC is ${v.MC}, want hi`);
     if (!(Math.abs(v.cx - 202.7) < 0.01)) throw new Error(`view().cx is ${v.cx}, want 202.7 (Hawaii's home)`);
   },
-  // The map's top bar has a button for every country in the switch above the spot picker, in the same order, the current one pressed.
+  // The map has a button for every country in the switch above the spot picker, in the same order, the current one pressed: the country's
+  // outline (the home button's drawing of it) with no words, its name read out and shown on hover.
   // Tapping one moves the page to that country without leaving the map or reloading, closes the forecast card left open in the old one,
   // and the map goes to its home view (straight there, with reduced motion); tapping the pressed one when zoomed out brings the map back there.
   async mapCountryButtons(open) {
     const page = await open(home("tw")); await page.evaluate(() => { window.__mark = 1; });
-    const pressed = () => page.evaluate(() => [...document.querySelectorAll('#wsLayers button[data-c][aria-pressed="true"]')].map(b => b.dataset.c).join());
-    const r = await page.evaluate(() => ({ want: [...document.querySelectorAll("#ctry button")].map(b => b.dataset.c).join(), got: [...document.querySelectorAll("#wsLayers button[data-c]")].map(b => b.dataset.c).join() }));
+    const pressed = () => page.evaluate(() => [...document.querySelectorAll('#wsCtry button[aria-pressed="true"]')].map(b => b.dataset.c).join());
+    const r = await page.evaluate(() => ({ want: [...document.querySelectorAll("#ctry button")].map(b => b.dataset.c).join(), got: [...document.querySelectorAll("#wsCtry button")].map(b => b.dataset.c).join(),
+      unlike: [...document.querySelectorAll("#wsCtry button")].filter(b => { const p = b.querySelector("svg path"), name = document.querySelector(`#ctry button[data-c="${b.dataset.c}"]`).textContent;
+        return !p || !p.getAttribute("d") || p.getAttribute("d") !== HOME_ICONS[b.dataset.c] || b.textContent.trim() || b.getAttribute("aria-label") !== name || b.title !== name; }).map(b => b.dataset.c).join(", "),
+      twIcon: HOME_ICONS.tw === document.querySelector("#wsHome path").getAttribute("d") }));
     if (r.got !== r.want) throw new Error(`the map's country buttons are ${r.got || "missing"}, want ${r.want}`);
+    if (r.unlike) throw new Error(`not the country's outline, named for it and with no words: ${r.unlike}`);
+    if (!r.twIcon) throw new Error("Taiwan's outline is not the home button's drawing of it");
     if (await pressed() !== "tw") throw new Error(`the pressed country button is ${await pressed() || "none"}, want tw`);
     await tapAt(page, await page.evaluate(() => { const s = ALL.spots.donghe; return window.__ws.px(MAPM.E(s.lon), s.lat); }));
     if (await page.evaluate(() => document.getElementById("wsSheet").hidden)) throw new Error("tapping Donghe did not open its forecast card");
-    await page.click('#wsLayers button[data-c="hi"]'); await settle(page);
+    await page.click('#wsCtry button[data-c="hi"]'); await settle(page);
     const v = await page.evaluate(() => ({ mark: window.__mark, c: spotCountry(CUR), view: VIEW, fs: document.getElementById("viewWs").classList.contains("fs"), shut: document.getElementById("wsSheet").hidden, ...window.__ws.view() }));
     if (v.mark !== 1) throw new Error("the page reloaded (window.__mark is gone)");
     if (v.c !== "hi" || v.view !== "ws" || !v.fs) throw new Error(`after tapping Hawaii the page is on ${v.c}, view ${v.view}, full screen ${v.fs}; want hi, ws, true`);
     if (!v.shut) throw new Error("after tapping Hawaii, Donghe's forecast card is still open");
     if (v.MC !== "hi" || !near(v.cx, 202.7, 0.01) || v.z !== v.z0) throw new Error(`after tapping Hawaii the map is ${v.MC} at cx ${v.cx}, z ${v.z}; want hi at 202.7, z0 ${v.z0}`);
     if (await pressed() !== "hi") throw new Error(`after tapping Hawaii the pressed country button is ${await pressed() || "none"}, want hi`);
-    await zoomOut(page); await page.click('#wsLayers button[data-c="hi"]'); await settle(page);
+    await zoomOut(page); await page.click('#wsCtry button[data-c="hi"]'); await settle(page);
     const b = await page.evaluate(() => window.__ws.view());
     if (b.z !== b.z0 || !near(b.cx, 202.7, 0.01)) throw new Error(`tapping Hawaii again when zoomed out leaves z ${b.z} and cx ${b.cx}, want z0 ${b.z0} and 202.7`);
   },
   // No strip runs across the top any more: the buttons sit straight on the map, a finger in the gap between them drags the map, and in English,
-  // Chinese and Japanese every button is on screen and none covers another or the zoom buttons down the right side.
+  // Chinese and Japanese every button is on screen and none covers another, the countries down the left, the zoom buttons down the right or the time bar.
   async topBarSeeThrough(open) {
     const page = await open(home("tw"));
     for (const l of ["en", "zh", "ja"]) {
       await page.evaluate(l => setLang(l), l); await settle(page);
       const r = await page.evaluate(() => { const bar = document.getElementById("wsLayers"), s = getComputedStyle(bar), rect = b => b.getBoundingClientRect();
-        const boxes = [...document.querySelectorAll("#wsLayers button, #viewWs .zoom button")].filter(b => b.offsetParent).map(b => [b.dataset.o || b.dataset.p || b.dataset.c || b.id, rect(b)]);
-        const hits = []; boxes.forEach(([a, p], i) => boxes.slice(i + 1).forEach(([b, q]) => { if (p.left < q.right && q.left < p.right && p.top < q.bottom && q.top < p.bottom) hits.push(`${a} covers ${b}`); }));
-        const off = boxes.filter(([, p]) => p.left < 0 || p.top < 0 || p.right > innerWidth || p.bottom > innerHeight).map(([a]) => a);
+        const parts = sel => [...document.querySelectorAll(sel)].filter(b => b.offsetParent).map(b => [b.dataset.o || b.dataset.p || b.dataset.c || b.id, rect(b)]);
+        const boxes = parts("#wsLayers button, #wsCtry button, #viewWs .zoom button"), time = parts("#wsPlay, #wsTime, #wsTl");
+        const hits = []; boxes.forEach(([a, p], i) => [...boxes.slice(i + 1), ...time].forEach(([b, q]) => { if (p.left < q.right && q.left < p.right && p.top < q.bottom && q.top < p.bottom) hits.push(`${a} covers ${b}`); }));
+        const off = [...boxes, ...time].filter(([, p]) => p.left < 0 || p.top < 0 || p.right > innerWidth || p.bottom > innerHeight).map(([a]) => a);
         // The gap between Rain and Pressure, halfway down Rain.
         const rain = rect(bar.querySelector('[data-o="rain"]')), pres = rect(bar.querySelector("[data-p]")), at = document.elementFromPoint((rain.right + pres.left)/2, (rain.top + rain.bottom)/2);
         return { bg: s.backgroundColor, border: parseFloat(s.borderTopWidth) > 0 && s.borderTopStyle !== "none", gap: pres.left - rain.right, at: at ? at.id || at.tagName : null, hits, off }; });
@@ -171,6 +181,57 @@ const CHECKS = {
       if (r.hits.length) throw new Error(`in ${l}: ${r.hits.join("; ")}`);
       if (r.off.length) throw new Error(`in ${l} ${r.off.join(", ")} sits off the screen`);
     }
+  },
+  // The countries stand in one column down the left side, in the switch's order from just under the top buttons, each under the last with the
+  // map between them (a finger there drags it); in English, Chinese and Japanese each is named in the page's language. With a spot's
+  // forecast card open, a finger on any of them still lands on it, as it does on the map's tools down the right.
+  async countryColumn(open) {
+    const page = await open(home("tw"));
+    for (const l of ["en", "zh", "ja"]) {
+      await page.evaluate(l => setLang(l), l); await settle(page);
+      const r = await page.evaluate(() => { const rect = e => e.getBoundingClientRect(), bs = [...document.querySelectorAll("#wsCtry button")], cs = bs.map(rect);
+        const gap = cs.length > 1 ? document.elementFromPoint((cs[0].left + cs[0].right)/2, (cs[0].bottom + cs[1].top)/2) : null;
+        return { n: cs.length, left: cs.map(c => c.left), top: cs.map(c => c.top), bottom: cs.map(c => c.bottom), bar: rect(document.getElementById("wsLayers")).bottom, gap: gap ? gap.id || gap.tagName : null,
+          names: bs.map(b => b.getAttribute("aria-label") + "|" + b.title).join(), want: bs.map(b => { const n = document.querySelector(`#ctry button[data-c="${b.dataset.c}"]`).textContent; return n + "|" + n; }).join() }; });
+      if (r.n < 2) throw new Error(`in ${l} the map has ${r.n} country buttons`);
+      if (r.left.some(x => Math.abs(x - r.left[0]) > 0.5) || r.left[0] > 16) throw new Error(`in ${l} the country buttons start at x ${r.left.map(Math.round)}, want one column within 16px of the left edge`);
+      if (r.top[0] < r.bar) throw new Error(`in ${l} the first country button starts at y ${r.top[0]}, above the top buttons' bottom at ${r.bar}`);
+      const up = r.top.findIndex((t, i) => i && t < r.bottom[i - 1] + 2);
+      if (up > 0) throw new Error(`in ${l} country button ${up + 1} starts at y ${r.top[up]}, not under the one before it (bottom ${r.bottom[up - 1]})`);
+      if (r.gap !== "wsFx") throw new Error(`in ${l} a finger between the first two country buttons lands on ${r.gap}, not the map`);
+      if (r.names !== r.want) throw new Error(`in ${l} the country buttons are named ${r.names}, want ${r.want}`);
+    }
+    await tapAt(page, await page.evaluate(() => { const s = ALL.spots.donghe; return window.__ws.px(MAPM.E(s.lon), s.lat); }));
+    if (await page.evaluate(() => document.getElementById("wsSheet").hidden)) throw new Error("tapping Donghe did not open its forecast card");
+    const hidden = await page.evaluate(() => [...document.querySelectorAll("#wsCtry button, #viewWs .zoom button")].filter(b => { const r = b.getBoundingClientRect(), at = document.elementFromPoint((r.left + r.right)/2, (r.top + r.bottom)/2);
+      return !at || at.closest("button") !== b; }).map(b => b.dataset.c || b.id));
+    if (hidden.length) throw new Error(`with Donghe's forecast card open, a finger on ${hidden.join(", ")} lands on something else`);
+  },
+  // Every button's words and outlines read over anything the map draws behind them. With the map under the buttons painted white (a pressure
+  // line or a bright patch at its worst), each top button's own background behind its word still gives the word 4.5:1 contrast (WCAG AA)
+  // with every pixel, and each country button's background behind its outline gives the outline 3:1.
+  async buttonsReadable(open) {
+    const page = await open(home("tw"));
+    // The words and outlines, each with the colour it is drawn in and the box it fills.
+    const marks = await page.evaluate(() => [...document.querySelectorAll("#wsLayers button, #wsCtry button")].filter(b => b.offsetParent).map(b => {
+      const svg = b.querySelector("svg"), r = svg ? svg.getBoundingClientRect() : (() => { const g = document.createRange(); g.selectNodeContents(b); return g.getBoundingClientRect(); })();
+      return { name: b.dataset.o || b.dataset.p || b.dataset.c, icon: !!svg, color: getComputedStyle(b).color, box: { x: r.left, y: r.top, width: r.width, height: r.height } }; }));
+    await page.evaluate(() => { const w = document.createElement("div"); w.style.cssText = "position:absolute;inset:0;z-index:4;background:#fff"; document.getElementById("viewWs").appendChild(w);
+      const s = document.createElement("style"); s.textContent = "#wsLayers button,#wsCtry button{color:transparent!important;text-shadow:none!important}"; document.head.appendChild(s); });
+    await settle(page);
+    const bad = [];
+    for (const m of marks) {
+      // A picture of what is behind the word or outline, with it taken away, and the contrast its colour makes with the worst pixel there.
+      const png = await page.screenshot({ clip: m.box, animations: "disabled" });
+      const worst = await page.evaluate(async ([b64, color]) => { const img = new Image(); img.src = "data:image/png;base64," + b64; await img.decode();
+        const c = document.createElement("canvas"); c.width = img.width; c.height = img.height; const g = c.getContext("2d"); g.drawImage(img, 0, 0);
+        const lin = v => (v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4, L = (r, g, b) => 0.2126*lin(r) + 0.7152*lin(g) + 0.0722*lin(b);
+        const fg = L(...color.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number)), d = g.getImageData(0, 0, c.width, c.height).data; let worst = 21;
+        for (let i = 0; i < d.length; i += 4) { const y = L(d[i], d[i+1], d[i+2]); worst = Math.min(worst, (Math.max(fg, y) + 0.05) / (Math.min(fg, y) + 0.05)); }
+        return worst; }, [png.toString("base64"), m.color]);
+      const need = m.icon ? 3 : 4.5; if (worst < need) bad.push(`${m.name} ${worst.toFixed(2)}:1 (want ${need}:1)`);
+    }
+    if (bad.length) throw new Error(`over a white map: ${bad.join(", ")}`);
   },
   // Back on the Forecast page the page is no wider than the phone, so it only scrolls up and down: in English, Chinese and Japanese nothing
   // in the page column reaches past the column, and the country buttons fit, or scroll inside their own row, instead of pushing it wider.
@@ -243,10 +304,11 @@ const CHECKS = {
     const ctx = await browser.newContext({ viewport: land ? { width: 844, height: 390 } : { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block" });
     ctxs.push(ctx);
     await ctx.route("**/*", r => r.request().url().split("#")[0] === PAGE ? r.continue() : r.abort());
-    await ctx.addInitScript(([saved, now]) => { Date.now = () => now; try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", "ws"); localStorage.setItem("waveslave-lang", "en");
-      if (saved) localStorage.setItem(saved.key, JSON.stringify(saved.view)); } catch (e) {} }, [saved, NOW]);
+    await ctx.addInitScript(([saved, now, unlock]) => { Date.now = () => now; try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", "ws"); localStorage.setItem("waveslave-lang", "en");
+      if (unlock) localStorage.setItem("waveslave-unlock", unlock); if (saved) localStorage.setItem(saved.key, JSON.stringify(saved.view)); } catch (e) {} }, [saved, NOW, UNLOCK]);
     const page = await ctx.newPage(); page.on("pageerror", e => errs.push(String(e)));
     await page.goto(PAGE + "#" + spot, { waitUntil: "load" });
+    if (await page.evaluate(() => document.documentElement.classList.contains("locked"))) throw new Error("the page is behind its passcode screen: check.js found no code hash (var H=\"...\") in it to open it with");
     await page.waitForFunction(() => (document.getElementById("wsTime") || {}).textContent); // the map has drawn once
     await settle(page); // and its next-frame resize
     if (hook && !await page.evaluate(() => !!window.__ws)) throw new Error("the page has no test hook (window.__ws): build it from this branch's template");

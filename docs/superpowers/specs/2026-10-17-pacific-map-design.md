@@ -21,7 +21,9 @@ Defaults I picked (say if you want otherwise):
 
 - Web-map (Mercator) projection, so every country keeps its shape at any zoom.
 - Zooming out stops when the whole Pacific box fits on the screen. On a phone held upright that leaves plain dark sea
-  above and below the box.
+  above and below the box. Changed on 2026-10-18 at Bryan's request: zooming out now stops when the box fills the
+  screen, so no dark sea shows. Upright that is the box's whole height, with the rest a swipe sideways; sideways it is
+  the box's whole width.
 - Change from part 2: inland points are not left out after all. Skipping them would save only a few percent of
   Open-Meteo calls, and it would leave holes in the wind and pressure over land, which would break the pressure lines
   at the coast.
@@ -41,7 +43,8 @@ Defaults I picked (say if you want otherwise):
   the page to that spot without a reload.
 - **The country buttons** never reload the page. The map opens centred on the new country.
 - **The home button** works as today, now at Pacific scale. One tap zooms out to the whole Pacific, and a second tap
-  goes back to the current country. Both moves glide there in under a second instead of jumping. With reduced motion
+  goes back to the current country. Since 2026-10-18 the first tap zooms all the way out around where you are, as far
+  as the screen-filling limit above allows. Both moves glide there in under a second instead of jumping. With reduced motion
   turned on, they jump.
 - **The dateline is seamless.** Panning east from Japan carries on past 180° to Hawaii and California. A dropped
   pin's label reads °E or °W correctly.
@@ -93,7 +96,7 @@ The country grids are unchanged: West Pacific 3°, California and Hawaii 1°, Au
      6-hour steps it shows the nearest one, while the country grids keep their 3-hour steps. The existing spot blending sits on top
      unchanged.
    - **View**: `REGION`, `mapRegion` and the cross-region reload in `switchSpot` go. The zoom-out limit becomes "the
-     whole Pacific box fits". Saved-view keys stay the same per country (`waveslave-mapview`, `-ca`, `-hi`,
+     whole Pacific box fits" ("the box fills the screen" since 2026-10-18). Saved-view keys stay the same per country (`waveslave-mapview`, `-ca`, `-hi`,
      `-au-w`, `-au-e`), so the views people have saved carry over, with old negative longitudes converted.
    - **Coast drawing**: the map keeps the list of lines the outlines were cut along (box edges, and 180° where
      Natural Earth splits islands). Segments lying exactly on one of those lines are left out of the stroke but kept
@@ -126,7 +129,7 @@ The country grids are unchanged: West Pacific 3°, California and Hawaii 1°, Au
   - the finest-grid choice and the edge fade at a few chosen points;
   - no reload when switching country.
 - Phone screenshots, upright and sideways:
-  - the whole Pacific in each layer;
+  - zoomed all the way out in each layer;
   - a swell crossing the dateline;
   - each country's home view on `main` and on this branch side by side, which should match apart from tiny
     projection differences.

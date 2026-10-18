@@ -189,22 +189,25 @@ test("my and iy", () => {
   near(M.my(-60), -M.my(60));
 });
 
-test("contain and cover", () => {
+test("cover", () => {
   const M = load();
   assert.deepEqual(M.PBOX, {l: 100, r: 250, s: -50, n: 60});
   const wp = {l: 100, r: 160, s: 0, n: 45};
   assert.deepEqual(M.OLDBOX, {tw: wp, jp: wp, ca: {l: 232, r: 244, s: 30, n: 42}, hi: {l: 198, r: 208, s: 15, n: 26}, au: {l: 110, r: 156, s: -44, n: -20}});
-  near(M.contain(M.PBOX, 390, 844), 2.6);
-  near(M.contain(M.PBOX, 844, 390), 390/(M.my(60) - M.my(-50)));
-  near(M.contain(M.PBOX, 844, 390), 2.924, 1e-3);
-  near(M.cover(M.OLDBOX.ca, 390, 844), 844/(M.my(42) - M.my(30)));
+  // Upright the Pacific box fills the screen top to bottom, sideways side to side.
   near(M.cover(M.PBOX, 390, 844), 844/(M.my(60) - M.my(-50)));
+  near(M.cover(M.PBOX, 390, 844), 6.328, 1e-3);
+  near(M.cover(M.PBOX, 844, 390), 844/150);
+  near(M.cover(M.OLDBOX.ca, 390, 844), 844/(M.my(42) - M.my(30)));
 });
 
 test("clampTo", () => {
   const M = load(), Y = M.iy((M.my(60) + M.my(-50))/2);
-  // Zoomed all the way out the box is no bigger than the screen either way, so the view centres on it.
-  const [cx, cy] = M.clampTo(M.PBOX, 390, 844, M.contain(M.PBOX, 390, 844), 120, 23.75);
+  // Zoomed all the way out upright, the box just fills the screen top to bottom: from Taiwan the view goes as far west as it can, on the box's middle row.
+  const zmin = M.cover(M.PBOX, 390, 844), [ox, oy] = M.clampTo(M.PBOX, 390, 844, zmin, 120, 23.75);
+  near(ox, 100 + 390/2/zmin); near(oy, Y);
+  // Where the box is smaller than the screen, the view centres on it: here both ways, at 2 pixels a degree.
+  const [cx, cy] = M.clampTo(M.PBOX, 390, 844, 2, 120, 23.75);
   near(cx, 175); near(cy, Y);
   // Zoomed in it keeps the view inside the box, the y axis in Mercator y: half the screen is 422/20 of it.
   const [ex, ey] = M.clampTo(M.PBOX, 390, 844, 20, 95, 0);

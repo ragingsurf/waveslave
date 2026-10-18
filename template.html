@@ -61,8 +61,8 @@ header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-be
 /* EN / 中文 switch, pinned to the top right corner. */
 header{position:relative}
 .lang{position:absolute;top:0;right:0;z-index:2;display:flex;gap:2px;padding:3px;border-radius:99px;background:var(--panel);border:1px solid var(--line)}
-.lang button{border:0;background:none;color:var(--muted);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP","Microsoft JhengHei",sans-serif;padding:6px 8px;border-radius:99px;cursor:pointer}
-.lang button[aria-pressed="true"]{background:#0a0f12;color:#ffb347;text-shadow:0 0 6px rgba(255,140,0,.7)}
+.lang button{border:0;background:none;color:var(--muted);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP","Microsoft JhengHei",sans-serif;padding:6px 8px;border-radius:99px;cursor:pointer;position:relative;z-index:1;transition:color .36s,text-shadow .36s}
+.lang button[aria-pressed="true"]{color:#ffb347;text-shadow:0 0 6px rgba(255,140,0,.7)}
 .fresh{font-size:12px;padding:4px 10px;border-radius:99px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
 .fresh.stale{border-color:var(--fair);color:var(--fair)}
 
@@ -110,7 +110,14 @@ header{position:relative}
   .days .day .mini{display:grid;justify-items:center;gap:4px;font-size:11px;color:var(--muted)}
   .day .mini i{font-style:normal}.day .mini b{font:800 12.5px var(--display);letter-spacing:-.03em;color:var(--ink)}.day.hist .mini b{color:var(--muted)}
   .day .mini u{display:block;width:14px;height:4px;border-radius:2px;text-decoration:none}
-  .days .day[aria-pressed="true"]{background:var(--ink);border-color:var(--ink)}
+  .days{position:relative;isolation:isolate}
+  .days .day{position:relative;overflow:visible;background:none;border-color:transparent}
+  .days .day::before{content:"";position:absolute;inset:-1px;z-index:-2;border-radius:inherit;border:1px solid var(--line);background:var(--panel);transition:opacity .36s}
+  .days .day.hist::before{background:transparent;border-style:dashed}
+  .days .day[aria-pressed="true"]::before{opacity:0}
+  .days > .glide-pill{z-index:-1;border-radius:12px;background:var(--ink)}
+  .days > .glide-pill.today{background:var(--sea)}
+  .days .day .mini,.days .day .mini b{transition:color .36s}
   .days .day[aria-pressed="true"] .mini,.days .day[aria-pressed="true"] .mini b{color:var(--bg)}
   .daydet{touch-action:pan-y;user-select:none;-webkit-user-select:none;display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 14px;align-items:center;margin-top:10px;padding:12px 14px;border-radius:14px;background:var(--panel);border:1px solid var(--ink)}
   .daydet.hist{border-style:dashed;background:transparent}
@@ -128,9 +135,11 @@ header{position:relative}
 .day[aria-pressed="true"]{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
 /* Today stands out in the sea colour (Bryan, Oct 16) so it's easy to find your way back; picked, it fills in. */
 .days .day.today{border:1px solid var(--sea);box-shadow:inset 0 0 0 1px var(--sea)}
+@media (min-width:561px){.days > .glide-pill{display:none}}
 .days .day.today .dn,.days .day.today .mini i{color:var(--sea);font-weight:700}
 @media (max-width:560px){
-  .days .day.today[aria-pressed="true"]{background:var(--sea);border-color:var(--sea)}
+  .days .day.today{border-color:transparent;box-shadow:none}
+  .days .day.today::before{border-color:var(--sea);box-shadow:inset 0 0 0 1px var(--sea)}
   .days .day.today[aria-pressed="true"] .mini i,.days .day.today[aria-pressed="true"] .mini b{color:var(--bg)}
 }
 .day .dn{font-weight:600}
@@ -177,14 +186,19 @@ svg text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
 .ctry button{flex:none;border:0;background:none;color:var(--muted);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP",sans-serif;padding:6px clamp(5px,calc((100vw - 310px)/10),12px);border-radius:99px;cursor:pointer;position:relative;z-index:1;transition:color .36s,text-shadow .36s}
 html[lang="ja"] .ctry button{padding-inline:clamp(3px,calc((100vw - 350px)/10),12px)}
 .ctry button[aria-pressed="true"]{color:#ffb347;text-shadow:0 0 6px rgba(255,140,0,.7)}
-/* The highlight is one bubble under the buttons that glides (place and width) to the picked country; ctryPill() puts it there. */
-.ctry-pill{position:absolute;left:0;top:0;border-radius:99px;background:#0a0f12;pointer-events:none;will-change:transform,width}
-.ctry-pill.glide{transition:transform .36s cubic-bezier(.22,1,.36,1),width .36s cubic-bezier(.22,1,.36,1)}
-.picker{display:flex;gap:8px;overflow-x:auto;padding:2px 0 4px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+/* Sliding highlight: in each group of buttons with a pick, one bubble glides (place and size) to the picked one; glider() puts it there.
+   Language, country, Forecast/Map and spot picker: a dark bubble under the words. Phone day chips: the ink (today: sea) fill. Map layers and the
+   map's countries: the glowing ring, on top, with the fill fading across underneath. */
+.glide-pill{position:absolute;left:0;top:0;box-sizing:border-box;border-radius:99px;background:#0a0f12;pointer-events:none;will-change:transform,width}
+.glide-pill.glide{transition:transform .36s cubic-bezier(.22,1,.36,1),width .36s cubic-bezier(.22,1,.36,1),height .36s cubic-bezier(.22,1,.36,1),background-color .36s,border-radius .36s}
+.picker{position:relative;isolation:isolate;display:flex;gap:8px;overflow-x:auto;padding:2px 0 4px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .picker::-webkit-scrollbar{display:none}
-.picker a{flex:none;padding:7px 14px;border-radius:99px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-weight:600;font-size:14px;text-decoration:none;white-space:nowrap}
+.picker a{position:relative;flex:none;padding:7px 14px;border-radius:99px;border:1px solid transparent;color:var(--ink);font-weight:600;font-size:14px;text-decoration:none;white-space:nowrap}
 .picker a small{font-weight:400;color:var(--muted);margin-left:6px;font-size:12px}
-.picker a[aria-current]{background:#0a0f12;border-color:#0a0f12;color:#ffb347;font-family:"VT323",monospace;font-size:19px;font-weight:400;letter-spacing:.04em;padding:4px 14px;text-shadow:0 0 6px rgba(255,140,0,.7)}
+.picker a::before{content:"";position:absolute;inset:-1px;z-index:-2;border-radius:inherit;border:1px solid var(--line);background:var(--panel);transition:opacity .36s}
+.picker a[aria-current]::before{opacity:0}
+.picker > .glide-pill{z-index:-1}
+.picker a[aria-current]{color:#ffb347;font-family:"VT323",monospace;font-size:19px;font-weight:400;letter-spacing:.04em;padding:4px 14px;text-shadow:0 0 6px rgba(255,140,0,.7)}
 .picker a[aria-current] small{color:#ffb347;opacity:.7;font-size:15px}
 .cams li{grid-template-columns:5.5em minmax(0,1fr);align-items:baseline;gap:8px!important;padding-bottom:7px!important}
 .cams li b{font-size:14px}
@@ -251,17 +265,19 @@ html{overscroll-behavior-y:none}
 .ptr.spin{animation:ptrblink .7s steps(1) infinite}
 @keyframes ptrblink{50%{opacity:.35}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
-.tabs{display:flex;gap:4px;padding:4px;border-radius:99px;background:var(--panel);border:1px solid var(--line);width:max-content}
-.tabs button{border:0;background:none;color:var(--muted);font:600 14px/1 "Public Sans",system-ui,sans-serif;padding:8px 16px;border-radius:99px;cursor:pointer}
-.tabs button[aria-selected="true"]{background:#0a0f12;color:#ffb347;font:400 19px/1 "VT323",monospace;letter-spacing:.04em;padding:6px 16px;text-shadow:0 0 6px rgba(255,140,0,.7)}
+.tabs{position:relative;display:flex;gap:4px;padding:4px;border-radius:99px;background:var(--panel);border:1px solid var(--line);width:max-content}
+.tabs button{border:0;background:none;color:var(--muted);font:600 14px/1 "Public Sans",system-ui,sans-serif;padding:8px 16px;border-radius:99px;cursor:pointer;position:relative;z-index:1;transition:color .36s,text-shadow .36s}
+.tabs button[aria-selected="true"]{color:#ffb347;font:400 19px/1 "VT323",monospace;letter-spacing:.04em;padding:6px 16px;text-shadow:0 0 6px rgba(255,140,0,.7)}
 [hidden]{display:none!important}
 /* WaveSlave map: dark neon panel in both themes */
 .wsmap{background:#0e0824;border-color:#2a1f4d;color:#e8e0ff}
-.wsmap .wsbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.wsmap .wsbar{position:relative;display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px}
 .wsmap .wsbar button{border:1px solid #3a2d6b;background:#1c1340;color:#cfc4ff;font:600 12px "Public Sans",system-ui,sans-serif;padding:6px 9px;border-radius:99px;cursor:pointer}
 .wsmap .wsbar .tog{margin-left:auto;border-style:dashed}
 .wsmap .wsbar .tog[aria-pressed="true"]{border-style:solid;border-color:#fff;color:#fff;background:#2a2050;box-shadow:0 0 8px rgba(255,255,255,.35)}
-.wsmap .wsbar button[data-o][aria-pressed="true"]{border-color:#ff2bd6;color:#fff;background:#3b0f4f;box-shadow:0 0 8px rgba(255,43,214,.6)}
+.wsmap .wsbar button[data-o]{transition:background-color .36s,color .36s}
+.wsmap .wsbar button[data-o][aria-pressed="true"]{color:#fff;background:#3b0f4f}
+.wsmap .wsbar > .glide-pill{z-index:1;background:none;border:1px solid #ff2bd6;box-shadow:0 0 8px rgba(255,43,214,.6)}
 .wsmap .box{position:relative}
 .wsmap canvas{display:block;width:100%;border-radius:12px}
 .wsmap #wsFx{position:absolute;inset:0;touch-action:pan-y;cursor:grab}
@@ -328,7 +344,9 @@ html{overscroll-behavior-y:none}
 .wsmap.fs .wsctry{position:absolute;z-index:5;top:calc(var(--barb,calc(40px + env(safe-area-inset-top))) + 16px);bottom:calc(120px + env(safe-area-inset-bottom));left:calc(8px + env(safe-area-inset-left));display:grid;grid-auto-flow:column;grid-template-rows:repeat(auto-fill,34px);align-content:start;gap:6px;pointer-events:none}
 .wsmap.fs .wsctry button{padding:0;pointer-events:auto}
 .wsmap.fs .wsctry button:not(:has(svg)){width:auto;padding:0 8px;font-size:12px}
-.wsmap.fs .wsctry button[aria-pressed="true"]{border-color:#ffb347;color:#ffb347;background:#0a0f12;box-shadow:0 0 8px rgba(255,140,0,.4)}
+.wsmap.fs .wsctry button{transition:background-color .36s,color .36s}
+.wsmap.fs .wsctry button[aria-pressed="true"]{color:#ffb347;background:#0a0f12}
+.wsmap .wsctry > .glide-pill{z-index:1;border-radius:10px;background:none;border:1px solid #ffb347;box-shadow:0 0 8px rgba(255,140,0,.4)}
 /* With a spot's card open the countries stay clear of it: sideways the card sits between them (however many columns they take: --ctryr is their
    right edge) and the map tools, upright they stop above it. */
 @media (orientation:landscape){.wsmap.fs .sheet{left:calc(var(--ctryr,calc(42px + env(safe-area-inset-left))) + 10px);right:calc(52px + env(safe-area-inset-right))}}
@@ -354,7 +372,7 @@ html{overscroll-behavior-y:none}
     <span class="fresh" id="fresh">Data snapshot</span>
   </header>
   <nav class="tabs" role="tablist" aria-label="View"><button role="tab" data-v="fc" aria-selected="true" data-zh="預報" data-ja="予報">Forecast</button><button role="tab" data-v="ws" aria-selected="false" data-zh="地圖" data-ja="地図">Map</button></nav>
-  <div class="ctry" id="ctry" role="group" aria-label="Country"><span class="ctry-pill" aria-hidden="true"></span><button data-c="tw" data-zh="台灣" data-ja="台湾">Taiwan</button><button data-c="jp" data-zh="日本" data-ja="日本">Japan</button><button data-c="kr" data-zh="韓國" data-ja="韓国">Korea</button><button data-c="ph" data-zh="菲律賓" data-ja="フィリピン">Philippines</button><button data-c="ca" data-zh="加州" data-ja="カリフォルニア">California</button><button data-c="hi" data-zh="夏威夷" data-ja="ハワイ">Hawaii</button><button data-c="au" data-zh="澳洲" data-ja="オーストラリア">Australia</button><button data-c="nw" data-zh="太平洋西北" data-ja="太平洋岸北西部">Pacific NW</button></div>
+  <div class="ctry" id="ctry" role="group" aria-label="Country"><button data-c="tw" data-zh="台灣" data-ja="台湾">Taiwan</button><button data-c="jp" data-zh="日本" data-ja="日本">Japan</button><button data-c="kr" data-zh="韓國" data-ja="韓国">Korea</button><button data-c="ph" data-zh="菲律賓" data-ja="フィリピン">Philippines</button><button data-c="ca" data-zh="加州" data-ja="カリフォルニア">California</button><button data-c="hi" data-zh="夏威夷" data-ja="ハワイ">Hawaii</button><button data-c="au" data-zh="澳洲" data-ja="オーストラリア">Australia</button><button data-c="nw" data-zh="太平洋西北" data-ja="太平洋岸北西部">Pacific NW</button></div>
   <nav class="picker" id="picker" aria-label="Choose a spot" data-zh-aria-label="選擇浪點" data-ja-aria-label="ポイントを選ぶ"></nav>
 
   <div id="viewFc">
@@ -521,14 +539,26 @@ function ctryEdges(){ const r = document.getElementById("ctry"); r.classList.tog
 // Country switch: back to the spot last open in that country, else its first spot.
 function switchCountry(c){ if(c===spotCountry(CUR)) return; let id; try{ id=localStorage.getItem("waveslave-spot-"+c); }catch(e){}
   switchSpot(ALL.spots[id] && spotCountry(id)===c ? id : countrySpots(c)[0]); }
-// The country switch's bubble: under whichever button is pressed, gliding there once the page is up (straight there the first time).
-function ctryPill(){ const box = document.getElementById("ctry"), pill = box && box.querySelector(".ctry-pill"), b = box && box.querySelector('button[aria-pressed="true"]');
-  if(!pill || !b) return; pill.style.transform = `translate(${b.offsetLeft}px,${b.offsetTop}px)`; pill.style.width = b.offsetWidth+"px"; pill.style.height = b.offsetHeight+"px";
-  // A country off the edge of a narrow switch, or under one of its faded edges (32 px, see ctryEdges), scrolls into view with it.
-  const m = box.scrollWidth > box.clientWidth ? 36 : 0;
-  if(b.offsetLeft < box.scrollLeft+m || b.offsetLeft+b.offsetWidth > box.scrollLeft+box.clientWidth-m) box.scrollTo({left: b.offsetLeft-(box.clientWidth-b.offsetWidth)/2, behavior: pill.classList.contains("glide") ? "smooth" : "auto"});
-  ctryEdges();
-  if(!pill.classList.contains("glide")) requestAnimationFrame(() => requestAnimationFrame(() => pill.classList.add("glide"))); }
+// Sliding highlight (Bryan, Oct 18): one bubble under a group's picked button that glides (place and size) to the next pick. sel finds the pick;
+// the bubble follows picks, redraws of the group (it goes back in from where it was, so it still glides), language and font changes.
+function glider(box, sel){ if(!box) return; let ro = null;
+  const pill = document.createElement("span"); pill.className = "glide-pill"; pill.setAttribute("aria-hidden", "true");
+  const place = () => { if(pill.parentNode!==box){ box.prepend(pill); pill.offsetWidth; }
+    if(ro) for(const c of box.children) if(c!==pill) ro.observe(c);
+    const b = box.querySelector(sel); pill.hidden = !b; if(!b) return;
+    pill.style.transform = `translate(${b.offsetLeft}px,${b.offsetTop}px)`; pill.style.width = b.offsetWidth+"px"; pill.style.height = b.offsetHeight+"px";
+    pill.classList.toggle("today", b.classList.contains("today"));
+    // A pick off the edge of a group that scrolls sideways comes into view with it.
+    if(box.scrollWidth > box.clientWidth && (b.offsetLeft < box.scrollLeft || b.offsetLeft+b.offsetWidth > box.scrollLeft+box.clientWidth))
+      box.scrollTo({left: b.offsetLeft-(box.clientWidth-b.offsetWidth)/2, behavior: pill.classList.contains("glide") ? "smooth" : "auto"});
+    if(!pill.classList.contains("glide")) requestAnimationFrame(() => requestAnimationFrame(() => pill.classList.add("glide"))); };
+  new MutationObserver(place).observe(box, {subtree: true, childList: true, attributes: true, attributeFilter: ["aria-pressed", "aria-selected", "aria-current"]});
+  if(window.ResizeObserver){ ro = new ResizeObserver(place); ro.observe(box); }
+  place(); }
+// A tap shows its pick at once and does the heavy redraw as the bubble lands, so the redraw never stutters the glide; taps in a row keep the last.
+const afterGlide = () => { let t = 0; return fn => { clearTimeout(t); if(matchMedia("(prefers-reduced-motion: reduce)").matches) return fn(); t = setTimeout(fn, 260); }; };
+const pressOnly = (all, b, a = "aria-pressed") => all.forEach(x => x.setAttribute(a, x===b));
+const spotLater = afterGlide();  // the spot picker is redrawn with each spot, so its taps share one timer
 // ---- Map maths: plain functions with no page state, tested in Node (tests/map/mapmath.test.js). Inside the map every longitude runs east, 0–360.
 const MAPM = (() => {
   // California's -118.5 is 241.5, so the Pacific has no break at the dateline; W180 goes back for Open-Meteo and the pin's label.
@@ -1254,16 +1284,17 @@ const WS = (() => {
     const sl = document.getElementById("wsSlider"); sl.max = times.length-1; sl.oninput = () => setT(+sl.value, true); timeline();
     document.getElementById("wsPlay").onclick = () => { if (playing) { clearInterval(playing); playing = 0; } else playing = setInterval(() => setT(ti+1 >= times.length ? 0 : ti+1), 700);
       document.getElementById("wsPlay").textContent = playing ? "❚❚" : "▶"; };
-    document.querySelectorAll("#wsLayers button[data-o]").forEach(b => b.onclick = () => { layer = b.dataset.o;
-      document.querySelectorAll("#wsLayers button[data-o]").forEach(x => x.setAttribute("aria-pressed", x===b)); legend(); drawBase(); });
+    const layerLater = afterGlide(), lbs = document.querySelectorAll("#wsLayers button[data-o]");
+    lbs.forEach(b => b.onclick = () => { pressOnly(lbs, b); layerLater(() => { layer = b.dataset.o; legend(); drawBase(); }); });
     const ib = document.querySelector("#wsLayers button[data-p]"); ib.hidden = !GRIDS.some(g => g.hasP); ib.setAttribute("aria-pressed", iso);
     ib.onclick = () => { iso = !iso; ib.setAttribute("aria-pressed", iso); try { localStorage.setItem("waveslave-iso", iso ? "1" : "0"); } catch(e) {} drawBase(); warm(); };
     // A button for each country in the switch above the spot picker (#ctry), made from it so that a country added there shows up here too: the country's
     // outline, its name read out and shown on hover in the page's language (applyLang swaps them), or a copy of the switch's button while it has no outline.
+    const ctryLater = afterGlide();
     document.getElementById("wsCtry").replaceChildren(...[...document.querySelectorAll("#ctry button")].map(b => { const c = b.dataset.c, d = HOME_ICONS[c], n = d ? document.createElement("button") : b.cloneNode(true);
       if (d) { n.dataset.c = c; n.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" style="display:block;margin:auto"><path d="${d}" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg>`;
         for (const a of ["aria-label", "title"]) { n.setAttribute(a, b.textContent); for (const l of ["en", "zh", "ja"]) n.setAttribute(`data-${l}-${a}`, b.dataset[l] || b.textContent); } }
-      n.onclick = () => flyTo(c); return n; })); ctryOn();
+      n.onclick = () => { pressOnly(document.querySelectorAll("#wsCtry button"), n); ctryLater(() => flyTo(c)); }; return n; })); ctryOn();
     // The zoom buttons and the countries sit just under the top buttons, however many rows those take (a narrow phone, a longer language): --barb is the bar's bottom edge.
     const bar = document.getElementById("wsLayers"), sec = document.getElementById("viewWs");
     if (window.ResizeObserver) new ResizeObserver(() => sec.style.setProperty("--barb", bar.offsetTop + bar.offsetHeight + "px")).observe(bar);
@@ -1381,7 +1412,7 @@ function setView(v, instant){ VIEW=v; try{ localStorage.setItem("waveslave-view"
   const go = () => { clearTimeout(wait); document.removeEventListener("fullscreenchange", go); if(SHOWN==="fc" && ending===hold) ending = FX.run("slam", false, ws, done); };
   const hold = () => { go(); if(ending) ending(); }; let wait = 0; ending = hold;
   if(document.fullscreenElement){ document.addEventListener("fullscreenchange", go); wait = setTimeout(go, 700); try{ document.exitFullscreen().catch(go); }catch(e){ go(); } } else go(); }
-document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>setView(b.dataset.v));
+{ const later = afterGlide(), bs = document.querySelectorAll(".tabs button"); bs.forEach(b=>b.onclick=()=>{ pressOnly(bs, b, "aria-selected"); later(()=>setView(b.dataset.v)); }); }
 addEventListener("hashchange", () => switchSpot(location.hash.slice(1)));
 function boot(SPOT){
 const DATA = Object.assign({updated:ALL.updated}, ALL.spots[SPOT]);
@@ -1617,7 +1648,7 @@ function drawDays(){
       <span class="mini"><i>${DOW[new Date(d.key+"T00:00Z").getUTCDay()].slice(isZh()?1:0, 2)}</i><i>${+d.key.slice(8)}</i><b>${r1(hi)}</b><u style="background:${RATE[r][1]}"></u></span>
       <span class="w">${RATE[r][0]}${isZh() ? (d.avgKt!=null?` · 風 ${Math.round(d.avgKt)} kt`:" · 無風力資料") : isJa() ? (d.avgKt!=null?` · 風 ${Math.round(d.avgKt)} kt`:" · 風データなし") : d.avgKt!=null?` · ${Math.round(d.avgKt)} kt wind`:" · no wind data"}</span></button>`; }).join("");
   // Phone card for the picked day (hidden on computers, where the dock tile itself opens up), with ‹ › to step a day.
-  const b = el.children[sel], q = c => b.querySelector(c), nm = i => dayInfo[i] ? dayName(dayInfo[i].key,todayKey) : "", det = document.getElementById("dayDet");
+  const b = el.querySelectorAll(".day")[sel], q = c => b.querySelector(c), nm = i => dayInfo[i] ? dayName(dayInfo[i].key,todayKey) : "", det = document.getElementById("dayDet");
   det.className = "daydet"+(dayInfo[sel].hist?" hist":"");
   det.innerHTML = `<div class="k"><span>${q(".dn").innerHTML}</span><small>${q(".tag")?q(".tag").textContent:""}</small></div>
     <span class="big mono">${q(".big").innerHTML}</span><span class="s"><span class="per mono">${q(".per").textContent}</span><span>${q(".w").textContent}</span></span>${q(".bar").outerHTML}
@@ -1647,19 +1678,20 @@ function drawDays(){
 // Dock: at rest the picked day is big; the pointer (or a finger dragged along) swells the day under it and, a little, its neighbours.
 const DOCK_G = () => 2.2;
 function dock(x){ const el = document.getElementById("days"), G = DOCK_G();
-  if(matchMedia("(max-width:560px)").matches){ [...el.children].forEach(c => { c.style.removeProperty("--g"); c.style.removeProperty("--m"); c.classList.remove("on"); }); return; }  // phones: chips, no dock
-  [...el.children].forEach((c,i) => { let m;
+  if(matchMedia("(max-width:560px)").matches){ el.querySelectorAll(".day").forEach(c => { c.style.removeProperty("--g"); c.style.removeProperty("--m"); c.classList.remove("on"); }); return; }  // phones: chips, no dock
+  el.querySelectorAll(".day").forEach((c,i) => { let m;
     if(x==null) m = i===sel ? 1 : 0;
     else { const r = c.getBoundingClientRect(); m = Math.max(0, 1-Math.abs(x-(r.left+r.width/2))/170) ** 1.6; }
     c.style.setProperty("--g", 1+G*m); c.style.setProperty("--m", m>.55 ? 1 : m*.6); c.classList.toggle("on", m>.55); }); }
-{ const el = document.getElementById("days"), pick = b => { if(!b) return; sel=+b.dataset.i; drawDays(); drawDay(); };
+{ const el = document.getElementById("days"), pick = b => { if(!b) return; sel=+b.dataset.i; drawDays();
+    if(matchMedia("(max-width:560px)").matches) dayLater(drawDay); else drawDay(); }, dayLater = afterGlide();  // phone chips: the chart waits for the bubble
   // Dock tiles move while the pointer does: a tap picks the tile it landed on, a finger dragged along picks the biggest tile when it lifts.
   // Phone chips never move, so a tap there is just that chip.
   // Keyboard Enter/Space still clicks.
   let down = null;
   el.onpointermove = e => { if(e.pointerType==="mouse" || e.buttons) dock(e.clientX); };
   el.onpointerdown = e => { down = {x: e.clientX, b: e.target.closest(".day")}; if(e.pointerType!=="mouse") dock(e.clientX); };
-  el.onpointerup = e => { const tiles = [...el.children], big = tiles.reduce((a,c) => +c.style.getPropertyValue("--g") > +a.style.getPropertyValue("--g") ? c : a, tiles[0]);
+  el.onpointerup = e => { const tiles = [...el.querySelectorAll(".day")], big = tiles.reduce((a,c) => +c.style.getPropertyValue("--g") > +a.style.getPropertyValue("--g") ? c : a, tiles[0]);
     pick(down && Math.abs(e.clientX-down.x) < 10 ? down.b : matchMedia("(max-width:560px)").matches ? null : big); down = null; dock(e.pointerType==="mouse" ? e.clientX : undefined); };
   el.onpointerleave = el.onpointercancel = () => dock();
   el.onclick = e => { if(e.detail===0) pick(e.target.closest(".day")); }; }
@@ -1829,7 +1861,7 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
 (() => {
   const go = switchSpot;
   const ids = countrySpots(spotCountry(SPOT));
-  document.querySelectorAll("#ctry button").forEach(b => b.setAttribute("aria-pressed", b.dataset.c===spotCountry(SPOT))); ctryPill();
+  document.querySelectorAll("#ctry button").forEach(b => b.setAttribute("aria-pressed", b.dataset.c===spotCountry(SPOT)));
   const cwaBuoy = id => `https://www.cwa.gov.tw/V8/${isZh()?"C":"E"}/M/OBS_Marine_30day.html?MID=${id}`;
   const jp = DATA.country==="jp", kr = DATA.country==="kr", ph = DATA.country==="ph", hi = DATA.country==="hi", au = DATA.country==="au", nw = DATA.country==="nw", ca = DATA.country==="ca" || hi || nw, far = DATA.buoyKm>=40 ? ` · ${DATA.buoyKm} km${isZh()?"外":isJa()?"先":" away"}` : "";
   const windy = s => `https://www.windy.com/${s.lat}/${s.lon}/ecmwfWaves/waves?waves,${s.lat},${s.lon},10,p:surfspots`;
@@ -1866,7 +1898,8 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
     : (zh ? "離岸風（氣象署預報）" : ja ? "オフショア（台湾気象署予報）" : "Offshore wind (CWA forecast)");
   document.getElementById("spotList").innerHTML = ids.map(id => { const s=ALL.spots[id];
     return `<li${id===SPOT?' aria-current="true"':""}><b>${SPT(s,"name")}</b><span class="links">${(s.cams||[]).length ? s.cams.map((c,i)=>`<a href="${c[1]}" target="_blank" rel="noopener">${camName(s,i)}</a>`).join("") : `<span class="where">${zh?"還沒找到攝影機":ja?"カメラはまだ見つかっていません":"No cam found yet"}</span>`}</span></li>`; }).join("");
-  document.querySelectorAll("a[data-spot]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); if(a.dataset.spot!==SPOT) go(a.dataset.spot); }));
+  document.querySelectorAll("a[data-spot]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); if(a.dataset.spot===SPOT) return;
+    document.querySelectorAll("#picker a").forEach(x => x.toggleAttribute("aria-current", x===a)); spotLater(() => go(a.dataset.spot)); }));
   document.querySelector(".picker a[aria-current]")?.scrollIntoView({inline:"center", block:"nearest"});
   document.title = `WaveSlave · ${nm}`;
 })();
@@ -1874,14 +1907,10 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
 drawDays(); drawDay();
 }
 applyLang();
-document.querySelectorAll("#lang button").forEach(b=>b.onclick=()=>setLang(b.dataset.l));
-// A tap sends the bubble on its way first and redraws the page as it lands, so the redraw never stutters the glide; taps in a row go to the last one.
-{ let t; document.querySelectorAll("#ctry button").forEach(b=>b.onclick=()=>{ if(b.dataset.c===spotCountry(CUR)&&!t) return; clearTimeout(t);
-    document.querySelectorAll("#ctry button").forEach(x=>x.setAttribute("aria-pressed", x===b)); ctryPill();
-    t = setTimeout(()=>{ t=0; switchCountry(b.dataset.c); }, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 260); });
-  // Language and font changes resize the buttons, so the bubble follows them.
-  if(window.ResizeObserver){ const ro = new ResizeObserver(()=>ctryPill()); document.querySelectorAll("#ctry, #ctry button").forEach(e=>ro.observe(e)); } }
-document.getElementById("ctry").addEventListener("scroll", ctryEdges, {passive: true}); addEventListener("resize", ctryEdges);
+{ const later = afterGlide(), bs = document.querySelectorAll("#lang button"); bs.forEach(b=>b.onclick=()=>{ pressOnly(bs, b); later(()=>setLang(b.dataset.l)); }); }
+{ const later = afterGlide(), bs = document.querySelectorAll("#ctry button"); bs.forEach(b=>b.onclick=()=>{ pressOnly(bs, b); later(()=>switchCountry(b.dataset.c)); }); }
+for(const [box, sel] of [["#lang", 'button[aria-pressed="true"]'], ["#ctry", 'button[aria-pressed="true"]'], [".tabs", 'button[aria-selected="true"]'], ["#picker", "a[aria-current]"],
+  ["#days", '.day[aria-pressed="true"]'], ["#wsLayers", 'button[data-o][aria-pressed="true"]'], ["#wsCtry", 'button[aria-pressed="true"]']]) glider(document.querySelector(box), sel);
 boot(SPOT0);
 if(VIEW!=="fc") setView(VIEW, true);
 

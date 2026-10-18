@@ -1029,14 +1029,17 @@ const WS = (() => {
       if (close && q.v && q.v.dir != null) { const a = (q.v.dir+180)*Math.PI/180, dx = Math.sin(a), dy = -Math.cos(a);
         g.strokeStyle = "#fff"; g.lineWidth = 2; g.beginPath(); g.moveTo(x-dx*14, y-dy*14); g.lineTo(x+dx*4, y+dy*4); g.stroke(); }
       g.fillStyle = cur ? "#ff2bd6" : "#ffe600"; g.shadowColor = g.fillStyle; g.shadowBlur = 10; g.beginPath(); g.arc(x, y, close ? (cur?6:4.5) : (cur?4:2.5), 0, 7); g.fill(); g.shadowBlur = 0; }
+    // Every tag is placed first, then the leader lines are drawn and the tags over them, so a line out of a crowded cluster (Bali's four spots) runs under the tags it crosses.
+    const tags = [];
     if (close) for (const q of S) { const [x,y] = px(q.s.lon, q.s.lat), cur = q.s.id===CUR, st = TAGS[TAG]; if (q.s.id===SHEET || x < -40 || y < -20 || x > W+40 || y > H+20) continue;
       const L = { name: SPT(ALL.spots[q.s.id], "name"), h: layer==="swell" ? (q.sw ? q.sw.h.toFixed(1)+"m" : "–") : q.v ? q.v.h.toFixed(1)+"m" : "–", kt: q.w ? Math.round(q.w.kt)+"kt" : "", rain: !!(q.w && q.w.rain), cur };
       const [tw, th] = st.size(g, L), pref = x > W*0.62 ? -1 : 1;
       const cands = [0,-1,1,-2,2,-3,3,-4,4,-5,5,-6,6].flatMap(k => [[pref,k],[-pref,k],[2*pref,k],[-2*pref,k],[0,k]]).map(([s,k]) => [s>1 ? x+44 : s>0 ? x+12 : s<-1 ? x-44-tw : s<0 ? x-12-tw : Math.max(2, Math.min(W-2-tw, x-tw/2)), y-th/2+k*(th+3)]).filter(([tx,ty]) => tx >= 2 && tx+tw <= W-2 && ty >= 2 && ty+th <= H-2);
       const hit = ([tx,ty]) => boxes.some(b => tx < b[0]+b[2]+3 && tx+tw+3 > b[0] && ty < b[1]+b[3]+2 && ty+th+2 > b[1]);
       const [tx,ty] = cands.find(c => !hit(c)) || cands[0] || [x+12, y-th/2]; boxes.push([tx, ty, tw, th]); TAGHIT.push([tx-6, ty-6, tw+12, th+12, q.s.id]);
-      if (Math.abs(ty-(y-th/2)) > 1) { const ex = tx+tw < x ? tx+tw : tx > x ? tx : x, ey = ty > y ? ty : ty+th < y ? ty+th : ty+th/2; g.strokeStyle = cur ? "#ff2bd6" : "#ffb347"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x, y); g.lineTo(ex, ey); g.stroke(); }
-      g.save(); st.draw(g, L, tx, ty, tw, th); g.restore(); }
+      tags.push({x, y, cur, st, L, tx, ty, tw, th}); }
+    for (const {x, y, cur, tx, ty, tw, th} of tags) if (Math.abs(ty-(y-th/2)) > 1) { const ex = tx+tw < x ? tx+tw : tx > x ? tx : x, ey = ty > y ? ty : ty+th < y ? ty+th : ty+th/2; g.strokeStyle = cur ? "#ff2bd6" : "#ffb347"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x, y); g.lineTo(ex, ey); g.stroke(); }
+    for (const {st, L, tx, ty, tw, th} of tags) { g.save(); st.draw(g, L, tx, ty, tw, th); g.restore(); }
     drawTowns(g, boxes, ISLES[ISLE].towns);
     if (SHEET) dial(g, S);
     tLabel();

@@ -1,7 +1,7 @@
 // Browser checks and phone screenshots of a built page (build one with tests/map/tool.py).
 // Usage: node tests/map/check.js <page.html> <outdir> shots|checks [land]
 //   shots   the six home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
-//           On a page whose hook can zoom, also the whole Pacific in each layer (out-wind, out-waves, out-swell, out-rain) and a swell across 180° (dateline).
+//           On a page whose hook can zoom, also zoomed all the way out in each layer (out-wind, out-waves, out-swell, out-rain) and a swell across 180° (dateline).
 //   checks  prints ok / FAIL / skip for each check, and exits 1 on any FAIL or page error. Needs the page's test hook, window.__ws.
 // Every page opens in its own fresh browser context, offline (only the page itself loads, no service worker): a phone 390x844 (844x390 with land),
 // dpr 2, touch, reduced motion (so no streaks, and moves jump), the intro done, English, and the map open full screen on load.
@@ -22,6 +22,7 @@ const HOMES = [["tw", "donghe", "waveslave-mapview", 120.9, 23.75], ["jp", "ichi
   ["hi", "pipeline", "waveslave-mapview-hi", -157.3, 20.6], ["au-e", "snapper", "waveslave-mapview-au-e", 152, -32.5], ["au-w", "margaret", "waveslave-mapview-au-w", 115.5, -32.5]];
 const OLD_CA = { key: "waveslave-mapview-ca", view: { cx: -117.5, cy: 33.0, k: 2 } }; // saved before the map ran east, off California's home view and zoomed in
 const home = name => { const [, spot, key, cx, cy] = HOMES.find(h => h[0] === name); return { spot, saved: { key, view: { cx, cy, k: 1 } } }; }; // open(home("tw"))
+const MID = { key: "waveslave-mapview", view: { cx: 190, cy: 25, k: 1 } }; // Taiwan's map left in the middle of the Pacific, so zoomed out from there Hawaii is on screen
 // Shots that need the hook's zoom: name, layer, saved view (none: zoomed all the way out from Donghe's first open).
 const OUT = [...["wind", "waves", "swell", "rain"].map(l => ["out-" + l, l, null]), ["dateline", "swell", { key: "waveslave-mapview", view: { cx: 180, cy: 35, k: 0.3 } }]];
 // Whether the page carries the Pacific grid: a page built without one has `pac: null` filled in (tool.py writes null, refresh.sh null and a newline).
@@ -83,12 +84,14 @@ const CHECKS = {
       return out; });
     if (off.length) throw new Error(off.join("; "));
   },
-  // Zooming out stops once the whole Pacific box (100°E–110°W, 50°S–60°N) fits on the screen.
-  async zoomOutFitsPacific(open) {
+  // Zooming out stops once the Pacific box (100°E–110°W, 50°S–60°N) fills the screen, so no dark sea shows around it:
+  // the view stays inside the box and spans all of it one way, its whole height upright and its whole width sideways.
+  async zoomOutFillsScreen(open) {
     const page = await open(home("tw")); await zoomOut(page);
-    const v = await page.evaluate(() => window.__ws.view()), e = await edges(page);
+    const v = await page.evaluate(() => window.__ws.view()), e = await edges(page), span = `${e.l}..${e.r} by ${e.s}..${e.n}`;
     if (v.z !== v.zmin) throw new Error(`z is ${v.z}, want zmin ${v.zmin}`);
-    if (!(e.l <= 100 + 1e-9 && e.r >= 250 - 1e-9 && e.s <= -50 + 1e-9 && e.n >= 60 - 1e-9)) throw new Error(`the view spans ${e.l}..${e.r} by ${e.s}..${e.n}, want at least 100..250 by -50..60`);
+    if (!(e.l >= 100 - 1e-9 && e.r <= 250 + 1e-9 && e.s >= -50 - 1e-9 && e.n <= 60 + 1e-9)) throw new Error(`the view spans ${span}, past the box's 100..250 by -50..60`);
+    if (!(land ? near(e.l, 100, 1e-6) && near(e.r, 250, 1e-6) : near(e.s, -50, 1e-6) && near(e.n, 60, 1e-6))) throw new Error(`the view spans ${span}, want the box's whole ${land ? "width, 100..250" : "height, -50..60"}`);
   },
   // With no saved view the map opens on the country's old map: inside Taiwan's West Pacific box and filling it one way; Australia at its home zoom or closer.
   async firstOpenOldBox(open) {
@@ -127,54 +130,35 @@ const CHECKS = {
     const kept = await page.evaluate(() => JSON.parse(localStorage.getItem("waveslave-mapview")));
     if (!kept || !near(kept.cx, v.cx) || !near(kept.cy, v.cy) || !near(kept.k, v.z/v.z0)) throw new Error(`waveslave-mapview holds ${JSON.stringify(kept)}, want cx ${v.cx}, cy ${v.cy}, k ${v.z/v.z0}`);
   },
-  // Zoomed out from Taiwan, tapping Pipeline switches the page to it and opens its table, with no reload.
+  // Zoomed out on Taiwan's map, tapping Pipeline switches the page to it and opens its table, with no reload.
   async tapOtherCountrySpot(open) {
-    const page = await open(home("tw")); await zoomOut(page);
+    const page = await open({ spot: "donghe", saved: MID }); await zoomOut(page);
     await tapAt(page, await page.evaluate(() => { window.__mark = 1; const s = ALL.spots.pipeline; return window.__ws.px(MAPM.E(s.lon), s.lat); })); await page.waitForTimeout(500);
     const r = await page.evaluate(() => ({ mark: window.__mark, cur: CUR, shut: document.getElementById("wsSheet").hidden }));
     if (r.mark !== 1) throw new Error("the page reloaded (window.__mark is gone)");
     if (r.cur !== "pipeline") throw new Error(`CUR is ${r.cur}, want pipeline`);
     if (r.shut) throw new Error("#wsSheet is hidden: Pipeline's table did not open");
   },
-  // From the Taiwan home view the home button goes out to the whole Pacific, and a second tap comes back (straight there, with reduced motion).
+  // From the Taiwan home view the home button goes all the way out with Taiwan still on screen (the view a pinch out ends on), and a second tap
+  // comes back (straight there, with reduced motion).
   async homeButton(open) {
     const page = await open(home("tw"));
-    await page.click("#wsHome"); const a = await page.evaluate(() => window.__ws.view());
-    if (a.z !== a.zmin || !near(a.cx, 175, 1e-6)) throw new Error(`after one tap z is ${a.z} and cx ${a.cx}, want zmin ${a.zmin} and 175`);
+    await page.click("#wsHome");
+    const a = await page.evaluate(() => { const v = window.__ws.view(); return { ...v, want: MAPM.clampTo(MAPM.PBOX, v.W, v.H, v.zmin, 120.9, 23.75), at: window.__ws.px(120.9, 23.75) }; });
+    if (a.z !== a.zmin || !near(a.cx, a.want[0], 1e-6) || !near(a.cy, a.want[1], 1e-6)) throw new Error(`after one tap the view is cx ${a.cx}, cy ${a.cy}, z ${a.z}, want cx ${a.want[0]}, cy ${a.want[1]}, zmin ${a.zmin}`);
+    if (!(a.at[0] >= 0 && a.at[0] <= a.W && a.at[1] >= 0 && a.at[1] <= a.H)) throw new Error(`after one tap Taiwan is off screen, at ${a.at}`);
     await page.click("#wsHome"); const b = await page.evaluate(() => window.__ws.view());
     if (b.z !== b.z0 || !near(b.cx, 120.9, 1e-6)) throw new Error(`after two taps z is ${b.z} and cx ${b.cx}, want z0 ${b.z0} and 120.9`);
   },
   // A pin dropped east of 180° asks Open-Meteo for a longitude in -180..180: 200°E goes out as -160.
   async pinRequestWraps(open) {
-    const page = await open(home("tw")); await zoomOut(page);
+    const page = await open({ spot: "donghe", saved: MID }); await zoomOut(page);
     let got; const asked = new Promise(r => { got = r; }), wait = setTimeout(() => got(null), 3000);
     await page.route("**/api.open-meteo.com/**", r => { got(r.request().url()); return r.abort(); });
     await tapAt(page, await page.evaluate(() => window.__ws.px(200, 40))); const url = await asked; clearTimeout(wait);
     if (!url) throw new Error("no request reached api.open-meteo.com");
     const q = new URL(url).searchParams.get("longitude"), lon = +q;
     if (!(lon >= -180 && lon <= 180 && Math.abs(lon + 160) < 0.5)) throw new Error(`the pin asked for longitude=${q}, want about -160`);
-  },
-  // Zoomed out, the box clips the map but not the pin: a tap on the dark sea outside the box drops no pin, and a pin
-  // near the box's edge shows its flag over that edge (upright over the north edge, sideways over the east edge).
-  async pinAndBoxEdge(open) {
-    const page = await open(home("tw")); await zoomOut(page);
-    let asked = null; await page.route("**/api.open-meteo.com/**", r => { asked = r.request().url(); return r.abort(); });
-    // Upright the box leaves dark sea above and below it, sideways to its west and east; the pins are well clear of the spots.
-    const { out, pin } = await page.evaluate(() => { const { px, view } = window.__ws, { W, H } = view(), [l, t] = px(100, 60);
-      return t > 8 ? { out: [W/2, t/2], pin: [245, 55] } : l > 8 ? { out: [l/2, H/2], pin: [248, 5] } : {}; });
-    if (!out) skip("the Pacific box fills the screen");
-    await tapAt(page, out); await page.waitForTimeout(800);
-    if (asked) throw new Error(`a tap outside the box dropped a pin (it asked ${asked})`);
-    // Pixels of the map picture outside the box that aren't the plain dark sea (#0e0824).
-    const lit = () => page.evaluate(() => { const c = document.getElementById("wsBase"), k = c.width / window.__ws.view().W, { px } = window.__ws, [l, t] = px(100, 60), [r, b] = px(250, -50);
-      const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; let n = 0;
-      for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++) { if (x >= l*k - 2 && x <= r*k + 2 && y >= t*k - 2 && y <= b*k + 2) continue;
-        const o = (y*c.width + x)*4; if (Math.abs(d[o] - 14) + Math.abs(d[o+1] - 8) + Math.abs(d[o+2] - 36) > 24) n++; }
-      return n; });
-    const before = await lit();
-    await tapAt(page, await page.evaluate(([lon, lat]) => window.__ws.px(lon, lat), pin)); await settle(page);
-    const after = await lit();
-    if (!(after > before)) throw new Error(`the pin's flag is cut off at the box's edge (${after} lit pixels outside the box, ${before} before the pin)`);
   },
 };
 

@@ -168,6 +168,19 @@ const CHECKS = {
   async philippines(open) { await homeBox(open, "ph", "cloud9", 122.6); },
   async indonesia(open) { await homeBox(open, "id", "uluwatu", 116); },
   async newZealand(open) { await homeBox(open, "nz", "raglan", 174.3); },
+  // On every home view, a tag drawn for another country's spot keeps clear of the buttons over the map: at the screen's edge, one with nowhere
+  // clear to go is left out (Sydney's, in the corner of New Zealand's home view held sideways).
+  async foreignTagsClear(open) {
+    for (const [name, spot] of HOMES) {
+      const page = await open(home(name));
+      if (!await page.evaluate(() => !!window.__ws.tags)) skip("the page's hook has no tags");
+      if (!await page.evaluate(s => !!ALL.spots[s], spot)) continue;  // a build from before that country
+      const bad = await page.evaluate(() => { const rect = e => e.getBoundingClientRect(), fx = rect(document.getElementById("wsFx")), MC = window.__ws.view().MC;
+        const over = [...document.querySelectorAll("#wsLayers button, #wsCtry button, #viewWs .zoom button")].filter(b => b.offsetParent).map(rect);
+        return window.__ws.tags().filter(([x, y, w, h, id]) => spotCountry(id) !== MC && over.some(r => fx.left + x < r.right && fx.left + x + w > r.left && fx.top + y < r.bottom && fx.top + y + h > r.top)).map(t => t[4]); });
+      if (bad.length) throw new Error(`on ${name}'s home view the tags of ${bad.join(", ")} sit under a button`);
+    }
+  },
   // Changing country moves the one map to the new country's home view, with no reload.
   async noReloadCountry(open) {
     const page = await open(home("tw"));
@@ -229,7 +242,7 @@ const CHECKS = {
   // map between them (a finger there drags it), and only when the column has no room left for the next does it start another column, at the
   // top just right of the last; in English, Chinese and Japanese each is named in the page's language. With a spot's forecast card open, a
   // finger on any of them still lands on it, as it does on the map's tools down the right; sideways that holds on a short screen too (a small
-  // phone in Safari, whose bar takes some of the height), where the countries take a second column four deep.
+  // phone in Safari, whose bar takes some of the height), where the countries take a second column five deep.
   async countryColumn(open) {
     const page = await open(home("tw"));
     for (const l of ["en", "zh", "ja"]) {

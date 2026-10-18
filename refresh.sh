@@ -109,8 +109,10 @@ fi
 # Korean spots (optional, never block the build): airport reports (METAR) from NOAA's Aviation Weather Center, the last 3 hours;
 # JMA MSM wind and the tide model via Open-Meteo, as for Japan and Australia; kr.py writes them under the same keys. No buoys yet:
 # the Korea Meteorological Administration's buoy feed needs a key.
+# krids <field>: the Korean spots' lat or lon, or metar for their airports (a spot's windStation may be one "metar:ICAO" or a list).
 krids(){ python3 -I -c "import json,sys;S=[s for s in json.load(open(sys.argv[1])) if s.get('country')=='kr'];f=sys.argv[2]
-v=[w[6:] for s in S for w in s['windStation'] if w.startswith('metar:')] if f=='metar' else [str(s[f]) for s in S]
+W=[w for s in S for w in (lambda v: v if isinstance(v,list) else [v] if v else [])(s.get('windStation'))]
+v=[w[6:] for w in W if w.startswith('metar:')] if f=='metar' else [str(s[f]) for s in S]
 print(','.join(v if f in ('lat','lon') else dict.fromkeys(v)))" "$HERE/spots.json" "$1"; }
 if [ -n "$(krids lat)" ]; then
   curl -fsSL --retry 2 -m 60 -A "waveslave.tw" -o "$W/dl/metar-kr.json" "https://aviationweather.gov/api/data/metar?ids=$(krids metar)&format=json&hours=3" || echo "metar fetch failed" >&2

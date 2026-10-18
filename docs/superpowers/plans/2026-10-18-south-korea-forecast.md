@@ -18,6 +18,6 @@
 - [ ] **4. spots.json.** The 8 spots, with names, regions and station names in zh and ja.
 - [ ] **5. refresh.sh and the workflow.** The Korea section after Australia, history/log/correct lines for `kr`, `log-kr` in the workflow's restore list.
 - [ ] **6. template.html.** Country button after Japan (zh 韓國, ja 韓国), the Korea outline in `HOME_ICONS`, `HOMES.kr` and `OLDBOX.kr`, "Model tide" for Korea, the JMA MSM legend, KMA's typhoon link, footer credits, the comment listing the countries.
-- [ ] **7. Map checks.** A Korea home view in `tests/map/check.js` (`HOMES`) and the country column check; `tests/map/tool.py` builds with the Korean fixture.
+- [ ] **7. Map checks.** A Korea home view in `tests/map/check.js` (`HOMES`) and the country column check. ~~`tests/map/tool.py` builds with the Korean fixture.~~ Dropped: tool.py builds pages from the live site's data, which carries Korea once this is merged; until then the Korea check runs on a full local build.
 - [ ] **8. Verify.** Unit tests, map math tests, `check.js` upright and sideways on a local build from real downloads; the other countries come out identical to `main`; phone screenshots of a Korean spot in en, zh and ja.
 - [ ] **9. Review and PR.** A fresh reviewer on the diff, fixes, then the pull request.

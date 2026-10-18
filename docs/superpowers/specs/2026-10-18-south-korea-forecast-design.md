@@ -1,6 +1,6 @@
 # South Korea forecast for WaveSlave: design
 
-Date: 2026-10-18. Status: building the parts that need no key. Plan: `docs/superpowers/plans/2026-10-18-south-korea-forecast.md`.
+Date: 2026-10-18. Status: the parts that need no key are built; Bryan is signing up for the keys. Plan: `docs/superpowers/plans/2026-10-18-south-korea-forecast.md`.
 
 ## Goal
 
@@ -8,7 +8,7 @@ Add South Korea to waveslave.tw the way Pacific NW was added (PR #50): a country
 map home view and a separate forecast-vs-buoy log (`log-kr/`).
 
 Bryan said yes to Korea next (project chat, 2026-10-18). Korea's live wave buoys and official tide tables need free keys
-whose sign-ups check a Korean mobile number or ID, so the card in the thread asks whether he can get them. This design
+whose sign-ups check a Korean mobile number or ID; Bryan chose to sign up for them (card in the thread). This design
 builds everything that needs no key first, and leaves room for the keyed sources (Phase 2 below).
 
 Defaults I picked (say if you want otherwise):
@@ -30,7 +30,7 @@ wind all answered for every spot).
 | geumjin | Geumjin Beach, Gangneung | NE | none within 50 km | |
 | wolpo | Wolpo Beach, Pohang | E | none (Pohang's airport is missing from NOAA's feed) | |
 | songjeong | Songjeong Beach, Busan | SE | RKPK Gimhae Airport (24 km) | |
-| jungmun | Jungmun Saekdal Beach, Jeju | S | RKPC Jeju Airport (31 km, north side) | summer typhoon swells |
+| jungmun | Jungmun Saekdal Beach, Jeju | S | none: Jeju Airport (31 km) is on the north coast, across Hallasan | summer typhoon swells |
 | iho | Iho Tewoo Beach, Jeju City | NNW | RKPC Jeju Airport (4 km) | winter north swells |
 | manlipo | Manlipo Beach, Taean | W | none within 80 km | the west coast's surf beach, big tides |
 
@@ -47,7 +47,9 @@ wind all answered for every spot).
 | Map | the West Pacific grid already covers Korea, as it does Taiwan and Japan | no new grid, no new Open-Meteo calls |
 
 Without a buoy the Right now card shows a dash and points to the forecast, as for Rincon today, and the spot logs its
-forecast and wind only. Corrections start once a buoy reports.
+forecast and airport wind only. Wave corrections start once a buoy reports, but `correct.py` already scales a spot's wind
+forecast by its airport's readings after two days, as in every country. That is why Jungmun takes no wind from Jeju Airport:
+across Hallasan, the airport's wind would skew Jungmun's wind forecast as well as its wind now.
 
 ## Phase 2: the keyed sources
 
@@ -56,7 +58,7 @@ forecast and wind only. Corrections start once a buoy reports.
   mobile number in Korean format, checked by text. 20,000 calls a day.
 - **Tide tables:** the Korea Hydrographic and Oceanographic Agency's high and low tide forecast on Korea's public data
   portal (`apis.data.go.kr`, datasets 15156018 and 15156022), development use approved automatically.
-- **Wind now** at the beaches without an airport: KMA's automatic weather stations through the same API Hub key.
+- **Wind now** at the beaches without an airport, Jungmun included: KMA's automatic weather stations through the same API Hub key.
 
 Each key goes in the workflow as a secret beside `CWA_KEY`, and every keyed fetch stays optional. The readers are written
 against real replies once a key exists, not from documentation alone.

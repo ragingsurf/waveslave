@@ -124,6 +124,43 @@ class Fill(unittest.TestCase):
         self.assertEqual(s['stationName'], 'Yangyang Airport')
         self.assertTrue(s['sun'])
 
+    def test_one_airport_as_text(self):
+        # a spot with one airport may name it without a list, as the NOAA countries' spots with one station do
+        import kr, copy
+        spots = copy.deepcopy(SPOTS)
+        j = next(s for s in spots if s['id'] == 'jukdo')
+        j['windStation'], j['stationName'], j['zh']['stationName'], j['ja']['stationName'] = 'metar:RKNY', 'Yangyang Airport', '襄陽機場', '襄陽空港'
+        kr.fill(self.snap, spots, FIXDIR, NOW)
+        s = self.snap['spots']['jukdo']
+        self.assertEqual(s['dwind'], [['2026-10-18T13:00', 6.0, 170.0]])
+        self.assertEqual((s['stationName'], s['zh']['stationName'], s['ja']['stationName']), ('Yangyang Airport', '襄陽機場', '襄陽空港'))
+
+    def test_one_spot_reply(self):
+        # Open-Meteo answers a single place with one object rather than a list of one
+        import kr, tempfile, shutil
+        tmp = tempfile.mkdtemp(); shutil.copy(os.path.join(FIXDIR, 'metar-kr.json'), tmp)
+        for n in ('openkr.json', 'tidekr.json'):
+            with open(os.path.join(tmp, n), 'w') as f: json.dump(json.loads(FIX(n))[0], f)
+        kr.fill(self.snap, [s for s in SPOTS if s.get('country') != 'kr' or s['id'] == 'jukdo'], tmp, NOW)
+        s = self.snap['spots']['jukdo']
+        self.assertEqual(s['wind'][0], ['2026-10-18T00:00', 17.2, 157, None, None])
+        self.assertEqual(s['tides']['2026-10-18'], [['06:30', 'H', 14], ['13:00', 'L', 6]])
+        self.assertEqual(self.snap['spots']['iho'], self.before['spots']['iho'])  # not in that spot list, so left alone
+
+    def test_bad_downloads(self):
+        # an error reply, a page that isn't JSON and a reply of the wrong shape only blank their own fields
+        import kr, tempfile, io, contextlib
+        tmp = tempfile.mkdtemp()
+        for n, v in (('openkr.json', '{"error":true,"reason":"Too many requests"}'), ('tidekr.json', '<html>busy</html>'), ('metar-kr.json', '{"error":"bad ids"}')):
+            with open(os.path.join(tmp, n), 'w') as f: f.write(v)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err): kr.fill(self.snap, SPOTS, tmp, NOW)
+        self.assertIn('kr: forecast jukdo skipped', err.getvalue())
+        for k in ('jukdo', 'geumjin', 'iho', 'manlipo'):
+            s = self.snap['spots'][k]
+            self.assertEqual((s['tz'], s['dwind'], s['wind'], s['tides']), (9, [], [], {}), k)
+            self.assertTrue(s['sun'], k)
+
     def test_runs_isolated_like_refresh(self):
         import subprocess, tempfile, shutil
         tmp = tempfile.mkdtemp(); f = os.path.join(tmp, 'snap.json'); shutil.copy(os.path.join(FIXDIR, 'snap_in.json'), f)

@@ -9,7 +9,8 @@
 #   tz     : each spot's offset at build time (Asia/Seoul keeps UTC+9 all year)
 #   buoy   : none: the Korea Meteorological Administration's buoy feed needs a key
 # Data times are Taipei wall clock ("YYYY-MM-DDTHH:MM", UTC+8) like the rest of snap.json, readings on the nearest hour.
-# Stale wind follows ca.py's rule (ca.WIND_STALE_HOURS). A spot's windStation (and its stationName) may be a list tried in order.
+# Stale wind follows ca.py's rule (ca.WIND_STALE_HOURS). A spot's windStation may be one "metar:ICAO" or a list tried in order
+# (its stationName likewise).
 # Usage: python3 -I kr.py <dl dir> <snap.json> <spots.json>   (each source is optional: a missing one only blanks its own fields)
 import sys, os, json, datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # python3 -I leaves this folder off the path
@@ -52,9 +53,9 @@ def fill(snap, spots, dl, now):
         sp = snap['spots'][S['id']]
         tz = sp['tz'] = au.offset(S['zone'], now)
         sp['buoyId'], sp['buoy'], sp['buoyAt'], sp['buoyQuiet'] = None, [], '', False
-        dw, used = [], 0
-        for i, w in enumerate(S.get('windStation') or []):
-            kind, sid = w.split(':', 1)
+        ws = S.get('windStation') or []; ws = ws if isinstance(ws, list) else [ws]; dw, used = [], 0
+        for i, w in enumerate(ws):
+            kind, _, sid = w.partition(':')
             if kind == 'metar': dw = part('wind ' + sid, lambda: metar_wind(metar, sid, now)) or []
             if dw: used = i; break
         sp['dwind'] = dw

@@ -48,7 +48,7 @@ wind.
 |---|---|---|
 | Wave height, period, direction, water temp | NOAA NDBC real-time files (NDBC, CDIP and Environment Canada buoys) | `ndbc.noaa.gov/data/realtime2/<id>.txt`, as for California. The Canadian buoys send height and peak period only (no average period, no direction), so their period is the peak period ÷ 1.3, which the page's ×1.3 turns back into the peak period. Their direction stays empty and the page shows a dash, not "N". |
 | Wind now (US) | NDBC shore stations and NWS airport stations | as for California |
-| Wind now (BC) | Environment and Climate Change Canada's real-time station feed (`api.weather.gc.ca`, collection `swob-realtime`) | the newest report from the last 6 hours, 10-minute average wind in km/h. The Tofino airport station is NAV CANADA's, whose reports ECCC passes on marked "All rights reserved"; the La Perouse Bank buoy (ECCC, open) is the backup. |
+| Wind now (BC) | Environment and Climate Change Canada's real-time station feed (`api.weather.gc.ca`, collection `swob-realtime`) | the newest report from the last 3 hours, 10-minute average wind in km/h. The Tofino airport station is NAV CANADA's, whose reports ECCC passes on marked "All rights reserved"; the La Perouse Bank buoy (ECCC, open) is the backup. |
 | Wind forecast | Open-Meteo `models=gfs_seamless` (NOAA HRRR then GFS), one call for all 8 spots | as for California; answered for every spot on 2026-10-18 |
 | Swell forecast, model check | Open-Meteo, as for every country | |
 | Tides (US) | NOAA CO-OPS predictions | as for California |

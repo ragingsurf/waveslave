@@ -1,17 +1,20 @@
-# Korean sources for the Korean spots, written into snap.json under the same keys snap.py writes for Taiwan from CWA:
+# Sources for the countries with no open buoy feed, Korea and the Philippines, written into snap.json under the same keys
+# snap.py writes for Taiwan from CWA:
 #   dwind  : airport reports (METAR) from NOAA's Aviation Weather Center (aviationweather.gov) [time, kt, from deg|None], the
-#            newest report of the spot's airport; variable wind (VRB) and calm have no direction
-#   wind   : JMA MSM wind forecast via Open-Meteo, 3-hourly [time, kt, from deg, 'Rain'|None, None] (Open-Meteo's KMA models
-#            answered with no data when this was built)
+#            newest report of the spot's airport; variable wind (VRB) and calm have no direction. No Philippine spot has an
+#            airport near enough
+#   wind   : a wind forecast model via Open-Meteo, 3-hourly [time, kt, from deg, 'Rain'|None, None]: JMA's MSM for Korea
+#            (Open-Meteo's KMA models answered with no data when this was built), ECMWF's IFS for the Philippines
 #   tides  : highs and lows picked from Open-Meteo's tide model (sea level, hourly), as for Australia
 #            {local date: [[local HH:MM, 'H'|'L', cm]]}
 #   sun    : computed {local date: {first, rise, set, last, phen}} in local time
-#   tz     : each spot's offset at build time (Asia/Seoul keeps UTC+9 all year)
-#   buoy   : none: the Korea Meteorological Administration's buoy feed needs a key
+#   tz     : each spot's offset at build time (Asia/Seoul keeps UTC+9 all year, Asia/Manila UTC+8)
+#   buoy   : none: the Korea Meteorological Administration's buoy feed needs a key, and the Philippines has no open one
 # Data times are Taipei wall clock ("YYYY-MM-DDTHH:MM", UTC+8) like the rest of snap.json, readings on the nearest hour.
 # Stale wind follows ca.py's rule (ca.WIND_STALE_HOURS). A spot's windStation may be one "metar:ICAO" or a list tried in order
 # (its stationName likewise).
-# Usage: python3 -I kr.py <dl dir> <snap.json> <spots.json>   (each source is optional: a missing one only blanks its own fields)
+# Usage: python3 -I kr.py <dl dir> <snap.json> <spots.json> [kr|ph]   (Korea when no country is given; it reads metar-<c>.json,
+#        open<c>.json and tide<c>.json, and each is optional: a missing one only blanks its own fields)
 import sys, os, json, datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # python3 -I leaves this folder off the path
 import jp, ca, au
@@ -37,17 +40,17 @@ def metar_wind(reports, icao, now=None):
     return [[jp.on_hour(ca.utc_to_tpe(t)), k, float(d) if k and isinstance(d, (int, float)) else None]]
 
 
-def fill(snap, spots, dl, now):
-    """Fill every Korean spot of snap (in place) from the downloads in dl; now (aware datetime) sets each spot's offset and the
-    cut-off for stale wind. The Open-Meteo replies list every Korean spot of spots.json, in its order."""
-    K = [S for S in spots if S.get('country') == 'kr']
+def fill(snap, spots, dl, now, c='kr'):
+    """Fill every spot of country c (kr or ph) of snap (in place) from the downloads in dl; now (aware datetime) sets each
+    spot's offset and the cut-off for stale wind. The Open-Meteo replies list every spot of c in spots.json, in its order."""
+    K = [S for S in spots if S.get('country') == c]
     def part(name, f):
         try: return f()
-        except Exception as e: print('kr:', name, 'skipped:', e, file=sys.stderr)
+        except Exception as e: print(c + ':', name, 'skipped:', e, file=sys.stderr)
     def many(n):
         v = jp._load(os.path.join(dl, n)); return v if isinstance(v, list) else [v] if v else []
-    metar = jp._load(os.path.join(dl, 'metar-kr.json'))
-    om, tide = many('openkr.json'), many('tidekr.json')
+    metar = jp._load(os.path.join(dl, 'metar-%s.json' % c))
+    om, tide = many('open%s.json' % c), many('tide%s.json' % c)
     for n, S in enumerate(K):
         if S['id'] not in snap['spots']: continue
         sp = snap['spots'][S['id']]
@@ -72,11 +75,11 @@ def fill(snap, spots, dl, now):
 
 
 if __name__ == '__main__':
-    dl, snapf, spotsf = sys.argv[1:4]
+    dl, snapf, spotsf = sys.argv[1:4]; c = sys.argv[4] if len(sys.argv) > 4 else 'kr'
     d = json.load(open(snapf)); S = json.load(open(spotsf))
-    fill(d, S, dl, datetime.datetime.now(UTC))
+    fill(d, S, dl, datetime.datetime.now(UTC), c)
     json.dump(d, open(snapf, 'w'), ensure_ascii=False, separators=(',', ':'))
     for s in S:
-        if s.get('country') == 'kr' and s['id'] in d['spots']:
+        if s.get('country') == c and s['id'] in d['spots']:
             v = d['spots'][s['id']]
-            print('kr:', s['id'], v['tz'], len(v['dwind']), len(v['wind']), len(v['tides']))
+            print(c + ':', s['id'], v['tz'], len(v['dwind']), len(v['wind']), len(v['tides']))

@@ -42,6 +42,13 @@ Defaults I picked (say if you want otherwise):
 - **Spots from every country** show on the one map. Tapping a spot in another country opens its table and switches
   the page to that spot without a reload.
 - **The country buttons** never reload the page. The map opens centred on the new country.
+- **Inside the map** (added 2026-10-18 at Bryan's request) the top buttons sit straight on the map, see-through, with no
+  strip behind them. Every country has a button there too, next to Pressure, copied from the country switch so a new
+  country shows up in both. Tapping one switches the page to that country without leaving the map and flies there like
+  a camera: out far enough to keep both ends in sight, across, and back in to its home view (van Wijk and Nuij's smooth
+  pan and zoom, 0.8 to 1.6 seconds). Tapping the country you are on glides back to its home view. An open forecast card
+  or pin closes, since it belongs to the place being left. On a phone held upright the countries take a second row,
+  under Pressure, and the zoom buttons move down to sit below them. With reduced motion the map jumps.
 - **The home button** works as today, now at Pacific scale. One tap zooms out to the whole Pacific, and a second tap
   goes back to the current country. Since 2026-10-18 the first tap zooms all the way out around where you are, as far
   as the screen-filling limit above allows. Both moves glide there in under a second instead of jumping. With reduced motion
@@ -138,4 +145,4 @@ The country grids are unchanged: West Pacific 3°, California and Hawaii 1°, Au
 ## Out of scope
 
 No new spots, countries or data sources. The Forecast tab, the typhoon and hurricane panels, and the country grids'
-detail and refresh stay as they are. No country switch inside the map itself.
+detail and refresh stay as they are. No country switch inside the map itself (added on 2026-10-18: see "Inside the map" above).

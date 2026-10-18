@@ -13,26 +13,45 @@
 <!-- Passcode screen: the page stays hidden until the 4-digit code is entered, then stays unlocked on that device.
      Only a SHA-256 of "waveslave:" + the code is kept here. To change the code: printf 'waveslave:1234' | sha256sum, and put the result in H. -->
 <script>/* Locked unless this device already holds the current code's hash. */(function(){var H="9ce703461ba3b584a69bd3eabb70ebadcb06e3e5c11ebf11b06c7184e2aba77b";window.__lockHash=H;try{if(localStorage.getItem("waveslave-unlock")===H)return}catch(e){}document.documentElement.classList.add("locked")})();</script>
-<style>html.locked,html.locked body{overflow:hidden}html.locked body>*{visibility:hidden}html.locked::before{content:"";position:fixed;inset:0;z-index:9998;background:radial-gradient(circle at 50% 40%,#24183f,#07050f 70%)}
-#lock{visibility:visible!important;position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:16px;color:#f4ecff;font:500 16px/1.4 "Public Sans",system-ui,sans-serif;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
-#lock .lk-brand{font-family:"Metal Mania","Impact","Arial Black",serif;font-size:clamp(48px,14vw,84px);line-height:1;padding:2px 6px;transform:rotate(-7deg) skewX(-14deg);margin-bottom:10px;background:linear-gradient(180deg,#fff7b0 0%,#ffd400 28%,#ff8a00 55%,#ff3d00 78%,#b80000 100%);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;-webkit-text-stroke:1px #200300;filter:drop-shadow(0 0 8px rgba(255,60,0,.7)) drop-shadow(2px 3px 0 #200300)}
-#lock .lk-msg{min-height:1.4em;letter-spacing:.02em;opacity:.85}#lock .lk-msg.bad{color:#ff8a6a;opacity:1}
-#lock .lk-dots{display:flex;gap:18px}#lock .lk-dots i{width:16px;height:16px;border-radius:50%;border:2px solid #ffb347;transition:background .12s}#lock .lk-dots i.on{background:#ffb347;box-shadow:0 0 10px #ff8a00}
-#lock .lk-dots.shake{animation:lkShake .4s}@keyframes lkShake{20%,60%{transform:translateX(-10px)}40%,80%{transform:translateX(10px)}}
-#lock .lk-pad{display:grid;grid-template-columns:repeat(3,72px);gap:14px;margin-top:6px}
-#lock button{width:72px;height:72px;border-radius:50%;border:1px solid rgba(255,179,71,.45);background:rgba(255,255,255,.06);color:#fff7e6;font:600 28px/1 "JetBrains Mono",ui-monospace,monospace;cursor:pointer;touch-action:manipulation}
-#lock button:active{background:rgba(255,138,0,.35)}#lock button:focus-visible{outline:2px solid #ffd400;outline-offset:3px}
-#lock button.lk-del{border-color:transparent;background:none;font-size:22px}</style>
-<script>/* The keypad: tap the numbers or type them; a wrong code shakes and clears. The right one is remembered and the page reloads unlocked. */document.documentElement.classList.contains("locked")&&addEventListener("DOMContentLoaded",function(){
-var T={en:["Enter passcode","Wrong code, try again","Delete"],zh:["請輸入密碼","密碼錯誤，請再試一次","刪除"],ja:["パスコードを入力","パスコードが違います","削除"]}[(document.documentElement.lang||"en").slice(0,2)]||["Enter passcode","Wrong code, try again","Delete"];
+<style>/* Classified Terminal: green screen, TOP SECRET banners; a wrong code flashes everything red. */
+html.locked,html.locked body{overflow:hidden}html.locked body>*{visibility:hidden}
+html.locked::before{content:"";position:fixed;inset:0;z-index:9998;background:#020604}
+#lock{--g:#39ff7a;--gd:rgba(57,255,122,.35);--r:#ff3344;visibility:visible!important;position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;color:var(--g);font:400 22px/1.2 "VT323",ui-monospace,monospace;text-shadow:0 0 6px var(--gd);-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;background:radial-gradient(ellipse at center,#06200f 0%,#020604 75%)}
+#lock::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,0,0,.35) 0 1px,transparent 1px 3px);animation:lkFlick 4s infinite}
+@keyframes lkFlick{0%,96%,100%{opacity:1}97%{opacity:.7}}
+#lock .lk-ban{position:absolute;top:0;left:0;right:0;background:var(--r);color:#fff;text-shadow:none;text-align:center;font-size:20px;letter-spacing:.25em;padding:4px 0}
+#lock .lk-ban.b{top:auto;bottom:0}
+#lock .lk-box{width:min(340px,100%);border:1px solid var(--gd);padding:18px 18px 22px;position:relative;background:rgba(0,20,8,.4)}
+#lock .lk-hd{display:flex;justify-content:space-between;font-size:16px;opacity:.7;letter-spacing:.08em;border-bottom:1px dashed var(--gd);padding-bottom:8px;margin-bottom:14px}
+#lock .lk-ttl{font-size:30px;letter-spacing:.12em;text-align:center}
+#lock .lk-sub{font-size:16px;text-align:center;opacity:.65;letter-spacing:.1em;margin:2px 0 14px}
+#lock .lk-msg{text-align:center;font-size:22px;letter-spacing:.1em;min-height:1.2em}
+#lock .lk-msg::after{content:"_";animation:lkBlink 1s steps(1) infinite}@keyframes lkBlink{50%{opacity:0}}
+#lock .lk-dots{display:flex;justify-content:center;gap:10px;margin:12px 0 18px}
+#lock .lk-dots i{width:44px;height:52px;border:1px solid var(--g);display:flex;align-items:center;justify-content:center;font-style:normal;font-size:34px}
+#lock .lk-dots i.on::before{content:"*"}
+#lock .lk-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+#lock button{height:58px;border:1px solid var(--gd);background:rgba(57,255,122,.04);color:var(--g);font:inherit;font-size:32px;text-shadow:inherit;cursor:pointer;touch-action:manipulation}
+#lock button:active{background:var(--g);color:#020604}
+#lock button.lk-del{border-style:dashed}#lock button:focus{outline:0}#lock button:focus-visible{outline:1px solid var(--g);outline-offset:2px}
+#lock .lk-ft{font-size:15px;opacity:.55;text-align:center;letter-spacing:.08em;margin-top:14px}
+#lock.bad{--g:var(--r);--gd:rgba(255,51,68,.4)}#lock.bad .lk-box{animation:lkJolt .35s}
+#lock.ok .lk-msg{animation:none}#lock.ok .lk-msg::after{content:""}
+@keyframes lkJolt{25%{transform:translateX(-8px)}50%{transform:translateX(8px)}75%{transform:translateX(-4px)}}</style>
+<script>/* The keypad: tap the numbers or type them; a wrong code shows ACCESS DENIED and clears. The right one shows ACCESS GRANTED, is remembered and the page reloads unlocked. */
+var LOCK_T={en:["ENTER ACCESS CODE","ACCESS DENIED","DELETE","ACCESS GRANTED"],zh:["輸入授權碼","拒絕存取 · 已記錄","刪除","授權通過"],ja:["アクセスコードを入力","アクセス拒否 · 記録済み","削除","アクセス許可"]};
+function LOCK_HTML(T,dots,pad){return'<div class="lk-ban">TOP SECRET // WAVESLAVE</div><div class="lk-box"><div class="lk-hd"><span>SECURE TERMINAL 07</span><span>LVL-5</span></div><div class="lk-ttl">WAVESLAVE</div><div class="lk-sub">SURF INTELLIGENCE DIVISION</div><div class="lk-msg" aria-live="polite"></div>'+dots+pad+'<div class="lk-ft">AUTHORIZED PERSONNEL ONLY</div></div><div class="lk-ban b">TOP SECRET // WAVESLAVE</div>'}
+document.documentElement.classList.contains("locked")&&addEventListener("DOMContentLoaded",function(){
+var L=(document.documentElement.lang||"en").slice(0,2),T=LOCK_T[L]||LOCK_T.en;
 var d=document.createElement("div");d.id="lock";d.setAttribute("role","dialog");d.setAttribute("aria-modal","true");d.setAttribute("aria-label",T[0]);
-d.innerHTML='<div class="lk-brand">WaveSlave</div><div class="lk-msg" aria-live="polite"></div><div class="lk-dots"><i></i><i></i><i></i><i></i></div><div class="lk-pad">'+[1,2,3,4,5,6,7,8,9].map(function(n){return'<button type="button" data-n="'+n+'">'+n+"</button>"}).join("")+'<span></span><button type="button" data-n="0">0</button><button type="button" class="lk-del" aria-label="'+T[2]+'">⌫</button></div>';
+var keys=[1,2,3,4,5,6,7,8,9].map(function(n){return'<button type="button" data-n="'+n+'"><b>'+n+"</b></button>"}).join("")+'<span></span><button type="button" data-n="0"><b>0</b></button><button type="button" class="lk-del" aria-label="'+T[2]+'"><b>⌫</b></button>';
+d.innerHTML=LOCK_HTML(T,'<div class="lk-dots"><i></i><i></i><i></i><i></i></div>','<div class="lk-pad">'+keys+"</div>");
 document.body.appendChild(d);var msg=d.querySelector(".lk-msg"),dots=d.querySelector(".lk-dots"),code="",busy=false;msg.textContent=T[0];
 function draw(){[].forEach.call(dots.children,function(e,i){e.className=i<code.length?"on":""})}
 function sha(s){return window.crypto&&crypto.subtle?crypto.subtle.digest("SHA-256",new TextEncoder().encode(s)).then(function(b){return[].map.call(new Uint8Array(b),function(x){return(x+256).toString(16).slice(1)}).join("")}):Promise.resolve("")}
-function check(){busy=true;sha("waveslave:"+code).then(function(h){if(h===window.__lockHash){try{localStorage.setItem("waveslave-unlock",h)}catch(e){}location.reload();return}
-msg.textContent=T[1];msg.className="lk-msg bad";dots.classList.remove("shake");void dots.offsetWidth;dots.classList.add("shake");if(navigator.vibrate)navigator.vibrate(120);setTimeout(function(){code="";draw();busy=false},350)})}
-function press(k){if(busy)return;code=k==="del"?code.slice(0,-1):code.length<4?code+k:code;draw();if(code.length===4)check()}
+function check(){busy=true;sha("waveslave:"+code).then(function(h){if(h===window.__lockHash){d.classList.add("ok");msg.textContent=T[3];try{localStorage.setItem("waveslave-unlock",h)}catch(e){}setTimeout(function(){location.reload()},window.__lockHold||700);return}
+msg.textContent=T[1];d.classList.remove("bad");void d.offsetWidth;d.classList.add("bad");if(navigator.vibrate)navigator.vibrate([80,60,80]);setTimeout(function(){code="";draw();busy=false},450);setTimeout(function(){if(!busy){d.classList.remove("bad");msg.textContent=T[0]}},2200)})}
+function press(k){if(busy)return;if(d.classList.contains("bad")){d.classList.remove("bad");msg.textContent=T[0]}code=k==="del"?code.slice(0,-1):code.length<4?code+k:code;draw();if(code.length===4)check()}
 d.addEventListener("click",function(e){var b=e.target.closest("button");if(b)press(b.classList.contains("lk-del")?"del":b.getAttribute("data-n"))});
 addEventListener("keydown",function(e){if(/^[0-9]$/.test(e.key))press(e.key);else if(e.key==="Backspace")press("del")});
 });</script>

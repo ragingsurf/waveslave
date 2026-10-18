@@ -1407,11 +1407,16 @@ const updated = Date.parse(DATA.updated);
   el.classList.remove("stale");
   if(ageH>12) el.classList.add("stale"); })();
 
-// A surfboard on its side in a len x w box, tail at the left and nose at the right, its widest point a little behind the middle:
-// k 0 is a longboard's round nose, 1 a shortboard's point.
-function boardPath(len,w,k){ const x0=.75, L=len-.75, cy=w/2, hw=w/2-.75, tw=hw*.5, wx=x0+(L-x0)*.45, c1x=wx+(L-wx)*(.55-.3*k), c2x=L-(L-wx)*.04, c2y=cy-hw*(.8-.7*k), f=n=>n.toFixed(1);
-  return `M${f(x0)},${f(cy-tw)}C${f(x0+(L-x0)*.06)},${f(cy-hw)} ${f(x0+(wx-x0)*.55)},${f(cy-hw)} ${f(wx)},${f(cy-hw)}C${f(c1x)},${f(cy-hw)} ${f(c2x)},${f(c2y)} ${f(L)},${f(cy)}`
-    + `C${f(c2x)},${f(2*cy-c2y)} ${f(c1x)},${f(cy+hw)} ${f(wx)},${f(cy+hw)}C${f(x0+(wx-x0)*.55)},${f(cy+hw)} ${f(x0+(L-x0)*.06)},${f(cy+hw)} ${f(x0)},${f(cy+tw)}Z`; }
+// A surfboard standing in a w x h box, nose at the top. Shape numbers are in board widths (x, -.5 to .5) and lengths (y, 0 nose to 1 tail):
+// nose 0 pointed .. 1 round; wide = where the widest point sits; full = how soon the nose fills out; hold = how long the rails stay parallel
+// behind the widest point; tw = tail width; tail round, square or swallow (notch = how deep). The nose leaves the tip at 55° (pointed) to 90°
+// (round) from the stringer and stays convex out to the widest point.
+function boardPath(w,h,p){ const X=x=>(w/2+x*(w-1.8)).toFixed(2), Y=y=>(.9+y*(h-1.8)).toFixed(2), bu={round:.06,square:.006,swallow:0}[p.tail], yt=1-bu, tw=p.tw/2;
+  const al=(55+35*p.nose)*Math.PI/180, l1=.12+.28*p.nose, a1x=l1*Math.sin(al), a1y=l1*Math.cos(al), a2y=Math.min(p.wide-.02, Math.max(p.wide*(1-p.full), a1y+(.5-a1x)/Math.tan(al)+.02));
+  const b1y=p.wide+(yt-p.wide)*p.hold, b2x=tw+(.5-tw)*.3, b2y=yt-(yt-p.wide)*.05;
+  return `M${X(0)},${Y(0)}C${X(a1x)},${Y(a1y)} ${X(.5)},${Y(a2y)} ${X(.5)},${Y(p.wide)}C${X(.5)},${Y(b1y)} ${X(b2x)},${Y(b2y)} ${X(tw)},${Y(yt)}`
+    + (p.tail==="swallow" ? `L${X(0)},${Y(yt-p.notch)}L${X(-tw)},${Y(yt)}` : `Q${X(0)},${Y(yt+2*bu)} ${X(-tw)},${Y(yt)}`)
+    + `C${X(-b2x)},${Y(b2y)} ${X(-.5)},${Y(b1y)} ${X(-.5)},${Y(p.wide)}C${X(-.5)},${Y(a2y)} ${X(-a1x)},${Y(a1y)} ${X(0)},${Y(0)}Z`; }
 
 // ---- right now
 (() => {
@@ -1437,13 +1442,21 @@ function boardPath(len,w,k){ const x0=.75, L=len-.75, cy=w/2, hw=w/2-.75, tw=hw*
   // Board pick from the same reading: under 0.7 m longboard, 0.7–1.2 m mid-length, over 1.2 m shortboard;
   // weak short-period waves (under 7 s) move it one board bigger. Height counts only the swell that reaches the spot.
   const bh = b[1]*exposure(b[3]), bp = b[2]*BUOY_P, bk = Math.max(0, (bh<0.7?0 : bh<1.2?1 : 2) - (bp<7?1:0));
-  // Shown as the quiver: shortboard, mid-length and longboard (6'0", 7'6", 9'6" at 62 px for the longboard), each drawn on its side and stood
-  // up on its tail, the pick filled in with a stringer down it.
+  // Shown as the quiver in retro shapes (Bryan picked these, Oct 18): a twin-fin fish with a swallow tail, an egg and a single-fin log
+  // (5'6", 7'2", 9'6" at 62 px for the log), fins showing underneath, the pick filled in sea blue with orange racing stripes and a stringer.
   const bd = document.getElementById("nowBoard"), on = 2-bk, names = isZh() ? ["短板","中長板","長板"] : isJa() ? ["ショート","ミッド","ロング"] : ["Short","Mid","Long"];
   bd.hidden = false;
-  bd.innerHTML = [[39,16,1],[49,15,.45],[62,12.5,0]].map(([h,w,k],i) => `<div class="q${i===on?" on":""}"><svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><g transform="translate(0 ${h}) rotate(-90)">`
-    + `<path d="${boardPath(h,w,k)}" style="${i===on ? "fill:var(--sea);stroke:var(--sea);stroke-width:1.5" : "fill:none;stroke:var(--muted);stroke-opacity:.55;stroke-width:1.3"}"/>`
-    + (i===on ? `<line x1="4" x2="${h-5}" y1="${w/2}" y2="${w/2}" style="stroke:var(--panel);stroke-opacity:.6"/>` : "") + `</g></svg>${names[i]}</div>`).join("");
+  bd.innerHTML = [[19,36,{nose:.35,wide:.45,full:.48,hold:.35,tw:.72,tail:"swallow",notch:.1},[[.18,.76,.25,.92],[-.18,.76,-.25,.92]]],
+    [18,47,{nose:.85,wide:.5,full:.62,hold:.4,tw:.42,tail:"round"},[[0,.8,0,.955]]],
+    [16.5,62,{nose:1,wide:.44,full:.88,hold:.78,tw:.66,tail:"square"},[[0,.76,0,.955]]]].map(([w,h,p,fins],i) => {
+    const d = boardPath(w,h,p), X = x=>(w/2+x*(w-1.8)).toFixed(2), Y = y=>(.9+y*(h-1.8)).toFixed(2), lit = i===on;
+    return `<div class="q${lit?" on":""}"><svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">` + (lit
+      ? `<clipPath id="boardClip"><path d="${d}"/></clipPath><path d="${d}" style="fill:var(--sea);stroke:var(--sea);stroke-width:1.5"/>`
+        + `<g clip-path="url(#boardClip)" style="stroke:#ffb347;stroke-width:1.4">${[.13,-.13].map(x => `<line x1="${X(x)}" x2="${X(x)}" y1="0" y2="${h}"/>`).join("")}</g>`
+        + `<line x1="${X(0)}" x2="${X(0)}" y1="${Y(.05)}" y2="${Y(.75)}" style="stroke:var(--panel);stroke-opacity:.6"/>`
+      : `<path d="${d}" style="fill:none;stroke:var(--muted);stroke-opacity:.55;stroke-width:1.3"/>`)
+      + `<g style="stroke-linecap:round;${lit ? "stroke:var(--panel);stroke-opacity:.75;stroke-width:1.7" : "stroke:var(--muted);stroke-opacity:.55;stroke-width:1.4"}">`
+      + fins.map(([x1,y1,x2,y2]) => `<line x1="${X(x1)}" y1="${Y(y1)}" x2="${X(x2)}" y2="${Y(y2)}"/>`).join("") + `</g></svg>${names[i]}</div>`; }).join("");
   bd.setAttribute("aria-label", (isZh() ? ["長板浪","中長板浪","短板浪"] : isJa() ? ["ロングボード向き","ミッドレングス向き","ショートボード向き"] : ["Longboard day","Mid-length day","Shortboard day"])[bk]);
   bd.title = isZh() ? "依浮標浪高與週期建議：0.7 m 以下長板，0.7–1.2 m 中長板，1.2 m 以上短板；週期短於 7 秒時建議大一號的板。"
     : isJa() ? "ブイの波高と周期から：0.7 m 未満はロング、0.7–1.2 m はミッドレングス、1.2 m 以上はショート。周期 7 秒未満なら一つ大きめの板。"

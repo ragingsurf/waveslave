@@ -5,11 +5,12 @@
 #   python3 -I tests/map/tool.py diff <a.png> <b.png>
 #       prints "diff <share of pixels with any channel off by more than 16>"
 #   python3 -I tests/map/tool.py grids <live.html> <dir>
-#       writes the four country grids under refresh.sh's cache names
+#       writes the country grids under refresh.sh's cache names
 import json, os, re, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-GRIDS = (('wp', 'GRID', 'grid.json'), ('ca', 'GRIDCA', 'grid-ca.json'), ('hi', 'GRIDHI', 'grid-hi.json'), ('au', 'GRIDAU', 'grid-au.json'))  # key in the page, placeholder, cache file
+GRIDS = (('wp', 'GRID', 'grid.json'), ('ca', 'GRIDCA', 'grid-ca.json'), ('hi', 'GRIDHI', 'grid-hi.json'), ('au', 'GRIDAU', 'grid-au.json'),
+         ('nw', 'GRIDNW', 'grid-nw.json'))  # key in the page, placeholder, cache file
 USAGE = 'usage: python3 -I tests/map/tool.py page <live.html> <template.html> <pac.json|null> <out.html> | diff <a.png> <b.png> | grids <live.html> <dir>'
 
 
@@ -23,20 +24,22 @@ def json_at(text, at):
 
 
 def live(text):
-    # What refresh.sh filled into the live page, by placeholder name: DATA, WOTW (the photo) and the country grids GRID (West Pacific), GRIDCA, GRIDHI, GRIDAU ("null" for a missing one).
-    # The grids sit in "GRID = {wp: ..., ca: ..., hi: ..., au: ...}" (or "RAW = {...}" in a page that also carries the Pacific grid).
+    # What refresh.sh filled into the live page, by placeholder name: DATA, WOTW (the photo) and the country grids GRID (West Pacific), GRIDCA, GRIDHI, GRIDAU, GRIDNW ("null" for a missing one).
+    # The grids sit in "GRID = {wp: ..., ca: ..., hi: ..., au: ...}" (or "RAW = {...}" in a page that also carries the Pacific grid, and nw: after au
+    # once it carries the Pacific Northwest's).
     photo, start = re.search(r'<img src="(data:image/jpeg;base64,[^"]*)" alt="Wave of the week', text), re.search(r'\b(?:GRID|RAW) = \{', text)
     if not (photo and start and 'const ALL = ' in text): sys.exit('not a WaveSlave page: no data, photo or country grids found')
     out = {'DATA': json_at(text, text.index('const ALL = ') + len('const ALL = ')), 'WOTW': photo.group(1)}; i = start.end()
-    for key, name, _ in GRIDS:  # {wp: <grid>, ca: <grid>, hi: <grid>, au: <grid>}
-        if not text.startswith(key + ': ', i): sys.exit('live page: the country grids are not in the order wp, ca, hi, au')
+    for key, name, _ in GRIDS:  # {wp: <grid>, ca: <grid>, hi: <grid>, au: <grid>, nw: <grid>}
+        if key == 'nw' and not text.startswith('nw: ', i): out[name] = 'null'; continue  # a page from before the Pacific Northwest
+        if not text.startswith(key + ': ', i): sys.exit('live page: the country grids are not in the order wp, ca, hi, au, nw')
         out[name] = json_at(text, i + len(key) + 2); i += len(key) + 2 + len(out[name]) + 2
     return out
 
 
 def page(live_html, template, pac, out):
     fill = live(read(live_html)); fill['GRIDPAC'] = 'null' if pac == 'null' else read(pac)
-    html = read(os.path.join(ROOT, 'web', 'head.html')) + re.sub(r'__(DATA|WOTW|GRIDCA|GRIDHI|GRIDAU|GRIDPAC|GRID)__', lambda m: fill[m.group(1)], read(template))
+    html = read(os.path.join(ROOT, 'web', 'head.html')) + re.sub(r'__(DATA|WOTW|GRIDCA|GRIDHI|GRIDAU|GRIDNW|GRIDPAC|GRID)__', lambda m: fill[m.group(1)], read(template))
     with open(out, 'w', encoding='utf-8') as f: f.write(html)
     print('wrote %s (%d bytes)' % (out, len(html.encode('utf-8'))))
 

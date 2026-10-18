@@ -6,7 +6,8 @@
 // Every page opens in its own fresh browser context, offline (only the page itself loads, no service worker): a phone 390x844 (844x390 with land),
 // dpr 2, touch, reduced motion (so no streaks, and moves jump), the intro done, English, and the map open full screen on load.
 // The time bar starts at the current hour, so take two runs you mean to compare (main and the branch) in one sitting, and look at the time printed after each shot.
-const { chromium } = require("/opt/node22/lib/node_modules/playwright");
+// Playwright wherever node finds it (npm install playwright), else the copy this container keeps.
+const { chromium } = (() => { try { return require("playwright"); } catch (e) { return require("/opt/node22/lib/node_modules/playwright"); } })();
 const fs = require("fs"), path = require("path"), { pathToFileURL } = require("url");
 
 const [file, outdir, mode, orient] = process.argv.slice(2), land = orient === "land";
@@ -19,7 +20,7 @@ const NOW = Date.now();
 // Home views: name, spot, saved-view key, centre. Saved as {cx, cy, k: 1}, the way main and the branch both read it (California and Hawaii still negative).
 const HOMES = [["tw", "donghe", "waveslave-mapview", 120.9, 23.75], ["jp", "ichinomiya", "waveslave-mapview", 135.6, 33.4], ["ca", "trestles", "waveslave-mapview-ca", -119.5, 35.3],
   ["hi", "pipeline", "waveslave-mapview-hi", -157.3, 20.6], ["au-e", "snapper", "waveslave-mapview-au-e", 152, -32.5], ["au-w", "margaret", "waveslave-mapview-au-w", 115.5, -32.5]];
-const OLD_CA = { key: "waveslave-mapview-ca", view: { cx: -119.5, cy: 35.3, k: 1 } }; // saved before the map ran east
+const OLD_CA = { key: "waveslave-mapview-ca", view: { cx: -117.5, cy: 33.0, k: 2 } }; // saved before the map ran east, off California's home view and zoomed in
 const home = name => { const [, spot, key, cx, cy] = HOMES.find(h => h[0] === name); return { spot, saved: { key, view: { cx, cy, k: 1 } } }; }; // open(home("tw"))
 // Shots that need the hook's zoom: name, layer, saved view (none: zoomed all the way out from Donghe's first open).
 const OUT = [...["wind", "waves", "swell", "rain"].map(l => ["out-" + l, l, null]), ["dateline", "swell", { key: "waveslave-mapview", view: { cx: 180, cy: 35, k: 0.3 } }]];
@@ -38,11 +39,11 @@ const edges = page => page.evaluate(() => { const { ll, view } = window.__ws, { 
 const tapAt = async (page, [x, y]) => { const b = await page.locator("#wsFx").boundingBox(); await page.mouse.click(b.x + x, b.y + y); };
 
 const CHECKS = {
-  // A California view saved with a negative centre opens on the California coast (the home view fits inside the Pacific box, so nothing moves it).
+  // A California view saved with a negative centre opens where it was left, upright and sideways: -117.5 at twice the home zoom is 242.5 at 2·z0
+  // (with nothing saved, Trestles opens on the old California box, at 240.5 upright and 238 sideways).
   async savedViewConverted(open) {
-    if (land) skip("portrait only: sideways the view would reach past the Pacific box's east edge (110°W), so it opens west of 240.5");
     const page = await open({ spot: "trestles", saved: OLD_CA }), v = await page.evaluate(() => window.__ws.view());
-    if (!near(v.cx, 240.5)) throw new Error(`view().cx is ${v.cx}, want 240.5`);
+    if (!near(v.cx, 242.5) || !near(v.z, 2*v.z0)) throw new Error(`view() is cx ${v.cx}, z ${v.z}, want cx 242.5, z ${2*v.z0} (2·z0)`);
   },
   // px and ll are inverses of each other, here east of 180 where California sits.
   async roundTrip(open) {

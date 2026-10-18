@@ -73,6 +73,9 @@ header{position:relative}
 .hero-num small{font-size:.35em;font-weight:600;margin-left:4px;color:var(--muted)}
 .hero-sub{font-size:16px;margin-top:8px}
 .rating-pill{display:inline-flex;align-items:center;gap:8px;margin-top:14px;padding:6px 12px 6px 8px;border-radius:99px;font-weight:600;font-size:14px;background:color-mix(in srgb,var(--rc) 14%,transparent);color:var(--rc)}
+.pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.pills .rating-pill{margin-top:0}
+.board-pill{display:inline-flex;align-items:center;gap:7px;padding:6px 12px 6px 9px;border-radius:99px;font-weight:600;font-size:14px;border:1px solid var(--line);color:var(--ink)}.board-pill[hidden]{display:none}
+.board-pill svg{width:9px;height:22px;transform:rotate(30deg);flex:none}
 .dots{display:inline-flex;gap:3px}.dots i{width:8px;height:8px;border-radius:50%;background:currentColor;opacity:.25}.dots i.on{opacity:1}
 .facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 16px;align-content:start}
 .fact .v{font-family:var(--display);font-weight:700;font-stretch:110%;font-size:24px;line-height:1.1}
@@ -332,7 +335,7 @@ html{overscroll-behavior-y:none}
       <div class="label" id="nowH">Right now</div>
       <div class="hero-num mono" id="nowH1">–</div>
       <div class="hero-sub" id="nowSub"></div>
-      <div class="rating-pill" id="nowRating"></div>
+      <div class="pills"><div class="rating-pill" id="nowRating"></div><div class="board-pill" id="nowBoard" hidden></div></div>
     </div>
     <div class="facts" id="nowFacts"></div>
   </section>
@@ -1402,7 +1405,7 @@ const updated = Date.parse(DATA.updated);
     document.getElementById("nowSub").textContent = DATA.buoyQuiet
       ? (isZh() ? `${qb}浮標目前沒有資料，請看下方預報。` : isJa() ? `${qb}ブイは現在データがありません。下の予報をご覧ください。` : `No reading from the ${qb} buoy right now. See the forecast below.`)
       : isZh() ? "附近沒有浪況浮標，請看下方預報。" : isJa() ? "近くに波浪ブイがありません。下の予報をご覧ください。" : "No nearby wave buoy. See the forecast below.";
-    document.getElementById("nowRating").innerHTML = ""; }
+    document.getElementById("nowRating").innerHTML = ""; document.getElementById("nowBoard").hidden = true; }
   else {
   document.getElementById("nowH1").innerHTML = r1(b[1])+"<small>m</small>";
   const arw = `<span class="dir" style="transform:rotate(${b[3]+180}deg)">↑</span>`;
@@ -1411,7 +1414,16 @@ const updated = Date.parse(DATA.updated);
     : `<b class="mono">${r1(b[2]*BUOY_P)} s</b> period, waves from the <b>${compass(b[3])}</b> ${arw} · read at ${hhmm(bt)}`;
   const r = rate(score(b[1]*exposure(b[3]), b[2]*BUOY_P, w));
   const v = document.getElementById("nowRating"); v.style.setProperty("--rc", RATE[r][1]);
-  v.innerHTML = `<span class="dots">${[0,1,2,3,4].map(i=>`<i class="${i<=r?"on":""}"></i>`).join("")}</span>${RATE[r][0]}`; }
+  v.innerHTML = `<span class="dots">${[0,1,2,3,4].map(i=>`<i class="${i<=r?"on":""}"></i>`).join("")}</span>${RATE[r][0]}`;
+  // Board pick from the same reading: under 0.7 m longboard, 0.7–1.2 m mid-length, over 1.2 m shortboard;
+  // weak short-period waves (under 7 s) move it one board bigger. Height counts only the swell that reaches the spot.
+  const bh = b[1]*exposure(b[3]), bp = b[2]*BUOY_P, bk = Math.max(0, (bh<0.7?0 : bh<1.2?1 : 2) - (bp<7?1:0));
+  const bd = document.getElementById("nowBoard"); bd.hidden = false;
+  bd.innerHTML = `<svg viewBox="0 0 10 30" aria-hidden="true"><path d="M5 0C9 7 9.5 20 7.5 30h-5C.5 20 1 7 5 0z" fill="currentColor"/></svg>`
+    + (isZh() ? ["長板浪","中長板浪","短板浪"] : isJa() ? ["ロングボード向き","ミッドレングス向き","ショートボード向き"] : ["Longboard day","Mid-length day","Shortboard day"])[bk];
+  bd.title = isZh() ? "依浮標浪高與週期建議：0.7 m 以下長板，0.7–1.2 m 中長板，1.2 m 以上短板；週期短於 7 秒時建議大一號的板。"
+    : isJa() ? "ブイの波高と周期から：0.7 m 未満はロング、0.7–1.2 m はミッドレングス、1.2 m 以上はショート。周期 7 秒未満なら一つ大きめの板。"
+    : "From the buoy height and period: under 0.7 m longboard, 0.7–1.2 m mid-length, over 1.2 m shortboard; one board bigger when the period is under 7 s."; }
   const t = tideAt(nowMs) || tideAt(bt);
   const k = w ? KIND[windKind(w.from)] : null;
   const facts = [

@@ -515,11 +515,11 @@ const CHECKS = {
   },
   // Taiwan mode, the page's default: no country row and no country buttons over the map, and zoomed out no other country's spot to tap (a
   // tap where Pipeline is drops a pin instead). World mode (setWorld, the tap on the W) brings them back and is kept; switching it off from
-  // Hawaii brings the page and the map back to Taiwan. Then on Forecast the W itself switches it on and off.
+  // Hawaii brings the page and the map back to Taiwan. Then on Forecast the W itself switches it on and off, with nothing under the row moving.
   async taiwanMode(open) {
     const page = await open({ spot: "donghe", saved: MID, world: false });
     const shown = () => page.evaluate(() => ({ world: WORLD, cls: document.documentElement.classList.contains("world"), kept: localStorage.getItem("waveslave-world"),
-      row: getComputedStyle(document.getElementById("ctry")).display !== "none", btns: [...document.querySelectorAll("#wsCtry button")].filter(b => b.offsetParent).length,
+      row: getComputedStyle(document.getElementById("ctry")).visibility !== "hidden", picker: document.getElementById("picker").getBoundingClientRect().top - document.querySelector(".tabs").getBoundingClientRect().bottom, scroll: scrollY, btns: [...document.querySelectorAll("#wsCtry button")].filter(b => b.offsetParent).length,
       want: document.querySelectorAll("#ctry button").length, cur: CUR, cc: spotCountry(CUR), MC: window.__ws.view().MC }));
     let a = await shown();
     if (a.world || a.cls) throw new Error("the page opened in World mode, want Taiwan mode");
@@ -534,10 +534,12 @@ const CHECKS = {
     await page.evaluate(() => setWorld(false)); await settle(page); a = await shown();
     if (a.world || a.cls || a.kept !== "0" || a.row || a.btns) throw new Error(`after setWorld(false) WORLD is ${a.world}, the class ${a.cls}, waveslave-world ${a.kept}, the row ${a.row}, ${a.btns} buttons`);
     if (a.cc !== "tw" || a.MC !== "tw") throw new Error(`after setWorld(false) from Hawaii the page is on ${a.cur} and the map on ${a.MC}, want Taiwan`);
-    // And the real switch: back on Forecast, a tap on the W in the logo turns World mode on, and another turns it off.
-    await page.click("#wsFs"); await settle(page);
+    // And the real switch: back on Forecast, a tap on the W in the logo turns World mode on, and another turns it off. The countries come and
+    // go in a place kept for them, so the spot picker and the forecast under it never move.
+    await page.click("#wsFs"); await settle(page); const at = (await shown()).picker;
     for (const want of [true, false]) { await page.click("header .brand .w"); await settle(page); a = await shown();
-      if (a.world !== want || a.row !== want) throw new Error(`a tap on the W left WORLD ${a.world} and the country row ${a.row ? "showing" : "hidden"}, want ${want ? "World mode" : "Taiwan mode"}`); }
+      if (a.world !== want || a.row !== want) throw new Error(`a tap on the W left WORLD ${a.world} and the country row ${a.row ? "showing" : "hidden"}, want ${want ? "World mode" : "Taiwan mode"}`);
+      if (a.picker !== at) throw new Error(`a tap on the W moved the spot picker from ${at} to ${a.picker} under the tabs (scrollY ${a.scroll})`); }
   },
   // A link to another country's spot opens it in World mode, kept for next time; in Taiwan mode the last spot open in another country is
   // passed over for the last Taiwan one.

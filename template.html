@@ -175,6 +175,36 @@ header{position:relative}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px}
 .ph{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:6px 14px;margin-bottom:10px}
 .ph h2{font-family:var(--display);font-weight:800;font-stretch:115%;font-size:22px}
+/* The day strip and its chart share one stage lit in the picked day's rating colour (Bryan, Oct 19), so the pair reads as the page's centrepiece and the strip as the chart's day picker. */
+.stage{--rc:var(--sea);display:grid;grid-template-columns:minmax(0,1fr);gap:14px;padding:16px;border-radius:24px;border:1.5px solid var(--rc);transition:border-color .36s,box-shadow .36s;
+  background:radial-gradient(120% 60% at 50% 0%,color-mix(in srgb,var(--rc) 14%,transparent),transparent 70%),color-mix(in srgb,var(--bg) 55%,var(--panel));
+  box-shadow:0 0 0 5px color-mix(in srgb,var(--rc) 12%,transparent),0 0 60px -10px color-mix(in srgb,var(--rc) 45%,transparent)}
+.sth{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px}
+.stt{font:800 24px/1 var(--display);font-stretch:115%;letter-spacing:-.01em}
+.stp{font-size:13px;font-weight:700;color:var(--bg);background:var(--rc);padding:5px 12px;border-radius:999px;transition:background-color .36s}
+.stage .daypanel{background:transparent;border:0;border-top:1px solid color-mix(in srgb,var(--rc) 40%,transparent);border-radius:0;padding:16px 2px 0}
+.stage .daypanel h2{color:var(--rc);transition:color .36s}
+@media (min-width:561px){
+  .stage .days .day[aria-pressed="true"]{position:relative;overflow:visible;border:1.5px solid var(--rc);box-shadow:0 0 24px -4px var(--rc)}
+  .stage .days .day[aria-pressed="true"] .big{overflow:hidden}
+  .stage .days .day[aria-pressed="true"]::after{content:"";position:absolute;left:50%;bottom:-13px;margin-left:-10px;border:10px solid transparent;border-top-color:var(--rc);border-bottom:0}
+}
+@media (max-width:760px){.stage{margin-inline:-8px;padding:14px 10px}}
+@media (max-width:640px){.stage .daypanel{margin-inline:-10px}}
+@media (max-width:560px){
+  .stage .days > .glide-pill,.stage .days > .glide-pill.today{background:var(--rc)}
+  .stage .daydet{border-color:var(--rc)}
+  /* Phones: the strip, its day card and the chart all fit on one screen (Bryan, Oct 19). */
+  .stage{gap:10px;padding-top:12px}
+  .sth{flex-wrap:nowrap;gap:8px}.stt{font-size:20px;white-space:nowrap}.stp{font-size:12px;padding:4px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .stage #outH{display:none}
+  .stage .daydet{margin-top:8px;padding:8px 12px;gap:2px 12px}
+  .stage .daydet .big{font-size:24px}
+  .stage .daydet .nav button{padding:2px 0}
+  .stage .daypanel{padding-top:10px}
+  .stage .ph{margin-bottom:6px}.stage .ph h2{display:none}
+  .stage .readout{margin-bottom:8px}
+}
 .best{font-size:14px}.best b{color:var(--good)}
 .chart-box{overflow:hidden}
 /* Phones: the day chart runs edge to edge; its text keeps the page gutter. */
@@ -208,17 +238,11 @@ svg text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
 .ctry button{flex:none;border:0;background:none;color:var(--muted);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP",sans-serif;padding:6px clamp(5px,calc((100vw - 310px)/10),12px);border-radius:99px;cursor:pointer;position:relative;z-index:1;transition:color .36s,text-shadow .36s}
 html[lang="ja"] .ctry button{padding-inline:clamp(3px,calc((100vw - 350px)/10),12px)}
 .ctry button[aria-pressed="true"]{color:#ffb347;text-shadow:0 0 6px rgba(255,140,0,.7)}
-/* Taiwan mode (the default) has no country row, here or on the map. In World mode the row opens from shut (no height, the spot picker pulled up
-   over the column's 22px gap above it) and its countries flicker on; going back, they flicker out and it shuts again. The picker slides only in
-   World mode: shut goes on before the row shows and comes off as it hides, so neither moves it. */
-html:not(.world) #ctry,html:not(.world) .wsmap .wsctry{display:none}
-#ctry{transition:max-height .16s cubic-bezier(.2,.8,.2,1),margin .16s cubic-bezier(.2,.8,.2,1),padding .16s cubic-bezier(.2,.8,.2,1),border-width .16s}
-html.world #picker{transition:margin-top .16s cubic-bezier(.2,.8,.2,1)}
-html.world #ctry{max-height:60px}
-html.shut #ctry{max-height:0;margin-bottom:0;padding-block:0;border-width:0;overflow:hidden}
-html.shut #picker{margin-top:-22px}
-html.shut #ctry>*{opacity:0}
-html.igniting #ctry>*{animation:flickOn .9s calc(.14s + var(--d,0s)) both}
+/* Taiwan mode (the default) keeps the country row's place but shows nothing in it (Bryan, Oct 19: the countries appear, they don't push the
+   forecast down), and the map has no country buttons. In World mode the countries flicker on in place; going back, they flicker out. */
+html:not(.world) #ctry{visibility:hidden}
+html:not(.world) .wsmap .wsctry{display:none}
+html.igniting #ctry>*{animation:flickOn .9s calc(.06s + var(--d,0s)) both}
 html.dousing #ctry>*{animation:flickOff .34s var(--d2,0s) both}
 /* Sliding highlight: in each group of buttons with a pick, one bubble glides (place and size) to the picked one; glider() puts it there.
    Language, country, Forecast/Map and spot picker: a dark bubble under the words. Phone day chips: the ink (today: sea) fill. Map layers and the
@@ -422,6 +446,8 @@ html{overscroll-behavior-y:none}
   </section>
 
 
+  <div class="stage" id="stage">
+  <div class="sth"><h2 class="stt" data-zh="逐日浪況" data-ja="日ごとの波">Day by day</h2><span class="stp" data-zh="👆 點選一天，下方圖表跟著換" data-ja="👆 日を選ぶとグラフが変わる">👆 Tap a day to chart it</span></div>
   <section aria-label="Last 4 days and 5-day outlook">
     <div class="label" id="outH" style="margin-bottom:8px">Last 4 days · 5-day outlook</div>
     <div class="days" id="days"></div>
@@ -460,6 +486,7 @@ html{overscroll-behavior-y:none}
       </div>
     </details>
   </section>
+  </div>
 
 
   <section class="panel storm wotw" id="wotw">
@@ -583,28 +610,24 @@ function ctryEdges(){ const r = document.getElementById("ctry"); r.classList.tog
 // Country switch: back to the spot last open in that country, else its first spot.
 function switchCountry(c){ if(c===spotCountry(CUR)) return; let id; try{ id=localStorage.getItem("waveslave-spot-"+c); }catch(e){}
   switchSpot(ALL.spots[id] && spotCountry(id)===c ? id : countrySpots(c)[0]); }
-// World mode on or off. The W flickers to neon and the country row opens, its countries flickering on one by one; or they flicker out, the row
-// shuts and the page goes back to Taiwan. With reduced motion it just switches. A tap mid-flicker turns it straight back (gen drops the old one).
+// World mode on or off. The W flickers to neon and the countries flicker on in their row, one by one; or they flicker out and the page goes
+// back to Taiwan. With reduced motion it just switches. A tap mid-flicker turns it straight back (gen drops the old one).
 let worldGen = 0;
 async function setWorld(on){ if(on===WORLD) return; const gen = ++worldGen, root = document.documentElement, ctry = document.getElementById("ctry"),
     flick = !matchMedia("(prefers-reduced-motion: reduce)").matches && !!document.getAnimations;
-  // Until the animations on the country row (and the spot picker's slide) end; never longer than 1.5 s.
-  const settled = sel => Promise.race([Promise.all(document.getAnimations().filter(a => a.effect && a.effect.target instanceof Element && a.effect.target.matches(sel)).map(a => a.finished.catch(() => {}))),
+  // Until the countries' flicker ends; never longer than 1.5 s.
+  const settled = () => Promise.race([Promise.all(document.getAnimations().filter(a => a.effect && a.effect.target instanceof Element && a.effect.target.parentNode===ctry).map(a => a.finished.catch(() => {}))),
     new Promise(r => setTimeout(r, 1500))]);
   const showing = root.classList.contains("world"); root.classList.remove("igniting", "dousing");
   // Each country catches, and goes out, at its own moment.
   [...ctry.children].forEach((b, i) => { b.style.setProperty("--d", ((i*37)%11/11*.22).toFixed(3)+"s"); b.style.setProperty("--d2", ((i*53)%7/7*.06).toFixed(3)+"s"); });
-  if(on){ if(flick && !showing){ root.classList.add("shut"); void ctry.offsetWidth; }
-    keepWorld(true); if(!flick){ root.classList.remove("shut"); WS.world(); return; }
-    // The bubble under the picked country goes straight there rather than gliding in from nowhere.
-    const pill = ctry.querySelector(".glide-pill"); if(pill && !showing) pill.classList.remove("glide");
-    void ctry.offsetWidth; root.classList.add("igniting"); root.classList.remove("shut"); WS.world();
-    await settled("#ctry, #ctry > *, #picker"); if(gen===worldGen) root.classList.remove("igniting"); return; }
+  if(on){ keepWorld(true); if(!flick){ WS.world(); return; }
+    void ctry.offsetWidth; root.classList.add("igniting"); WS.world();
+    await settled(); if(gen===worldGen) root.classList.remove("igniting"); return; }
   keepWorld(false);
-  if(flick && showing){ root.classList.add("world", "dousing"); await settled("#ctry > *"); if(gen!==worldGen) return; }
+  if(flick && showing){ void ctry.offsetWidth; root.classList.add("world", "dousing"); await settled(); if(gen!==worldGen) return; }
   if(spotCountry(CUR)!=="tw") switchCountry("tw");
-  if(flick && showing){ root.classList.add("world", "shut"); await settled("#ctry, #picker"); if(gen!==worldGen) return; }
-  root.classList.remove("world", "shut", "dousing"); WS.world(); }
+  root.classList.remove("world", "dousing"); WS.world(); }
 // Sliding highlight (Bryan, Oct 18): one bubble under a group's picked button that glides (place and size) to the next pick. sel finds the pick;
 // the bubble follows picks, redraws of the group (it goes back in from where it was, so it still glides), language and font changes.
 function glider(box, sel){ if(!box) return; let ro = null;
@@ -1828,6 +1851,7 @@ function drawDays(){
       <span class="w">${RATE[r][0]}${isZh() ? (d.avgKt!=null?` · 風 ${Math.round(d.avgKt)} kt`:" · 無風力資料") : isJa() ? (d.avgKt!=null?` · 風 ${Math.round(d.avgKt)} kt`:" · 風データなし") : d.avgKt!=null?` · ${Math.round(d.avgKt)} kt wind`:" · no wind data"}</span></button>`; }).join("");
   // Phone card for the picked day (hidden on computers, where the dock tile itself opens up), with ‹ › to step a day.
   const b = el.querySelectorAll(".day")[sel], q = c => b.querySelector(c), nm = i => dayInfo[i] ? dayName(dayInfo[i].key,todayKey) : "", det = document.getElementById("dayDet");
+  document.getElementById("stage").style.setProperty("--rc", RATE[rate(dayInfo[sel].peakS)][1]);
   det.className = "daydet"+(dayInfo[sel].hist?" hist":"");
   det.innerHTML = `<div class="k"><span>${q(".dn").innerHTML}</span><small>${q(".tag")?q(".tag").textContent:""}</small></div>
     <span class="big mono">${q(".big").innerHTML}</span><span class="s"><span class="per mono">${q(".per").textContent}</span><span>${q(".w").textContent}</span></span>${q(".bar").outerHTML}

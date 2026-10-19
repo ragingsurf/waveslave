@@ -365,5 +365,44 @@ class LogSplitAlaska(unittest.TestCase):
         self.assertEqual(d['spots']['bishopsbeach']['adj']['days'], 1)
 
 
+MI_IDS = ['boatbasin', 'majuro', 'mwand', 'ppass', 'sidedish', 'talofofo', 'tankbeach', 'umatac']
+
+
+class LogSplitMicronesia(unittest.TestCase):
+    # Micronesia's log holds the forecast, the buoy readings (Arno's at Majuro too) and the station wind, from pi.py on the saved downloads
+    def setUp(self):
+        import datetime
+        sys.path.insert(0, ROOT); import pi
+        self.tmp = tempfile.mkdtemp(); self.snap = os.path.join(self.tmp, 'snap.json')
+        fix = os.path.join(HERE, 'fixtures', 'mi'); d = json.load(open(os.path.join(fix, 'snap_in.json')))
+        pi.fill(d, json.load(open(os.path.join(ROOT, 'spots.json'))), fix, datetime.datetime(2026, 10, 19, 2, 45, tzinfo=datetime.timezone.utc), 'mi')
+        with open(self.snap, 'w') as f: json.dump(d, f)
+
+    def test_log_mi_only(self):
+        run(['log.py', self.snap, self.tmp + '/log-mi', 'mi'])
+        rec = records(self.tmp + '/log-mi')[-1]
+        self.assertEqual(sorted(rec['spots']), MI_IDS)
+        p, m, b = rec['spots']['ppass'], rec['spots']['majuro'], rec['spots']['boatbasin']
+        self.assertEqual((p['buoyId'], p['buoy'][-1], p['station'], len(p['fc'])), ('52213', ['2026-10-19T08:00', 1.5, 6.0, 352.0, 29.3], [], 24))
+        self.assertEqual((m['buoyId'], m['buoy'][-1]), ('52216', ['2026-10-19T10:00', 1.4, 6.7, 57.0, 29.1]))
+        self.assertEqual((b['buoy'], b['station']), ([], [['2026-10-19T10:00', 14.0, 150.0]]))
+
+    def test_other_logs_hold_no_micronesia(self):
+        for c, d, ids in (('tw', 'log', ['donghe']), ('pi', 'log-pi', ['amouli', 'cloudbreak', 'frigates', 'haatafu', 'papara', 'rutaki', 'salani', 'teahupoo'])):
+            run(['log.py', self.snap, self.tmp + '/' + d, c])
+            self.assertEqual(sorted(records(self.tmp + '/' + d)[-1]['spots']), ids, c)
+
+    def test_correct_and_history_mi(self):
+        before = json.load(open(self.snap))['spots']
+        run(['log.py', self.snap, self.tmp + '/log-mi', 'mi'])
+        run(['correct.py', self.snap, self.tmp + '/log-mi', 'mi'])
+        run(['history.py', self.snap, self.tmp + '/log-mi', self.tmp + '/cache', 'mi'])
+        d = json.load(open(self.snap))
+        for k in ('donghe', 'blacks', 'raglan', 'amouli', 'teahupoo'): self.assertEqual(d['spots'][k], before[k])
+        self.assertEqual(sorted(json.load(open(self.tmp + '/cache/tides-mi.json'))), MI_IDS)
+        self.assertEqual(d['spots']['ppass']['adj']['days'], 1)
+        self.assertEqual((d['spots']['majuro']['adj']['f'], d['spots']['majuro']['adj']['days']), (1.0, 0))  # Arno's readings: a backup, not learned from
+
+
 if __name__ == '__main__':
     unittest.main()

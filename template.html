@@ -175,6 +175,26 @@ header{position:relative}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px}
 .ph{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:6px 14px;margin-bottom:10px}
 .ph h2{font-family:var(--display);font-weight:800;font-stretch:115%;font-size:22px}
+/* The day strip and its chart share one stage lit in the picked day's rating colour (Bryan, Oct 19), so the pair reads as the page's centrepiece and the strip as the chart's day picker. */
+.stage{--rc:var(--sea);display:grid;grid-template-columns:minmax(0,1fr);gap:14px;padding:16px;border-radius:24px;border:1.5px solid var(--rc);transition:border-color .36s,box-shadow .36s;
+  background:radial-gradient(120% 60% at 50% 0%,color-mix(in srgb,var(--rc) 14%,transparent),transparent 70%),color-mix(in srgb,var(--bg) 55%,var(--panel));
+  box-shadow:0 0 0 5px color-mix(in srgb,var(--rc) 12%,transparent),0 0 60px -10px color-mix(in srgb,var(--rc) 45%,transparent)}
+.sth{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px}
+.stt{font:800 24px/1 var(--display);font-stretch:115%;letter-spacing:-.01em}
+.stp{font-size:13px;font-weight:700;color:var(--bg);background:var(--rc);padding:5px 12px;border-radius:999px;transition:background-color .36s}
+.stage .daypanel{background:transparent;border:0;border-top:1px solid color-mix(in srgb,var(--rc) 40%,transparent);border-radius:0;padding:16px 2px 0}
+.stage .daypanel h2{color:var(--rc);transition:color .36s}
+@media (min-width:561px){
+  .stage .days .day[aria-pressed="true"]{position:relative;overflow:visible;border:1.5px solid var(--rc);box-shadow:0 0 24px -4px var(--rc)}
+  .stage .days .day[aria-pressed="true"] .big{overflow:hidden}
+  .stage .days .day[aria-pressed="true"]::after{content:"";position:absolute;left:50%;bottom:-13px;margin-left:-10px;border:10px solid transparent;border-top-color:var(--rc);border-bottom:0}
+}
+@media (max-width:760px){.stage{margin-inline:-8px;padding:14px 10px}}
+@media (max-width:640px){.stage .daypanel{margin-inline:-10px}}
+@media (max-width:560px){
+  .stage .days > .glide-pill,.stage .days > .glide-pill.today{background:var(--rc)}
+  .stage .daydet{border-color:var(--rc)}
+}
 .best{font-size:14px}.best b{color:var(--good)}
 .chart-box{overflow:hidden}
 /* Phones: the day chart runs edge to edge; its text keeps the page gutter. */
@@ -422,6 +442,8 @@ html{overscroll-behavior-y:none}
   </section>
 
 
+  <div class="stage" id="stage">
+  <div class="sth"><h2 class="stt" data-zh="逐日浪況" data-ja="日ごとの波">Day by day</h2><span class="stp" data-zh="👆 點選一天，下方圖表跟著換" data-ja="👆 日を選ぶと下のグラフが切り替わります">👆 Pick a day, the chart follows</span></div>
   <section aria-label="Last 4 days and 5-day outlook">
     <div class="label" id="outH" style="margin-bottom:8px">Last 4 days · 5-day outlook</div>
     <div class="days" id="days"></div>
@@ -460,6 +482,7 @@ html{overscroll-behavior-y:none}
       </div>
     </details>
   </section>
+  </div>
 
 
   <section class="panel storm wotw" id="wotw">
@@ -1828,6 +1851,7 @@ function drawDays(){
       <span class="w">${RATE[r][0]}${isZh() ? (d.avgKt!=null?` · 風 ${Math.round(d.avgKt)} kt`:" · 無風力資料") : isJa() ? (d.avgKt!=null?` · 風 ${Math.round(d.avgKt)} kt`:" · 風データなし") : d.avgKt!=null?` · ${Math.round(d.avgKt)} kt wind`:" · no wind data"}</span></button>`; }).join("");
   // Phone card for the picked day (hidden on computers, where the dock tile itself opens up), with ‹ › to step a day.
   const b = el.querySelectorAll(".day")[sel], q = c => b.querySelector(c), nm = i => dayInfo[i] ? dayName(dayInfo[i].key,todayKey) : "", det = document.getElementById("dayDet");
+  document.getElementById("stage").style.setProperty("--rc", RATE[rate(dayInfo[sel].peakS)][1]);
   det.className = "daydet"+(dayInfo[sel].hist?" hist":"");
   det.innerHTML = `<div class="k"><span>${q(".dn").innerHTML}</span><small>${q(".tag")?q(".tag").textContent:""}</small></div>
     <span class="big mono">${q(".big").innerHTML}</span><span class="s"><span class="per mono">${q(".per").textContent}</span><span>${q(".w").textContent}</span></span>${q(".bar").outerHTML}

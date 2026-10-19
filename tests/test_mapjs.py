@@ -39,3 +39,11 @@ class Placeholders(unittest.TestCase):
             self.assertIn('nz: {"g": "nz"}' if 'nz' in keys else 'nz: null', html)
             self.assertIn('pi: {"g": "pi"}' if 'pi' in keys else 'pi: null', html)
             self.assertIn('ak: {"g": "ak"}' if 'ak' in keys else 'ak: null', html)
+
+    def test_tool_reads_past_a_missing_grid(self):
+        # refresh.sh fills a grid it has no file for as "null" and a newline, so the next grid follows "null\n, " in the page
+        spec = importlib.util.spec_from_file_location('maptool', os.path.join(ROOT, 'tests', 'map', 'tool.py'))
+        tool = importlib.util.module_from_spec(spec); spec.loader.exec_module(tool)
+        found = tool.live('<img src="data:image/jpeg;base64,AA==" alt="Wave of the week">\n<script>const ALL = {"spots": {}};\nconst RAW = {wp: {"g": "wp"}, '
+                          'ca: null\n, hi: {"g": "hi"}, au: {"g": "au"}, id: {"g": "id"}, nw: {"g": "nw"}, nz: {"g": "nz"}, pi: null\n, ak: {"g": "ak"}, pac: null};</script>')
+        self.assertEqual([found[n] for n in ('GRIDCA', 'GRIDHI', 'GRIDPI', 'GRIDAK')], ['null', '{"g": "hi"}', 'null', '{"g": "ak"}'])

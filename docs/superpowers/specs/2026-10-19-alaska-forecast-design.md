@@ -79,8 +79,9 @@ inside the forecast window, since the page uses one offset per spot.
 - **The Pacific box reaches 65°N** (today 60°N). Bishop's Beach (59.6°N) and Ocean Cape (59.5°N) sit at today's top edge, which a
   view can't pass, and the coast north of them (the Kenai Peninsula, Prince William Sound, Anchorage) isn't drawn. Zoomed all the way
   out, the box upright is about 8% smaller, as its height sets the zoom; sideways nothing changes.
-- **Coastline**: `tools/pacific_coast.py` cuts Natural Earth's land to 65°N, adding about 7 KB to the page; today's coast comes out
-  unchanged.
+- **Coastline**: `tools/pacific_coast.py` cuts Natural Earth's land to 65°N, adding about 7 KB to the page. Every ring wholly south of
+  60°N comes out unchanged; the six that crossed 60°N are simplified again as whole rings, so their parts south of 60°N move by at most
+  0.033°, within the simplification's tolerance.
 - **Pacific layer**: 50°S–65°N, 24 rows (744 points), fetched in the same two chunks of rows.
 - **Home view**: one view for all 8 spots, which spread over 17° of longitude (Kodiak to Sitka), centred at 144.6°W, 58.4°N and showing
   at least 24° of longitude and 6.2° of latitude. Held sideways the spots fill the middle; upright their width sets the zoom, and the
@@ -111,6 +112,7 @@ inside the forecast window, since the page uses one offset per spot.
 - `tests/test_ak.py`: the spots are complete; `ca.py` fills a Yakutat spot (far buoy, airport wind, NOAA tides, offset -8) and
   Bishop's Beach (CDIP buoy, not far) from saved downloads; the backup buoy's name and distance; correct.py leaves a far spot's height
   factor at 1 while it learns a near spot's and both spots' wind.
-- The map maths, pacific.sh's request and the coast tool follow the box to 65°N; the coast tool rebuilds today's coastline exactly.
+- The map maths, pacific.sh's request and the coast tool follow the box to 65°N; a test ties pacific.sh's rows and columns to the
+  box's edges; the coast tool rebuilds every ring wholly south of 60°N exactly.
 - On the same downloads, every other country's output and log is identical to `main`'s.
 - `tests/map/check.js` passes upright and sideways, with a new check for Alaska's first open and home view.

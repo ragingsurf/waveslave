@@ -108,6 +108,19 @@ class Fill(unittest.TestCase):
         self.assertEqual((k['buoyId'], k['buoyKm'], k['buoyMain'], k['buoyFar']), ('46080', 145, '46080', True))
         self.assertEqual((k['dwind'], k['stationName']), ([], 'Kodiak Airport'))  # no Kodiak wind in the fixtures: the first station's name
 
+    def test_third_buoy(self):
+        # Kodiak's spots try three buoys in turn: with Portlock Bank and Albatross Bank silent, Surfers Beach shows the Gulf of Alaska buoy
+        # by name and distance (the readings are Portlock Bank's file, saved under 46001's name), and stays far by its main buoy
+        import ca, shutil, tempfile
+        dl = tempfile.mkdtemp()
+        for f in os.listdir(FIXDIR): shutil.copy(os.path.join(FIXDIR, f), dl)
+        os.rename(os.path.join(dl, 'ndbc-46080.txt'), os.path.join(dl, 'ndbc-46001.txt'))
+        ca.fill(self.snap, SPOTS, dl, NOW, 'ak')
+        k = self.snap['spots']['surfersbeach']
+        self.assertEqual((k['buoyId'], k['buoyName'], k['buoyKm'], k['zh']['buoyName'], k['ja']['buoyName'], k['buoyMain'], k['buoyFar']),
+                         ('46001', 'Gulf of Alaska', 295, '阿拉斯加灣', 'アラスカ湾', '46080', True))
+        self.assertEqual(k['buoy'][-1][0], '2026-10-19T08:00')
+
     def test_runs_isolated_like_refresh(self):
         import subprocess, tempfile, shutil
         tmp = tempfile.mkdtemp(); f = os.path.join(tmp, 'snap.json'); shutil.copy(os.path.join(FIXDIR, 'snap_in.json'), f)

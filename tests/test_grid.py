@@ -27,24 +27,24 @@ def raw(d, field):
 
 class Coords(unittest.TestCase):
     def test_coords_wrap_dateline(self):
-        lats, lons = grid.coords(-50, 5, 23, 100, 5, 31, (0, 1))
+        lats, lons = grid.coords(-50, 5, 24, 100, 5, 31, (0, 1))
         self.assertEqual(lats, ['-50.0']*31)
         self.assertEqual(len(lons), 31)
         self.assertEqual([lons[i] for i in (0, 15, 16, 17, 30)], ['100.0', '175.0', '-180.0', '-175.0', '-110.0'])
 
     def test_coords_rows(self):
-        lats, lons = grid.coords(-50, 5, 23, 100, 5, 31, (12, 23))
-        self.assertEqual((len(lats), len(lons)), (341, 341))
-        self.assertEqual((lats[0], lats[-1]), ('10.0', '60.0'))
+        lats, lons = grid.coords(-50, 5, 24, 100, 5, 31, (12, 24))
+        self.assertEqual((len(lats), len(lons)), (372, 372))
+        self.assertEqual((lats[0], lats[-1]), ('10.0', '65.0'))
         lats, lons = grid.coords(30, 1, 13, -128, 1, 13)
         self.assertEqual((len(lats), len(lons)), (169, 169))
         self.assertEqual(lons[0], '-128.0')
         # row by row: the second row starts again at the first longitude
         self.assertEqual((lats[12], lats[13], lons[13], lats[-1], lons[-1]), ('30.0', '31.0', '-128.0', '42.0', '-116.0'))
-        # the Pacific layer asks for rows 0-11 and then 12-22, which together are every point once, in order
-        a, b = (grid.coords(-50, 5, 23, 100, 5, 31, r) for r in ((0, 12), (12, 23)))
-        self.assertEqual((len(a[0]), len(b[0])), (372, 341))
-        self.assertEqual((a[0] + b[0], a[1] + b[1]), grid.coords(-50, 5, 23, 100, 5, 31))
+        # the Pacific layer asks for rows 0-11 and then 12-23, which together are every point once, in order
+        a, b = (grid.coords(-50, 5, 24, 100, 5, 31, r) for r in ((0, 12), (12, 24)))
+        self.assertEqual((len(a[0]), len(b[0])), (372, 372))
+        self.assertEqual((a[0] + b[0], a[1] + b[1]), grid.coords(-50, 5, 24, 100, 5, 31))
 
     def test_coords_rounded(self):
         # fractional spacing: float noise (0.1 + 3*0.2 is 0.7000000000000001) goes at 2 places, and 2 places stay
@@ -53,7 +53,7 @@ class Coords(unittest.TestCase):
         self.assertEqual(lons, ['0.1', '0.3', '0.5', '0.7', '0.9']*3)
 
     def test_coords_command(self):
-        lines = run(['grid.py', 'coords', '-50', '5', '23', '100', '5', '31', '12', '13']).splitlines()
+        lines = run(['grid.py', 'coords', '-50', '5', '24', '100', '5', '31', '12', '13']).splitlines()
         self.assertEqual(len(lines), 2)
         lats, lons = (l.split(',') for l in lines)
         self.assertEqual(lats, ['10.0']*31)

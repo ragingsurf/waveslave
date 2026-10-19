@@ -12,6 +12,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 GRIDS = (('wp', 'GRID', 'grid.json'), ('ca', 'GRIDCA', 'grid-ca.json'), ('hi', 'GRIDHI', 'grid-hi.json'), ('au', 'GRIDAU', 'grid-au.json'),
          ('id', 'GRIDID', 'grid-id.json'), ('nw', 'GRIDNW', 'grid-nw.json'), ('nz', 'GRIDNZ', 'grid-nz.json'),
          ('pi', 'GRIDPI', 'grid-pi.json'), ('ak', 'GRIDAK', 'grid-ak.json'))  # key in the page, placeholder, cache file
+SEP = re.compile(r'\s*,?\s*')  # what follows a grid in the page: ", ", or "\n, " after a missing one, which refresh.sh fills in as "null" and a newline
 USAGE = 'usage: python3 -I tests/map/tool.py page <live.html> <template.html> <pac.json|null> <out.html> | diff <a.png> <b.png> | grids <live.html> <dir>'
 
 
@@ -34,7 +35,7 @@ def live(text):
     for key, name, _ in GRIDS:  # {wp: <grid>, ca: <grid>, hi: <grid>, au: <grid>, id: <grid>, nw: <grid>, nz: <grid>, pi: <grid>, ak: <grid>}
         if key in ('id', 'nw', 'nz', 'pi', 'ak') and not text.startswith(key + ': ', i): out[name] = 'null'; continue  # a page from before Indonesia, the Pacific Northwest, New Zealand, the South Pacific or Alaska
         if not text.startswith(key + ': ', i): sys.exit('live page: the country grids are not in the order wp, ca, hi, au, id, nw, nz, pi, ak')
-        out[name] = json_at(text, i + len(key) + 2); i += len(key) + 2 + len(out[name]) + 2
+        out[name] = json_at(text, i + len(key) + 2); i = SEP.match(text, i + len(key) + 2 + len(out[name])).end()
     return out
 
 

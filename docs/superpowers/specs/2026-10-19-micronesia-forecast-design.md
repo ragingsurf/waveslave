@@ -120,7 +120,8 @@ none the map draws the coarser grids there.
   complete; `pi.py mi` gives each spot its offset (+10, +11, +12), P-Pass North Point's rows, Majuro Arno's when Kalo has no waves,
   a quiet buoy at Guam's spots, Guam's airport wind and Apra Harbor's when the airport is silent, no wind at Kosrae from a stale
   report, NOAA's tides on each spot's clock and the model's with `tideModel`; filling Micronesia leaves the South Pacific alone and
-  the reverse; `pi.py` runs isolated like refresh.sh. `tests/test_pi.py` passes unchanged.
+  the reverse; `pi.py` runs isolated like refresh.sh. `tests/test_pi.py`'s checks of refresh.sh follow the loop (`piids pi`, the
+  loop's download names); its other tests pass unchanged.
 - `tests/test_logsplit.py`: log, correct and history with `mi` touch only Micronesia's spots.
 - The map: Micronesia's two home views and the move between them in `tests/map/check.js`, and its grid in `gridsLoaded`. A test on
   the template that every 10 m ring lies inside one of the four island boxes, and every coarser ring that reaches into a box lies

@@ -255,5 +255,44 @@ class Fill(unittest.TestCase):
         self.assertIn('regrid mi 350 -2 2 9 152 2 13\n', sh)
 
 
+class Coast(unittest.TestCase):
+    # The map draws Micronesia's islands with spots from Natural Earth's 10 m land, pushed after a loop that drops the coarser outlines inside
+    # the island boxes (MIB in template.html), so no island is drawn twice, nor one in part.
+    def setUp(self):
+        import re
+        with open(os.path.join(ROOT, 'template.html'), encoding='utf-8') as f: L = f.read().split('\n')
+        at = [i for i, l in enumerate(L) if l.startswith('  const MIB = ')]
+        self.assertEqual(len(at), 1); at = at[0]
+        self.boxes = json.loads(L[at][len('  const MIB = '):-1])
+        self.assertTrue(L[at + 1].startswith('  for (let i = COAST.length; i--;) if (MIB.some(([l, r, s, n]) => COAST[i].every(([x, y]) => x > l && x < r && y > s && y < n))) COAST.splice(i, 1);'))
+        ring = re.compile(r'^  (?:const COAST = |COAST\.push\(\.\.\.)(\[.*\])\)?;$')  # the outline lines, as tests/map/mapmath.test.js reads them
+        rings = lambda part: [r for l in part for m in [ring.match(l)] if m for r in json.loads(m.group(1))]
+        self.coarse, self.ten, self.later = rings(L[:at]), rings(L[at + 2:at + 3]), rings(L[at + 3:])
+        self.assertTrue(self.coarse and self.ten)
+        self.inside = lambda r, B: all(B[0] < x < B[1] and B[2] < y < B[3] for x, y in r)
+        self.reaches = lambda r, B: min(x for x, y in r) < B[1] and max(x for x, y in r) > B[0] and min(y for x, y in r) < B[3] and max(y for x, y in r) > B[2]
+
+    def test_boxes_hold_the_spots_islands(self):
+        # the Marianas from Guam to Saipan, Pohnpei, Kosrae and Majuro, each box near its spots
+        self.assertEqual(len(self.boxes), 4)
+        for ids, B in zip((['umatac', 'boatbasin', 'talofofo', 'tankbeach'], ['ppass', 'mwand'], ['sidedish'], ['majuro']), self.boxes):
+            for s in SPOTS:
+                if s['id'] in ids: self.assertTrue(B[0] - 0.1 < s['lon'] < B[1] + 0.1 and B[2] - 0.1 < s['lat'] < B[3] + 0.1, s['id'])
+
+    def test_ten_metre_rings_inside_one_box(self):
+        for r in self.ten:
+            self.assertEqual(sum(self.inside(r, B) for B in self.boxes), 1, r[:2])
+            self.assertEqual(r[0], r[-1])
+        for B in self.boxes: self.assertTrue(any(self.inside(r, B) for r in self.ten), B)
+
+    def test_coarse_rings_in_a_box_are_dropped_whole(self):
+        # a coarser ring that reaches into a box lies wholly inside it, so the page drops it; each box drops at least one
+        for B in self.boxes:
+            near = [r for r in self.coarse if self.reaches(r, B)]
+            self.assertTrue(near, B)
+            for r in near: self.assertTrue(self.inside(r, B), (B, r))
+            self.assertFalse([r for r in self.later if self.reaches(r, B)], B)  # nothing pushed after the 10 m land reaches back in
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -49,7 +49,7 @@ def _f(v):
 
 
 def _ndbc(txt):
-    """NDBC realtime2 text -> [(UTC datetime, {column: value str})], newest first."""
+    """NDBC realtime2 text (a .txt, or a .drift, whose time of day is one hhmm column) -> [(UTC datetime, {column: value str})], newest first."""
     head, out = None, []
     for l in (txt or '').splitlines():
         if l.startswith('#'):
@@ -58,7 +58,8 @@ def _ndbc(txt):
         v = l.split()
         if not head or len(v) < len(head): continue
         d = dict(zip(head, v))
-        out.append((datetime.datetime(int(d['YY']), int(d['MM']), int(d['DD']), int(d['hh']), int(d['mm']), tzinfo=UTC), d))
+        hh, mm = (d['hhmm'][:2], d['hhmm'][2:]) if 'hhmm' in d else (d['hh'], d['mm'])
+        out.append((datetime.datetime(int(d['YY']), int(d['MM']), int(d['DD']), int(hh), int(mm), tzinfo=UTC), d))
     return out
 
 

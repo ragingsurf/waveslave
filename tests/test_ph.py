@@ -105,7 +105,7 @@ class Fill(unittest.TestCase):
         tmp = tempfile.mkdtemp(); f = os.path.join(tmp, 'snap.json'); shutil.copy(os.path.join(FIXDIR, 'snap_in.json'), f)
         r = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'kr.py'), FIXDIR, f, os.path.join(ROOT, 'spots.json'), 'ph'], capture_output=True, text=True, cwd=tmp)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn('ph: cloud9 8 0 8 3', r.stdout)
+        self.assertIn('ph: cloud9 8 None 0 0 8 3', r.stdout)   # no buoy
         self.assertNotIn('jukdo', r.stdout)
         with open(f) as fh: d = json.load(fh)
         self.assertEqual(d['spots']['pagudpud']['tz'], 8)

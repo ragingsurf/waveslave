@@ -1,6 +1,6 @@
 # South Korea forecast for WaveSlave: design
 
-Date: 2026-10-18. Status: the parts that need no key are built; Bryan is signing up for the keys. Plan: `docs/superpowers/plans/2026-10-18-south-korea-forecast.md`.
+Date: 2026-10-18. Status: the parts that need no key are built, and since 2026-10-19 the buoys too, from NOAA's copies with no key (Phase 2 below); Bryan dropped the keys on 2026-10-19. Plan: `docs/superpowers/plans/2026-10-18-south-korea-forecast.md`.
 
 ## Goal
 
@@ -62,6 +62,14 @@ across Hallasan, the airport's wind would skew Jungmun's wind forecast as well a
 
 Each key goes in the workflow as a secret beside `CWA_KEY`, and every keyed fetch stays optional. The readers are written
 against real replies once a key exists, not from documentation alone.
+
+**2026-10-19:** the sign-ups stopped at the Korean mobile check and Bryan dropped them. The buoys came without a key instead:
+NOAA NDBC copies KMA's eight moored buoys from the WMO weather reports (`ndbc.noaa.gov/data/realtime2/<id>.drift`, hourly,
+45 days). Those copies carry the height in 0.5 m steps and the water temperature, but no real period (0 or 1 s) and no
+direction, so the page says "Heights in 0.5 m steps" where the period would be. Seven spots have a buoy (Iho faces north,
+away from Marado); Jukdo and Surfyy are 119 and 125 km from Donghae's buoy, so it shows there without correcting their
+heights. A buoy that sends only 0.0 m for 72 hours counts as silent (Marado's lost its wave sensor for three weeks in
+September). The tide tables and the wind at the beaches without an airport stay as they are.
 
 ## Clocks
 

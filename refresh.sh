@@ -68,7 +68,7 @@ else: v=[str(s[f]) for s in S]
 print(','.join(v if f in ('lat','lon') else dict.fromkeys(v)))" "$HERE/spots.json" "$1" "$2"; }
 # midnight of a day relative to today on BC's clock, in UTC: mid '-5 days'
 mid(){ date -u -d "TZ=\"America/Vancouver\" $(TZ=America/Vancouver date -d "$1" +%F) 00:00" +%FT%TZ; }
-rm -f "$W/dl"/ndbc-*.txt "$W/dl"/nws-*.json "$W/dl"/eccc-*.json "$W/dl"/chs-*.json
+rm -f "$W/dl"/ndbc-*.txt "$W/dl"/ndbc-*.drift "$W/dl"/nws-*.json "$W/dl"/eccc-*.json "$W/dl"/chs-*.json
 for C in ca hi nw ak; do
   [ -n "$(noaaids $C lat)" ] || continue
   ZONE=America/Los_Angeles; [ $C = hi ] && ZONE=Pacific/Honolulu; [ $C = ak ] && ZONE=America/Anchorage
@@ -108,18 +108,21 @@ if [ -n "$(auids lat)" ]; then
 fi
 # Korean, Philippine and Indonesian spots (optional, never block the build): airport reports (METAR) from NOAA's Aviation Weather
 # Center, the last 3 hours, where a spot has an airport near enough (none does in the Philippines; Bali's does in Indonesia); a wind
-# forecast and the tide model via Open-Meteo, as for Japan and Australia; kr.py writes them under the same keys. No buoys: the Korea
-# Meteorological Administration's buoy feed needs a key, and the Philippines and Indonesia have no open one. The wind forecast is
+# forecast and the tide model via Open-Meteo, as for Japan and Australia; kr.py writes them under the same keys. Korea's buoys are the
+# Korea Meteorological Administration's, as NOAA NDBC copies them from the WMO weather reports (45 days in one .drift file per buoy;
+# KMA's own feed needs a key and a Korean mobile number); the Philippines and Indonesia have no open buoy. The wind forecast is
 # JMA's MSM for Korea, as for Japan, and ECMWF's IFS for the Philippines and Indonesia, south of the MSM's area (Open-Meteo's
 # default, the fallback, is ECMWF there too).
-# krids <country> <field>: the spots' lat or lon, or metar for their airports (a spot's windStation may be one "metar:ICAO" or a list).
+# krids <country> <field>: the spots' lat or lon, metar for their airports (a spot's windStation may be one "metar:ICAO" or a list),
+# or ndbc for their buoys.
 krids(){ python3 -I -c "import json,sys;S=[s for s in json.load(open(sys.argv[1])) if s.get('country')==sys.argv[2]];f=sys.argv[3]
 W=[w for s in S for w in (lambda v: v if isinstance(v,list) else [v] if v else [])(s.get('windStation'))]
-v=[w[6:] for w in W if w.startswith('metar:')] if f=='metar' else [str(s[f]) for s in S]
+v=[w[6:] for w in W if w.startswith('metar:')] if f=='metar' else [b for s in S for b in s.get('ndbc') or []] if f=='ndbc' else [str(s[f]) for s in S]
 print(','.join(v if f in ('lat','lon') else dict.fromkeys(v)))" "$HERE/spots.json" "$1" "$2"; }
 for C in kr ph id; do
   [ -n "$(krids $C lat)" ] || continue
   M=jma_msm M2=jma_seamless; [ $C = kr ] || M=ecmwf_ifs M2=best_match
+  for b in $(krids $C ndbc | tr ',' ' '); do curl -fsSL --retry 2 -m 60 -o "$W/dl/ndbc-$b.drift" "https://www.ndbc.noaa.gov/data/realtime2/$b.drift" || echo "ndbc $b fetch failed" >&2; done
   [ -z "$(krids $C metar)" ] || curl -fsSL --retry 2 -m 60 -A "waveslave.tw" -o "$W/dl/metar-$C.json" "https://aviationweather.gov/api/data/metar?ids=$(krids $C metar)&format=json&hours=3" || echo "metar $C fetch failed" >&2
   KQ="latitude=$(krids $C lat)&longitude=$(krids $C lon)"
   get open$C "https://api.open-meteo.com/v1/forecast?$KQ&hourly=wind_speed_10m,wind_direction_10m,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=4&models=$M" ||

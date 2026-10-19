@@ -49,10 +49,11 @@ class Spots(unittest.TestCase):
             self.assertEqual(ca.offset('ak', datetime.datetime(2026, 11, 1, 10, 0, tzinfo=U), z), -9, z)
         self.assertEqual(ca.offset('ak', datetime.datetime(2026, 11, 2, tzinfo=U)), -9)  # a spot without its own zone: Anchorage time
 
-    def test_far_only_in_alaska(self):
-        # no spot outside Alaska has a main buoy 100 km or more away, so the far rule changes nothing elsewhere
+    def test_far_only_in_alaska_and_yangyang(self):
+        # outside Alaska only Korea's two Yangyang beaches, 119 and 125 km from Donghae's buoy, have a main buoy 100 km or more away, so
+        # the far rule changes nothing elsewhere
         first = lambda v: v[0] if isinstance(v, list) and v else v if isinstance(v, (int, float)) else 0
-        self.assertEqual(sorted(s['id'] for s in SPOTS if first(s.get('buoyKm')) >= 100), sorted(FAR))
+        self.assertEqual(sorted(s['id'] for s in SPOTS if first(s.get('buoyKm')) >= 100), sorted(FAR + ['jukdo', 'surfyy']))
 
 
 FIXDIR = os.path.join(HERE, 'fixtures', 'ak')  # live copies from 2026-10-19 00:26 UTC, less Sitka's buoy 46084 and the Kodiak wind

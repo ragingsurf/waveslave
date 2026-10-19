@@ -149,8 +149,17 @@ header{position:relative}
   .daydet .big small{font-size:14px;color:var(--muted)}
   .daydet .s{display:grid;gap:3px;font-size:13px;color:var(--muted)}.daydet .s .per{color:var(--swell);font-weight:600}
   .daydet .bar{grid-column:1/-1}
-  .daydet .nav{grid-column:1/-1;display:flex;justify-content:space-between}
-  .daydet .nav button{appearance:none;border:0;background:none;color:var(--muted);font:inherit;font-size:13px;padding:6px 0;cursor:pointer}
+  /* The card's foot says ‹‹‹ Swipe ››› (Bryan, Oct 19): the arrows light up one after another outward from the word, in the picked day's
+     colour, as if moving the way the card goes; the side with no day to go to stays dark. Opacity and transform only, so it costs no repaints. */
+  .daydet .swipe{grid-column:1/-1;display:flex;justify-content:center;align-items:center;gap:2px;padding:3px 0 0;font-size:13px;font-weight:700;letter-spacing:.04em;line-height:1;color:var(--muted)}
+  .daydet .swipe > span{margin-inline:8px}
+  .daydet .swipe b{display:flex;gap:2px}
+  .daydet .swipe i{display:inline-block;font:800 24px/.8 var(--display);font-style:normal;color:var(--rc,var(--sea));text-shadow:0 0 6px var(--rc,var(--sea)),0 0 12px var(--rc,var(--sea));opacity:.18;animation:swipeGlow 1.5s ease-in-out infinite}
+  .daydet .swipe .l i{--x:-3px}.daydet .swipe .r i{--x:3px}
+  .daydet .swipe .l i:nth-child(3),.daydet .swipe .r i:nth-child(1){animation-delay:0s}
+  .daydet .swipe .l i:nth-child(2),.daydet .swipe .r i:nth-child(2){animation-delay:.16s}
+  .daydet .swipe .l i:nth-child(1),.daydet .swipe .r i:nth-child(3){animation-delay:.32s}
+  .daydet .swipe .off i{animation:none;opacity:.12;text-shadow:none}
 }
 .day{appearance:none;font:inherit;color:inherit;text-align:left;cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;display:grid;gap:6px}
 @media (hover:hover){.day:hover{border-color:var(--sea)}}  /* phones keep :hover stuck on the last tapped tile, which looked like a second "today" */
@@ -181,7 +190,6 @@ header{position:relative}
   box-shadow:0 0 0 5px color-mix(in srgb,var(--rc) 12%,transparent),0 0 60px -10px color-mix(in srgb,var(--rc) 45%,transparent)}
 .sth{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px}
 .stt{font:800 24px/1 var(--display);font-stretch:115%;letter-spacing:-.01em}
-.stp{font-size:13px;font-weight:700;color:var(--bg);background:var(--rc);padding:5px 12px;border-radius:999px;transition:background-color .36s}
 .stage .daypanel{background:transparent;border:0;border-top:1px solid color-mix(in srgb,var(--rc) 40%,transparent);border-radius:0;padding:16px 2px 0}
 .stage .daypanel h2{color:var(--rc);transition:color .36s}
 @media (min-width:561px){
@@ -196,11 +204,10 @@ header{position:relative}
   .stage .daydet{border-color:var(--rc)}
   /* Phones: the strip, its day card and the chart all fit on one screen (Bryan, Oct 19). */
   .stage{gap:10px;padding-top:12px}
-  .sth{flex-wrap:nowrap;gap:8px}.stt{font-size:20px;white-space:nowrap}.stp{font-size:12px;padding:4px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .stt{font-size:20px;white-space:nowrap}
   .stage #outH{display:none}
   .stage .daydet{margin-top:8px;padding:8px 12px;gap:2px 12px}
   .stage .daydet .big{font-size:24px}
-  .stage .daydet .nav button{padding:2px 0}
   .stage .daypanel{padding-top:10px}
   .stage .ph{margin-bottom:6px}.stage .ph h2{display:none}
   .stage .readout{margin-bottom:8px}
@@ -229,7 +236,11 @@ svg text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
 .quick{display:flex;flex-wrap:wrap;gap:10px}
 /* The country buttons fit a phone: their side padding shrinks on narrow screens (more in Japanese, whose names are longer), and if they still
    don't fit, the row scrolls sideways inside itself like the spot picker, so the page never slides sideways. */
-.ctry{position:relative;display:flex;width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none;overscroll-behavior-x:contain;gap:2px;padding:3px;margin:0 0 8px;border-radius:99px;background:var(--panel);border:1px solid var(--line)}
+/* Forecast / Map, the countries and the spots are one group of controls, evenly and closely spaced (Bryan, Oct 19); the spot row's 2px of
+   padding (room for its glow) is taken back so it sits the same distance under the countries as they do under Forecast / Map. */
+.ctl{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
+.ctl .picker{margin-top:-2px}
+.ctry{position:relative;display:flex;width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none;overscroll-behavior-x:contain;gap:2px;padding:3px;margin:0;border-radius:99px;background:var(--panel);border:1px solid var(--line)}
 .ctry::-webkit-scrollbar{display:none}
 /* Six countries don't fit one row on most phones: the row's edge fades where buttons are hidden (more-l / more-r, set as it scrolls). */
 .ctry.more-r{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 32px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 32px),transparent)}
@@ -323,6 +334,8 @@ html{overscroll-behavior-y:none}
   text-shadow:0 0 6px rgba(255,140,0,.7);white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.3)}
 .ptr.spin{animation:ptrblink .7s steps(1) infinite}
 @keyframes ptrblink{50%{opacity:.35}}
+@keyframes swipeGlow{0%,60%,100%{opacity:.18;transform:none}25%{opacity:1;transform:translateX(var(--x,0))}}
+@media (prefers-reduced-motion:reduce){.daydet .swipe i{animation:none;opacity:.7}.daydet .swipe .off i{opacity:.12}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 .tabs{position:relative;display:flex;gap:4px;padding:4px;border-radius:99px;background:var(--panel);border:1px solid var(--line);width:max-content}
 .tabs button{border:0;background:none;color:var(--muted);font:600 14px/1 "Public Sans",system-ui,sans-serif;padding:8px 16px;border-radius:99px;cursor:pointer;position:relative;z-index:1;transition:color .36s,text-shadow .36s}
@@ -430,9 +443,11 @@ html{overscroll-behavior-y:none}
     <div class="lang" id="lang" role="group" aria-label="Language / 語言 / 言語"><button data-l="en" aria-pressed="true" lang="en">EN</button><button data-l="zh" aria-pressed="false" lang="zh-Hant-TW">中文</button><button data-l="ja" aria-pressed="false" lang="ja">日本語</button></div>
     <span class="fresh" id="fresh">Data snapshot</span>
   </header>
-  <nav class="tabs" role="tablist" aria-label="View"><button role="tab" data-v="fc" aria-selected="true" data-zh="預報" data-ja="予報">Forecast</button><button role="tab" data-v="ws" aria-selected="false" data-zh="地圖" data-ja="地図">Map</button></nav>
-  <div class="ctry" id="ctry" role="group" aria-label="Country"><button data-c="tw" data-zh="台灣" data-ja="台湾">Taiwan</button><button data-c="jp" data-zh="日本" data-ja="日本">Japan</button><button data-c="kr" data-zh="韓國" data-ja="韓国">Korea</button><button data-c="hk" data-zh="香港" data-ja="香港">Hong Kong</button><button data-c="hn" data-zh="海南" data-ja="海南島">Hainan</button><button data-c="ph" data-zh="菲律賓" data-ja="フィリピン">Philippines</button><button data-c="id" data-zh="印尼" data-ja="インドネシア">Indonesia</button><button data-c="ca" data-zh="加州" data-ja="カリフォルニア">California</button><button data-c="hi" data-zh="夏威夷" data-ja="ハワイ">Hawaii</button><button data-c="au" data-zh="澳洲" data-ja="オーストラリア">Australia</button><button data-c="nz" data-zh="紐西蘭" data-ja="ニュージーランド">New Zealand</button><button data-c="pi" data-zh="南太平洋" data-ja="南太平洋">South Pacific</button><button data-c="mi" data-zh="密克羅尼西亞" data-ja="ミクロネシア">Micronesia</button><button data-c="nw" data-zh="太平洋西北" data-ja="太平洋岸北西部">Pacific NW</button><button data-c="ak" data-zh="阿拉斯加" data-ja="アラスカ">Alaska</button></div>
-  <nav class="picker" id="picker" aria-label="Choose a spot" data-zh-aria-label="選擇浪點" data-ja-aria-label="ポイントを選ぶ"></nav>
+  <div class="ctl">
+    <nav class="tabs" role="tablist" aria-label="View"><button role="tab" data-v="fc" aria-selected="true" data-zh="預報" data-ja="予報">Forecast</button><button role="tab" data-v="ws" aria-selected="false" data-zh="地圖" data-ja="地図">Map</button></nav>
+    <div class="ctry" id="ctry" role="group" aria-label="Country"><button data-c="tw" data-zh="台灣" data-ja="台湾">Taiwan</button><button data-c="jp" data-zh="日本" data-ja="日本">Japan</button><button data-c="kr" data-zh="韓國" data-ja="韓国">Korea</button><button data-c="hk" data-zh="香港" data-ja="香港">Hong Kong</button><button data-c="hn" data-zh="海南" data-ja="海南島">Hainan</button><button data-c="ph" data-zh="菲律賓" data-ja="フィリピン">Philippines</button><button data-c="id" data-zh="印尼" data-ja="インドネシア">Indonesia</button><button data-c="ca" data-zh="加州" data-ja="カリフォルニア">California</button><button data-c="hi" data-zh="夏威夷" data-ja="ハワイ">Hawaii</button><button data-c="au" data-zh="澳洲" data-ja="オーストラリア">Australia</button><button data-c="nz" data-zh="紐西蘭" data-ja="ニュージーランド">New Zealand</button><button data-c="pi" data-zh="南太平洋" data-ja="南太平洋">South Pacific</button><button data-c="mi" data-zh="密克羅尼西亞" data-ja="ミクロネシア">Micronesia</button><button data-c="nw" data-zh="太平洋西北" data-ja="太平洋岸北西部">Pacific NW</button><button data-c="ak" data-zh="阿拉斯加" data-ja="アラスカ">Alaska</button></div>
+    <nav class="picker" id="picker" aria-label="Choose a spot" data-zh-aria-label="選擇浪點" data-ja-aria-label="ポイントを選ぶ"></nav>
+  </div>
 
   <div id="viewFc">
   <section class="now" aria-labelledby="nowH">
@@ -447,7 +462,7 @@ html{overscroll-behavior-y:none}
 
 
   <div class="stage" id="stage">
-  <div class="sth"><h2 class="stt" data-zh="逐日浪況" data-ja="日ごとの波">Day by day</h2><span class="stp" data-zh="👆 點選一天，下方圖表跟著換" data-ja="👆 日を選ぶとグラフが変わる">👆 Tap a day to chart it</span></div>
+  <div class="sth"><h2 class="stt" data-zh="逐日浪況" data-ja="日ごとの波">Day by day</h2></div>
   <section aria-label="Last 4 days and 5-day outlook">
     <div class="label" id="outH" style="margin-bottom:8px">Last 4 days · 5-day outlook</div>
     <div class="days" id="days"></div>
@@ -1854,18 +1869,17 @@ function drawDays(){
       <span class="bar"><i style="width:${(d.peakS/8*100).toFixed(0)}%;background:${RATE[r][1]}"></i></span>
       <span class="mini"><i>${DOW[new Date(d.key+"T00:00Z").getUTCDay()].slice(isZh()?1:0, 2)}</i><i>${+d.key.slice(8)}</i><b>${r1(hi)}</b><u style="background:${RATE[r][1]}"></u></span>
       <span class="w">${RATE[r][0]}${isZh() ? (d.avgKt!=null?` · 風 ${Math.round(d.avgKt)} kt`:" · 無風力資料") : isJa() ? (d.avgKt!=null?` · 風 ${Math.round(d.avgKt)} kt`:" · 風データなし") : d.avgKt!=null?` · ${Math.round(d.avgKt)} kt wind`:" · no wind data"}</span></button>`; }).join("");
-  // Phone card for the picked day (hidden on computers, where the dock tile itself opens up), with ‹ › to step a day.
-  const b = el.querySelectorAll(".day")[sel], q = c => b.querySelector(c), nm = i => dayInfo[i] ? dayName(dayInfo[i].key,todayKey) : "", det = document.getElementById("dayDet");
+  // Phone card for the picked day (hidden on computers, where the dock tile itself opens up); a swipe steps a day, as its foot says.
+  const b = el.querySelectorAll(".day")[sel], q = c => b.querySelector(c), det = document.getElementById("dayDet");
   document.getElementById("stage").style.setProperty("--rc", RATE[rate(dayInfo[sel].peakS)][1]);
   det.className = "daydet"+(dayInfo[sel].hist?" hist":"");
   det.innerHTML = `<div class="k"><span>${q(".dn").innerHTML}</span><small>${q(".tag")?q(".tag").textContent:""}</small></div>
     <span class="big mono">${q(".big").innerHTML}</span><span class="s"><span class="per mono">${q(".per").textContent}</span><span>${q(".w").textContent}</span></span>${q(".bar").outerHTML}
-    <span class="nav"><button data-d="-1"${sel>0?"":" hidden"}>‹ ${nm(sel-1)}</button><button data-d="1"${sel<dayInfo.length-1?"":" hidden"}>${nm(sel+1)} ›</button></span>`;
+    <span class="swipe" aria-hidden="true"><b class="l${sel>0?"":" off"}"><i>‹</i><i>‹</i><i>‹</i></b><span>${isZh()?"滑動":isJa()?"スワイプ":"Swipe"}</span><b class="r${sel<dayInfo.length-1?"":" off"}"><i>›</i><i>›</i><i>›</i></b></span>`;
   dock();
 }
 { const det = document.getElementById("dayDet"), go = (d, later) => { const n = Math.max(0, Math.min(dayInfo.length-1, sel+d)); if(n===sel) return false; sel = n; drawDays();
     if(later) setTimeout(drawDay, 220); else drawDay(); return true; };  // after a swipe the chart waits for the slide, so the card doesn't stutter
-  det.onclick = e => { const b = e.target.closest("button[data-d]"); if(b) go(+b.dataset.d); };
   // Swipe the card left for the next day, right for the day before (Bryan, Oct 16); it follows the finger and slides the new day in.
   // Touch events, not pointer events: iPhones cancel the pointer as soon as the page starts to scroll, which made the card snap or skip mid-swipe.
   // Once a swipe is sideways, preventDefault keeps the page from scrolling under it.

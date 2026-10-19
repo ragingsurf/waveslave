@@ -188,6 +188,15 @@ test("isoPick", () => {
   assert.equal(name(M.isoPick(G, 106.52, 110.14, 9.17, 16.79)), "wp");
   assert.equal(name(M.isoPick(G, 100, 119.99, 8.58, 17.57)), "wp");
   assert.equal(name(M.isoPick(G, 100, 120.53, 8.58, 17.57)), "wp");
+  // Papua New Guinea's first opens: its north coast (Lido to Tupira) upright, then sideways on a phone and a 20:9 phone, then New Ireland
+  // (Kavieng to Rubio) the same three ways. Sideways both lie inside its grid (8°S–0°, 138–154°E), and New Ireland upright too; upright the
+  // north coast's width sets the zoom and its height runs past the grid, so the Pacific layer draws there.
+  assert.equal(name(M.isoPick(G, 140.47, 146.07, -10.06, 2)), "pac");
+  assert.equal(name(M.isoPick(G, 139.88, 146.82, -5.17, -1.97)), "pg");
+  assert.equal(name(M.isoPick(G, 139.79, 146.91, -5.17, -1.97)), "pg");
+  assert.equal(name(M.isoPick(G, 150.4, 152.52, -5.31, -0.71)), "pg");
+  assert.equal(name(M.isoPick(G, 149.73, 153.19, -3.81, -2.21)), "pg");
+  assert.equal(name(M.isoPick(G, 149.68, 153.24, -3.81, -2.21)), "pg");
   assert.equal(M.isoPick(G.slice(0, 11), 95, 170, -5, 50), null); // no Pacific grid
   // Half a degree of slack past a box edge, and a grid without pressure is passed over.
   assert.equal(name(M.isoPick(G, 99.6, 123, 21.75, 25.75)), "wp");

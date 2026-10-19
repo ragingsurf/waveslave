@@ -18,16 +18,16 @@ class Placeholders(unittest.TestCase):
     # A new country grid needs its __NAME__ filled in refresh.sh's page step and in tool.py, which builds test pages from an earlier build's data.
     def test_refresh_fills_every_placeholder(self):
         names = sorted(set(re.findall(r'__([A-Z]+)__', read('template.html'))))
-        self.assertIn('GRIDID', names); self.assertIn('GRIDNZ', names); self.assertIn('GRIDPI', names)
+        self.assertIn('GRIDID', names); self.assertIn('GRIDNZ', names); self.assertIn('GRIDPI', names); self.assertIn('GRIDAK', names)
         for n in names: self.assertIn("replace('__%s__'" % n, read('refresh.sh'), n)
 
     def test_tool_fills_every_placeholder(self):
         spec = importlib.util.spec_from_file_location('maptool', os.path.join(ROOT, 'tests', 'map', 'tool.py'))
         tool = importlib.util.module_from_spec(spec); spec.loader.exec_module(tool)
         tmp = tempfile.mkdtemp(); src, out = os.path.join(tmp, 'built.html'), os.path.join(tmp, 'out.html')
-        # a page as refresh.sh builds it now, one from before the South Pacific's grid, one from before New Zealand's and one from before
-        # Indonesia's, whose Pacific Northwest grid must still be found
-        for keys in (('wp', 'ca', 'hi', 'au', 'id', 'nw', 'nz', 'pi'), ('wp', 'ca', 'hi', 'au', 'id', 'nw', 'nz'), ('wp', 'ca', 'hi', 'au', 'id', 'nw'), ('wp', 'ca', 'hi', 'au', 'nw')):
+        # a page as refresh.sh builds it now, one from before Alaska's grid, one from before the South Pacific's, one from before New Zealand's
+        # and one from before Indonesia's, whose Pacific Northwest grid must still be found
+        for keys in (('wp', 'ca', 'hi', 'au', 'id', 'nw', 'nz', 'pi', 'ak'), ('wp', 'ca', 'hi', 'au', 'id', 'nw', 'nz', 'pi'), ('wp', 'ca', 'hi', 'au', 'id', 'nw', 'nz'), ('wp', 'ca', 'hi', 'au', 'id', 'nw'), ('wp', 'ca', 'hi', 'au', 'nw')):
             with open(src, 'w', encoding='utf-8') as f:
                 f.write('<img src="data:image/jpeg;base64,AA==" alt="Wave of the week">\n<script>const ALL = {"spots": {}};\n'
                         'const RAW = {%s, pac: null};</script>' % ', '.join('%s: {"g": "%s"}' % (k, k) for k in keys))
@@ -38,3 +38,4 @@ class Placeholders(unittest.TestCase):
             self.assertIn('id: {"g": "id"}' if 'id' in keys else 'id: null', html)
             self.assertIn('nz: {"g": "nz"}' if 'nz' in keys else 'nz: null', html)
             self.assertIn('pi: {"g": "pi"}' if 'pi' in keys else 'pi: null', html)
+            self.assertIn('ak: {"g": "ak"}' if 'ak' in keys else 'ak: null', html)

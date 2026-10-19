@@ -82,9 +82,9 @@ inside the forecast window, since the page uses one offset per spot.
 - **Coastline**: `tools/pacific_coast.py` cuts Natural Earth's land to 65°N, adding about 7 KB to the page; today's coast comes out
   unchanged.
 - **Pacific layer**: 50°S–65°N, 24 rows (744 points), fetched in the same two chunks of rows.
-- **Home view**: one view for all 8 spots, 17° of longitude wide like the South Pacific's western part: held sideways the spots fill
-  the middle; upright their width sets the zoom, and the view, kept inside the box, puts them in its upper part, clear of a spot's
-  forecast card. With nothing saved, the first open is the home view, as for the South Pacific. The map's country button is Alaska's
+- **Home view**: one view for all 8 spots, which spread over 17° of longitude (Kodiak to Sitka), centred at 144.6°W, 58.4°N and showing
+  at least 24° of longitude and 6.2° of latitude. Held sideways the spots fill the middle; upright their width sets the zoom, and the
+  view, kept inside the box, puts them in its upper part, clear of a spot's forecast card. With nothing saved, the first open is the home view, as for the South Pacific. The map's country button is Alaska's
   outline (the mainland's southern coast with Kodiak).
 
 ## Architecture

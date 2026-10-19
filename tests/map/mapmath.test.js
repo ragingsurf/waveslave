@@ -129,10 +129,10 @@ test("layered", () => {
 
 test("isoPick", () => {
   // The real grids' headers: lat0, dlat, nlat, lon0, dlon, nlon.
-  const M = load(), real = {hi: [15, 1, 12, -162, 1, 11], ca: [30, 1, 13, -128, 1, 13], au: [-44, 2, 13, 110, 2, 24], id: [-16, 2, 8, 100, 2, 17], nz: [-50, 2, 10, 150, 2, 25], pi: [-24, 2, 8, 170, 2, 24], wp: [0, 3, 16, 100, 3, 21], pac: [-50, 5, 23, 100, 5, 31]};
+  const M = load(), real = {hi: [15, 1, 12, -162, 1, 11], ca: [30, 1, 13, -128, 1, 13], au: [-44, 2, 13, 110, 2, 24], id: [-16, 2, 8, 100, 2, 17], nz: [-50, 2, 10, 150, 2, 25], pi: [-24, 2, 8, 170, 2, 24], wp: [0, 3, 16, 100, 3, 21], pac: [-50, 5, 24, 100, 5, 31], ak: [54, 1, 9, -158, 2, 15]};
   const grid = (n, pres = () => 1012) => { const [lat0, dlat, nlat, lon0, dlon, nlon] = real[n]; return M.mkGrid(n, packGrid({lat0, dlat, nlat, lon0, dlon, nlon, pres})); };
-  const G = ["hi", "ca", "au", "id", "nz", "pi", "wp", "pac"].map(n => grid(n)), name = g => g ? g.name : null;
-  assert.deepEqual(G.map(g => g.box), [{l: 198, r: 208, s: 15, n: 26}, {l: 232, r: 244, s: 30, n: 42}, {l: 110, r: 156, s: -44, n: -20}, {l: 100, r: 132, s: -16, n: -2}, {l: 150, r: 198, s: -50, n: -32}, {l: 170, r: 216, s: -24, n: -10}, {l: 100, r: 160, s: 0, n: 45}, {l: 100, r: 250, s: -50, n: 60}]);
+  const G = ["hi", "ca", "ak", "au", "id", "nz", "pi", "wp", "pac"].map(n => grid(n)), name = g => g ? g.name : null;
+  assert.deepEqual(G.map(g => g.box), [{l: 198, r: 208, s: 15, n: 26}, {l: 232, r: 244, s: 30, n: 42}, {l: 202, r: 230, s: 54, n: 62}, {l: 110, r: 156, s: -44, n: -20}, {l: 100, r: 132, s: -16, n: -2}, {l: 150, r: 198, s: -50, n: -32}, {l: 170, r: 216, s: -24, n: -10}, {l: 100, r: 160, s: 0, n: 45}, {l: 100, r: 250, s: -50, n: 65}]);
   assert.equal(name(M.isoPick(G, 119, 123, 21.75, 25.75)), "wp"); // Taiwan
   assert.equal(name(M.isoPick(G, 95, 170, -5, 50)), "pac"); // wider than the West Pacific
   assert.equal(name(M.isoPick(G, 199, 207, 16, 25)), "hi");
@@ -150,18 +150,23 @@ test("isoPick", () => {
   assert.equal(name(M.isoPick(G, 195.65, 214.49, -23.45, -15.45)), "pi");
   assert.equal(name(M.isoPick(G, 174.05, 191.65, -34.78, 0.95)), "pac");
   assert.equal(name(M.isoPick(G, 197.47, 212.67, -34.12, -3.44)), "pac");
-  assert.equal(M.isoPick(G.slice(0, 7), 95, 170, -5, 50), null); // no Pacific grid
+  // Alaska's home view held sideways, on a phone and a 20:9 phone: inside its grid. Upright its width sets the zoom and the view runs from the
+  // box's top, 65°N, down past the grid, so the Pacific layer draws there.
+  assert.equal(name(M.isoPick(G, 202.6, 228.2, 55.16, 61.37)), "ak");
+  assert.equal(name(M.isoPick(G, 202.25, 228.55, 55.16, 61.37)), "ak");
+  assert.equal(name(M.isoPick(G, 203.4, 227.4, 32.48, 65)), "pac");
+  assert.equal(M.isoPick(G.slice(0, 8), 95, 170, -5, 50), null); // no Pacific grid
   // Half a degree of slack past a box edge, and a grid without pressure is passed over.
   assert.equal(name(M.isoPick(G, 99.6, 123, 21.75, 25.75)), "wp");
   assert.equal(name(M.isoPick(G, 99.4, 123, 21.75, 25.75)), "pac");
-  assert.equal(name(M.isoPick([grid("wp", null), G[7]], 119, 123, 21.75, 25.75)), "pac");
+  assert.equal(name(M.isoPick([grid("wp", null), G[8]], 119, 123, 21.75, 25.75)), "pac");
   assert.equal(M.isoPick([grid("wp", null), grid("pac", null)], 119, 123, 21.75, 25.75), null);
 });
 
 test("cut", () => {
   const M = load();
   assert.deepEqual(M.CUTX, [100, 163, 180, 232, 246, 250]);
-  assert.deepEqual(M.CUTY, [-50, -5, 30, 43, 50, 60]);
+  assert.deepEqual(M.CUTY, [-50, -5, 30, 43, 50, 65]);
   assert.equal(M.cut(163, 10, 163, 12), true);
   assert.equal(M.cut(163, 10, 163.01, 12), false);
   assert.equal(M.cut(120, -5, 121, -5), true);
@@ -205,12 +210,12 @@ test("my and iy", () => {
 
 test("cover", () => {
   const M = load();
-  assert.deepEqual(M.PBOX, {l: 100, r: 250, s: -50, n: 60});
+  assert.deepEqual(M.PBOX, {l: 100, r: 250, s: -50, n: 65});
   const wp = {l: 100, r: 160, s: 0, n: 45};
   assert.deepEqual(M.OLDBOX, {tw: wp, jp: wp, kr: {l: 117.1, r: 138.4, s: 31.6, n: 39.6}, ph: {l: 103.66, r: 141.54, s: 5.18, n: 22.12}, id: {l: 101.77, r: 130.23, s: -15.18, n: -2.21}, ca: {l: 232, r: 244, s: 30, n: 42}, hi: {l: 198, r: 208, s: 15, n: 26}, au: {l: 110, r: 156, s: -44, n: -20}, nz: {l: 151.08, r: 197.52, s: -49.3, n: -33.31}, nw: {l: 231, r: 238, s: 42, n: 50}});
   // Upright the Pacific box fills the screen top to bottom, sideways side to side.
-  near(M.cover(M.PBOX, 390, 844), 844/(M.my(60) - M.my(-50)));
-  near(M.cover(M.PBOX, 390, 844), 6.328, 1e-3);
+  near(M.cover(M.PBOX, 390, 844), 844/(M.my(65) - M.my(-50)));
+  near(M.cover(M.PBOX, 390, 844), 5.852, 1e-3);
   near(M.cover(M.PBOX, 844, 390), 844/150);
   near(M.cover(M.OLDBOX.ca, 390, 844), 844/(M.my(42) - M.my(30)));
   // Korea's box opens a phone on Korea's home view (cy 35.7, 8 degrees of latitude) both ways up, to within a part in a thousand,
@@ -222,7 +227,7 @@ test("cover", () => {
 });
 
 test("clampTo", () => {
-  const M = load(), Y = M.iy((M.my(60) + M.my(-50))/2);
+  const M = load(), Y = M.iy((M.my(65) + M.my(-50))/2);
   // Zoomed all the way out upright, the box just fills the screen top to bottom: from Taiwan the view goes as far west as it can, on the box's middle row.
   const zmin = M.cover(M.PBOX, 390, 844), [ox, oy] = M.clampTo(M.PBOX, 390, 844, zmin, 120, 23.75);
   near(ox, 100 + 390/2/zmin); near(oy, Y);
@@ -232,8 +237,8 @@ test("clampTo", () => {
   // Zoomed in it keeps the view inside the box, the y axis in Mercator y: half the screen is 422/20 of it.
   const [ex, ey] = M.clampTo(M.PBOX, 390, 844, 20, 95, 0);
   near(ex, 100 + 390/2/20); near(ey, 0);
-  const [nx, ny] = M.clampTo(M.PBOX, 390, 844, 20, 251, 59);
-  near(nx, 250 - 390/2/20); near(ny, M.iy(M.my(60) - 844/2/20));
+  const [nx, ny] = M.clampTo(M.PBOX, 390, 844, 20, 251, 64);
+  near(nx, 250 - 390/2/20); near(ny, M.iy(M.my(65) - 844/2/20));
   assert.deepEqual(M.clampTo(M.PBOX, 390, 844, 20, 175, 23.75), [175, 23.75]);
 });
 

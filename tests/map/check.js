@@ -139,14 +139,14 @@ const CHECKS = {
       return out; });
     if (off.length) throw new Error(off.join("; "));
   },
-  // Zooming out stops once the Pacific box (100°E–110°W, 50°S–60°N) fills the screen, so no dark sea shows around it:
+  // Zooming out stops once the Pacific box (100°E–110°W, 50°S–65°N) fills the screen, so no dark sea shows around it:
   // the view stays inside the box and spans all of it one way, its whole height upright and its whole width sideways.
   async zoomOutFillsScreen(open) {
     const page = await open(home("tw")); await zoomOut(page);
     const v = await page.evaluate(() => window.__ws.view()), e = await edges(page), span = `${e.l}..${e.r} by ${e.s}..${e.n}`;
     if (v.z !== v.zmin) throw new Error(`z is ${v.z}, want zmin ${v.zmin}`);
-    if (!(e.l >= 100 - 1e-9 && e.r <= 250 + 1e-9 && e.s >= -50 - 1e-9 && e.n <= 60 + 1e-9)) throw new Error(`the view spans ${span}, past the box's 100..250 by -50..60`);
-    if (!(land ? near(e.l, 100, 1e-6) && near(e.r, 250, 1e-6) : near(e.s, -50, 1e-6) && near(e.n, 60, 1e-6))) throw new Error(`the view spans ${span}, want the box's whole ${land ? "width, 100..250" : "height, -50..60"}`);
+    if (!(e.l >= 100 - 1e-9 && e.r <= 250 + 1e-9 && e.s >= -50 - 1e-9 && e.n <= 65 + 1e-9)) throw new Error(`the view spans ${span}, past the box's 100..250 by -50..65`);
+    if (!(land ? near(e.l, 100, 1e-6) && near(e.r, 250, 1e-6) : near(e.s, -50, 1e-6) && near(e.n, 65, 1e-6))) throw new Error(`the view spans ${span}, want the box's whole ${land ? "width, 100..250" : "height, -50..65"}`);
   },
   // With no saved view the map opens on the country's old map: inside Taiwan's West Pacific box and filling it one way; Australia at its home zoom or closer.
   async firstOpenOldBox(open) {

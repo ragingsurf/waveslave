@@ -12,7 +12,7 @@
 <script>if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));</script>
 <!-- Passcode screen: the page stays hidden until the 4-digit code is entered, then stays unlocked on that device.
      Only a SHA-256 of "waveslave:" + the code is kept here. To change the code: printf 'waveslave:XXXX' | sha256sum, and put the result in H. -->
-<script>/* Locked unless this device already holds the current code's hash. ON switches the whole screen: false = the site opens straight to the forecast. */(function(){var ON=false,H="b200079bce89b4d2c4e55f2ef5812f58c1b9827f5086ae8a08bdf78b0d43bcde";window.__lockHash=H;if(!ON)return;try{if(localStorage.getItem("waveslave-unlock")===H)return}catch(e){}document.documentElement.classList.add("locked")})();</script>
+<script>/* Locked unless this device already holds the current code's hash. ON switches the whole screen: false = the site opens straight to the forecast. */(function(){var ON=true,H="b200079bce89b4d2c4e55f2ef5812f58c1b9827f5086ae8a08bdf78b0d43bcde";window.__lockHash=H;if(!ON)return;try{if(localStorage.getItem("waveslave-unlock")===H)return}catch(e){}document.documentElement.classList.add("locked")})();</script>
 <style>/* Classified Terminal: green screen, TOP SECRET banners; a wrong code flashes everything red. */
 html.locked,html.locked body{overflow:hidden}html.locked body>*{visibility:hidden}
 html.locked::before{content:"";position:fixed;inset:0;z-index:9998;background:#020604}

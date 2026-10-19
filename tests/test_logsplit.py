@@ -486,6 +486,12 @@ class LogSplitHainan(unittest.TestCase):
             self.assertEqual(sorted(records(self.tmp + '/' + d)[-1]['spots']), ids, c)
 
     def test_correct_and_history_hn(self):
+        import datetime
+        # history.py keeps the last 5 days' tides by today's clock, so Dadonghai's tide days move to today's (the 19th to today)
+        today = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)).date(); shift = today - datetime.date(2026, 10, 19)
+        d = json.load(open(self.snap)); t = d['spots']['dadonghai']['tides']
+        d['spots']['dadonghai']['tides'] = {(datetime.date.fromisoformat(x) + shift).isoformat(): v for x, v in t.items()}
+        with open(self.snap, 'w') as f: json.dump(d, f)
         before = json.load(open(self.snap))['spots']
         run(['log.py', self.snap, self.tmp + '/log-hn', 'hn'])
         run(['correct.py', self.snap, self.tmp + '/log-hn', 'hn'])
@@ -494,11 +500,59 @@ class LogSplitHainan(unittest.TestCase):
         for k in ('donghe', 'jukdo', 'cloud9', 'cheungsha'): self.assertEqual(d['spots'][k], before[k])
         t = json.load(open(self.tmp + '/cache/tides-hn.json'))
         self.assertEqual(sorted(t), HN_IDS)
-        self.assertEqual(t['dadonghai']['2026-10-19'], [['02:45', 'H', 138], ['12:30', 'L', 33]])
+        self.assertEqual(t['dadonghai'][today.isoformat()], [['02:45', 'H', 138], ['12:30', 'L', 33]])
         # with no buoy the heights are only rounded to 0.1 m, as everywhere
         self.assertEqual((d['spots']['riyue']['adj']['f'], d['spots']['riyue']['adj']['days']), (1.0, 0))
         self.assertEqual([r[1] for r in d['spots']['riyue']['hourly']], [round(r[1], 1) for r in before['riyue']['hourly']])
         self.assertEqual((d['spots']['riyue']['hist']['buoy'], d['spots']['riyue']['hist']['station']), ([], []))
+
+
+VN_IDS = ['anbang', 'baidai', 'honchong', 'muine', 'mykhe', 'nonnuoc', 'quynhon', 'vungtau']
+
+
+class LogSplitVietnam(unittest.TestCase):
+    # Vietnam's spots have no buoy: their log holds the forecast and, at Bai Dai, Cam Ranh's airport wind, from kr.py on the saved downloads
+    def setUp(self):
+        import datetime
+        sys.path.insert(0, ROOT); import kr
+        self.tmp = tempfile.mkdtemp(); self.snap = os.path.join(self.tmp, 'snap.json')
+        fix = os.path.join(HERE, 'fixtures', 'vn'); d = json.load(open(os.path.join(fix, 'snap_in.json')))
+        kr.fill(d, json.load(open(os.path.join(ROOT, 'spots.json'))), fix, datetime.datetime(2026, 10, 19, 13, 20, tzinfo=datetime.timezone.utc), 'vn')
+        with open(self.snap, 'w') as f: json.dump(d, f)
+
+    def test_log_vn_only(self):
+        run(['log.py', self.snap, self.tmp + '/log-vn', 'vn'])
+        rec = records(self.tmp + '/log-vn')[-1]
+        self.assertEqual(sorted(rec['spots']), VN_IDS)
+        b, m = rec['spots']['baidai'], rec['spots']['mykhe']
+        self.assertEqual((b['buoyId'], b['buoy'], b['station'], len(b['fc'])), (None, [], [['2026-10-19T21:00', 4.0, 20.0]], 24))
+        self.assertEqual((m['buoy'], m['station']), ([], []))
+
+    def test_other_logs_hold_no_vietnam(self):
+        for c, d, ids in (('tw', 'log', ['donghe']), ('kr', 'log-kr', ['jukdo']), ('ph', 'log-ph', ['cloud9']), ('hk', 'log-hk', ['cheungsha']), ('hn', 'log-hn', ['dadonghai'])):
+            run(['log.py', self.snap, self.tmp + '/' + d, c])
+            self.assertEqual(sorted(records(self.tmp + '/' + d)[-1]['spots']), ids, c)
+
+    def test_correct_and_history_vn(self):
+        import datetime
+        # history.py keeps the last 5 days' tides by today's clock, so Bai Dai's tide days move to today's (the 19th to today)
+        today = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)).date(); shift = today - datetime.date(2026, 10, 19)
+        d = json.load(open(self.snap)); t = d['spots']['baidai']['tides']
+        d['spots']['baidai']['tides'] = {(datetime.date.fromisoformat(x) + shift).isoformat(): v for x, v in t.items()}
+        with open(self.snap, 'w') as f: json.dump(d, f)
+        before = json.load(open(self.snap))['spots']
+        run(['log.py', self.snap, self.tmp + '/log-vn', 'vn'])
+        run(['correct.py', self.snap, self.tmp + '/log-vn', 'vn'])
+        run(['history.py', self.snap, self.tmp + '/log-vn', self.tmp + '/cache', 'vn'])
+        d = json.load(open(self.snap))
+        for k in ('donghe', 'jukdo', 'cloud9', 'cheungsha', 'dadonghai'): self.assertEqual(d['spots'][k], before[k])
+        t = json.load(open(self.tmp + '/cache/tides-vn.json'))
+        self.assertEqual(sorted(t), VN_IDS)
+        self.assertEqual(t['baidai'][today.isoformat()], [['00:30', 'H', 133], ['11:00', 'L', 26]])
+        # with no buoy the heights are only rounded to 0.1 m, as everywhere
+        self.assertEqual((d['spots']['mykhe']['adj']['f'], d['spots']['mykhe']['adj']['days']), (1.0, 0))
+        self.assertEqual([r[1] for r in d['spots']['mykhe']['hourly']], [round(r[1], 1) for r in before['mykhe']['hourly']])
+        self.assertEqual((d['spots']['mykhe']['hist']['buoy'], d['spots']['mykhe']['hist']['station']), ([], []))
 
 
 class EveryCountry(unittest.TestCase):

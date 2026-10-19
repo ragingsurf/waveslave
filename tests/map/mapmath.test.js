@@ -183,6 +183,11 @@ test("isoPick", () => {
   assert.equal(name(M.isoPick(G, 109.28, 110.58, 17.1, 19.77)), "wp");
   assert.equal(name(M.isoPick(G, 108.85, 111.01, 17.96, 18.91)), "wp");
   assert.equal(name(M.isoPick(G, 108.82, 111.04, 17.96, 18.91)), "wp");
+  // Vietnam's first open (nothing saved, the home view fitted to the names) upright, then sideways on a phone and a 20:9 phone: it has no
+  // grid of its own either. Sideways the view stops at the Pacific box's west edge, 100°E, which is also the West Pacific grid's.
+  assert.equal(name(M.isoPick(G, 106.52, 110.14, 9.17, 16.79)), "wp");
+  assert.equal(name(M.isoPick(G, 100, 119.99, 8.58, 17.57)), "wp");
+  assert.equal(name(M.isoPick(G, 100, 120.53, 8.58, 17.57)), "wp");
   assert.equal(M.isoPick(G.slice(0, 10), 95, 170, -5, 50), null); // no Pacific grid
   // Half a degree of slack past a box edge, and a grid without pressure is passed over.
   assert.equal(name(M.isoPick(G, 99.6, 123, 21.75, 25.75)), "wp");

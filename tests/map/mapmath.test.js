@@ -102,6 +102,14 @@ test("iso marks highs and lows on the grid's own east longitudes", () => {
   assert.ok(s.lv.some(l => l.s.length > 0), "pressure lines around the low");
 });
 
+test("iso marks no highs or lows on Hong Kong's 0.125° grid", () => {
+  // The same low on Hong Kong's spacing still gets its pressure lines, but no L: 2 points there are only a quarter of a degree.
+  const M = load(), g = M.mkGrid("hk", packGrid({lat0: 21.5, dlat: 0.125, nlat: 5, lon0: 113.5, dlon: 0.125, nlon: 5, pres: (k, i, j) => 1000 + (i - 2)**2 + (j - 2)**2}));
+  g.at(g.t0);
+  assert.deepEqual(g.iso().HL, []);
+  assert.ok(g.segs(2).lv.some(l => l.s.length > 0), "pressure lines around the low");
+});
+
 const fine = {box: {l: 0, r: 10, s: 0, n: 10}, dlon: 1, dlat: 1}, coarse = {box: {l: -20, r: 30, s: -20, n: 30}, dlon: 5, dlat: 5};
 
 test("fade", () => {

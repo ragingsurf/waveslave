@@ -673,7 +673,8 @@ const MAPM = (() => {
               dst[o] = src[o] !== src[o] || !c ? NaN : sm/c; } } };
           for (let q = 0; q < 3; q++) { pass(F, T, ml, mn, mn, 1); pass(T, F, mn, ml, 1, mn); } }
         // Highs and lows: grid points higher or lower than everything within 2 points (6° on the West Pacific grid), placed on the grid's own east longitudes.
-        const HL = []; for (let i = 1; i < nl-1; i++) for (let j = 1; j < nn-1; j++) { const v = raw(i, j); if (isNaN(v)) continue; let hi = true, lo = true;
+        // None on Hong Kong's 0.125° grid, where 2 points are a quarter of a degree and a tenth of a hPa makes an H or L that is no weather system.
+        const HL = []; if (dlat >= 0.5) for (let i = 1; i < nl-1; i++) for (let j = 1; j < nn-1; j++) { const v = raw(i, j); if (isNaN(v)) continue; let hi = true, lo = true;
           for (let di = -2; di <= 2; di++) for (let dj = -2; dj <= 2; dj++) { if (!di && !dj) continue; const u = raw(i+di, j+dj); if (u >= v) hi = false; if (u <= v) lo = false; }
           if (hi || lo) HL.push({lat: lat0+i*dlat, lon: lon0+j*dlon, v, hi}); }
         const f = {F, ml, mn, S, HL, seg: {}}; ISOC.set(k, f); return f; },

@@ -286,6 +286,25 @@ class Refresh(unittest.TestCase):
         self.assertFalse([u for u in second if 'station=SPW' in u])
         self.assertTrue([u for u in second if 'station=TMW' in u] and [u for u in second if 'station=KLW' in u])
 
+    def test_tide_timeout_stops_asking(self):
+        # after a timeout (curl's exit 28) the run asks HKO for nothing more, so a slow HKO can't hold up the build; the next run asks again
+        import re, subprocess, tempfile
+        loop = re.search(r'^  Y0=\$\(TZ=Asia/Hong_Kong .*?^  done; done$', self.sh, re.S | re.M).group(0)
+        tmp = tempfile.mkdtemp(); G = os.path.join(tmp, 'cache'); os.makedirs(G); bin_ = os.path.join(tmp, 'bin'); os.makedirs(bin_)
+        with open(os.path.join(tmp, 'whole.json'), 'w') as f: f.write(json.dumps({'fields': [], 'data': [['01', '01', '0100', '1.00']] * 365}))
+        with open(os.path.join(bin_, 'curl'), 'w') as f:
+            f.write('#!/bin/sh\nout=; url=\nwhile [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift 2;; -A|-m|--retry) shift 2;; -*) shift;; *) url=$1; shift;; esac; done\n'
+                    'echo "$url" >> "$T/calls"\ncase "$url" in *station=TMW*) exit 28;; *) cp "$T/whole.json" "$out";; esac\n')
+        os.chmod(os.path.join(bin_, 'curl'), 0o755)
+        env = dict(os.environ, PATH=bin_ + os.pathsep + os.environ['PATH'], T=tmp)
+        r = subprocess.run(['sh', '-c', 'set -e\nHERE=$1; G=$2\n' + self.hkids + '\n' + loop, 'sh', ROOT, G], capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        y = (datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))) - datetime.timedelta(days=7)).year
+        with open(os.path.join(tmp, 'calls')) as f: calls = f.read().split()
+        self.assertEqual([u.split('station=')[1][:3] for u in calls], ['SPW', 'TMW'])  # Ko Lau Wan, and any second year, wait
+        self.assertIn('hko tide TMW %d fetch failed' % y, r.stderr)
+        self.assertEqual(sorted(os.listdir(G)), ['hk-tide-SPW-%d.json' % y])
+
 
 if __name__ == '__main__':
     unittest.main()

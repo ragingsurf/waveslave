@@ -134,8 +134,9 @@ done
 # airport's reports (METAR) from NOAA's Aviation Weather Center, ECMWF's wind forecast via Open-Meteo from the sea cell nearest each spot,
 # as for Micronesia, and HKO's tide predictions: one file per station and year, kept in cache/ (a year's predictions don't change), for the
 # years of a week before and 12 days after today on Hong Kong's clock, as for New Zealand. HKO answers a bad request with an HTML page
-# and status 200, so a reply is kept only when it holds a whole year of rows; until then the next run asks again. Hong Kong has no open
-# wave buoy. hk.py writes them under the same keys as the other countries.
+# and status 200, so a reply is kept only when it holds a whole year of rows; until then the next run asks again. After a timeout the rest
+# wait for the next run, so a slow HKO can't hold up the build. Hong Kong has no open wave buoy. hk.py writes them under the same keys as
+# the other countries.
 # hkids <field>: the spots' lat or lon, metar for their airports, or tideStation for their HKO stations.
 hkids(){ python3 -I -c "import json,sys;S=[s for s in json.load(open(sys.argv[1])) if s.get('country')=='hk'];f=sys.argv[2]
 W=[w for s in S for w in (lambda v: v if isinstance(v,list) else [v] if v else [])(s.get('windStation'))]
@@ -147,11 +148,13 @@ if [ -n "$(hkids lat)" ]; then
   [ -z "$(hkids metar)" ] || curl -fsSL --retry 2 -m 60 -A "waveslave.tw" -o "$W/dl/metar-hk.json" "https://aviationweather.gov/api/data/metar?ids=$(hkids metar)&format=json&hours=3" || echo "metar hk fetch failed" >&2
   HQ="latitude=$(hkids lat)&longitude=$(hkids lon)&hourly=wind_speed_10m,wind_direction_10m,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=4&cell_selection=sea"
   get openhk "https://api.open-meteo.com/v1/forecast?$HQ&models=ecmwf_ifs" || get openhk "https://api.open-meteo.com/v1/forecast?$HQ" || echo "openhk fetch failed" >&2
-  Y0=$(TZ=Asia/Hong_Kong date -d '-7 days' +%Y); Y1=$(TZ=Asia/Hong_Kong date -d '+12 days' +%Y); [ "$Y1" != "$Y0" ] || Y1=
+  Y0=$(TZ=Asia/Hong_Kong date -d '-7 days' +%Y); Y1=$(TZ=Asia/Hong_Kong date -d '+12 days' +%Y); [ "$Y1" != "$Y0" ] || Y1=; HKO=up
   for y in $Y0 $Y1; do for s in $(hkids tideStation | tr ',' ' '); do
-    f="$G/hk-tide-$s-$y.json"; [ -s "$f" ] && continue
-    { curl -fsSL --retry 2 -m 60 -A "waveslave.tw" -o "$f.new" "https://data.weather.gov.hk/weatherAPI/opendata/opendata.php?dataType=HLT&station=$s&year=$y&rformat=json" &&
-      python3 -I -c "import json,sys;sys.exit(len(json.load(open(sys.argv[1]))['data'])<365)" "$f.new" 2>/dev/null && mv "$f.new" "$f"; } || { rm -f "$f.new"; echo "hko tide $s $y fetch failed" >&2; }
+    f="$G/hk-tide-$s-$y.json"; e=0
+    [ ! -s "$f" ] && [ -n "$HKO" ] || continue
+    curl -fsSL --retry 1 -m 30 -A "waveslave.tw" -o "$f.new" "https://data.weather.gov.hk/weatherAPI/opendata/opendata.php?dataType=HLT&station=$s&year=$y&rformat=json" || e=$?
+    # a whole year of rows, or the reply isn't kept (exit 28 is a timeout: the rest wait for the next run, as for LINZ)
+    [ $e = 0 ] && python3 -I -c "import json,sys;sys.exit(len(json.load(open(sys.argv[1]))['data'])<365)" "$f.new" 2>/dev/null && mv "$f.new" "$f" || { rm -f "$f.new"; echo "hko tide $s $y fetch failed" >&2; [ $e != 28 ] || HKO=; }
   done; done
   python3 -I "$HERE/hk.py" "$W/dl" "$W/snap.json" "$HERE/spots.json" "$G" || echo "hong kong skipped" >&2
 fi
@@ -229,8 +232,8 @@ fi
 # Open-Meteo refuses longitudes past 180, so those are asked for as west ones (182 as -178), as pacific.sh does; the grid keeps them east.
 regrid(){ C=$1; AGE=$2; shift 2
   [ -n "$(python3 -I -c "import json,sys;print(any(s.get('country')==sys.argv[2] for s in json.load(open(sys.argv[1]))) or '')" "$HERE/spots.json" $C)" ] && [ -z "$(find "$G/grid-$C.json" -mmin -$AGE 2>/dev/null)" ] || return 0
-  LA=$(python3 -I -c "import sys;a0,da,na,o0,do,no=map(float,sys.argv[1:]);print(','.join(str(round(a0+i*da,2)) for i in range(int(na)) for j in range(int(no))))" "$@") || return 0
-  LO=$(python3 -I -c "import sys;a0,da,na,o0,do,no=map(float,sys.argv[1:]);print(','.join(str(round((o0+j*do+180)%360-180,2)) for i in range(int(na)) for j in range(int(no))))" "$@") || return 0
+  LA=$(python3 -I -c "import sys;a0,da,na,o0,do,no=map(float,sys.argv[1:]);print(','.join(str(round(a0+i*da,4)) for i in range(int(na)) for j in range(int(no))))" "$@") || return 0
+  LO=$(python3 -I -c "import sys;a0,da,na,o0,do,no=map(float,sys.argv[1:]);print(','.join(str(round((o0+j*do+180)%360-180,4)) for i in range(int(na)) for j in range(int(no))))" "$@") || return 0
   { curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwind-$C.json" "https://api.open-meteo.com/v1/forecast?latitude=$LA&longitude=$LO&hourly=wind_speed_10m,wind_direction_10m,pressure_msl,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
     curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwave-$C.json" "https://marine-api.open-meteo.com/v1/marine?latitude=$LA&longitude=$LO&hourly=wave_height,wave_direction,swell_wave_height,swell_wave_direction,swell_wave_period&models=meteofrance_wave&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
     python3 -I "$HERE/grid.py" "$G/gwind-$C.json" "$G/gwave-$C.json" "$G/grid-$C.new" "$@" && mv "$G/grid-$C.new" "$G/grid-$C.json"; } || echo "$C grid fetch failed, keeping last grid" >&2; }

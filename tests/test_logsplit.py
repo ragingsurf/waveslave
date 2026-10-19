@@ -442,6 +442,11 @@ class LogSplitHongKong(unittest.TestCase):
             self.assertEqual(sorted(records(self.tmp + '/' + d)[-1]['spots']), ids, c)
 
     def test_correct_and_history_hk(self):
+        import datetime
+        # history.py keeps the last 5 days by today's clock, so Big Wave Bay's station reading moves to today
+        today = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)).date().isoformat()
+        d = json.load(open(self.snap)); d['spots']['bigwavebay']['dwind'] = [[today + 'T14:00', 7.6, 90.0]]
+        with open(self.snap, 'w') as f: json.dump(d, f)
         before = json.load(open(self.snap))['spots']
         run(['log.py', self.snap, self.tmp + '/log-hk', 'hk'])
         run(['correct.py', self.snap, self.tmp + '/log-hk', 'hk'])
@@ -452,7 +457,7 @@ class LogSplitHongKong(unittest.TestCase):
         # with no buoy the heights are only rounded to 0.1 m, as everywhere; the station's reading is kept for the past days
         self.assertEqual((d['spots']['bigwavebay']['adj']['f'], d['spots']['bigwavebay']['adj']['days']), (1.0, 0))
         self.assertEqual([r[1] for r in d['spots']['bigwavebay']['hourly']], [round(r[1], 1) for r in before['bigwavebay']['hourly']])
-        self.assertEqual(d['spots']['bigwavebay']['hist']['station'], [['2026-10-19T14:00', 7.6, 90.0]])
+        self.assertEqual(d['spots']['bigwavebay']['hist']['station'], [[today + 'T14:00', 7.6, 90.0]])
 
 
 if __name__ == '__main__':

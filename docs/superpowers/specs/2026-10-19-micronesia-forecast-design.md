@@ -118,8 +118,9 @@ none the map draws the coarser grids there.
 
 ## Testing
 
-- `tests/test_mi.py`, from one saved copy of each new download (Pohnpei's and Arno's buoys, a silent Guam buoy, Kalo's rows with no
-  waves, Apra Harbor's station, the airports' reports, ECMWF's wind, NOAA's three stations in UTC, the tide model): the 8 spots are
+- `tests/test_mi.py`, from one saved copy of each new download (Pohnpei's and Arno's buoys, Kalo's rows with no waves, Apra Harbor's
+  station, the airports' reports, ECMWF's wind, NOAA's three stations in UTC, the tide model; Guam's, Saipan's and Kosrae's buoys have
+  no file: NDBC serves none for a buoy silent this long, so the build's fetch fails, as it did on 2026-10-19): the 8 spots are
   complete; `pi.py mi` gives each spot its offset (+10, +11, +12), P-Pass North Point's rows, Majuro Arno's when Kalo has no waves,
   a quiet buoy at Guam's spots, Guam's airport wind and Apra Harbor's when the airport is silent, no wind at Kosrae from a stale
   report, NOAA's tides on each spot's clock and the model's with `tideModel`; filling Micronesia leaves the South Pacific alone and

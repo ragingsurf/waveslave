@@ -1,6 +1,6 @@
 // Browser checks and phone screenshots of a built page (build one with tests/map/tool.py).
 // Usage: node tests/map/check.js <page.html> <outdir> shots|checks [land]
-//   shots   the sixteen home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
+//   shots   the seventeen home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
 //           On a page whose hook can zoom, also zoomed all the way out in each layer (out-wind, out-waves, out-swell, out-rain) and a swell across 180° (dateline).
 //   checks  prints ok / FAIL / skip for each check, and exits 1 on any FAIL or page error. Needs the page's test hook, window.__ws.
 // Every page opens in its own fresh browser context, offline (only the page itself loads, no service worker): a phone 390x844 (844x390 with land),
@@ -20,7 +20,7 @@ const NOW = Date.now();
 // Home views: name, spot, saved-view key, centre. Saved as {cx, cy, k: 1}, the way main and the branch both read it (California and Hawaii still negative).
 const HOMES = [["tw", "donghe", "waveslave-mapview", 120.9, 23.75], ["jp", "ichinomiya", "waveslave-mapview", 135.6, 33.4], ["ca", "trestles", "waveslave-mapview-ca", -119.5, 35.3],
   ["hi", "pipeline", "waveslave-mapview-hi", -157.3, 20.6], ["au-e", "snapper", "waveslave-mapview-au-e", 152, -32.5], ["au-w", "margaret", "waveslave-mapview-au-w", 115.5, -32.5],
-  ["nw", "coxbay", "waveslave-mapview-nw", -124.7, 46.1], ["kr", "jukdo", "waveslave-mapview-kr", 127.75, 35.7],
+  ["nw", "coxbay", "waveslave-mapview-nw", -124.7, 46.1], ["kr", "jukdo", "waveslave-mapview-kr", 127.75, 35.7], ["hk", "cheungsha", "waveslave-mapview-hk", 114.17, 22.32],
   ["ph", "cloud9", "waveslave-mapview-ph", 122.6, 13.8], ["id", "uluwatu", "waveslave-mapview-id", 116, -8.75], ["nz", "raglan", "waveslave-mapview-nz", 174.3, -41.8],
   ["pi-w", "cloudbreak", "waveslave-mapview-pi-w", -177.15, -17.8], ["pi-e", "teahupoo", "waveslave-mapview-pi-e", -154.93, -19.5],
   ["ak", "cannonbeach", "waveslave-mapview-ak", -144.6, 58.4], ["mi-w", "umatac", "waveslave-mapview-mi-w", 145.22, 14.24], ["mi-e", "ppass", "waveslave-mapview-mi-e", 164.74, 6.21]];
@@ -33,12 +33,13 @@ const OUT = [...["wind", "waves", "swell", "rain"].map(l => ["out-" + l, l, null
 const PAC = !/\bpac: null\s*\}/.test(fs.readFileSync(file, "utf8"));
 // Whether it carries the Pacific Northwest grid (a grid is a JSON object, unlike the nw: {l: ...} boxes in the page's code).
 const NWG = /\bnw: \{"/.test(fs.readFileSync(file, "utf8"));
-// And Indonesia's (none in a build from before Indonesia, or before its first grid fetch), and New Zealand's, the South Pacific's, Alaska's and Micronesia's likewise.
+// And Indonesia's (none in a build from before Indonesia, or before its first grid fetch), and New Zealand's, the South Pacific's, Alaska's, Micronesia's and Hong Kong's likewise.
 const IDG = /\bid: \{"/.test(fs.readFileSync(file, "utf8"));
 const NZG = /\bnz: \{"/.test(fs.readFileSync(file, "utf8"));
 const PIG = /\bpi: \{"/.test(fs.readFileSync(file, "utf8"));
 const AKG = /\bak: \{"/.test(fs.readFileSync(file, "utf8"));
 const MIG = /\bmi: \{"/.test(fs.readFileSync(file, "utf8"));
+const HKG = /\bhk: \{"/.test(fs.readFileSync(file, "utf8"));
 // A site build (web/head.html on top) opens on the passcode screen; each fresh context starts unlocked with the page's own code hash.
 const LOCK = (fs.readFileSync(file, "utf8").match(/\bH="([0-9a-f]{64})"/) || [])[1];
 
@@ -75,6 +76,29 @@ async function homeBox(open, c, spot) {
   const n = await page.evaluate(() => ({ c: spotCountry(CUR), ...window.__ws.view(), h: window.__ws.home() }));
   if (n.c !== c || n.MC !== c || !near(n.cx, n.h.cx, 1e-6) || !near(n.cy, n.h.cy, 1e-6) || n.z !== n.z0) throw new Error(`after the map's Japan then ${c} buttons the page is on ${n.c}, view() MC ${n.MC}, centre ${n.cx}, ${n.cy}, z ${n.z}; want ${c}, ${c}, the home view's ${n.h.cx}, ${n.h.cy}, z0 ${n.z0}`);
   out = await hid(); if (out.length) throw new Error(`on ${c}'s home view ${out.join(", ")} is off the map or under a button`);
+}
+
+// A country that never had a map of its own, so has no box to open on (Alaska, Hong Kong): c, its first spot and its home view A. With
+// nothing saved, the spot opens on the home view with every spot of the country on the map and clear of the buttons and the time bar.
+// Upright the home view's width sets the zoom the fit for the names starts from (home().z1), sideways its height. From Japan's, the map's
+// country button brings it back there. It gives back the first open's edges.
+async function ownHome(open, c, spot, A) {
+  const page = await open({ spot });
+  if (!await page.evaluate(id => !!ALL.spots[id], spot)) skip(`the page has no ${spot}`);
+  const v = await page.evaluate(() => ({ ...window.__ws.view(), h: window.__ws.home() })), byW = v.W/A.wide, byH = v.H*Math.cos(A.cy*Math.PI/180)/A.span, e = await edges(page);
+  if (land ? !(byH < byW) : !(byW < byH)) throw new Error(`on a ${v.W}x${v.H} screen ${c}'s ${land ? "height" : "width"} isn't the tighter fit (${byW} by width, ${byH} by height)`);
+  if (v.MC !== c || !near(v.cx, v.h.cx, 1e-6) || !near(v.cy, v.h.cy, 1e-6) || !near(v.h.z1, Math.min(byW, byH), 1e-9) || v.z !== v.z0) throw new Error(`${spot} opens on ${v.MC} at ${v.cx}, ${v.cy}, z ${v.z} (z0 ${v.z0}, z1 ${v.h.z1}); want ${c} on the home view's ${v.h.cx}, ${v.h.cy}, z1 ${Math.min(byW, byH)}`);
+  const hid = () => page.evaluate(c => { const rect = e => e.getBoundingClientRect(), fx = rect(document.getElementById("wsFx"));
+    const over = [...document.querySelectorAll("#wsLayers button, #wsCtry button, #viewWs .zoom button, #wsPlay, #wsTime, #wsTl")].filter(b => b.offsetParent).map(rect);
+    return countrySpots(c).filter(id => { const s = ALL.spots[id], [x, y] = window.__ws.px(MAPM.E(s.lon), s.lat), X = fx.left + x, Y = fx.top + y;
+      return x < 0 || y < 0 || x > fx.width || y > fx.height || over.some(r => X > r.left - 6 && X < r.right + 6 && Y > r.top - 6 && Y < r.bottom + 6); }); }, c);
+  let out = await hid(); if (out.length) throw new Error(`on ${c}'s first open ${out.join(", ")} is off the map or under a button`);
+  await page.click('#wsCtry button[data-c="jp"]'); await settle(page);
+  await page.click(`#wsCtry button[data-c="${c}"]`); await settle(page);
+  const n = await page.evaluate(() => ({ c: spotCountry(CUR), ...window.__ws.view(), h: window.__ws.home() }));
+  if (n.c !== c || n.MC !== c || !near(n.cx, n.h.cx, 1e-6) || !near(n.cy, n.h.cy, 1e-6) || n.z !== n.z0) throw new Error(`after the map's Japan then ${c} buttons the page is on ${n.c}, view() MC ${n.MC}, centre ${n.cx}, ${n.cy}, z ${n.z}; want ${c}, ${c}, the home view's ${n.h.cx}, ${n.h.cy}, z0 ${n.z0}`);
+  out = await hid(); if (out.length) throw new Error(`on ${c}'s home view ${out.join(", ")} is off the map or under a button`);
+  return e;
 }
 
 // A country with two parts, west and east of the longitude at, where the current spot picks the part (the South Pacific, Micronesia): each
@@ -129,7 +153,7 @@ const CHECKS = {
   // Every grid is made, finest first, with the Pacific layer last when the page carries it.
   async gridsLoaded(open) {
     const page = await open(home("tw")), got = JSON.stringify(await page.evaluate(() => window.__ws.grids()));
-    const want = JSON.stringify([...(NWG ? ["nw"] : []), "hi", "ca", ...(AKG ? ["ak"] : []), "au", ...(IDG ? ["id"] : []), ...(NZG ? ["nz"] : []), ...(PIG ? ["pi"] : []), ...(MIG ? ["mi"] : []), "wp", ...(PAC ? ["pac"] : [])]);
+    const want = JSON.stringify([...(HKG ? ["hk"] : []), ...(NWG ? ["nw"] : []), "hi", "ca", ...(AKG ? ["ak"] : []), "au", ...(IDG ? ["id"] : []), ...(NZG ? ["nz"] : []), ...(PIG ? ["pi"] : []), ...(MIG ? ["mi"] : []), "wp", ...(PAC ? ["pac"] : [])]);
     if (got !== want) throw new Error(`grids() is ${got}, want ${want}`);
   },
   // The Taiwan home view sits inside the West Pacific grid, so its pressure lines come from that grid; zoomed out they come from the Pacific layer (none without it).
@@ -145,6 +169,14 @@ const CHECKS = {
     const page = await open(home("id"));
     if (!await page.evaluate(() => !!ALL.spots.uluwatu)) skip("the page has no Indonesian spots");
     const src = await page.evaluate(() => window.__ws.iso()), want = IDG ? "id" : PAC ? "pac" : null;
+    if (src !== want) throw new Error(`iso() is ${src}, want ${want}`);
+  },
+  // Hong Kong's home view, both ways up, sits inside its own grid (21.5–23.125°N, 113.5–114.75°E), the finest, so its pressure lines come
+  // from that grid, or from the West Pacific grid when the page has no Hong Kong grid.
+  async hongKongIso(open) {
+    const page = await open(home("hk"));
+    if (!await page.evaluate(() => !!ALL.spots.cheungsha)) skip("the page has no Hong Kong spots");
+    const src = await page.evaluate(() => window.__ws.iso()), want = HKG ? "hk" : "wp";
     if (src !== want) throw new Error(`iso() is ${src}, want ${want}`);
   },
   // New Zealand's likewise, inside its own grid (50–32°S, 150°E–162°W), which runs past 180°.
@@ -238,28 +270,13 @@ const CHECKS = {
   async philippines(open) { await homeBox(open, "ph", "cloud9"); },
   async indonesia(open) { await homeBox(open, "id", "uluwatu"); },
   async newZealand(open) { await homeBox(open, "nz", "raglan"); },
-  // Alaska never had a map of its own: with nothing saved, Cannon Beach opens on Alaska's home view with every Alaska spot on the map and
-  // clear of the buttons and the time bar. Upright the home view's width sets the zoom the fit for the names starts from (home().z1), and
-  // the view stays inside the Pacific box, under its top, 65°N; sideways its height sets that zoom. From Japan's, the map's Alaska button
-  // brings it back there.
+  // Alaska never had a map of its own (see ownHome); upright its view stays inside the Pacific box, under its top, 65°N.
   async alaska(open) {
-    const A = { cx: 215.4, cy: 58.4, span: 6.2, wide: 24 }, page = await open({ spot: "cannonbeach" });
-    if (!await page.evaluate(() => !!ALL.spots.cannonbeach)) skip("the page has no Alaska spots");
-    const v = await page.evaluate(() => ({ ...window.__ws.view(), h: window.__ws.home() })), byW = v.W/A.wide, byH = v.H*Math.cos(A.cy*Math.PI/180)/A.span, e = await edges(page);
-    if (land ? !(byH < byW) : !(byW < byH)) throw new Error(`on a ${v.W}x${v.H} screen Alaska's ${land ? "height" : "width"} isn't the tighter fit (${byW} by width, ${byH} by height)`);
-    if (v.MC !== "ak" || !near(v.cx, v.h.cx, 1e-6) || !near(v.cy, v.h.cy, 1e-6) || !near(v.h.z1, Math.min(byW, byH), 1e-9) || v.z !== v.z0) throw new Error(`Cannon Beach opens on ${v.MC} at ${v.cx}, ${v.cy}, z ${v.z} (z0 ${v.z0}, z1 ${v.h.z1}); want ak on the home view's ${v.h.cx}, ${v.h.cy}, z1 ${Math.min(byW, byH)}`);
+    const e = await ownHome(open, "ak", "cannonbeach", { cx: 215.4, cy: 58.4, span: 6.2, wide: 24 });
     if (e.n > 65 + 1e-6) throw new Error(`Alaska's home view reaches ${e.n}°N at its top, past the box's top, 65°N`);
-    const hid = () => page.evaluate(() => { const rect = e => e.getBoundingClientRect(), fx = rect(document.getElementById("wsFx"));
-      const over = [...document.querySelectorAll("#wsLayers button, #wsCtry button, #viewWs .zoom button, #wsPlay, #wsTime, #wsTl")].filter(b => b.offsetParent).map(rect);
-      return countrySpots("ak").filter(id => { const s = ALL.spots[id], [x, y] = window.__ws.px(MAPM.E(s.lon), s.lat), X = fx.left + x, Y = fx.top + y;
-        return x < 0 || y < 0 || x > fx.width || y > fx.height || over.some(r => X > r.left - 6 && X < r.right + 6 && Y > r.top - 6 && Y < r.bottom + 6); }); });
-    let out = await hid(); if (out.length) throw new Error(`on Alaska's first open ${out.join(", ")} is off the map or under a button`);
-    await page.click('#wsCtry button[data-c="jp"]'); await settle(page);
-    await page.click('#wsCtry button[data-c="ak"]'); await settle(page);
-    const n = await page.evaluate(() => ({ c: spotCountry(CUR), ...window.__ws.view(), h: window.__ws.home() }));
-    if (n.c !== "ak" || n.MC !== "ak" || !near(n.cx, n.h.cx, 1e-6) || !near(n.cy, n.h.cy, 1e-6) || n.z !== n.z0) throw new Error(`after the map's Japan then Alaska buttons the page is on ${n.c}, view() MC ${n.MC}, centre ${n.cx}, ${n.cy}, z ${n.z}; want ak, ak, the home view's ${n.h.cx}, ${n.h.cy}, z0 ${n.z0}`);
-    out = await hid(); if (out.length) throw new Error(`on Alaska's home view ${out.join(", ")} is off the map or under a button`);
   },
+  // Nor did Hong Kong.
+  async hongKong(open) { await ownHome(open, "hk", "cheungsha", { cx: 114.17, cy: 22.32, span: 0.5, wide: 0.75 }); },
   // The South Pacific has two parts, west (Fiji to the Samoas) and east (Rarotonga and Tahiti), and so has Micronesia, west (Guam and Saipan)
   // and east (Pohnpei to Majuro); see twoParts.
   async southPacific(open) {

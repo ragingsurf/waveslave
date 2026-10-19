@@ -415,5 +415,50 @@ class LogSplitMicronesia(unittest.TestCase):
         self.assertEqual((d['spots']['majuro']['adj']['f'], d['spots']['majuro']['adj']['days']), (1.0, 0))  # Arno's readings: a backup, not learned from
 
 
+HK_IDS = ['bigwavebay', 'cheungsha', 'tailongwan']
+
+
+class LogSplitHongKong(unittest.TestCase):
+    # Hong Kong's spots have no buoy: their log holds the forecast and the station wind, from hk.py on the saved downloads
+    def setUp(self):
+        import datetime
+        sys.path.insert(0, ROOT); import hk
+        self.tmp = tempfile.mkdtemp(); self.snap = os.path.join(self.tmp, 'snap.json')
+        fix = os.path.join(HERE, 'fixtures', 'hk'); d = json.load(open(os.path.join(fix, 'snap_in.json')))
+        hk.fill(d, json.load(open(os.path.join(ROOT, 'spots.json'))), fix, datetime.datetime(2026, 10, 19, 6, 0, tzinfo=datetime.timezone.utc), os.path.join(fix, 'hko'))
+        with open(self.snap, 'w') as f: json.dump(d, f)
+
+    def test_log_hk_only(self):
+        run(['log.py', self.snap, self.tmp + '/log-hk', 'hk'])
+        rec = records(self.tmp + '/log-hk')[-1]
+        self.assertEqual(sorted(rec['spots']), HK_IDS)
+        c, t = rec['spots']['cheungsha'], rec['spots']['tailongwan']
+        self.assertEqual((c['buoyId'], c['buoy'], c['station'], len(c['fc'])), (None, [], [['2026-10-19T14:00', 14.6, 135.0]], 24))
+        self.assertEqual((t['buoy'], t['station']), ([], []))
+
+    def test_other_logs_hold_no_hong_kong(self):
+        for c, d, ids in (('tw', 'log', ['donghe']), ('kr', 'log-kr', ['jukdo']), ('mi', 'log-mi', ['umatac'])):
+            run(['log.py', self.snap, self.tmp + '/' + d, c])
+            self.assertEqual(sorted(records(self.tmp + '/' + d)[-1]['spots']), ids, c)
+
+    def test_correct_and_history_hk(self):
+        import datetime
+        # history.py keeps the last 5 days by today's clock, so Big Wave Bay's station reading moves to today
+        today = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)).date().isoformat()
+        d = json.load(open(self.snap)); d['spots']['bigwavebay']['dwind'] = [[today + 'T14:00', 7.6, 90.0]]
+        with open(self.snap, 'w') as f: json.dump(d, f)
+        before = json.load(open(self.snap))['spots']
+        run(['log.py', self.snap, self.tmp + '/log-hk', 'hk'])
+        run(['correct.py', self.snap, self.tmp + '/log-hk', 'hk'])
+        run(['history.py', self.snap, self.tmp + '/log-hk', self.tmp + '/cache', 'hk'])
+        d = json.load(open(self.snap))
+        for k in ('donghe', 'jukdo', 'cloud9', 'raglan', 'umatac'): self.assertEqual(d['spots'][k], before[k])
+        self.assertEqual(sorted(json.load(open(self.tmp + '/cache/tides-hk.json'))), HK_IDS)
+        # with no buoy the heights are only rounded to 0.1 m, as everywhere; the station's reading is kept for the past days
+        self.assertEqual((d['spots']['bigwavebay']['adj']['f'], d['spots']['bigwavebay']['adj']['days']), (1.0, 0))
+        self.assertEqual([r[1] for r in d['spots']['bigwavebay']['hourly']], [round(r[1], 1) for r in before['bigwavebay']['hourly']])
+        self.assertEqual(d['spots']['bigwavebay']['hist']['station'], [[today + 'T14:00', 7.6, 90.0]])
+
+
 if __name__ == '__main__':
     unittest.main()

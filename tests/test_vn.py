@@ -6,7 +6,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 SPOTS = json.load(open(os.path.join(ROOT, 'spots.json')))
 VN_IDS = ['mykhe', 'nonnuoc', 'anbang', 'quynhon', 'honchong', 'baidai', 'muine', 'vungtau']
-KEYS = ['zone', 'buoyKm', 'buoyName', 'windStation', 'stationName', 'off', 'lat', 'lon', 'blurb', 'cams', 'zh', 'ja']
+KEYS = ['name', 'full', 'region', 'zone', 'buoyKm', 'buoyName', 'windStation', 'stationName', 'off', 'lat', 'lon', 'blurb', 'cams', 'zh', 'ja']
 
 
 class Spots(unittest.TestCase):
@@ -138,8 +138,9 @@ class Fill(unittest.TestCase):
 
 class Refresh(unittest.TestCase):
     def loop(self, fail=''):
-        # refresh.sh's loop for Korea, the Philippines, Indonesia, Hainan and Vietnam, run with a stand-in curl that notes each request, and
-        # fails one holding fail the way curl -f fails on an HTTP error (exit 22); gives the requests in order and Vietnam's query
+        # refresh.sh's loop for Korea, the Philippines, Indonesia, Hainan and Vietnam, run under set -e as refresh.sh runs, with a stand-in
+        # curl that notes each request and fails one holding fail the way curl -f fails on an HTTP error (exit 22); gives the requests in
+        # order and Vietnam's query
         import re, subprocess, tempfile
         with open(os.path.join(ROOT, 'refresh.sh'), encoding='utf-8') as f: sh = f.read()
         get = re.search(r'^get\(\)\{.*?; \}$', sh, re.M).group(0)
@@ -150,7 +151,7 @@ class Refresh(unittest.TestCase):
             f.write('#!/bin/sh\nfor a; do url=$a; done\necho "$url" >> "$T/calls"\nif [ -n "$F" ]; then case "$url" in *"$F"*) exit 22;; esac; fi\nexit 0\n')
         os.chmod(os.path.join(bin_, 'curl'), 0o755)
         env = dict(os.environ, PATH=bin_ + os.pathsep + os.environ['PATH'], T=tmp, F=fail)
-        r = subprocess.run(['sh', '-c', 'HERE=$1; W=$2\n%s\n%s\n%s' % (get, krids, loop), 'sh', ROOT, os.path.join(tmp, 'w')], capture_output=True, text=True, env=env)
+        r = subprocess.run(['sh', '-c', 'set -e\nHERE=$1; W=$2\n%s\n%s\n%s' % (get, krids, loop), 'sh', ROOT, os.path.join(tmp, 'w')], capture_output=True, text=True, env=env)
         self.assertEqual(r.returncode, 0, r.stderr)
         with open(os.path.join(tmp, 'calls')) as f: calls = f.read().split()
         vn = [s for s in SPOTS if s.get('country') == 'vn']
@@ -167,6 +168,11 @@ class Refresh(unittest.TestCase):
         self.assertIn('https://aviationweather.gov/api/data/metar?ids=VVCR&format=json&hours=3', calls)
         hn = [s for s in SPOTS if s.get('country') == 'hn']
         self.assertEqual(len([u for u in calls if 'cell_selection=sea&models=ecmwf_ifs' in u and 'latitude=%s,' % hn[0]['lat'] in u]), 1)
+        # Korea, the Philippines and Indonesia ask for their default cells as before: only Hainan's and Vietnam's of the five ask for the sea
+        hq = 'latitude=%s&longitude=%s' % (','.join(str(s['lat']) for s in hn), ','.join(str(s['lon']) for s in hn))
+        wind = [u for u in calls if u.startswith('https://api.open-meteo.com/v1/forecast?')]
+        self.assertEqual(len(wind), 5)
+        self.assertEqual([u for u in wind if 'cell_selection' in u], [u for u in wind if q in u or hq in u])
 
     def test_fallback_from_the_sea_cells_too(self):
         # When ECMWF's reply fails, the default model is asked for, still from the sea cells

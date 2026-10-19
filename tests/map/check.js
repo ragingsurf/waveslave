@@ -189,13 +189,16 @@ const CHECKS = {
     const src = await page.evaluate(() => window.__ws.iso());
     if (src !== "wp") throw new Error(`iso() is ${src}, want wp`);
   },
-  // Nor has Vietnam: its home view lies inside the West Pacific grid upright, and held sideways it stops at the Pacific box's west edge,
-  // 100°E, which is also the West Pacific grid's, so its pressure lines come from the West Pacific grid.
+  // Nor has Vietnam: its home view and its first open (nothing saved, the home view fitted to the names), both ways up, lie inside the
+  // West Pacific grid, so its pressure lines come from it. Held sideways the first open stops at the Pacific box's west edge, 100°E,
+  // which is also the West Pacific grid's.
   async vietnamIso(open) {
-    const page = await open(home("vn"));
-    if (!await page.evaluate(() => !!ALL.spots.mykhe)) skip("the page has no Vietnam spots");
-    const src = await page.evaluate(() => window.__ws.iso());
-    if (src !== "wp") throw new Error(`iso() is ${src}, want wp`);
+    for (const [what, how] of [["home view", home("vn")], ["first open", { spot: "mykhe" }]]) {
+      const page = await open(how);
+      if (!await page.evaluate(() => !!ALL.spots.mykhe)) skip("the page has no Vietnam spots");
+      const src = await page.evaluate(() => window.__ws.iso());
+      if (src !== "wp") throw new Error(`on Vietnam's ${what} iso() is ${src}, want wp`);
+    }
   },
   // New Zealand's likewise, inside its own grid (50–32°S, 150°E–162°W), which runs past 180°.
   async newZealandIso(open) {
@@ -416,7 +419,7 @@ const CHECKS = {
   // map between them (a finger there drags it), and only when the column has no room left for the next does it start another column, at the
   // top just right of the last; in English, Chinese and Japanese each is named in the page's language. With a spot's forecast card open, a
   // finger on any of them still lands on it, as it does on the map's tools down the right; sideways that holds on a short screen too (a small
-  // phone in Safari, whose bar takes some of the height), where the countries take three columns five deep.
+  // phone in Safari, whose bar takes some of the height), where the countries stand five deep in several columns.
   async countryColumn(open) {
     const page = await open(home("tw"));
     for (const l of ["en", "zh", "ja"]) {

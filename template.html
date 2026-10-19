@@ -1004,7 +1004,7 @@ const WS = (() => {
   // A home view's zoom: its span of latitude fills the map's height at its own latitude, or its width (wide) the map's width where that's the tighter fit.
   const homeZ = h => Math.min(h.wide ? W/h.wide : Infinity, H*Math.cos(h.cy*Math.PI/180)/h.span);
   window.__ws = {px, ll, view: () => ({cx, cy, z, z0, zmin, W, H, MC}), iso: () => ISOG ? ISOG.name : null, val: gridVal, grids: () => GRIDS.map(g => g.name), zoom: f => zoomAt(f, W/2, H/2),
-    home: () => ({cx: HV.cx, cy: HV.cy, z: z0, z1: homeZ(HOME)}), tags: () => TAGHIT.map(([x, y, w, h, id]) => [x+6, y+6, w-12, h-12, id]), towns: () => TOWNAT.map(t => t.slice())}; // test hook (tests/map/check.js)
+    home: () => ({cx: HV.cx, cy: HV.cy, z: z0, z1: homeZ(HOME)}), tags: () => TAGHIT.map(([x, y, w, h, id]) => [x+6, y+6, w-12, h-12, id]), towns: () => TOWNAT.map(t => t.slice()), pin: () => !!PIN}; // test hook (tests/map/check.js)
   const near = (arr, t, win) => { let b = null, bd = Infinity; for (const r of arr) { const d = Math.abs(r.t-t); if (d < bd) { bd = d; b = r; } } return bd <= win ? b : null; };
   // Every grid at its step nearest t (unpacked when first read there), read finest first and faded into the next coarser grid at its edge.
   function gridAt(t) { for (const g of GRIDS) g.at(t); }

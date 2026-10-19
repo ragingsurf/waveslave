@@ -1,6 +1,6 @@
 // Browser checks and phone screenshots of a built page (build one with tests/map/tool.py).
 // Usage: node tests/map/check.js <page.html> <outdir> shots|checks [land]
-//   shots   the eighteen home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
+//   shots   the nineteen home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
 //           On a page whose hook can zoom, also zoomed all the way out in each layer (out-wind, out-waves, out-swell, out-rain) and a swell across 180° (dateline).
 //   checks  prints ok / FAIL / skip for each check, and exits 1 on any FAIL or page error. Needs the page's test hook, window.__ws.
 // Every page opens in its own fresh browser context, offline (only the page itself loads, no service worker): a phone 390x844 (844x390 with land),
@@ -22,7 +22,7 @@ const NOW = Date.now();
 const HOMES = [["tw", "donghe", "waveslave-mapview", 120.9, 23.75], ["jp", "ichinomiya", "waveslave-mapview", 135.6, 33.4], ["ca", "trestles", "waveslave-mapview-ca", -119.5, 35.3],
   ["hi", "pipeline", "waveslave-mapview-hi", -157.3, 20.6], ["au-e", "snapper", "waveslave-mapview-au-e", 152, -32.5], ["au-w", "margaret", "waveslave-mapview-au-w", 115.5, -32.5],
   ["nw", "coxbay", "waveslave-mapview-nw", -124.7, 46.1], ["kr", "jukdo", "waveslave-mapview-kr", 127.75, 35.7], ["hk", "cheungsha", "waveslave-mapview-hk", 114.17, 22.32],
-  ["hn", "dadonghai", "waveslave-mapview-hn", 109.93, 18.44],
+  ["hn", "dadonghai", "waveslave-mapview-hn", 109.93, 18.44], ["vn", "mykhe", "waveslave-mapview-vn", 108.2, 13.2],
   ["ph", "cloud9", "waveslave-mapview-ph", 122.6, 13.8], ["id", "uluwatu", "waveslave-mapview-id", 116, -8.75], ["nz", "raglan", "waveslave-mapview-nz", 174.3, -41.8],
   ["pi-w", "cloudbreak", "waveslave-mapview-pi-w", -177.15, -17.8], ["pi-e", "teahupoo", "waveslave-mapview-pi-e", -154.93, -19.5],
   ["ak", "cannonbeach", "waveslave-mapview-ak", -144.6, 58.4], ["mi-w", "umatac", "waveslave-mapview-mi-w", 145.22, 14.24], ["mi-e", "ppass", "waveslave-mapview-mi-e", 164.74, 6.21]];
@@ -80,7 +80,7 @@ async function homeBox(open, c, spot) {
   out = await hid(); if (out.length) throw new Error(`on ${c}'s home view ${out.join(", ")} is off the map or under a button`);
 }
 
-// A country that never had a map of its own, so has no box to open on (Alaska, Hong Kong, Hainan): c, its first spot and its home view A. With
+// A country that never had a map of its own, so has no box to open on (Alaska, Hong Kong, Hainan, Vietnam): c, its first spot and its home view A. With
 // nothing saved, the spot opens on the home view with every spot of the country on the map and clear of the buttons and the time bar.
 // Upright the home view's width sets the zoom the fit for the names starts from (home().z1), sideways its height. From Japan's, the map's
 // country button brings it back there. It gives back the first open's edges.
@@ -186,6 +186,14 @@ const CHECKS = {
   async hainanIso(open) {
     const page = await open(home("hn"));
     if (!await page.evaluate(() => !!ALL.spots.dadonghai)) skip("the page has no Hainan spots");
+    const src = await page.evaluate(() => window.__ws.iso());
+    if (src !== "wp") throw new Error(`iso() is ${src}, want wp`);
+  },
+  // Nor has Vietnam: its home view lies inside the West Pacific grid upright, and held sideways it stops at the Pacific box's west edge,
+  // 100°E, which is also the West Pacific grid's, so its pressure lines come from the West Pacific grid.
+  async vietnamIso(open) {
+    const page = await open(home("vn"));
+    if (!await page.evaluate(() => !!ALL.spots.mykhe)) skip("the page has no Vietnam spots");
     const src = await page.evaluate(() => window.__ws.iso());
     if (src !== "wp") throw new Error(`iso() is ${src}, want wp`);
   },
@@ -310,9 +318,10 @@ const CHECKS = {
     const e = await ownHome(open, "ak", "cannonbeach", { cx: 215.4, cy: 58.4, span: 6.2, wide: 24 });
     if (e.n > 65 + 1e-6) throw new Error(`Alaska's home view reaches ${e.n}°N at its top, past the box's top, 65°N`);
   },
-  // Nor did Hong Kong, or Hainan.
+  // Nor did Hong Kong, Hainan or Vietnam.
   async hongKong(open) { await ownHome(open, "hk", "cheungsha", { cx: 114.17, cy: 22.32, span: 0.5, wide: 0.75 }); },
   async hainan(open) { await ownHome(open, "hn", "dadonghai", { cx: 109.93, cy: 18.44, span: 0.95, wide: 1.3 }); },
+  async vietnam(open) { await ownHome(open, "vn", "mykhe", { cx: 108.2, cy: 13.2, span: 6.6, wide: 3.4 }); },
   // The South Pacific has two parts, west (Fiji to the Samoas) and east (Rarotonga and Tahiti), and so has Micronesia, west (Guam and Saipan)
   // and east (Pohnpei to Majuro); see twoParts.
   async southPacific(open) {

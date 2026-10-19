@@ -23,8 +23,9 @@ class Spots(unittest.TestCase):
             self.assertEqual((s['buoyKm'], s['buoyName'], s['zh']['buoyName'], s['ja']['buoyName']), (None, '', '', ''))
             self.assertEqual((s['windStation'], s['stationName'], s['zh']['stationName'], s['ja']['stationName']), ([], '', '', ''))
         self.assertEqual(len({s['id'] for s in SPOTS}), len(SPOTS))
-        # last in spots.json, so the shared Open-Meteo calls, which list every spot in its order, keep each other spot's place
-        self.assertEqual([s['id'] for s in SPOTS[-7:]], HN_IDS)
+        # after Hong Kong's and before Vietnam's, the last added, so the shared Open-Meteo calls, which list every spot in its order, keep
+        # each other spot's place
+        self.assertEqual([s['id'] for s in SPOTS[-15:-8]], HN_IDS)
 
 
 FIXDIR = os.path.join(HERE, 'fixtures', 'hn')  # live copies from 2026-10-19 10:31 UTC (ECMWF wind from the sea cells, tide model)
@@ -114,13 +115,13 @@ class Fill(unittest.TestCase):
 
 class Refresh(unittest.TestCase):
     def loop(self, fail=''):
-        # refresh.sh's loop for Korea, the Philippines, Indonesia and Hainan, run with a stand-in curl that notes each request, and fails one
-        # holding fail the way curl -f fails on an HTTP error (exit 22); gives the requests in order and Hainan's query
+        # refresh.sh's loop for Korea, the Philippines, Indonesia, Hainan and Vietnam, run with a stand-in curl that notes each request, and
+        # fails one holding fail the way curl -f fails on an HTTP error (exit 22); gives the requests in order and Hainan's query
         import re, subprocess, tempfile
         with open(os.path.join(ROOT, 'refresh.sh'), encoding='utf-8') as f: sh = f.read()
         get = re.search(r'^get\(\)\{.*?; \}$', sh, re.M).group(0)
         krids = re.search(r'^krids\(\)\{.*?; \}$', sh, re.S | re.M).group(0)
-        loop = re.search(r'^for C in kr ph id hn; do$.*?^done$', sh, re.S | re.M).group(0)
+        loop = re.search(r'^for C in kr ph id hn vn; do$.*?^done$', sh, re.S | re.M).group(0)
         tmp = tempfile.mkdtemp(); bin_ = os.path.join(tmp, 'bin'); os.makedirs(bin_); os.makedirs(os.path.join(tmp, 'w', 'dl'))
         with open(os.path.join(bin_, 'curl'), 'w') as f:
             f.write('#!/bin/sh\nfor a; do url=$a; done\necho "$url" >> "$T/calls"\nif [ -n "$F" ]; then case "$url" in *"$F"*) exit 22;; esac; fi\nexit 0\n')
@@ -138,9 +139,8 @@ class Refresh(unittest.TestCase):
         self.assertIn('https://api.open-meteo.com/v1/forecast?%s&hourly=wind_speed_10m,wind_direction_10m,precipitation&wind_speed_unit=kn'
                       '&timezone=Asia%%2FTaipei&forecast_days=4&cell_selection=sea&models=ecmwf_ifs' % q, calls)
         self.assertIn('https://marine-api.open-meteo.com/v1/marine?%s&hourly=sea_level_height_msl&timezone=GMT&past_days=5&forecast_days=10' % q, calls)
-        sea = [u for u in calls if 'cell_selection' in u]
+        sea = [u for u in calls if 'cell_selection' in u and q in u]
         self.assertEqual(len(sea), 1)  # the stand-in answers, so the default model isn't asked for
-        self.assertIn(q, sea[0])
         self.assertFalse([u for u in calls if 'metar' in u and 'ZJ' in u])
         for c in ('kr', 'ph', 'id'):
             self.assertTrue([u for u in calls if u.startswith('https://api.open-meteo.com/v1/forecast?latitude=%s' % next(str(s['lat']) for s in SPOTS if s.get('country') == c))], c)

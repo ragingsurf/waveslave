@@ -106,23 +106,23 @@ if [ -n "$(auids lat)" ]; then
   get tideau "https://marine-api.open-meteo.com/v1/marine?$AQ&hourly=sea_level_height_msl&timezone=GMT&past_days=5&forecast_days=10" || echo "tideau fetch failed" >&2
   python3 -I "$HERE/au.py" "$W/dl" "$W/snap.json" "$HERE/spots.json" || echo "australia skipped" >&2
 fi
-# Korean, Philippine, Indonesian and Hainan spots (optional, never block the build): airport reports (METAR) from NOAA's Aviation
-# Weather Center, the last 3 hours, where a spot has an airport near enough (none does in the Philippines or on Hainan; Bali's does in
-# Indonesia); a wind forecast and the tide model via Open-Meteo, as for Japan and Australia; kr.py writes them under the same keys.
-# Korea's buoys are the Korea Meteorological Administration's, as NOAA NDBC copies them from the WMO weather reports (45 days in one
-# .drift file per buoy; KMA's own feed needs a key and a Korean mobile number); the Philippines, Indonesia and Hainan have no open
-# buoy. The wind forecast is JMA's MSM for Korea, as for Japan, and ECMWF's IFS for the Philippines, Indonesia and Hainan, outside the
-# MSM's area (Open-Meteo's default, the fallback, is ECMWF there too). Hainan's comes from the sea cell nearest each spot, as for
-# Micronesia and Hong Kong: six of its spots' default cells lie inland.
+# Korean, Philippine, Indonesian, Hainan and Vietnamese spots (optional, never block the build): airport reports (METAR) from NOAA's
+# Aviation Weather Center, the last 3 hours, where a spot has an airport near enough (none does in the Philippines or on Hainan; Bali's
+# does in Indonesia, and Cam Ranh's at Vietnam's Bai Dai); a wind forecast and the tide model via Open-Meteo, as for Japan and Australia;
+# kr.py writes them under the same keys. Korea's buoys are the Korea Meteorological Administration's, as NOAA NDBC copies them from the
+# WMO weather reports (45 days in one .drift file per buoy; KMA's own feed needs a key and a Korean mobile number); the Philippines,
+# Indonesia, Hainan and Vietnam have no open buoy. The wind forecast is JMA's MSM for Korea, as for Japan, and ECMWF's IFS for the
+# Philippines, Indonesia, Hainan and Vietnam, outside the MSM's area (Open-Meteo's default, the fallback, is ECMWF there too). Hainan's
+# and Vietnam's come from the sea cell nearest each spot, as for Micronesia and Hong Kong: most of their spots' default cells lie inland.
 # krids <country> <field>: the spots' lat or lon, metar for their airports (a spot's windStation may be one "metar:ICAO" or a list),
 # or ndbc for their buoys.
 krids(){ python3 -I -c "import json,sys;S=[s for s in json.load(open(sys.argv[1])) if s.get('country')==sys.argv[2]];f=sys.argv[3]
 W=[w for s in S for w in (lambda v: v if isinstance(v,list) else [v] if v else [])(s.get('windStation'))]
 v=[w[6:] for w in W if w.startswith('metar:')] if f=='metar' else [b for s in S for b in s.get('ndbc') or []] if f=='ndbc' else [str(s[f]) for s in S]
 print(','.join(v if f in ('lat','lon') else dict.fromkeys(v)))" "$HERE/spots.json" "$1" "$2"; }
-for C in kr ph id hn; do
+for C in kr ph id hn vn; do
   [ -n "$(krids $C lat)" ] || continue
-  M=jma_msm M2=jma_seamless; [ $C = kr ] || M=ecmwf_ifs M2=best_match; CS=; [ $C != hn ] || CS="&cell_selection=sea"
+  M=jma_msm M2=jma_seamless; [ $C = kr ] || M=ecmwf_ifs M2=best_match; CS=; case $C in hn|vn) CS="&cell_selection=sea";; esac
   for b in $(krids $C ndbc | tr ',' ' '); do curl -fsSL --retry 2 -m 60 -o "$W/dl/ndbc-$b.drift" "https://www.ndbc.noaa.gov/data/realtime2/$b.drift" || echo "ndbc $b fetch failed" >&2; done
   [ -z "$(krids $C metar)" ] || curl -fsSL --retry 2 -m 60 -A "waveslave.tw" -o "$W/dl/metar-$C.json" "https://aviationweather.gov/api/data/metar?ids=$(krids $C metar)&format=json&hours=3" || echo "metar $C fetch failed" >&2
   KQ="latitude=$(krids $C lat)&longitude=$(krids $C lon)"
@@ -278,7 +278,8 @@ python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log-ak" "$G" ak || echo "ala
 python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log-mi" "$G" mi || echo "micronesia history skipped" >&2
 python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log-hk" "$G" hk || echo "hong kong history skipped" >&2
 python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log-hn" "$G" hn || echo "hainan history skipped" >&2
-# Forecast vs buoy log for later corrections, one folder per country (Taiwan log/, Japan log-jp/, California log-ca/, Hawaii log-hi/, Australia log-au/, Pacific Northwest log-nw/, Korea log-kr/, the Philippines log-ph/, Indonesia log-id/, New Zealand log-nz/, the South Pacific log-pi/, Alaska log-ak/, Micronesia log-mi/, Hong Kong log-hk/, Hainan log-hn/); never blocks the build.
+python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log-vn" "$G" vn || echo "vietnam history skipped" >&2
+# Forecast vs buoy log for later corrections, one folder per country (Taiwan log/, Japan log-jp/, California log-ca/, Hawaii log-hi/, Australia log-au/, Pacific Northwest log-nw/, Korea log-kr/, the Philippines log-ph/, Indonesia log-id/, New Zealand log-nz/, the South Pacific log-pi/, Alaska log-ak/, Micronesia log-mi/, Hong Kong log-hk/, Hainan log-hn/, Vietnam log-vn/); never blocks the build.
 python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log" tw || true
 python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-jp" jp || true
 python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-ca" ca || true
@@ -294,6 +295,7 @@ python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-ak" ak || true
 python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-mi" mi || true
 python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-hk" hk || true
 python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-hn" hn || true
+python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/log-vn" vn || true
 # Tune each spot's wave heights to its buoy from that log and score the forecast (after log.py, so the log stays raw).
 python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log" tw || echo "corrections skipped" >&2
 python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-jp" jp || echo "japan corrections skipped" >&2
@@ -310,6 +312,7 @@ python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-ak" ak || echo "alaska c
 python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-mi" mi || echo "micronesia corrections skipped" >&2
 python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-hk" hk || echo "hong kong corrections skipped" >&2
 python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-hn" hn || echo "hainan corrections skipped" >&2
+python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-vn" vn || echo "vietnam corrections skipped" >&2
 # Wave of the week photo (wotw.jpg) is embedded inline.
 python3 -I -c "import sys,base64;t=open(sys.argv[1]).read();d=open(sys.argv[2]).read();img='data:image/jpeg;base64,'+base64.b64encode(open(sys.argv[4],'rb').read()).decode();open(sys.argv[3],'w').write(t.replace('__DATA__',d).replace('__WOTW__',img).replace('__GRIDCA__',open(sys.argv[6]).read()).replace('__GRIDHI__',open(sys.argv[7]).read()).replace('__GRIDAU__',open(sys.argv[8]).read()).replace('__GRIDPAC__',open(sys.argv[9]).read()).replace('__GRIDNW__',open(sys.argv[10]).read()).replace('__GRIDID__',open(sys.argv[11]).read()).replace('__GRIDNZ__',open(sys.argv[12]).read()).replace('__GRIDPI__',open(sys.argv[13]).read()).replace('__GRIDAK__',open(sys.argv[14]).read()).replace('__GRIDMI__',open(sys.argv[15]).read()).replace('__GRIDHK__',open(sys.argv[16]).read()).replace('__GRID__',open(sys.argv[5]).read()))" "$HERE/template.html" "$W/snap.json" "$W/taitung-surf.html" "$HERE/wotw.jpg" "$GJ" "$GC" "$GH" "$GA" "$GP" "$GN" "$GI" "$GZ" "$GS" "$GK" "$GM" "$GHK"
 echo "built $W/taitung-surf.html"

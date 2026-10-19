@@ -1,0 +1,13 @@
+Copyright (c) 2026 ragingsurf (WaveSlave, https://waveslave.tw). All rights reserved.
+
+This repository is public so its code can be read, not reused. No licence is
+granted to copy, modify, redistribute, republish or host this code, the site's
+design, text, logo or images, in whole or in part, without written permission
+from the copyright holder.
+
+The weather, wave, tide and buoy data the site shows is not covered by this
+notice: it belongs to its providers (CWA, JMA, NOAA, Environment Canada, the
+Canadian Hydrographic Service, IMOS, BoM, LINZ, PacIOOS, Open-Meteo and the
+others credited on the site) and is used under their own terms.
+
+To ask for permission, open an issue at https://github.com/ragingsurf/waveslave.

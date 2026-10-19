@@ -73,10 +73,15 @@ def linz_events(txt):
 
 
 def linz_tides(texts, first=None, last=None):
-    """A port's LINZ tide tables, in year order -> {local date: [[HH:MM, 'H'|'L', cm]]}, only the dates from first to last when given.
-    The tables don't say which is which; highs and lows take turns, so each is a high when it is above the next one (the last, the
-    one before), and one level with it takes the other kind from the one before."""
-    ev, out, kind = [e for t in texts for e in linz_events(t)], {}, None
+    """A port's LINZ tide tables, in year order -> {local date: [[HH:MM, 'H'|'L', cm]]}, only the dates from first to last when given."""
+    return turns([e for t in texts for e in linz_events(t)], first, last)
+
+
+def turns(ev, first=None, last=None):
+    """A tide table's highs and lows, [(local date, HH:MM, m)] in order, when it doesn't say which is which (LINZ's, HKO's) -> {local
+    date: [[HH:MM, 'H'|'L', cm]]}, only the dates from first to last when given. Highs and lows take turns, so each is a high when it is
+    above the next one (the last, the one before), and one level with it takes the other kind from the one before."""
+    out, kind = {}, None
     for i, (day, t, v) in enumerate(ev):
         if len(ev) < 2: break
         other = ev[i + 1][2] if i + 1 < len(ev) else ev[i - 1][2]

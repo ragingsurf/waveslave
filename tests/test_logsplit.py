@@ -178,7 +178,13 @@ class LogSplitKorea(unittest.TestCase):
         self.assertEqual(sorted(records(self.tmp + '/log-ca')[-1]['spots']), ['blacks'])
 
     def test_correct_and_history_kr(self):
-        before = json.load(open(self.snap))['spots']
+        # the readings moved to today, since the past days keep only the last 5
+        import datetime
+        today = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)).date().isoformat()
+        d = json.load(open(self.snap))
+        for k in ('jukdo', 'geumjin'): d['spots'][k]['buoy'] = [[today + 'T13:00', 1.5, None, None, 23.3]]; d['src']['spots'][k] = today + 'T13:00/'
+        with open(self.snap, 'w') as f: json.dump(d, f)
+        before = d['spots']
         run(['log.py', self.snap, self.tmp + '/log-kr', 'kr'])
         run(['correct.py', self.snap, self.tmp + '/log-kr', 'kr'])
         run(['history.py', self.snap, self.tmp + '/log-kr', self.tmp + '/cache', 'kr'])
@@ -191,7 +197,7 @@ class LogSplitKorea(unittest.TestCase):
         self.assertEqual(j['hourly'], before['jukdo']['hourly'])  # and one day is too few to change Geumjin's
         self.assertEqual(g['hourly'], before['geumjin']['hourly'])
         # the past days show the buoy either way
-        self.assertEqual((j['hist']['buoy'][-1], g['hist']['buoy'][-1]), (['2026-10-18T13:00', 1.5, None, None],) * 2)
+        self.assertEqual((j['hist']['buoy'], g['hist']['buoy']), ([[today + 'T13:00', 1.5, None, None]],) * 2)
 
 
 class LogSplitPhilippines(unittest.TestCase):

@@ -137,10 +137,10 @@ test("layered", () => {
 
 test("isoPick", () => {
   // The real grids' headers: lat0, dlat, nlat, lon0, dlon, nlon.
-  const M = load(), real = {hi: [15, 1, 12, -162, 1, 11], ca: [30, 1, 13, -128, 1, 13], au: [-44, 2, 13, 110, 2, 24], id: [-16, 2, 8, 100, 2, 17], nz: [-50, 2, 10, 150, 2, 25], pi: [-24, 2, 8, 170, 2, 24], wp: [0, 3, 16, 100, 3, 21], pac: [-50, 5, 24, 100, 5, 31], ak: [54, 1, 9, -158, 2, 15], mi: [-2, 2, 9, 152, 2, 13], hk: [21.5, 0.125, 14, 113.5, 0.125, 11]};
+  const M = load(), real = {hi: [15, 1, 12, -162, 1, 11], ca: [30, 1, 13, -128, 1, 13], au: [-44, 2, 13, 110, 2, 24], id: [-16, 2, 8, 100, 2, 17], nz: [-50, 2, 10, 150, 2, 25], pi: [-24, 2, 8, 170, 2, 24], wp: [0, 3, 16, 100, 3, 21], pac: [-50, 5, 24, 100, 5, 31], ak: [54, 1, 9, -158, 2, 15], mi: [-2, 2, 9, 152, 2, 13], hk: [21.5, 0.125, 14, 113.5, 0.125, 11], pg: [-8, 2, 5, 138, 2, 9]};
   const grid = (n, pres = () => 1012) => { const [lat0, dlat, nlat, lon0, dlon, nlon] = real[n]; return M.mkGrid(n, packGrid({lat0, dlat, nlat, lon0, dlon, nlon, pres})); };
-  const G = ["hk", "hi", "ca", "ak", "au", "id", "nz", "pi", "mi", "wp", "pac"].map(n => grid(n)), name = g => g ? g.name : null;
-  assert.deepEqual(G.map(g => g.box), [{l: 113.5, r: 114.75, s: 21.5, n: 23.125}, {l: 198, r: 208, s: 15, n: 26}, {l: 232, r: 244, s: 30, n: 42}, {l: 202, r: 230, s: 54, n: 62}, {l: 110, r: 156, s: -44, n: -20}, {l: 100, r: 132, s: -16, n: -2}, {l: 150, r: 198, s: -50, n: -32}, {l: 170, r: 216, s: -24, n: -10}, {l: 152, r: 176, s: -2, n: 14}, {l: 100, r: 160, s: 0, n: 45}, {l: 100, r: 250, s: -50, n: 65}]);
+  const G = ["hk", "hi", "ca", "ak", "au", "id", "nz", "pi", "mi", "pg", "wp", "pac"].map(n => grid(n)), name = g => g ? g.name : null;
+  assert.deepEqual(G.map(g => g.box), [{l: 113.5, r: 114.75, s: 21.5, n: 23.125}, {l: 198, r: 208, s: 15, n: 26}, {l: 232, r: 244, s: 30, n: 42}, {l: 202, r: 230, s: 54, n: 62}, {l: 110, r: 156, s: -44, n: -20}, {l: 100, r: 132, s: -16, n: -2}, {l: 150, r: 198, s: -50, n: -32}, {l: 170, r: 216, s: -24, n: -10}, {l: 152, r: 176, s: -2, n: 14}, {l: 138, r: 154, s: -8, n: 0}, {l: 100, r: 160, s: 0, n: 45}, {l: 100, r: 250, s: -50, n: 65}]);
   assert.equal(name(M.isoPick(G, 119, 123, 21.75, 25.75)), "wp"); // Taiwan
   assert.equal(name(M.isoPick(G, 95, 170, -5, 50)), "pac"); // wider than the West Pacific
   assert.equal(name(M.isoPick(G, 199, 207, 16, 25)), "hi");
@@ -188,11 +188,11 @@ test("isoPick", () => {
   assert.equal(name(M.isoPick(G, 106.52, 110.14, 9.17, 16.79)), "wp");
   assert.equal(name(M.isoPick(G, 100, 119.99, 8.58, 17.57)), "wp");
   assert.equal(name(M.isoPick(G, 100, 120.53, 8.58, 17.57)), "wp");
-  assert.equal(M.isoPick(G.slice(0, 10), 95, 170, -5, 50), null); // no Pacific grid
+  assert.equal(M.isoPick(G.slice(0, 11), 95, 170, -5, 50), null); // no Pacific grid
   // Half a degree of slack past a box edge, and a grid without pressure is passed over.
   assert.equal(name(M.isoPick(G, 99.6, 123, 21.75, 25.75)), "wp");
   assert.equal(name(M.isoPick(G, 99.4, 123, 21.75, 25.75)), "pac");
-  assert.equal(name(M.isoPick([grid("wp", null), G[10]], 119, 123, 21.75, 25.75)), "pac");
+  assert.equal(name(M.isoPick([grid("wp", null), G[11]], 119, 123, 21.75, 25.75)), "pac");
   assert.equal(M.isoPick([grid("wp", null), grid("pac", null)], 119, 123, 21.75, 25.75), null);
 });
 
@@ -254,7 +254,8 @@ test("coast edges along a cut line lie on it exactly", () => {
 test("DETAIL boxes: the coarse outlines give way to the 10 m land, meeting it on the boxes' edges", () => {
   // The page's own steps on template.html's COAST lines: longitudes east, then each outline reaching into a box cut to its pieces outside it,
   // then the 10 m push after the comment. No coarse vertex lies on a box's edge, so only cuts run along one; each box holds 10 m land, which
-  // keeps inside its box, its points on an edge exactly on it; and nothing coarse is left inside a box.
+  // keeps inside one box, its points on an edge exactly on it (boxes may overlap, as New Ireland's two do); and nothing coarse is left inside
+  // a box.
   const M = load(), src = fs.readFileSync(path.join(__dirname, "..", "..", "template.html"), "utf8").split("\n");
   const at = src.indexOf("  // Up close: Natural Earth 10 m land cut to the DETAIL boxes, simplified (tools/detail_coast.py).");
   assert.ok(at > 0, "no DETAIL push in template.html");
@@ -274,9 +275,8 @@ test("DETAIL boxes: the coarse outlines give way to the 10 m land, meeting it on
   }
   for (const o of ten) {
     assert.deepEqual(o[0], o[o.length - 1]);
-    const B = M.DETAIL.find(B => o.some(p => inBox(p, B)));
-    assert.ok(B, `${o[0]} is in no box`);
-    for (const p of o) assert.ok(inBox(p, B) || edge(p, B), `${p} is outside ${B}`);
+    const B = M.DETAIL.find(B => o.some(p => inBox(p, B)) && o.every(p => inBox(p, B) || edge(p, B)));
+    assert.ok(B, `${o[0]} is in no one box`);
     for (let i = 1; i < o.length; i++) {  // a segment along an edge is a cut, so the coast line leaves it out
       const [a, b] = [o[i-1], o[i]];
       if ((a[0] === b[0] && (a[0] === B[0] || a[0] === B[1])) || (a[1] === b[1] && (a[1] === B[2] || a[1] === B[3]))) assert.ok(M.cut(...a, ...b));

@@ -60,7 +60,9 @@ and Tai Long Wan about 80 px from the sides), sideways the height (about 720). T
 (2026-10-18) starts from.
 
 The grid covers the home view upright and sideways. It is the finest grid, so it runs first in the finest-first order, and the West
-Pacific grid and the Pacific layer fill in around it when the map is zoomed out. The map's country button is Hong Kong's outline.
+Pacific grid and the Pacific layer fill in around it when the map is zoomed out. Its points are too close for the map's highs and lows,
+which look 2 points around (a quarter of a degree here, where a tenth of a hPa would make an H), so grids finer than half a degree draw
+pressure lines only. The map's country button is Hong Kong's outline.
 
 **Coastline.** Done in the commit before this work: the coarse outlines drew Hong Kong as three polygons of 4 to 7 points, so a
 DETAIL box (113.44–114.66°E, 21.95–22.75°N) now holds Natural Earth's 10 m land, and every coarser outline keeps only its pieces outside
@@ -90,7 +92,8 @@ the box.
 
 As for Micronesia: a source that is down only blanks its own part, and the build never fails on it. A station reading over 3 hours
 old, or one with no speed (HKO's `N/A`), is skipped, so Cheung Sha falls back to the airport. Calm reads 0 kt with no direction, as
-does a variable wind's speed. A tide year that fails, or isn't whole, isn't kept. A failed grid fetch keeps the last grid, and with
+does a variable wind's speed. A tide year that fails, or isn't whole, isn't kept, and after a timeout the rest wait for the next run,
+as for LINZ. A failed grid fetch keeps the last grid, and with
 none the map draws the coarser grids there.
 
 ## Testing

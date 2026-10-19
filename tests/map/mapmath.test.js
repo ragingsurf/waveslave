@@ -174,8 +174,9 @@ test("isoPick", () => {
 
 test("cut", () => {
   const M = load();
-  assert.deepEqual(M.CUTX, [100, 163, 180, 232, 246, 250]);
-  assert.deepEqual(M.CUTY, [-50, -5, 30, 43, 50, 65]);
+  // the coast boxes' edges, then each DETAIL box's
+  assert.deepEqual(M.CUTX, [100, 163, 180, 232, 246, 250, ...M.DETAIL.flatMap(([l, r]) => [l, r])]);
+  assert.deepEqual(M.CUTY, [-50, -5, 30, 43, 50, 65, ...M.DETAIL.flatMap(([, , s, n]) => [s, n])]);
   assert.equal(M.cut(163, 10, 163, 12), true);
   assert.equal(M.cut(163, 10, 163.01, 12), false);
   assert.equal(M.cut(120, -5, 121, -5), true);
@@ -183,6 +184,28 @@ test("cut", () => {
   // Within 1e-6; and a segment running from one cut line to another lies on neither.
   assert.equal(M.cut(246 + 5e-7, 31, 246, 35), true);
   assert.equal(M.cut(163, 30, 170, 43), false);
+});
+
+test("clipOut", () => {
+  const M = load(), area = o => Math.abs(o.slice(1).reduce((a, [x, y], i) => a + o[i][0]*y - x*o[i][1], 0))/2, B = [4, 6, 4, 6];
+  // A ring round the box: the pieces west, east, south and north of it, each closed, filling all of the ring but the box.
+  const P = M.clipOut([[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]], B);
+  assert.equal(P.length, 4);
+  for (const p of P) assert.deepEqual(p[0], p[p.length - 1]);
+  near(P.reduce((a, p) => a + area(p), 0), 96);
+  for (const p of P) for (const [x, y] of p) assert.ok(!(x > 4 && x < 6 && y > 4 && y < 6), `${x}, ${y} is inside the box`);
+  // Inside the box nothing is left; wholly outside it, the ring comes back as it was.
+  assert.deepEqual(M.clipOut([[4.5, 4.5], [5.5, 4.5], [5.5, 5.5], [4.5, 4.5]], B), []);
+  assert.deepEqual(M.clipOut([[0, 0], [2, 0], [2, 2], [0, 0]], B), [[[0, 0], [2, 0], [2, 2], [0, 0]]]);
+  // A ring reaching into the box from the west keeps its part west of it, which ends on the box's west edge exactly.
+  const W = M.clipOut([[2, 4.5], [5, 4.5], [5, 5.5], [2, 5.5], [2, 4.5]], B);
+  assert.equal(W.length, 1);
+  near(area(W[0]), 2);
+  assert.deepEqual(W[0].filter(([x]) => x === 4), [[4, 4.5], [4, 5.5]]);
+  // One reaching across the box's south-west corner: a piece west of it and one south of it, meeting on its west edge.
+  const C = M.clipOut([[3, 3], [5, 3], [5, 5], [3, 5], [3, 3]], B);
+  assert.equal(C.length, 2);
+  near(C.reduce((a, p) => a + area(p), 0), 3);
 });
 
 test("coast edges along a cut line lie on it exactly", () => {
@@ -202,6 +225,38 @@ test("coast edges along a cut line lie on it exactly", () => {
   }
   assert.ok(n >= 5, `only ${n} COAST lines found`);
   assert.deepEqual(off, []);
+});
+
+test("DETAIL boxes: the coarse outlines give way to the 10 m land, meeting it on the boxes' edges", () => {
+  // The page's own steps on template.html's COAST lines: longitudes east, then each outline reaching into a box cut to its pieces outside it,
+  // then the 10 m push after the comment. No coarse vertex lies on a box's edge, so only cuts run along one; the 10 m land keeps inside its box,
+  // its points on an edge exactly on it; and nothing coarse is left inside a box.
+  const M = load(), src = fs.readFileSync(path.join(__dirname, "..", "..", "template.html"), "utf8").split("\n");
+  const at = src.indexOf("  // Up close: Natural Earth 10 m land cut to the DETAIL boxes, simplified (tools/detail_coast.py).");
+  assert.ok(at > 0, "no DETAIL push in template.html");
+  const rings = L => L.flatMap(l => { const m = /^  (?:const COAST = |COAST\.push\(\.\.\.)(\[.*\])\)?;$/.exec(l); return m ? JSON.parse(m[1]) : []; });
+  let coarse = rings(src.slice(0, at)).map(o => o.map(([x, y]) => [M.E(x), y]));
+  const ten = rings(src.slice(at + 1, at + 2)), inBox = ([x, y], [l, r, s, n]) => x > l && x < r && y > s && y < n;
+  const edge = ([x, y], [l, r, s, n]) => x === l || x === r || y === s || y === n;
+  assert.ok(M.DETAIL.length >= 1 && ten.length >= 1);
+  for (const B of M.DETAIL) {
+    const [l, r, s, n] = B;
+    assert.ok(l < r && s < n, B);
+    for (const o of coarse) for (const [x, y] of o) assert.ok(Math.abs(x - l) > 1e-6 && Math.abs(x - r) > 1e-6 && Math.abs(y - s) > 1e-6 && Math.abs(y - n) > 1e-6, `${x}, ${y} is on ${B}`);
+    assert.ok(coarse.some(o => o.some(p => inBox(p, B))), `nothing coarse reaches into ${B}`);
+    coarse = coarse.flatMap(o => o.some(([x]) => x > l) && o.some(([x]) => x < r) && o.some(([, y]) => y > s) && o.some(([, y]) => y < n) ? M.clipOut(o, B) : [o]);
+    assert.deepEqual(coarse.filter(o => o.some(p => inBox(p, B))), []);
+  }
+  for (const o of ten) {
+    assert.deepEqual(o[0], o[o.length - 1]);
+    const B = M.DETAIL.find(B => o.some(p => inBox(p, B)));
+    assert.ok(B, `${o[0]} is in no box`);
+    for (const p of o) assert.ok(inBox(p, B) || edge(p, B), `${p} is outside ${B}`);
+    for (let i = 1; i < o.length; i++) {  // a segment along an edge is a cut, so the coast line leaves it out
+      const [a, b] = [o[i-1], o[i]];
+      if ((a[0] === b[0] && (a[0] === B[0] || a[0] === B[1])) || (a[1] === b[1] && (a[1] === B[2] || a[1] === B[3]))) assert.ok(M.cut(...a, ...b));
+    }
+  }
 });
 
 test("mkGrid null", () => {

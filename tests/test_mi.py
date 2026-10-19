@@ -40,9 +40,9 @@ class Spots(unittest.TestCase):
             self.assertEqual(len(s['zh']['cams']), len(s['cams'])); self.assertEqual(len(s['ja']['cams']), len(s['cams']))
         self.assertEqual(len({s['id'] for s in SPOTS}), len(SPOTS))
         for c in ('tw', 'jp', 'kr', 'ph', 'id', 'ca', 'hi', 'au', 'nz', 'nw', 'pi', 'ak', 'mi'): self.assertEqual(sum(s.get('country', 'tw') == c for s in SPOTS), 8, c)
-        # after Alaska's and before Hong Kong's, Hainan's, Vietnam's and Papua New Guinea's, the last added, so the shared Open-Meteo calls,
-        # which list every spot in its order, keep each other spot's place
-        self.assertEqual([s['id'] for s in SPOTS[-33:-25]], MI_IDS)
+        # after Alaska's and before Hong Kong's, Hainan's, Vietnam's, Papua New Guinea's and Vanuatu's, the last added, so the shared
+        # Open-Meteo calls, which list every spot in its order, keep each other spot's place
+        self.assertEqual([s['id'] for s in SPOTS[-39:-31]], MI_IDS)
 
     def test_no_clock_changes(self):
         # none of the eight zones changes its clock, so the one offset the page draws with holds all year
@@ -250,8 +250,8 @@ class Fill(unittest.TestCase):
         self.assertEqual(got, {'lat': '13.298,13.487,13.337,15.176,6.9845,7.0215,5.3335,7.079', 'lon': '144.656,144.748,144.776,145.789,158.1255,158.2935,162.9355,171.355',
                                'ndbc': '52202,52200,52211,52213,52215,52201,52216,APRP7', 'metar': 'PGUM,PGSN,PTSA', 'tideStation': '1630000,1633227,TPT2721',
                                'mlat': '6.9845,7.0215,5.3335', 'mlon': '158.1255,158.2935,162.9355'})
-        block = re.search(r'^for C in pi mi pg; do$.*?^done$', sh, re.S | re.M).group(0)
-        self.assertIn('CS=; case $C in mi|pg) CS="&cell_selection=sea";; esac', block)
+        block = re.search(r'^for C in pi mi pg vu; do$.*?^done$', sh, re.S | re.M).group(0)
+        self.assertIn('CS=; case $C in mi|pg|vu) CS="&cell_selection=sea";; esac', block)
         self.assertEqual(re.findall(r'forecast_days=4\$CS"', block), ['forecast_days=4$CS"'])
         self.assertIn('regrid mi 350 -2 2 9 152 2 13\n', sh)
 

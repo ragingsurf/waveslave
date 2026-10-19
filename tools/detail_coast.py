@@ -1,6 +1,6 @@
-# The map's coast up close where the coarse outlines are too rough for the spots (Hong Kong, Hainan, Papua New Guinea): Natural Earth 10 m
-# land cut to each of the map's DETAIL boxes (MAPM.DETAIL in template.html), simplified, and written into template.html as the COAST.push
-# line after the boxes' clip-out.
+# The map's coast up close where the coarse outlines are too rough for the spots (Hong Kong, Hainan, Papua New Guinea, Vanuatu): Natural
+# Earth 10 m land cut to each of the map's DETAIL boxes (MAPM.DETAIL in template.html), simplified, and written into template.html as the
+# COAST.push line after the boxes' clip-out.
 # A one-off, not part of the build:
 #   python3 -I tools/detail_coast.py <ne_10m_land.geojson> <template.html> [--eps 0.0005]
 import argparse, json, sys
@@ -8,7 +8,7 @@ import argparse, json, sys
 BOXES = '  const DETAIL = '  # the boxes' line in MAPM: [[l, r, s, n], ...], east
 CLIPOUT = '  for (const [l, r, s, n] of MAPM.DETAIL)'  # the page's clip-out loop, which the push follows
 COMMENT = '  // Up close: Natural Earth 10 m land cut to the DETAIL boxes, simplified (tools/detail_coast.py).'
-BUDGET = 40000  # bytes in the push line
+BUDGET = 45000  # bytes in the push line
 
 
 def clip(ring, box):

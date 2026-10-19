@@ -1,6 +1,7 @@
-# Sources for the Pacific island spots, written into snap.json under the same keys snap.py writes for Taiwan from CWA, for three groups:
+# Sources for the Pacific island spots, written into snap.json under the same keys snap.py writes for Taiwan from CWA, for four groups:
 # the South Pacific (pi: Fiji, Tonga, Samoa, American Samoa, the Cook Islands and Tahiti), Micronesia (mi: Guam, Saipan, Pohnpei,
-# Kosrae and Majuro) and Papua New Guinea (pg: Vanimo, Wewak, Ulingan Bay, Kavieng and New Ireland's east coast).
+# Kosrae and Majuro), Papua New Guinea (pg: Vanimo, Wewak, Ulingan Bay, Kavieng and New Ireland's east coast) and Vanuatu (vu: Efate
+# and Tanna).
 #   buoy   : PacIOOS's wave buoys via NOAA NDBC (buoyBy "pacioos") [time, height m, average period s, from deg, water °C], last 24 h, one
 #            row per hour, read as for California (ca.ndbc_rows), each spot's list tried in order (Aunu'u, then King-Poloa when it is
 #            silent); buoyMain names the first, the only one correct.py and history.py learn from
@@ -13,10 +14,10 @@
 #            Australia, with tideModel set so the page says so {local date: [[local HH:MM, 'H'|'L', cm]]}
 #   sun    : computed {local date: {first, rise, set, last, phen}} in local time
 #   tz     : each spot's offset at build time (Fiji +12, Tonga and Samoa +13, American Samoa -11, the Cook Islands and Tahiti -10;
-#            Guam and Saipan +10, Pohnpei and Kosrae +11, Majuro +12; Papua New Guinea +10; none changes its clock)
+#            Guam and Saipan +10, Pohnpei and Kosrae +11, Majuro +12; Papua New Guinea +10; Vanuatu +11; none changes its clock)
 # Data times are Taipei wall clock ("YYYY-MM-DDTHH:MM", UTC+8) like the rest of snap.json, readings on the nearest hour.
 # Silent buoys and stale wind follow ca.py's rules (ca.STALE_HOURS, ca.WIND_STALE_HOURS).
-# Usage: python3 -I pi.py <dl dir> <snap.json> <spots.json> [pi|mi|pg]   (for group c it reads ndbc-<id>.txt, metar-c.json, openc.json,
+# Usage: python3 -I pi.py <dl dir> <snap.json> <spots.json> [pi|mi|pg|vu]   (for group c it reads ndbc-<id>.txt, metar-c.json, openc.json,
 #        tidec-<station>.json and tidec.json, and each is optional: a missing one only blanks its own fields)
 import sys, os, json, datetime
 from zoneinfo import ZoneInfo
@@ -36,9 +37,9 @@ def noaa_tides(js, zone):
 
 
 def fill(snap, spots, dl, now, country='pi'):
-    """Fill every spot of one island group (pi, mi, pg) in snap (in place) from the downloads in dl; now (aware datetime) sets each spot's
-    offset and the cut-offs for a silent buoy and stale wind. The ECMWF reply lists every spot of the group in spots.json's order, the
-    tide model's reply the ones without a tideStation."""
+    """Fill every spot of one island group (pi, mi, pg, vu) in snap (in place) from the downloads in dl; now (aware datetime) sets each
+    spot's offset and the cut-offs for a silent buoy and stale wind. The ECMWF reply lists every spot of the group in spots.json's order,
+    the tide model's reply the ones without a tideStation."""
     C = [S for S in spots if S.get('country') == country]
     def part(name, f):
         try: return f()

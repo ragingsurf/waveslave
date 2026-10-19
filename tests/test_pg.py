@@ -27,8 +27,9 @@ class Spots(unittest.TestCase):
             self.assertIsNone(s['tideStation'], s['id'])
             self.assertEqual((s['cams'], s['zh']['cams'], s['ja']['cams']), ([], [], []), s['id'])
         self.assertEqual(len({s['id'] for s in SPOTS}), len(SPOTS))
-        # last in spots.json, so the shared Open-Meteo calls, which list every spot in its order, keep each other spot's place
-        self.assertEqual([s['id'] for s in SPOTS[-7:]], PG_IDS)
+        # after Vietnam's and before Vanuatu's, the last added, so the shared Open-Meteo calls, which list every spot in its order, keep
+        # each other spot's place
+        self.assertEqual([s['id'] for s in SPOTS[-13:-6]], PG_IDS)
 
     def test_no_clock_changes(self):
         import au
@@ -152,13 +153,13 @@ class Refresh(unittest.TestCase):
         import re, subprocess, tempfile
         get = re.search(r'^get\(\)\{.*?; \}$', self.sh, re.M).group(0)
         piids = re.search(r'^piids\(\)\{.*?; \}$', self.sh, re.S | re.M).group(0)
-        loop = re.search(r'^for C in pi mi pg; do$.*?^done$', self.sh, re.S | re.M).group(0)
+        loop = re.search(r'^for C in pi mi pg vu; do$.*?^done$', self.sh, re.S | re.M).group(0)
         tmp = tempfile.mkdtemp(); bin_ = os.path.join(tmp, 'bin'); os.makedirs(bin_); os.makedirs(os.path.join(tmp, 'w', 'dl'))
         with open(os.path.join(bin_, 'curl'), 'w') as f:
             f.write('#!/bin/sh\nfor a; do url=$a; done\necho "$url" >> "$T/calls"\nif [ -n "$F" ]; then case "$url" in *"$F"*) exit 22;; esac; fi\nexit 0\n')
         os.chmod(os.path.join(bin_, 'curl'), 0o755)
         env = dict(os.environ, PATH=bin_ + os.pathsep + os.environ['PATH'], T=tmp, F=fail)
-        r = subprocess.run(['sh', '-c', 'set -e\nHERE=$1; W=$2\n%s\n%s\n%s' % (get, piids, loop.replace('for C in pi mi pg; do', 'for C in pg; do', 1)), 'sh', ROOT, os.path.join(tmp, 'w')],
+        r = subprocess.run(['sh', '-c', 'set -e\nHERE=$1; W=$2\n%s\n%s\n%s' % (get, piids, loop.replace('for C in pi mi pg vu; do', 'for C in pg; do', 1)), 'sh', ROOT, os.path.join(tmp, 'w')],
                            capture_output=True, text=True, env=env)
         self.assertEqual(r.returncode, 0, r.stderr)
         with open(os.path.join(tmp, 'calls')) as f: return f.read().split()
@@ -184,7 +185,7 @@ class Refresh(unittest.TestCase):
         page = [l for l in self.sh.split('\n') if "replace('__GRIDPG__'" in l]
         self.assertEqual(len(page), 1)
         self.assertIn(".replace('__GRIDPG__',open(sys.argv[17]).read())", page[0])
-        self.assertTrue(page[0].endswith(' "$GM" "$GHK" "$GPG"'))
+        self.assertEqual(page[0].split('.read()))" ', 1)[1].split(' ')[16], '"$GPG"')  # sys.argv[17]
 
 
 if __name__ == '__main__':

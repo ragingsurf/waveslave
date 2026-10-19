@@ -107,12 +107,11 @@ async function ownHome(open, c, spot, A) {
 }
 
 // A country with two parts, west and east of the longitude at, where the current spot picks the part (the South Pacific, Micronesia, Papua
-// New Guinea): each
-// part's first spot, another spot in it (mate) and its home view. With nothing saved, a spot opens on its part's home view with every spot
-// of the part on the map and clear of the buttons and the time bar; upright the part's width sets the zoom the fit for the names starts
-// from (home().z1), sideways its height. Another spot in the same part leaves the map where it is. A spot in the other part moves the map
-// to that part's home view and keeps the view left under its own part's key, where the next open finds it, and from Japan's the map's
-// country button brings back the part of the spot last open.
+// New Guinea): each part's first spot, another spot in it (mate) and its home view. With nothing saved, a spot opens on its part's home
+// view with every spot of the part on the map and clear of the buttons and the time bar; upright the part's width sets the zoom the fit
+// for the names starts from (home().z1), sideways its height. Another spot in the same part leaves the map where it is. A spot in the
+// other part moves the map to that part's home view and keeps the view left under its own part's key, where the next open finds it, and
+// from Japan's the map's country button brings back the part of the spot last open.
 async function twoParts(open, c, at, PARTS) {
   for (const [part, other] of [["w", "e"], ["e", "w"]]) {
     const P = PARTS[part], O = PARTS[other], page = await open({ spot: P.spot });
@@ -623,7 +622,7 @@ const CHECKS = {
     if (b.z !== b.z0 || !near(b.cx, b.h.cx, 1e-6) || !near(b.cy, b.h.cy, 1e-6)) throw new Error(`after two taps the view is z ${b.z} at ${b.cx}, ${b.cy}, want z0 ${b.z0} at the home view's ${b.h.cx}, ${b.h.cy}`);
   },
   // Each country's button brings a home view with all of the country's names in the clear, in English, Chinese and Japanese, on the phone
-  // and (upright runs) on a 1280x800 computer screen too: every one of its spots (in Australia, the South Pacific and Micronesia: those in the part it's on, each part in turn)
+  // and (upright runs) on a 1280x800 computer screen too: every one of its spots (in Australia, the South Pacific, Micronesia and Papua New Guinea: those in the part it's on, each part in turn)
   // has its dot and its tag on the map with room around them, 16px or more inside the screen, under the top buttons and over the time bar,
   // and 8px or more from the buttons down the sides. The home view is never closer than the country's home zoom was (home().z1), and only
   // as far out as it needs: still at that zoom, or with the names spanning half of the clear map or more one way. Taiwan's towns never put
@@ -634,9 +633,9 @@ const CHECKS = {
       const page = await open({ spot: "pipeline", size }), cs = await page.evaluate(() => [...document.querySelectorAll("#wsCtry button")].map(b => b.dataset.c));
       for (const l of ["en", "zh", "ja"]) {
         await page.evaluate(l => setLang(l), l); await settle(page);
-        for (const c of [...cs, "margaret", "noosa", "cloudbreak", "teahupoo", "umatac", "ppass"]) {
-          // A country from another one's button, so its own flies to its home view; the two parts of Australia, the South Pacific and
-          // Micronesia by picking a spot in each.
+        for (const c of [...cs, "margaret", "noosa", "cloudbreak", "teahupoo", "umatac", "ppass", "lido", "nusa"]) {
+          // A country from another one's button, so its own flies to its home view; the two parts of Australia, the South Pacific,
+          // Micronesia and Papua New Guinea by picking a spot in each.
           if (cs.includes(c)) for (const b of [c === cs[0] ? cs[1] : cs[0], c]) { await page.click(`#wsCtry button[data-c="${b}"]`); await settle(page); }
           else { await page.evaluate(id => switchSpot(id), c); await settle(page); }
           const r = await page.evaluate(([M, MB]) => { const cv = document.getElementById("wsFx").getBoundingClientRect(), v = window.__ws.view(), h = window.__ws.home(), tags = window.__ws.tags();

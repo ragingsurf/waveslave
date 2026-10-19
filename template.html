@@ -1108,10 +1108,11 @@ const WS = (() => {
     const dpr = Math.min(2, window.devicePixelRatio||1);
     FXR = W*H > 1.2e6 ? 1 : Math.min(1.5, dpr); for (const [c, r] of [[base, dpr], [fx, FXR]]) { c.width = W*r; c.height = H*r; c.style.height = H+"px"; c.getContext("2d").setTransform(r,0,0,r,0,0); }
     zmin = MAPM.cover(MAPM.PBOX, W, H); refit(); // zoomed all the way out, the Pacific box fills the screen: upright its whole height, sideways its whole width
-    // First open: the saved view, else the country's old map filling the screen (Australia no further out than its home view), else (the
-    // South Pacific, Alaska, Micronesia, Hong Kong and Hainan, which never had one) its home view.
+    // First open: the saved view, else the country's old map filling the screen (Australia no further out than its home view), slid
+    // sideways inside it so its dots clear the buttons (offButtons), else (the South Pacific, Alaska, Micronesia, Hong Kong and Hainan,
+    // which never had one) its home view.
     if (z === 1) { const LAST = lastView(), k = LAST && LAST.k > 0 ? LAST.k : 0, OLD = MAPM.OLDBOX[MC];
-      if (k) { z = k*homeZ(HOME); cx = LAST.cx; cy = LAST.cy; } else if (!OLD) { z = z0; cx = HV.cx; cy = HV.cy; } else { z = MC === "au" ? Math.max(MAPM.cover(OLD, W, H), z0) : MAPM.cover(OLD, W, H); [cx, cy] = MAPM.clampTo(OLD, W, H, z, HOME.cx, HOME.cy); } }
+      if (k) { z = k*homeZ(HOME); cx = LAST.cx; cy = LAST.cy; } else if (!OLD) { z = z0; cx = HV.cx; cy = HV.cy; } else { z = MC === "au" ? Math.max(MAPM.cover(OLD, W, H), z0) : MAPM.cover(OLD, W, H); [cx, cy] = MAPM.clampTo(OLD, W, H, z, HOME.cx, HOME.cy); offButtons(OLD); } }
     else if (was) z = was*z0; clampView();
     if (parts.length) { const n = Math.min(4000, Math.round(W*H/260)); while (parts.length < n) { const p = {}; spawn(p); parts.push(p); } parts.length = n; } } // same streak density at any size, capped so big full screens stay smooth
   // The view stays inside the Pacific box, between the box filling the screen and ten times the country's home zoom.
@@ -1207,6 +1208,12 @@ const WS = (() => {
         vx -= dx/zz; vy = iy(Y + dy/zz); }
       if (zz === zmin) break; }
     return best; }
+  // The view slid sideways, as far as the box B lets it, until each of the country's dots sits ROOMB or more from the buttons, as fitHome
+  // has it: a dot by a button right of the middle moves left, one by a button left of it right.
+  function offButtons(B) { const A = clearArea(), Y = my(cy); let pl = 0, pr = 0;
+    for (const s of SP) { if (spotCountry(s.id) !== MC) continue; const x = W/2 + (s.lon-cx)*z, y = H/2 - (my(s.lat)-Y)*z;
+      for (const b of A.btn) if (x-6 < b[0]+b[2]+ROOMB && x+6 > b[0]-ROOMB && y-6 < b[1]+b[3]+ROOMB && y+6 > b[1]-ROOMB) { if (b[0]+b[2]/2 > W/2) pl = Math.max(pl, x+6-b[0]+ROOMB); else pr = Math.max(pr, b[0]+b[2]+ROOMB-x+6); } }
+    [cx, cy] = MAPM.clampTo(B, W, H, z, cx - (pr-pl)/z, cy); }
   // The home view worked out again whenever the map takes its size, another country (or the other part of one) or language is picked
   // or the tags' font arrives: a map sitting on the old home view moves to the new one.
   const refit = () => { const at = z0 > 1 && z === z0 && cx === HV.cx && cy === HV.cy, f = fitHome(); HV = {cx: f.cx, cy: f.cy}; z0 = f.z; if (at) { cx = HV.cx; cy = HV.cy; z = z0; } };

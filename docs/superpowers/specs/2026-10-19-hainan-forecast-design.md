@@ -70,6 +70,12 @@ tip of the Leizhou Peninsula across the strait; every coarser outline keeps only
 unchanged. The 10 m land still closes Dadonghai's small bay, so that spot's dot sits 0.7 km inside the coast: 2 px at the home view,
 about 20 px at the closest zoom. The map's country button is Hainan's outline.
 
+**First open.** Hainan's button makes the country column one button longer, and on an upright phone its foot came down over New
+Zealand's St Clair and Australia's Bells Beach on those countries' first open (their old map, with nothing saved). That first open now
+slides sideways inside the old map's box, as the home view does, until the country's dots clear the buttons; this also clears
+California's Ocean Beach and Hawaii's Hanalei, which sat under the column already. Held sideways, Australia's first open fills its box's
+whole width and can't slide, so Snapper and Byron stay by the zoom buttons, as before.
+
 ## Architecture
 
 1. **spots.json**: 7 spots with `country: "hn"`, `zone`, `buoyKm: null`, `buoyName: ""`, `windStation: []`, `stationName: ""`,

@@ -258,6 +258,23 @@ const CHECKS = {
     const a = await page.evaluate(() => { const v = window.__ws.view(); return { z: v.z, want: Math.max(MAPM.cover(MAPM.OLDBOX.au, v.W, v.H), v.z0) }; });
     if (a.z !== a.want) throw new Error(`Margaret River opens at z ${a.z}, want ${a.want}`);
   },
+  // And none of the country's dots sits under a button there: the old map slides sideways inside its box until they clear the buttons
+  // (upright, Ocean Beach, Hanalei, Bells Beach and St Clair would sit under the country buttons). Australia opens on each of its parts.
+  async firstOpenClear(open) {
+    for (const [name, spot] of HOMES) {
+      const page = await open({ spot });
+      const c = await page.evaluate(s => ALL.spots[s] && MAPM.OLDBOX[spotCountry(s)] ? spotCountry(s) : "", spot);
+      if (!c) continue;  // a country that never had an old map, or a build from before that country
+      const e = await edges(page), b = await page.evaluate(c => MAPM.OLDBOX[c], c);
+      if (!(e.l >= b.l - 1e-9 && e.r <= b.r + 1e-9 && e.s >= b.s - 1e-9 && e.n <= b.n + 1e-9)) throw new Error(`${spot} opens on ${e.l}..${e.r} by ${e.s}..${e.n}, not inside ${c}'s box`);
+      if (near(e.l, b.l, 1e-6) && near(e.r, b.r, 1e-6)) continue;  // as wide as its box, it has no room to slide (sideways, Australia's Snapper and Byron stay by the zoom buttons)
+      const out = await page.evaluate(c => { const rect = e => e.getBoundingClientRect(), fx = rect(document.getElementById("wsFx"));
+        const over = [...document.querySelectorAll("#wsLayers button, #wsCtry button, #viewWs .zoom button")].filter(b => b.offsetParent).map(rect);
+        return countrySpots(c).filter(id => { const s = ALL.spots[id], [x, y] = window.__ws.px(MAPM.E(s.lon), s.lat), X = fx.left + x, Y = fx.top + y;
+          return x >= 0 && y >= 0 && x <= fx.width && y <= fx.height && over.some(r => X > r.left - 6 && X < r.right + 6 && Y > r.top - 6 && Y < r.bottom + 6); }); }, c);
+      if (out.length) throw new Error(`on ${name}'s first open ${out.join(", ")} sits under a button`);
+    }
+  },
   // Pacific NW: with nothing saved, Cox Bay opens on its old box; California then opens on its home view with the Pacific NW view kept
   // under its own key, and the map's own Pacific NW button brings it back to the Pacific NW home view.
   async pacificNorthwest(open) {

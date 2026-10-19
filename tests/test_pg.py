@@ -178,8 +178,8 @@ class Refresh(unittest.TestCase):
         self.assertEqual([x for x in self.loop('cell_selection=sea&models=ecmwf_ifs') if x.startswith(u)], [u + '&models=ecmwf_ifs', u])
 
     def test_grid_and_page(self):
-        # the map's grid for Papua New Guinea, 2° apart over 8°S–0°, 138–154°E, refetched every ~6 h, and its place in the page
-        self.assertIn('regrid pg 350 -8 2 5 138 2 9\n', self.sh)
+        # the map's grid for Papua New Guinea, 2° apart over 10°S–2°N, 136–156°E, refetched every ~6 h, and its place in the page
+        self.assertIn('regrid pg 350 -10 2 7 136 2 11\n', self.sh)
         self.assertIn('GPG="$G/grid-pg.json"; [ -f "$GPG" ] || { echo null > "$W/gridnull.json"; GPG="$W/gridnull.json"; }\n', self.sh)
         page = [l for l in self.sh.split('\n') if "replace('__GRIDPG__'" in l]
         self.assertEqual(len(page), 1)

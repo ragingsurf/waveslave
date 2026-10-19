@@ -58,30 +58,34 @@ No public surf cam was found at any of them.
 | Tides | Open-Meteo's tide model, as for Pohnpei and Kosrae | highs and lows picked from the hourly level; the page says "Model tide". NOAA has no prediction station near PNG, and the official tables (the Australian Hydrographic Office's for PNG, and BoM's calendars for Lombrum and Port Moresby) are Australian copyright, not open for reuse. Against the one open gauge, Lombrum on Manus, 350 to 680 km from the spots, the model's highs and lows came a median 17 minutes early over 11 to 19 October (37 minutes off on average) |
 | Sun times | computed | |
 | Cyclones | links only | the Typhoon watch panel becomes Cyclone watch, as for Indonesia, and links the PNG National Weather Service (TCWC Port Moresby, the WMO's warning centre for the Solomon Sea and the Gulf of Papua) and the Bureau of Meteorology, whose cyclone centre issued the advisories as ex-TC Maila neared PNG this April. Cyclones seldom reach 2.5–4.5°S |
-| Map | a grid of its own, 2° apart (8°S–0°, 138–154°E), refetched every ~6 h as for Micronesia | no other grid reaches these spots: the West Pacific grid stops at the equator, Indonesia's at 132°E |
+| Map | a grid of its own, 2° apart (10°S–2°N, 136–156°E), refetched every ~6 h as for Micronesia | no other grid reaches these spots: the West Pacific grid stops at the equator, Indonesia's at 132°E |
 
 The log keeps the forecast only. With no buoy and no wind station, the corrections leave the forecast as it is.
 
 The past days' wind and the Map tab's wind after the four-day forecast come from the shared `openwx` call, which takes the default
 cells, as for Micronesia, Hong Kong, Hainan and Vietnam (already a follow-up in the to-do list).
 
-Open-Meteo: about 2,200 more calls a day (the spots in the three shared calls, the wind and tide calls, and the grid), about 68,000
+Open-Meteo: about 2,500 more calls a day (the spots in the three shared calls, the wind and tide calls, and the grid), about 68,500
 in all.
 
 ## Map
 
 The 7 spots span 2.57–4.49°S and 141.27–152.20°E, 1,220 km. Two home views, split at 148°E, as for Micronesia: the north coast, `w:
 {cx: 143.35, cy: -3.57, span: 3.2, wide: 5.6}`, and New Ireland, `e: {cx: 151.46, cy: -3.01, span: 1.6, wide: 2}`. Upright the
-width decides, sideways the height. Nusa and Nago, the closest pair, are 3.7 km apart, 7 px at New Ireland's first open upright.
+width decides, sideways the height. Nusa and Nago, the closest pair, are 3.7 km apart, 6 px at New Ireland's first open upright.
 
 With Papua New Guinea's the map has 17 country buttons, one more than fits in a column on a 390×844 phone held upright, so the 17th
 starts a second column at the top; the fit for the names moves each country's first open clear of it, as it does for the others.
 
-**Grid.** `regrid pg 350 -8 2 5 138 2 9`, 45 points, joins the West Pacific grid at the equator. It holds both home views sideways and
-New Ireland's upright, so their pressure lines come from it; the north coast's upright view runs from 10°S to 2°N, past it, so the
-Pacific layer draws there. It runs after Micronesia's in the finest-first order.
+**Grid.** `regrid pg 350 -10 2 7 136 2 11`, 77 points, reaching 2° past the equator into the edge of the West Pacific grid. A grid
+fades into the next coarser one over its outer two steps, so it runs at least two steps past the spots: all seven take the map's
+colours from it in full (Rubio 0.95), where a grid ending at the equator and 8°S would give Lido and the Kavieng reefs about half
+and Rubio 0.4, the rest coming from the 5° Pacific layer. It holds all four home views, either way up (the north coast's upright
+one reaches 0.06° past its south edge, inside the half degree to spare), so their pressure lines come from it. It runs after
+Micronesia's in the finest-first order.
 
-**Coastline.** The coarse outlines draw PNG's half of New Guinea north of 5°S as one ring of 12 points and New Ireland as one of 18,
+**Coastline.** The coarse outlines draw PNG's half of New Guinea north of 5°S as one open outline of 12 points, from the border at
+5°S round to 5°S again by Madang, and New Ireland as a ring of 18,
 which puts Wewak 3.6 km, Tupira 1.3 km and Rubio 4.1 km on land (Rubio 7 to 9 px at New Ireland's home view), and they leave out the
 islands off the north coast. Three DETAIL boxes, as for Hong Kong and Hainan, take Natural Earth's 10 m land instead:
 
@@ -97,7 +101,12 @@ the Bird's Head's coast in Indonesia.
 The detailed coast's line in the page grows from 26 kB to 39.4 kB, inside its 40 kB budget, and Hong Kong's and Hainan's rings come
 out unchanged. Wewak then sits 40 m off the drawn coast, Tupira 0.9 km and Rubio 0.3 km on land, and Lido, 1.1 km offshore before,
 1.5 km on land: Natural Earth rounds off the Vanimo peninsula. That is under 2 px at the north coast's home view. Natural Earth has
-none of Kavieng's small islands, so Nusa, Nago and Ral sit 3 to 9 km off New Ireland's drawn coast.
+none of Kavieng's small islands, so Nusa, Nago and Ral sit 3 to 9 km off New Ireland's drawn coast. Karkar, beside Tupira just east
+of the north coast's box, keeps its coarse outline: taking it and Bagabag in would put the line 117 bytes over its budget.
+
+The north coast's box is the first to cut an open outline. The page's clip used to drop every outline's last point, taking each to
+be closed, which here drew a 12 km line at the foot of the border; it now keeps an open outline's points and closes it from its last
+point to its first, along the 5°S cut line, as tools/pacific_coast.py and tools/detail_coast.py do.
 
 The map's country button is PNG's outline.
 

@@ -230,8 +230,8 @@ fi
 # home views sideways and their middle upright), Alaska 1° of latitude by 2° of longitude apart (54–62°N, 158–130°W, close to square
 # cells there), Micronesia 2° apart (2°S–14°N, 152–176°E, its east home view sideways and the middle upright; its west one lies
 # inside the West Pacific grid), Hong Kong 0.125° apart (21.5–23.125°N, 113.5–114.75°E, its home view either way up) and Papua New
-# Guinea 2° apart (8°S–0°, 138–154°E, both its home views sideways and New Ireland's upright), all refetched only every ~6 h to keep
-# Open-Meteo calls down.
+# Guinea 2° apart (10°S–2°N, 136–156°E, both its home views either way up), all refetched only every ~6 h to keep Open-Meteo calls
+# down.
 # Open-Meteo refuses longitudes past 180, so those are asked for as west ones (182 as -178), as pacific.sh does; the grid keeps them east.
 regrid(){ C=$1; AGE=$2; shift 2
   [ -n "$(python3 -I -c "import json,sys;print(any(s.get('country')==sys.argv[2] for s in json.load(open(sys.argv[1]))) or '')" "$HERE/spots.json" $C)" ] && [ -z "$(find "$G/grid-$C.json" -mmin -$AGE 2>/dev/null)" ] || return 0
@@ -250,7 +250,7 @@ regrid pi 350 -24 2 8 170 2 24
 regrid ak 350 54 1 9 -158 2 15
 regrid mi 350 -2 2 9 152 2 13
 regrid hk 350 21.5 0.125 14 113.5 0.125 11
-regrid pg 350 -8 2 5 138 2 9
+regrid pg 350 -10 2 7 136 2 11
 # The whole Pacific, 5° apart (50°S–65°N, 100°E–110°W), by pacific.sh: refetched only every ~6 h, and never in a run that refetched the West Pacific grid, so the two biggest requests don't land together.
 [ -n "$WPNEW" ] || [ -n "$(find "$G/grid-pac.json" -mmin -350 2>/dev/null)" ] || sh "$HERE/pacific.sh" "$G" || echo "pacific grid fetch failed, keeping last grid" >&2
 GJ="$G/grid.json"; [ -f "$GJ" ] || { echo null > "$W/gridnull.json"; GJ="$W/gridnull.json"; }

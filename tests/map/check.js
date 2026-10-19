@@ -239,10 +239,10 @@ const CHECKS = {
       if (src !== want) throw new Error(`on ${name}'s home view iso() is ${src}, want ${want}`);
     }
   },
-  // Papua New Guinea's two home views held sideways sit inside its grid (8°S–0°, 138–154°E), and New Ireland's upright too; upright the north
-  // coast's width sets the zoom, so its height runs past the grid and the pressure lines come from the Pacific layer.
+  // Papua New Guinea's two home views sit inside its grid (10°S–2°N, 136–156°E) either way up, the north coast's upright one with its height
+  // (set by its width) inside the half degree to spare, so their pressure lines come from it.
   async papuaNewGuineaIso(open) {
-    for (const [name, want] of [["pg-w", PGG && land ? "pg" : PAC ? "pac" : null], ["pg-e", PGG ? "pg" : PAC ? "pac" : null]]) {
+    for (const [name, want] of [["pg-w", PGG ? "pg" : PAC ? "pac" : null], ["pg-e", PGG ? "pg" : PAC ? "pac" : null]]) {
       const page = await open(home(name));
       if (!await page.evaluate(() => !!ALL.spots.lido)) skip("the page has no Papua New Guinea spots");
       const src = await page.evaluate(() => window.__ws.iso());

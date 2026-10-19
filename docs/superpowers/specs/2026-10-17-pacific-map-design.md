@@ -52,7 +52,16 @@ Defaults I picked (say if you want otherwise):
   are on does what the home button did (below). An open forecast card or pin closes, since it belongs to the place
   being left. The card never covers the countries: sideways it sits between them and the map tools, upright they stop
   above it. With reduced motion the map jumps. (Until a later change the same day the countries were words in a second
-  row under Pressure, and the buttons only faintly tinted.)
+  row under Pressure, and the buttons only faintly tinted.) Since a later change on 2026-10-18 (Bryan's request) the home
+  view fits the country's names: from the country's home centre and zoom it moves, and zooms out a step at a time, until
+  every one of its spots (Australia's and the South Pacific's: in the part you are on) has its dot and its tag in the clear map, 16px or more
+  inside the screen, under the top buttons and over the time bar, and 8px or more from the buttons down the sides. It is
+  worked out again when the screen's size, the language or the tags' font changes. The map's own country's tags are
+  placed first, another country's tag with no free place is left off, and another country's tags show only from 0.6 of
+  that country's own home zoom in, so the neighbours don't crowd a country zoomed out to fit. Taiwan's towns likewise go
+  by Taiwan's own home zoom, so none crowd into Taiwan at the edge of Japan's view, and a town whose dot would land on a
+  tag is left off. A saved view keeps its zoom against the country's home zoom before the fit, so it still opens exactly
+  where it was left.
 - **The home button** works as today, now at Pacific scale. One tap zooms out to the whole Pacific, and a second tap
   goes back to the current country. Since 2026-10-18 it is the lit country in the column down the left: the button
   that drew the current country's outline among the map tools went, so no outline shows twice. Since 2026-10-18 the first tap zooms all the way out around where you are, as far
@@ -100,7 +109,7 @@ The country grids are unchanged: West Pacific 3°, California and Hawaii 1°, Au
      through `px`/`ll`, including the places that do their own maths today: pan, pinch, `zoomAt`, `clampView`, the
      colour-field cells, the Taiwan relief image and the streak shift on pan. The region-wide `KX` goes; distances
      for spot blending use the cosine of the point's own latitude. Each country's home zoom is set so the home view
-     matches today's.
+     matches today's (since 2026-10-18 the fit for the names starts from it, see "Inside the map", and never comes closer).
    - **Grids**: the code that today serves one `GRID` (unpacking a time step, reading wind, waves, swell, rain and
      pressure at a point) is turned into a small per-grid object, made once for each of the five grids. A lookup
      uses the finest grid covering the point. Within two of that grid's own steps of its edge, it fades into the

@@ -459,6 +459,7 @@ html{overscroll-behavior-y:none}
   </footer>
   <!-- British Columbia tides: the notice the Canadian Hydrographic Service licence asks every product made from its data to carry, word for word (https://www.tides.gc.ca/en/licence-agreement). -->
   <footer class="legal">This product is not to be used for navigation. This product was made by or for WaveSlave and contains intellectual property (Data) of the Canadian Hydrographic Service of the Department of Fisheries and Oceans. The copyrights in the Data are and remain the property of His Majesty the King in Right of Canada and shall not be sold, licensed, leased, assigned or given to a third party. The incorporation of the Data in this product does not constitute an endorsement or an approval of this product by the Canadian Hydrographic Service, the Department of Fisheries and Oceans or His Majesty the King in Right of Canada.</footer>
+  <footer class="legal" data-zh="© 2026 WaveSlave。版權所有，未經許可請勿複製或轉載本站程式碼與設計。" data-ja="© 2026 WaveSlave. 無断での複製・転載を禁じます（サイトのコードとデザイン）。">© 2026 WaveSlave. All rights reserved: please don't copy or republish this site's code or design without permission.</footer>
 </div>
 
 <script>
@@ -714,11 +715,11 @@ const WS = (() => {
   const GRIDS = ["nw", "hi", "ca", "ak", "au", "id", "nz", "pi", "wp", "pac"].map(n => MAPM.mkGrid(n, RAW[n])).filter(Boolean);
   // Each country's home view: its centre, the degrees of latitude the map's height shows there, and (wide) the degrees of longitude its width shows at least.
   const HOMES = {tw: {cx: 120.9, cy: 23.75, span: 4}, jp: {cx: 135.6, cy: 33.4, span: 13}, kr: {cx: 127.75, cy: 35.7, span: 8}, ph: {cx: 122.6, cy: 13.8, span: 17}, id: {cx: 116, cy: -8.75, span: 13}, ca: {cx: 240.5, cy: 35.3, span: 9}, hi: {cx: 202.7, cy: 20.6, span: 10}, nz: {cx: 174.3, cy: -41.8, span: 16}, nw: {cx: 235.3, cy: 46.1, span: 8.2}, ak: {cx: 215.4, cy: 58.4, span: 6.2, wide: 24}};
-  // A country too big for a phone has parts, west and east of the longitude at, each with its home view; the current spot picks the part.
+  // A country too big for a phone has parts, west and east of the longitude at, each with its home view; the current spot (or the spot asked about) picks the part.
   // Australia: its west coast, or its east (Noosa to Phillip Island). The South Pacific: Fiji to the Samoas, or Rarotonga and Tahiti.
   const PARTS = {au: {at: 130, w: {cx: 115.5, cy: -32.5, span: 6}, e: {cx: 152, cy: -32.5, span: 14}},
     pi: {at: 195, w: {cx: 182.85, cy: -17.8, span: 11, wide: 17.6}, e: {cx: 205.07, cy: -19.5, span: 8, wide: 15.2}}};
-  const homeOf = c => { const p = PARTS[c]; return !p ? HOMES[c] || HOMES.tw : p[MAPM.E((ALL.spots[CUR]||{}).lon) < p.at ? "w" : "e"]; };
+  const homeOf = (c, id = CUR) => { const p = PARTS[c]; return !p ? HOMES[c] || HOMES.tw : p[MAPM.E((ALL.spots[id]||{}).lon) < p.at ? "w" : "e"]; };
   // MC is the map's country, which picks the home view, the first-open box and the saved-view key.
   let MC = spotCountry(SPOT0), HOME = homeOf(MC);
   const NEON = [[0,"#2b2d8f"],[.18,"#00b4d8"],[.36,"#00f5d4"],[.54,"#b5ff3b"],[.7,"#ffe600"],[.85,"#ff7a00"],[1,"#ff2bd6"]];
@@ -808,14 +809,18 @@ const WS = (() => {
     g.restore(); }
   function drawBorders(g, col, w, dash) { g.save(); g.strokeStyle = col; g.lineWidth = w; g.setLineDash(dash || []); g.lineJoin = "round"; g.beginPath();
     for (const l of TWGEO.borders) l.forEach(([lon, lat], i) => { const [x, y] = px(lon, lat); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke(); g.restore(); }
-  const townsShown = () => z < z0*0.5 ? [] : TOWNS.filter(t => t[3] === 1 || (t[3] === 2 && z >= z0*0.85) || (t[3] === 3 && z >= z0*1.6));
-  // Town labels go wherever they fit around the spot tags and dots, else they're skipped.
-  function drawTowns(g, boxes, st) { g.save(); g.textBaseline = "middle";
+  // Taiwan's towns go by Taiwan's own home zoom (the fitted one when the map is Taiwan's), so Japan's home view, zoomed out to fit its
+  // names down to Okinawa, crams no towns into Taiwan at its edge.
+  const townsShown = () => { const zt = MC === "tw" ? z0 : homeZ(HOMES.tw); return z < zt*0.5 ? [] : TOWNS.filter(t => t[3] === 1 || (t[3] === 2 && z >= zt*0.85) || (t[3] === 3 && z >= zt*1.6)); };
+  // Town labels go wherever they fit around the spot tags and dots, else they're skipped. A town whose dot would land on a spot's tag or
+  // dot, or under a button, is left off altogether.
+  function drawTowns(g, boxes, st) { g.save(); g.textBaseline = "middle"; TOWNAT = []; const taken = boxes.slice();
     for (const [en, lon, lat, r] of townsShown()) { const name = T(en); const [x, y] = px(lon, lat); if (x < 0 || y < 0 || x > W || y > H) continue;
+      if (taken.some(b => x > b[0]-3 && x < b[0]+b[2]+3 && y > b[1]-3 && y < b[1]+b[3]+3)) continue;
       g.font = st.font(r); const tw = g.measureText(st.up ? name.toUpperCase() : name).width, th = r === 1 ? 14 : 12;
       const spots = [[x+st.gap(r), y-th/2], [x-st.gap(r)-tw, y-th/2], [x-tw/2, y-th-st.gap(r)+2], [x-tw/2, y+st.gap(r)-2]];
       const at = spots.find(([tx, ty]) => tx > 2 && tx+tw < W-2 && ty > 2 && ty+th < H-2 && !boxes.some(b => tx < b[0]+b[2]+2 && tx+tw+2 > b[0] && ty < b[1]+b[3]+2 && ty+th+2 > b[1]));
-      st.dot(g, x, y, r); if (!at) continue; boxes.push([at[0], at[1], tw, th]); st.text(g, st.up ? name.toUpperCase() : name, at[0], at[1]+th/2, r); }
+      st.dot(g, x, y, r); TOWNAT.push([x, y, en]); if (!at) continue; boxes.push([at[0], at[1], tw, th]); st.text(g, st.up ? name.toUpperCase() : name, at[0], at[1]+th/2, r); }
     g.restore(); }
   // Island styles: land (under the coast line) and towns (over the spot tags).
   const SANS = '"Public Sans", sans-serif';
@@ -855,8 +860,9 @@ const WS = (() => {
       swell: s.hourly.filter(r => r[4] != null).map(r => ({t: pt(r[0]), h: r[4], p: r[5], dir: r[6]})),
       rain: (s.wx||[]).filter(r => r[3] != null).map(r => ({t: pt(r[0]), mm: r[3]})) }; });
   let SP = null, times = [], ti = 0, layer = "wind", W = 0, H = 0, base, fx, parts = [], raf = 0, playing = 0, built = false;
-  let TAGHIT = [];
+  let TAGHIT = [], TOWNAT = []; // the tags and the town dots as last drawn, for taps (TAGHIT) and the test hook
   let cx = HOME.cx, cy = HOME.cy, z = 1, z0 = 1, zmin = 1, dirty = false, FXR = 1;
+  let HV = {cx: HOME.cx, cy: HOME.cy}; // the home view's centre on this screen (fitHome), at zoom z0
   // Mercator: z is pixels per degree of longitude, and up the screen runs Mercator y (MAPM.my), so every country keeps its shape.
   // my(cy) is worked out again only once cy has moved (a pan, zoom, glide or clamp), so px and ll pay for one my or iy a point, not two.
   let MYK = NaN, MYV = 0; const myCy = () => cy === MYK ? MYV : (MYK = cy, MYV = my(cy));
@@ -864,7 +870,8 @@ const WS = (() => {
   const ll = (x, y) => [cx + (x-W/2)/z, iy(myCy() - (y-H/2)/z)];
   // A home view's zoom: its span of latitude fills the map's height at its own latitude, or its width (wide) the map's width where that's the tighter fit.
   const homeZ = h => Math.min(h.wide ? W/h.wide : Infinity, H*Math.cos(h.cy*Math.PI/180)/h.span);
-  window.__ws = {px, ll, view: () => ({cx, cy, z, z0, zmin, W, H, MC}), iso: () => ISOG ? ISOG.name : null, val: gridVal, grids: () => GRIDS.map(g => g.name), zoom: f => zoomAt(f, W/2, H/2), tags: () => TAGHIT.map(([x, y, w, h, id]) => [x+6, y+6, w-12, h-12, id])}; // test hook (tests/map/check.js)
+  window.__ws = {px, ll, view: () => ({cx, cy, z, z0, zmin, W, H, MC}), iso: () => ISOG ? ISOG.name : null, val: gridVal, grids: () => GRIDS.map(g => g.name), zoom: f => zoomAt(f, W/2, H/2),
+    home: () => ({cx: HV.cx, cy: HV.cy, z: z0, z1: homeZ(HOME)}), tags: () => TAGHIT.map(([x, y, w, h, id]) => [x+6, y+6, w-12, h-12, id]), towns: () => TOWNAT.map(t => t.slice())}; // test hook (tests/map/check.js)
   const near = (arr, t, win) => { let b = null, bd = Infinity; for (const r of arr) { const d = Math.abs(r.t-t); if (d < bd) { bd = d; b = r; } } return bd <= win ? b : null; };
   // Every grid at its step nearest t (unpacked when first read there), read finest first and faded into the next coarser grid at its edge.
   function gridAt(t) { for (const g of GRIDS) g.at(t); }
@@ -981,7 +988,9 @@ const WS = (() => {
   const viewKey = () => "waveslave-mapview"+(MC==="tw" || MC==="jp"?"":"-"+MC)+(PARTS[MC]?(HOME.cx < PARTS[MC].at ? "-w" : "-e"):"");
   // A view saved before the map ran east (California -119.5) opens on the same coast: 360 is added to a negative centre.
   const lastView = () => { try { const v = JSON.parse(localStorage.getItem(viewKey())); if (v && v.cx < 0) v.cx += 360; return v; } catch(e) { return null; } };
-  const keep = () => { if (z0 > 1) try { localStorage.setItem(viewKey(), JSON.stringify({cx, cy, k: z/z0})); } catch(e) {} };
+  // k is the zoom over the country's home zoom on this screen before any fitting (homeZ), not over the fitted z0, which moves with the
+  // language and the forecast in the tags: so a view opens again exactly where it was left, as views saved before the fit do.
+  const keep = () => { if (z0 > 1) try { localStorage.setItem(viewKey(), JSON.stringify({cx, cy, k: z/homeZ(HOME)})); } catch(e) {} };
   addEventListener("pagehide", () => { if (FS) keep(); });
   // Only phones and tablets (a touch screen as the main pointer) ask the browser for real full screen, to hide the address bar.
   // On a computer the map just fills the browser window, so the taskbar and browser tabs stay put.
@@ -1004,15 +1013,15 @@ const WS = (() => {
     H = FS ? Math.max(150, box.clientHeight) : Math.round(Math.max(240, v.land ? Math.min(W*0.75, v.h*0.86) : Math.min(W*1.35, v.h*0.7)));
     const dpr = Math.min(2, window.devicePixelRatio||1);
     FXR = W*H > 1.2e6 ? 1 : Math.min(1.5, dpr); for (const [c, r] of [[base, dpr], [fx, FXR]]) { c.width = W*r; c.height = H*r; c.style.height = H+"px"; c.getContext("2d").setTransform(r,0,0,r,0,0); }
-    z0 = homeZ(HOME); zmin = MAPM.cover(MAPM.PBOX, W, H); // zoomed all the way out, the Pacific box fills the screen: upright its whole height, sideways its whole width
+    zmin = MAPM.cover(MAPM.PBOX, W, H); refit(); // zoomed all the way out, the Pacific box fills the screen: upright its whole height, sideways its whole width
     // First open: the saved view, else the country's old map filling the screen (Australia no further out than its home view), else (the
     // South Pacific and Alaska, which never had one) its home view.
     if (z === 1) { const LAST = lastView(), k = LAST && LAST.k > 0 ? LAST.k : 0, OLD = MAPM.OLDBOX[MC];
-      if (k) { z = k*z0; cx = LAST.cx; cy = LAST.cy; } else if (!OLD) { z = z0; cx = HOME.cx; cy = HOME.cy; } else { z = MC === "au" ? Math.max(MAPM.cover(OLD, W, H), z0) : MAPM.cover(OLD, W, H); [cx, cy] = MAPM.clampTo(OLD, W, H, z, HOME.cx, HOME.cy); } }
+      if (k) { z = k*homeZ(HOME); cx = LAST.cx; cy = LAST.cy; } else if (!OLD) { z = z0; cx = HV.cx; cy = HV.cy; } else { z = MC === "au" ? Math.max(MAPM.cover(OLD, W, H), z0) : MAPM.cover(OLD, W, H); [cx, cy] = MAPM.clampTo(OLD, W, H, z, HOME.cx, HOME.cy); } }
     else if (was) z = was*z0; clampView();
     if (parts.length) { const n = Math.min(4000, Math.round(W*H/260)); while (parts.length < n) { const p = {}; spawn(p); parts.push(p); } parts.length = n; } } // same streak density at any size, capped so big full screens stay smooth
-  // The view stays inside the Pacific box, between the box filling the screen and ten times the home zoom.
-  function clampView() { z = Math.max(zmin, Math.min(z0*10, z)); [cx, cy] = MAPM.clampTo(MAPM.PBOX, W, H, z, cx, cy); }
+  // The view stays inside the Pacific box, between the box filling the screen and ten times the country's home zoom.
+  function clampView() { z = Math.max(zmin, Math.min(homeZ(HOME)*10, z)); [cx, cy] = MAPM.clampTo(MAPM.PBOX, W, H, z, cx, cy); }
   // The outlines in view as one path, to fill or clip with: an outline whose box lies wholly outside the view and a degree around it is skipped.
   // edges() is the same path for the coast line, moving across each cut segment instead of drawing it, so a cut edge never shows as coast.
   function path(g, cuts) { const [vl, vt] = ll(0, 0), [vr, vb] = ll(W, H), Y = myCy(); g.beginPath();
@@ -1050,6 +1059,63 @@ const WS = (() => {
       x.setTransform(r, 0, 0, r, 0, 0); draw(x); LC = {key, c}; }
     g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(LC.c, 0, 0); g.restore(); }
   let hold = false; // the map keeps its picture while a country button switches the page (see flyTo)
+  // Whether a spot's tag shows at zoom zz (once zoomed in far enough for tags at all): always for the map's own country, and for another
+  // country's from 0.6 of that country's own home zoom in, so the neighbours' names don't crowd a big country zoomed out to fit its own.
+  const named = (s, zz) => { const c = spotCountry(s.id); return c === MC || zz >= homeZ(homeOf(c, s.id))*0.6; };
+  // The buttons over the map (the top bar, however many rows it takes, the countries and the zoom buttons) where they are now, as boxes on the
+  // map, and the clear part of the map that the top bar and the time bar leave: from t down to b.
+  function clearArea() { const cv = base.getBoundingClientRect(), on = sel => [...document.querySelectorAll(sel)].map(e => e.getBoundingClientRect()).filter(r => r.width).map(r => [r.left-cv.left, r.top-cv.top, r.width, r.height]);
+    return { btn: on("#wsLayers button, #wsCtry button, #viewWs .zoom button"), t: Math.max(0, ...on("#wsLayers button").map(b => b[1]+b[3])), b: Math.min(H, ...on("#wsPlay, #wsTime, #wsTl").map(b => b[1])) }; }
+  // A spot's tag, q from sample(): its name, the wave (or with the swell layer, swell) height, the wind and whether it rains.
+  const tagLabel = q => ({ name: SPT(ALL.spots[q.s.id], "name"), h: layer==="swell" ? (q.sw ? q.sw.h.toFixed(1)+"m" : "–") : q.v ? q.v.h.toFixed(1)+"m" : "–", kt: q.w ? Math.round(q.w.kt)+"kt" : "", rain: !!(q.w && q.w.rain), cur: q.s.id===CUR });
+  // Where each spot's tag goes in the view P draws (lon, lat to px), saying label(q): beside its dot, to the right (or the left when the dot
+  // is well over to the right), then the other side, further out, then a row up or down at a time; the first place inside the clear part
+  // of the map A, ROOM or more from its edges and ROOMB from its buttons, that hits none of the boxes (the buttons, the dots and each tag
+  // placed before it, added as it goes). The map's own country's tags go first; another country's with no free place is left off. Each spot
+  // gives {q, L, x, y, tx, ty, tw, th, ok}, ok when it found a free place, or null when it is off the screen, is skip (its card is open) or
+  // is left off.
+  const ROOM = 16, ROOMB = 8;
+  function placeTags(g, S, P, A, boxes, skip, label) { const st = TAGS[TAG], E = ROOM, own = S.map(q => spotCountry(q.s.id) === MC), R = S.map(() => null);
+    for (const i of S.map((q, i) => i).sort((a, b) => own[b] - own[a])) { const q = S[i], [x,y] = P(q.s.lon, q.s.lat); if (q.s.id===skip || x < -40 || y < -20 || x > W+40 || y > H+20) continue;
+      const L = label(q), [tw, th] = L.wh || st.size(g, L), pref = x > W*0.62 ? -1 : 1;
+      const cands = [0,-1,1,-2,2,-3,3,-4,4,-5,5,-6,6].flatMap(k => [[pref,k],[-pref,k],[2*pref,k],[-2*pref,k],[0,k]]).map(([s,k]) => [s>1 ? x+44 : s>0 ? x+12 : s<-1 ? x-44-tw : s<0 ? x-12-tw : Math.max(E, Math.min(W-E-tw, x-tw/2)), y-th/2+k*(th+3)]).filter(([tx,ty]) => tx >= E && tx+tw <= W-E && ty >= A.t+E && ty+th <= A.b-E && !A.btn.some(b => tx < b[0]+b[2]+ROOMB && tx+tw+ROOMB > b[0] && ty < b[1]+b[3]+ROOMB && ty+th+ROOMB > b[1]));
+      const hit = ([tx,ty]) => boxes.some(b => tx < b[0]+b[2]+3 && tx+tw+3 > b[0] && ty < b[1]+b[3]+2 && ty+th+2 > b[1]);
+      const c = cands.find(c => !hit(c)); if (!c && !own[i]) continue;
+      const [tx,ty] = c || cands[0] || [x+12, y-th/2]; boxes.push([tx, ty, tw, th]); R[i] = {q, L, x, y, tx, ty, tw, th, ok: !!c}; }
+    return R; }
+  // The country's home view on this screen: its home centre and zoom (HOME), moved and then zoomed out a step at a time until every one of
+  // its spots has its tag where placeTags puts it (reading as it does at the time shown) and its dot in the clear part of the map with the
+  // same room around it: ROOM or more inside the screen, under the top buttons and over the time bar, and ROOMB from the buttons down the
+  // sides. Never closer than the home zoom; a country with parts (Australia, the South Pacific) fits the part it's on. The best try, should
+  // nothing fit, is the one with the most of its tags placed.
+  function fitHome() { const z1 = homeZ(HOME), g = base.getContext("2d"), A = clearArea(), st = TAGS[TAG], m = ROOM, mb = ROOMB;
+    const pa = PARTS[MC], mine = new Set(SP.filter(s => spotCountry(s.id) === MC && (!pa || (s.lon < pa.at) === (HOME.cx < pa.at)))), all = sample(times[ti]);
+    const labs = new Map(all.map(q => { const L = tagLabel(q); L.wh = st.size(g, L); return [q.s.id, L]; }));
+    let best = null;
+    for (let i = 0, zi = z1; i < 40; i++, zi *= 0.94) { const zz = Math.max(zi, zmin), S = all.filter(q => named(q.s, zz)); let vx = HOME.cx, vy = HOME.cy;
+      for (let pass = 0; pass < 3; pass++) { [vx, vy] = MAPM.clampTo(MAPM.PBOX, W, H, zz, vx, vy);
+        const Y = my(vy), P = (lon, lat) => [W/2 + (lon-vx)*zz, H/2 - (my(lat)-Y)*zz], boxes = A.btn.slice();
+        for (const q of all) { const [x,y] = P(q.s.lon, q.s.lat); boxes.push([x-5, y-5, 10, 10]); }
+        const T = placeTags(g, S, P, A, boxes, null, q => labs.get(q.s.id));
+        // U: the box round its dots and tags; D: round its dots alone; pl, pr: how far a dot next to a button wants to go left, right.
+        const U = [Infinity, Infinity, -Infinity, -Infinity], D = U.slice(), grow = (B, x0, y0, x1, y1) => { B[0] = Math.min(B[0], x0); B[1] = Math.min(B[1], y0); B[2] = Math.max(B[2], x1); B[3] = Math.max(B[3], y1); };
+        let ok = true, n = 0, pl = -Infinity, pr = -Infinity;
+        S.forEach((q, j) => { if (!mine.has(q.s)) return; const [x,y] = P(q.s.lon, q.s.lat), p = T[j]; grow(U, x-6, y-6, x+6, y+6); grow(D, x-6, y-6, x+6, y+6);
+          if (x-6 < m || x+6 > W-m || y-6 < A.t+m || y+6 > A.b-m) ok = false;
+          for (const b of A.btn) if (x-6 < b[0]+b[2]+mb && x+6 > b[0]-mb && y-6 < b[1]+b[3]+mb && y+6 > b[1]-mb) { ok = false; if (b[0]+b[2]/2 > W/2) pl = Math.max(pl, x+6-b[0]+mb); else pr = Math.max(pr, b[0]+b[2]+mb-x+6); }
+          if (p && p.ok) { grow(U, p.tx, p.ty, p.tx+p.tw, p.ty+p.th); n++; } else ok = false; });
+        if (ok) return {cx: vx, cy: vy, z: zz};
+        if (!best || n > best.n) best = {cx: vx, cy: vy, z: zz, n};
+        // For the next try the dots and tags move to the middle of the clear map, as far as the dots stay inside it, and the dots away from
+        // any button they are next to (sideways, the buttons being down the sides); the tags find their places again.
+        const mid = (lo, hi, c) => lo <= hi ? Math.max(lo, Math.min(hi, c)) : c;
+        const dx = mid(Math.max(m-D[0], pr), Math.min(W-m-D[2], -pl), W/2-(U[0]+U[2])/2), dy = mid(A.t+m-D[1], A.b-m-D[3], (A.t+A.b)/2-(U[1]+U[3])/2);
+        vx -= dx/zz; vy = iy(Y + dy/zz); }
+      if (zz === zmin) break; }
+    return best; }
+  // The home view worked out again whenever the map takes its size, another country (or the other part of one) or language is picked
+  // or the tags' font arrives: a map sitting on the old home view moves to the new one.
+  const refit = () => { const at = z0 > 1 && z === z0 && cx === HV.cx && cy === HV.cy, f = fitHome(); HV = {cx: f.cx, cy: f.cy}; z0 = f.z; if (at) { cx = HV.cx; cy = HV.cy; z = z0; } };
   function drawBase() { if (hold) return; const g = base.getContext("2d"), t = times[ti], S = sample(t), cell = Math.max(6, Math.round(Math.sqrt(W*H/40000))), close = z >= z0*0.6;
     g.fillStyle = "#0e0824"; g.fillRect(0, 0, W, H);
     // The map's own layers (colours, swell arrows, land, pressure lines, typhoon tracks) are drawn only inside the Pacific box: zoomed out on a phone held upright, plain dark sea above and below it.
@@ -1059,29 +1125,19 @@ const WS = (() => {
     if (layer === "swell") swellArrows(g, S);
     landLayer(g, close);
     isobars(g); tracks(g, t); g.restore();
-    // Spot markers: neon dot and swell arrow; tags in the TAG style when zoomed in near Taiwan (placed so tags never overlap).
-    // Tags keep clear of the buttons over the map (the top bar, however many rows it takes, the countries and the zoom buttons), measured where they are now.
-    const cv = base.getBoundingClientRect(), boxes = [...document.querySelectorAll("#wsLayers button, #wsCtry button, #viewWs .zoom button")].map(b => b.getBoundingClientRect()).filter(r => r.width).map(r => [r.left-cv.left, r.top-cv.top, r.width, r.height]);
+    // Spot markers: neon dot and swell arrow; tags in the TAG style when zoomed in near Taiwan (placed so tags never overlap: placeTags).
+    const A = clearArea(), boxes = A.btn.slice();
     g.textBaseline = "middle"; TAGHIT = [];
-    if (close) for (const q of S) { const [x,y] = px(q.s.lon, q.s.lat); boxes.push([x-5, y-5, 10, 10]); } // and so do the spot dots
+    if (close) for (const q of S) { const [x,y] = px(q.s.lon, q.s.lat); boxes.push([x-5, y-5, 10, 10]); } // tags keep clear of the spot dots too
     for (const q of S) { const [x,y] = px(q.s.lon, q.s.lat), cur = q.s.id===CUR;
       if (close && q.v && q.v.dir != null) { const a = (q.v.dir+180)*Math.PI/180, dx = Math.sin(a), dy = -Math.cos(a);
         g.strokeStyle = "#fff"; g.lineWidth = 2; g.beginPath(); g.moveTo(x-dx*14, y-dy*14); g.lineTo(x+dx*4, y+dy*4); g.stroke(); }
       g.fillStyle = cur ? "#ff2bd6" : "#ffe600"; g.shadowColor = g.fillStyle; g.shadowBlur = 10; g.beginPath(); g.arc(x, y, close ? (cur?6:4.5) : (cur?4:2.5), 0, 7); g.fill(); g.shadowBlur = 0; }
-    // Every tag is placed first, then the leader lines are drawn and the tags over them, so a line out of a crowded cluster (Bali's four spots) runs under the tags it crosses.
-    const tags = [];
-    if (close) for (const q of S) { const [x,y] = px(q.s.lon, q.s.lat), cur = q.s.id===CUR, st = TAGS[TAG]; if (q.s.id===SHEET || x < -40 || y < -20 || x > W+40 || y > H+20) continue;
-      const L = { name: SPT(ALL.spots[q.s.id], "name"), h: layer==="swell" ? (q.sw ? q.sw.h.toFixed(1)+"m" : "–") : q.v ? q.v.h.toFixed(1)+"m" : "–", kt: q.w ? Math.round(q.w.kt)+"kt" : "", rain: !!(q.w && q.w.rain), cur };
-      const [tw, th] = st.size(g, L), pref = x > W*0.62 ? -1 : 1;
-      const cands = [0,-1,1,-2,2,-3,3,-4,4,-5,5,-6,6].flatMap(k => [[pref,k],[-pref,k],[2*pref,k],[-2*pref,k],[0,k]]).map(([s,k]) => [s>1 ? x+44 : s>0 ? x+12 : s<-1 ? x-44-tw : s<0 ? x-12-tw : Math.max(2, Math.min(W-2-tw, x-tw/2)), y-th/2+k*(th+3)]).filter(([tx,ty]) => tx >= 2 && tx+tw <= W-2 && ty >= 2 && ty+th <= H-2);
-      const hit = ([tx,ty]) => boxes.some(b => tx < b[0]+b[2]+3 && tx+tw+3 > b[0] && ty < b[1]+b[3]+2 && ty+th+2 > b[1]), clear = cands.find(c => !hit(c));
-      // Another country's spot with nowhere clear for its tag goes without one: at the screen's edge it would sit under the buttons (Sydney's,
-      // in the corner of New Zealand's home view held sideways).
-      if (!clear && spotCountry(q.s.id) !== MC) continue;
-      const [tx,ty] = clear || cands[0] || [x+12, y-th/2]; boxes.push([tx, ty, tw, th]); TAGHIT.push([tx-6, ty-6, tw+12, th+12, q.s.id]);
-      tags.push({x, y, cur, st, L, tx, ty, tw, th}); }
-    for (const {x, y, cur, tx, ty, tw, th} of tags) if (Math.abs(ty-(y-th/2)) > 1) { const ex = tx+tw < x ? tx+tw : tx > x ? tx : x, ey = ty > y ? ty : ty+th < y ? ty+th : ty+th/2; g.strokeStyle = cur ? "#ff2bd6" : "#ffb347"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x, y); g.lineTo(ex, ey); g.stroke(); }
-    for (const {st, L, tx, ty, tw, th} of tags) { g.save(); st.draw(g, L, tx, ty, tw, th); g.restore(); }
+    // Every tag is placed first (placeTags), then the leader lines are drawn and the tags over them, so a line out of a crowded cluster (Bali's four spots) runs under the tags it crosses.
+    const tags = close ? placeTags(g, S.filter(q => named(q.s, z)), px, A, boxes, SHEET, tagLabel).filter(Boolean) : [];
+    for (const {q, tx, ty, tw, th} of tags) TAGHIT.push([tx-6, ty-6, tw+12, th+12, q.s.id]);
+    for (const {L, x, y, tx, ty, tw, th} of tags) if (Math.abs(ty-(y-th/2)) > 1) { const ex = tx+tw < x ? tx+tw : tx > x ? tx : x, ey = ty > y ? ty : ty+th < y ? ty+th : ty+th/2; g.strokeStyle = L.cur ? "#ff2bd6" : "#ffb347"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x, y); g.lineTo(ex, ey); g.stroke(); }
+    for (const {L, tx, ty, tw, th} of tags) { g.save(); TAGS[TAG].draw(g, L, tx, ty, tw, th); g.restore(); }
     drawTowns(g, boxes, ISLES[ISLE].towns);
     if (SHEET) dial(g, S);
     tLabel();
@@ -1265,7 +1321,7 @@ const WS = (() => {
   // A country button switches the page to that country (as the switch above the spot picker does) without leaving the map, and the map flies there
   // from where it is. An open forecast card or pin belongs to the place being left, so it closes. The pressed country does what the home button
   // did: one tap glides all the way out around where you are, and a tap when already out glides back to the country's home view.
-  function flyTo(c) { if (c === MC) return z > zmin*1.01 ? glide(...MAPM.clampTo(MAPM.PBOX, W, H, zmin, cx, cy), zmin) : glide(HOME.cx, HOME.cy, z0);
+  function flyTo(c) { if (c === MC) return z > zmin*1.01 ? glide(...MAPM.clampTo(MAPM.PBOX, W, H, zmin, cx, cy), zmin) : glide(HV.cx, HV.cy, z0);
     const from = [cx, cy, z]; PIN = null; PINBTN = PINX = null; SHEET = null; document.getElementById("wsSheet").hidden = true;
     // switchCountry moves the map to the new home view: it isn't drawn there (hold), and goes back to where it was to fly from.
     hold = true; try { switchCountry(c); } finally { hold = false; } const to = [cx, cy, z]; [cx, cy, z] = from; fly(...to); }
@@ -1357,7 +1413,7 @@ const WS = (() => {
   return {
     // still=true draws the map but holds its moving streaks until go(), so they don't compete with the opening animation for frames.
     show(still) { if (!built) build(); size(); legend(); setT(ti); warm();
-      if (document.fonts) Promise.all([document.fonts.load('italic 800 13px "Anybody"'), document.fonts.load('17px "Metal Mania"'), document.fonts.load('16px "VT323"')]).then(() => { if (raf) drawBase(); }).catch(() => {}); parts = Array.from({length: Math.min(4000, Math.round(W*H/260))}, () => { const p = {}; spawn(p); return p; });
+      if (document.fonts) Promise.all([document.fonts.load('italic 800 13px "Anybody"'), document.fonts.load('17px "Metal Mania"'), document.fonts.load('16px "VT323"')]).then(() => { if (!document.getElementById("viewWs").hidden) { refit(); moved(); } }).catch(() => {}); parts = Array.from({length: Math.min(4000, Math.round(W*H/260))}, () => { const p = {}; spawn(p); return p; });
       cancelAnimationFrame(raf); raf = 0; if (!still) this.go(); },
     go() { if (!raf && !document.getElementById("viewWs").hidden && !matchMedia("(prefers-reduced-motion: reduce)").matches) raf = requestAnimationFrame(frame); },
     pause() { cancelAnimationFrame(raf); raf = 0; },
@@ -1372,10 +1428,10 @@ const WS = (() => {
     part(id) { const p = PARTS[spotCountry(id)]; return p ? (MAPM.E(ALL.spots[id].lon) < p.at ? "w" : "e") : ""; },
     // Another country picked (or the other part, or another spot in Australia): the map goes to its home view. With the map open, the view being left
     // is saved under the old country's (or part's) key first.
-    home(c) { unglide(); if (FS) keep(); MC = c; HOME = homeOf(c); cx = HOME.cx; cy = HOME.cy; ctryOn(); if (built) { z0 = homeZ(HOME); z = z0; clampView(); moved(); } else z = 1; },
+    home(c) { unglide(); if (FS) keep(); MC = c; HOME = homeOf(c); HV = {cx: HOME.cx, cy: HOME.cy}; ctryOn(); if (built) refit(); cx = HV.cx; cy = HV.cy; if (built) { z = z0; clampView(); moved(); } else z = 1; },
     // After a language switch: day labels, an open forecast table and the map's own text.
     relang() { if (!built) return; timeline(); tlMark(); const el = document.getElementById("wsSheet"); if (!el.hidden) { if (SHEET) { const k = [cx, cy, z]; openSheet(SHEET); [cx, cy, z] = k; clampView(); } else if (PIN && PIN.open) showPin(); }
-      document.getElementById("wsFs").setAttribute("aria-label", T(FS ? "Back to Forecast" : "Full screen")); if (!document.getElementById("viewWs").hidden) drawBase(); } };
+      document.getElementById("wsFs").setAttribute("aria-label", T(FS ? "Back to Forecast" : "Full screen")); if (!document.getElementById("viewWs").hidden) { refit(); clampView(); drawBase(); } } };
 })();
 // ---- View tabs: Forecast or the WaveSlave map
 let VIEW="fc";

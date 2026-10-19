@@ -22,13 +22,17 @@ def swell2():
     for S, o in zip(SPOTS, OW):
         h = o['hourly']
         if 'secondary_swell_wave_height' not in h: return
-        d['spots'][S['id']]['swell2'] = [[t, r2(a), r2(b), c] for t, a, b, c in zip(h['time'], h['secondary_swell_wave_height'], h['secondary_swell_wave_period'], h['secondary_swell_wave_direction'])]
+        rows = [[t, r2(a), r2(b), c] for t, a, b, c in zip(h['time'], h['secondary_swell_wave_height'], h['secondary_swell_wave_period'], h['secondary_swell_wave_direction'])]
+        # The past 5 days go under hist.swell2, so swell2 still starts today.
+        sp = d['spots'][S['id']]; today = min(r[0] for r in sp['hourly'])[:10] if sp.get('hourly') else rows[0][0][:10]
+        sp['swell2'] = [r for r in rows if r[0][:10] >= today]; sp.setdefault('hist', {})['swell2'] = [r for r in rows if r[0][:10] < today]
 
 WDIR = {'偏北': 0, '東北': 45, '偏東': 90, '東南': 135, '偏南': 180, '西南': 225, '偏西': 270, '西北': 315}
 def cwawave():
     cw = L('coastal.json')['cwaopendata']
     C = {l['LocationName']: l for l in cw['Dataset']['Locations']['Location']}
     for S in SPOTS:
+        if S.get('country', 'tw') != 'tw': continue  # CWA covers Taiwan only; jp.py adds jmawave for Japan
         E = {e['ElementName']: e['Time'] for e in C[S['coast']]['WeatherElement']}
         rows = []
         for i, t in enumerate(E['浪高']):

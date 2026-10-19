@@ -1,15 +1,16 @@
 name: Refresh WaveSlave
 
-# Rebuild the forecast from CWA + Open-Meteo every hour and publish it to GitHub Pages.
+# Rebuild the forecast from CWA, NOWPHAS, JMA, NOAA, Environment Canada, CHS, IMOS, BoM, South Island Waves, LINZ, PacIOOS, HKO + Open-Meteo every half hour and publish it to GitHub Pages.
+# GitHub often skips scheduled runs (only 2 ran overnight on Oct 13-14), so two slots an hour keeps the data fresher.
 on:
   schedule:
-    - cron: "7 * * * *"
+    - cron: "7,37 * * * *"
   workflow_dispatch:
   push:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write   # logstore.sh keeps the forecast-vs-buoy log on the data branch
   pages: write
   id-token: write
 
@@ -22,25 +23,56 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # The West Pacific map grid (refetched every ~3 h) and the forecast-vs-buoy log carry over between runs.
+      # The map grids and the forecast-vs-buoy logs (Taiwan log/, every other country log-<country>/) carry over between runs.
+      # GitHub files a cache under its exact path list, so the list must never change: "log-*" picks up a new country's
+      # log by itself. (Each country added to the old one-folder-per-line list started today's logs from empty.)
       - uses: actions/cache/restore@v4
+        id: state
         with:
           path: |
             cache
             log
+            log-*
           key: state-${{ github.run_id }}
           restore-keys: state-
+      # One-off bridge: the first run under the list above finds nothing filed under it, so it reads the last cache saved
+      # under the old list instead. Skipped whenever the step above found a cache.
+      - uses: actions/cache/restore@v4
+        if: steps.state.outputs.cache-matched-key == ''
+        with:
+          path: |
+            cache
+            log
+            log-jp
+            log-ca
+            log-hi
+            log-au
+          key: state-${{ github.run_id }}
+          restore-keys: state-
+      - name: Restore log days the cache lost
+        run: |
+          for d in $(printf '%s\n' log log-jp log-ca log-hi log-au log-nw log-kr log-ph log-id log-nz log-pi log-ak log-mi log-hk $(ls -d log-*/ 2>/dev/null | tr -d /) | sort -u); do
+            sh logstore.sh restore "$d" || echo "$d restore failed" >&2
+          done
       - name: Build
         env:
           CWA_KEY: ${{ secrets.CWA_KEY }}
           TZ: Asia/Taipei
         run: sh build-site.sh _site
+      - name: Save finished log days for good
+        if: always()
+        run: |
+          for d in log log-*/; do
+            [ -d "$d" ] || continue
+            sh logstore.sh save "${d%/}" || echo "${d%/} save failed" >&2
+          done
       - uses: actions/cache/save@v4
         if: always()
         with:
           path: |
             cache
             log
+            log-*
           key: state-${{ github.run_id }}
       - uses: actions/upload-pages-artifact@v3
         with:

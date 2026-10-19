@@ -2,3 +2,17 @@ cwa_key.txt
 _site/
 cache/
 log/
+__pycache__/
+log-jp/
+log-ca/
+log-hi/
+log-au/
+log-nw/
+log-kr/
+log-ph/
+log-id/
+log-nz/
+log-pi/
+log-ak/
+log-mi/
+log-hk/

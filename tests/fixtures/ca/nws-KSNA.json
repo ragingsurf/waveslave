@@ -1,0 +1,1 @@
+{"properties": {"timestamp": "2026-10-17T12:45:00+00:00", "windSpeed": {"unitCode": "wmoUnit:km_h-1", "value": 5.544, "qualityControl": "V"}, "windDirection": {"unitCode": "wmoUnit:degree_(angle)", "value": 110, "qualityControl": "V"}}}

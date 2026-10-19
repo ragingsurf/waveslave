@@ -5,6 +5,8 @@ def fnum(v):
   try: return float(v)
   except (TypeError,ValueError): return None
 r1=lambda v: None if v is None else round(v,2)
+# Open-Meteo is asked for the past 5 days too (past_days=5): those hours go under spots[id].hist.wave, so hourly (and the log) still start today.
+TODAY=(datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(hours=8)).strftime('%Y-%m-%d')
 
 OW=L('openwave.json'); OW=OW if isinstance(OW,list) else [OW]
 cw=L('coastal.json')['cwaopendata']
@@ -37,11 +39,7 @@ def buoyrows(sid):
     if None not in r[1:4]: out.append(r)
   return out[-24:]
 
-spots={}; src={}
-for n,S in enumerate(SPOTS):
-  # Wave forecast: Open-Meteo marine, Météo-France MFWAM, nearest sea point.
-  o=OW[n]['hourly']
-  hourly=[[o['time'][i], r1(o['wave_height'][i]), r1(o['wave_period'][i]), o['wave_direction'][i], r1(o['swell_wave_height'][i]), r1(o['swell_wave_period'][i]), o['swell_wave_direction'][i], r1(o['wind_wave_height'][i])] for i in range(len(o['time'])) if o['wave_height'][i] is not None]
+def cwa_parts(S,DAYS):
   # Wind + sky: CWA coastal forecast F-D0047-095 for the spot's township coast.
   E={e['ElementName']:e['Time'] for e in COAST[S['coast']]['WeatherElement']}
   wind=[]
@@ -49,7 +47,6 @@ for n,S in enumerate(SPOTS):
     wd=E['風向'][i]['ElementValue']['WindDirection']; w=E['天氣現象'][i]['ElementValue']['Weather']
     wind.append([t['DataTime'][:16], float(t['ElementValue']['WindSpeedKts']), DIR.get(wd), ('Rain' if '雨' in (w or '') else SKY.get(w,w)), fnum(E['浪高'][i]['ElementValue']['WaveHeight'])])
   # Tides: CWA F-A0021-001 surf-spot tide point.
-  DAYS=sorted({t[:10] for t in o['time']})
   tides={}
   for d in sorted(TIDE[S['tide']]['TimePeriods']['Daily'],key=lambda d:d['Date']):
     if d['Date']<=DAYS[-1]: tides[d['Date']]=[[x['DateTime'][11:16], 'H' if x['Tide']=='滿潮' else 'L', int(x['TideHeights']['AboveTWVD'])] for x in d['Time']]
@@ -65,6 +62,20 @@ for n,S in enumerate(SPOTS):
   if st:
     we=st['WeatherElement']; ws=fnum(we.get('WindSpeed'))
     if ws is not None and ws>=0: dwind=[[st['ObsTime']['DateTime'][:16], round(ws*1.944,1), float(we['WindDirection'])]]
+  return bid,buoy,wind,tides,sun,dwind
+
+spots={}; src={}
+for n,S in enumerate(SPOTS):
+  # Wave forecast: Open-Meteo marine, Météo-France MFWAM, nearest sea point.
+  o=OW[n]['hourly']
+  allh=[[o['time'][i], r1(o['wave_height'][i]), r1(o['wave_period'][i]), o['wave_direction'][i], r1(o['swell_wave_height'][i]), r1(o['swell_wave_period'][i]), o['swell_wave_direction'][i], r1(o['wind_wave_height'][i])] for i in range(len(o['time'])) if o['wave_height'][i] is not None]
+  hourly=[r for r in allh if r[0][:10]>=TODAY]; histwave=[r for r in allh if r[0][:10]<TODAY]
+  DAYS=sorted({t[:10] for t in o['time']})
+  if S.get('country','tw')!='tw':
+    # Japan: jp.py fills wind, tides, sun, buoy and station later; only the Open-Meteo parts come from here.
+    bid,buoy,wind,tides,sun,dwind=None,[],[],{},{},[]
+  else:
+    bid,buoy,wind,tides,sun,dwind=cwa_parts(S,DAYS)
   # Typhoons: distance/bearing from this spot.
   storms=[]
   for s,f in FIX:
@@ -74,8 +85,9 @@ for n,S in enumerate(SPOTS):
     storms.append({'name':name,'kind':kind,'id':s.get('CwaTyphoonName') or ('TD'+s.get('CwaTdNo','')),'distNm':dist,'bearing':bear,'heading':CMP.get(f.get('MovingDirection'),0),
       'kt':kt,'gust':round(float(f.get('MaxGustSpeed') or 0)*1.944),'mb':int(float(f['Pressure'])),'swell':None})
   storms.sort(key=lambda s:s['distNm'])
-  meta={k:S[k] for k in ('name','full','region','buoyName','stationName','off','lat','lon','blurb','cams')}
-  spots[S['id']]=dict(meta,buoyId=bid,buoyAt=buoy[-1][0] if buoy else '',hourly=hourly,wind=wind,tides=tides,sun=sun,buoy=buoy,dwind=dwind,storms=storms)
+  meta={k:S[k] for k in ('name','full','region','buoyName','stationName','off','lat','lon','blurb','cams')}; meta['zh']=S.get('zh') or {}  # Traditional Chinese names for the 中文 view
+  meta.update(country=S.get('country','tw'),tz=S.get('tz',8),buoyKm=S.get('buoyKm'),ja=S.get('ja') or {})  # Japanese names for the 日本語 view
+  spots[S['id']]=dict(meta,buoyId=bid,buoyAt=buoy[-1][0] if buoy else '',hourly=hourly,wind=wind,tides=tides,sun=sun,buoy=buoy,dwind=dwind,storms=storms,hist={'wave':histwave})
   src[S['id']]=(buoy[-1][0] if buoy else '')+'/'+(dwind[-1][0] if dwind else '')
 
 # Freshness key parts: latest source times.

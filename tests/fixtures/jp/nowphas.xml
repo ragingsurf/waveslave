@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DataMap time20min="202610170020" time2hr="202610170000" time20minGPS="202610170020">
+<mapdata code="609">
+<yugiha>1.35</yugiha>
+<shiyuki>5.7</shiyuki>
+<namimuki>ESE</namimuki>
+<zentai_wh>150</zentai_wh>
+<zentai_wd>ESE</zentai_wd>
+<fuha_wh>139</fuha_wh>
+<fuha_wd>N</fuha_wd>
+<uneri_wh>55</uneri_wh>
+<uneri_wd>NNE</uneri_wd>
+<cshiyuki_wh>11</cshiyuki_wh>
+</mapdata>
+<mapdata code="614">
+<yugiha></yugiha>
+<shiyuki></shiyuki>
+<namimuki></namimuki>
+<zentai_wh></zentai_wh>
+<zentai_wd></zentai_wd>
+<fuha_wh></fuha_wh>
+<fuha_wd></fuha_wd>
+<uneri_wh></uneri_wh>
+<uneri_wd></uneri_wd>
+<cshiyuki_wh></cshiyuki_wh>
+</mapdata>
+<mapdata code="603">
+<yugiha>99999</yugiha>
+<shiyuki>99999</shiyuki>
+<namimuki></namimuki>
+<zentai_wh>99999</zentai_wh>
+<zentai_wd></zentai_wd>
+<fuha_wh>99999</fuha_wh>
+<fuha_wd></fuha_wd>
+<uneri_wh>99999</uneri_wh>
+<uneri_wd></uneri_wd>
+<cshiyuki_wh>99999</cshiyuki_wh>
+</mapdata>
+<mapdata code="222">
+<yugiha>0.83</yugiha>
+<shiyuki>7.3</shiyuki>
+<namimuki>E</namimuki>
+<zentai_wh>89</zentai_wh>
+<zentai_wd>E</zentai_wd>
+<fuha_wh>68</fuha_wh>
+<fuha_wd>ENE</fuha_wd>
+<uneri_wh>57</uneri_wh>
+<uneri_wd>E</uneri_wd>
+<cshiyuki_wh>7</cshiyuki_wh>
+</mapdata>
+</DataMap>

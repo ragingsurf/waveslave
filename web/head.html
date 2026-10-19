@@ -12,9 +12,9 @@
 <script>if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));</script>
 <!-- Visitor counter: GoatCounter (no cookies, no personal data). Dashboard: https://waveslave.goatcounter.com -->
 <script data-goatcounter="https://waveslave.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
-<!-- Passcode screen: the page stays hidden until the 4-digit code is entered, then stays unlocked on that device.
+<!-- Passcode screen: the page stays hidden until the 4-digit code is entered, for that visit only.
      Only a SHA-256 of "waveslave:" + the code is kept here. To change the code: printf 'waveslave:XXXX' | sha256sum, and put the result in H. -->
-<script>/* Locked unless this device already holds the current code's hash. ON switches the whole screen: false = the site opens straight to the forecast. */(function(){var ON=true,H="b200079bce89b4d2c4e55f2ef5812f58c1b9827f5086ae8a08bdf78b0d43bcde";window.__lockHash=H;if(!ON)return;try{if(localStorage.getItem("waveslave-unlock")===H)return}catch(e){}document.documentElement.classList.add("locked")})();</script>
+<script>/* Locked on every visit (each new tab or app launch) unless this visit already entered the code; the unlock reload keeps it via sessionStorage. An app left in the background over a minute locks again when it comes back. ON switches the whole screen: false = the site opens straight to the forecast. */(function(){var ON=true,H="b200079bce89b4d2c4e55f2ef5812f58c1b9827f5086ae8a08bdf78b0d43bcde";window.__lockHash=H;if(!ON)return;try{localStorage.removeItem("waveslave-unlock");if(sessionStorage.getItem("waveslave-unlock")===H){var gone=0;document.addEventListener("visibilitychange",function(){if(document.hidden)gone=Date.now();else if(gone&&Date.now()-gone>60000){sessionStorage.removeItem("waveslave-unlock");location.reload()}});return}}catch(e){}document.documentElement.classList.add("locked")})();</script>
 <style>/* Classified Terminal: green screen, TOP SECRET banners; a wrong code flashes everything red. */
 html.locked,html.locked body{overflow:hidden}html.locked body>*{visibility:hidden}
 html.locked::before{content:"";position:fixed;inset:0;z-index:9998;background:#020604}
@@ -40,7 +40,7 @@ html.locked::before{content:"";position:fixed;inset:0;z-index:9998;background:#0
 #lock.bad{--g:var(--r);--gd:rgba(255,51,68,.4)}#lock.bad .lk-box{animation:lkJolt .35s}
 #lock.ok .lk-msg{animation:none}#lock.ok .lk-msg::after{content:""}
 @keyframes lkJolt{25%{transform:translateX(-8px)}50%{transform:translateX(8px)}75%{transform:translateX(-4px)}}</style>
-<script>/* The keypad: tap the numbers or type them; a wrong code shows ACCESS DENIED and clears. The right one shows ACCESS GRANTED, is remembered and the page reloads unlocked. */
+<script>/* The keypad: tap the numbers or type them; a wrong code shows ACCESS DENIED and clears. The right one shows ACCESS GRANTED and the page reloads unlocked for the rest of this visit. */
 var LOCK_T={en:["ENTER ACCESS CODE","ACCESS DENIED","DELETE","ACCESS GRANTED"],zh:["輸入授權碼","拒絕存取 · 已記錄","刪除","授權通過"],ja:["アクセスコードを入力","アクセス拒否 · 記録済み","削除","アクセス許可"]};
 function LOCK_HTML(T,dots,pad){return'<div class="lk-ban">TOP SECRET // WAVESLAVE</div><div class="lk-box"><div class="lk-hd"><span>SECURE TERMINAL 07</span><span>LVL-5</span></div><div class="lk-ttl">WAVESLAVE</div><div class="lk-sub">SURF INTELLIGENCE DIVISION</div><div class="lk-msg" aria-live="polite"></div>'+dots+pad+'<div class="lk-ft">AUTHORIZED PERSONNEL ONLY</div></div><div class="lk-ban b">TOP SECRET // WAVESLAVE</div>'}
 document.documentElement.classList.contains("locked")&&addEventListener("DOMContentLoaded",function(){
@@ -51,7 +51,7 @@ d.innerHTML=LOCK_HTML(T,'<div class="lk-dots"><i></i><i></i><i></i><i></i></div>
 document.body.appendChild(d);var msg=d.querySelector(".lk-msg"),dots=d.querySelector(".lk-dots"),code="",busy=false;msg.textContent=T[0];
 function draw(){[].forEach.call(dots.children,function(e,i){e.className=i<code.length?"on":""})}
 function sha(s){return window.crypto&&crypto.subtle?crypto.subtle.digest("SHA-256",new TextEncoder().encode(s)).then(function(b){return[].map.call(new Uint8Array(b),function(x){return(x+256).toString(16).slice(1)}).join("")}):Promise.resolve("")}
-function check(){busy=true;sha("waveslave:"+code).then(function(h){if(h===window.__lockHash){d.classList.add("ok");msg.textContent=T[3];try{localStorage.setItem("waveslave-unlock",h)}catch(e){}setTimeout(function(){location.reload()},window.__lockHold||700);return}
+function check(){busy=true;sha("waveslave:"+code).then(function(h){if(h===window.__lockHash){d.classList.add("ok");msg.textContent=T[3];try{sessionStorage.setItem("waveslave-unlock",h)}catch(e){}setTimeout(function(){location.reload()},window.__lockHold||700);return}
 msg.textContent=T[1];d.classList.remove("bad");void d.offsetWidth;d.classList.add("bad");if(navigator.vibrate)navigator.vibrate([80,60,80]);setTimeout(function(){code="";draw();busy=false},450);setTimeout(function(){if(!busy){d.classList.remove("bad");msg.textContent=T[0]}},2200)})}
 function press(k){if(busy)return;if(d.classList.contains("bad")){d.classList.remove("bad");msg.textContent=T[0]}code=k==="del"?code.slice(0,-1):code.length<4?code+k:code;draw();if(code.length===4)check()}
 d.addEventListener("click",function(e){var b=e.target.closest("button");if(b)press(b.classList.contains("lk-del")?"del":b.getAttribute("data-n"))});

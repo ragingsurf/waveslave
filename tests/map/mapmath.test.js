@@ -178,6 +178,11 @@ test("isoPick", () => {
   assert.equal(name(M.isoPick(G, 113.59, 114.75, 22.07, 22.57)), "hk");
   assert.equal(name(M.isoPick(G, 113.57, 114.77, 22.07, 22.57)), "hk");
   assert.equal(name(M.isoPick(G, 112.9, 115.4, 21.2, 23.5)), "wp");
+  // Hainan's home view upright, then sideways on a phone and a 20:9 phone: it has no grid of its own and lies south of Hong Kong's, so
+  // the West Pacific grid draws.
+  assert.equal(name(M.isoPick(G, 109.28, 110.58, 17.1, 19.77)), "wp");
+  assert.equal(name(M.isoPick(G, 108.85, 111.01, 17.96, 18.91)), "wp");
+  assert.equal(name(M.isoPick(G, 108.82, 111.04, 17.96, 18.91)), "wp");
   assert.equal(M.isoPick(G.slice(0, 10), 95, 170, -5, 50), null); // no Pacific grid
   // Half a degree of slack past a box edge, and a grid without pressure is passed over.
   assert.equal(name(M.isoPick(G, 99.6, 123, 21.75, 25.75)), "wp");

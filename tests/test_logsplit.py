@@ -460,5 +460,46 @@ class LogSplitHongKong(unittest.TestCase):
         self.assertEqual(d['spots']['bigwavebay']['hist']['station'], [[today + 'T14:00', 7.6, 90.0]])
 
 
+HN_IDS = ['dadonghai', 'houhai', 'qingshui', 'riyue', 'shenzhou', 'shimei', 'xiangshui']
+
+
+class LogSplitHainan(unittest.TestCase):
+    # Hainan's spots have no buoy and no wind now, as in the Philippines: their log holds the forecast only, from kr.py on the saved downloads
+    def setUp(self):
+        import datetime
+        sys.path.insert(0, ROOT); import kr
+        self.tmp = tempfile.mkdtemp(); self.snap = os.path.join(self.tmp, 'snap.json')
+        fix = os.path.join(HERE, 'fixtures', 'hn'); d = json.load(open(os.path.join(fix, 'snap_in.json')))
+        kr.fill(d, json.load(open(os.path.join(ROOT, 'spots.json'))), fix, datetime.datetime(2026, 10, 19, 10, 30, tzinfo=datetime.timezone.utc), 'hn')
+        with open(self.snap, 'w') as f: json.dump(d, f)
+
+    def test_log_hn_only(self):
+        run(['log.py', self.snap, self.tmp + '/log-hn', 'hn'])
+        rec = records(self.tmp + '/log-hn')[-1]
+        self.assertEqual(sorted(rec['spots']), HN_IDS)
+        r = rec['spots']['riyue']
+        self.assertEqual((r['buoyId'], r['buoy'], r['station'], len(r['fc'])), (None, [], [], 24))
+
+    def test_other_logs_hold_no_hainan(self):
+        for c, d, ids in (('tw', 'log', ['donghe']), ('kr', 'log-kr', ['jukdo']), ('ph', 'log-ph', ['cloud9']), ('hk', 'log-hk', ['cheungsha'])):
+            run(['log.py', self.snap, self.tmp + '/' + d, c])
+            self.assertEqual(sorted(records(self.tmp + '/' + d)[-1]['spots']), ids, c)
+
+    def test_correct_and_history_hn(self):
+        before = json.load(open(self.snap))['spots']
+        run(['log.py', self.snap, self.tmp + '/log-hn', 'hn'])
+        run(['correct.py', self.snap, self.tmp + '/log-hn', 'hn'])
+        run(['history.py', self.snap, self.tmp + '/log-hn', self.tmp + '/cache', 'hn'])
+        d = json.load(open(self.snap))
+        for k in ('donghe', 'jukdo', 'cloud9', 'cheungsha'): self.assertEqual(d['spots'][k], before[k])
+        t = json.load(open(self.tmp + '/cache/tides-hn.json'))
+        self.assertEqual(sorted(t), HN_IDS)
+        self.assertEqual(t['dadonghai']['2026-10-19'], [['02:45', 'H', 138], ['12:30', 'L', 33]])
+        # with no buoy the heights are only rounded to 0.1 m, as everywhere
+        self.assertEqual((d['spots']['riyue']['adj']['f'], d['spots']['riyue']['adj']['days']), (1.0, 0))
+        self.assertEqual([r[1] for r in d['spots']['riyue']['hourly']], [round(r[1], 1) for r in before['riyue']['hourly']])
+        self.assertEqual((d['spots']['riyue']['hist']['buoy'], d['spots']['riyue']['hist']['station']), ([], []))
+
+
 if __name__ == '__main__':
     unittest.main()

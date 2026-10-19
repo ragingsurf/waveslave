@@ -1,6 +1,6 @@
 // Browser checks and phone screenshots of a built page (build one with tests/map/tool.py).
 // Usage: node tests/map/check.js <page.html> <outdir> shots|checks [land]
-//   shots   the fourteen home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
+//   shots   the sixteen home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
 //           On a page whose hook can zoom, also zoomed all the way out in each layer (out-wind, out-waves, out-swell, out-rain) and a swell across 180° (dateline).
 //   checks  prints ok / FAIL / skip for each check, and exits 1 on any FAIL or page error. Needs the page's test hook, window.__ws.
 // Every page opens in its own fresh browser context, offline (only the page itself loads, no service worker): a phone 390x844 (844x390 with land),
@@ -23,7 +23,7 @@ const HOMES = [["tw", "donghe", "waveslave-mapview", 120.9, 23.75], ["jp", "ichi
   ["nw", "coxbay", "waveslave-mapview-nw", -124.7, 46.1], ["kr", "jukdo", "waveslave-mapview-kr", 127.75, 35.7],
   ["ph", "cloud9", "waveslave-mapview-ph", 122.6, 13.8], ["id", "uluwatu", "waveslave-mapview-id", 116, -8.75], ["nz", "raglan", "waveslave-mapview-nz", 174.3, -41.8],
   ["pi-w", "cloudbreak", "waveslave-mapview-pi-w", -177.15, -17.8], ["pi-e", "teahupoo", "waveslave-mapview-pi-e", -154.93, -19.5],
-  ["ak", "cannonbeach", "waveslave-mapview-ak", -144.6, 58.4]];
+  ["ak", "cannonbeach", "waveslave-mapview-ak", -144.6, 58.4], ["mi-w", "umatac", "waveslave-mapview-mi-w", 145.22, 14.24], ["mi-e", "ppass", "waveslave-mapview-mi-e", 164.74, 6.21]];
 const OLD_CA = { key: "waveslave-mapview-ca", view: { cx: -117.5, cy: 33.0, k: 2 } }; // saved before the map ran east, off California's home view and zoomed in
 const home = name => { const [, spot, key, cx, cy] = HOMES.find(h => h[0] === name); return { spot, saved: { key, view: { cx, cy, k: 1 } } }; }; // open(home("tw"))
 const MID = { key: "waveslave-mapview", view: { cx: 190, cy: 25, k: 1 } }; // Taiwan's map left in the middle of the Pacific, so zoomed out from there Hawaii is on screen
@@ -33,11 +33,12 @@ const OUT = [...["wind", "waves", "swell", "rain"].map(l => ["out-" + l, l, null
 const PAC = !/\bpac: null\s*\}/.test(fs.readFileSync(file, "utf8"));
 // Whether it carries the Pacific Northwest grid (a grid is a JSON object, unlike the nw: {l: ...} boxes in the page's code).
 const NWG = /\bnw: \{"/.test(fs.readFileSync(file, "utf8"));
-// And Indonesia's (none in a build from before Indonesia, or before its first grid fetch), and New Zealand's, the South Pacific's and Alaska's likewise.
+// And Indonesia's (none in a build from before Indonesia, or before its first grid fetch), and New Zealand's, the South Pacific's, Alaska's and Micronesia's likewise.
 const IDG = /\bid: \{"/.test(fs.readFileSync(file, "utf8"));
 const NZG = /\bnz: \{"/.test(fs.readFileSync(file, "utf8"));
 const PIG = /\bpi: \{"/.test(fs.readFileSync(file, "utf8"));
 const AKG = /\bak: \{"/.test(fs.readFileSync(file, "utf8"));
+const MIG = /\bmi: \{"/.test(fs.readFileSync(file, "utf8"));
 // A site build (web/head.html on top) opens on the passcode screen; each fresh context starts unlocked with the page's own code hash.
 const LOCK = (fs.readFileSync(file, "utf8").match(/\bH="([0-9a-f]{64})"/) || [])[1];
 
@@ -76,6 +77,42 @@ async function homeBox(open, c, spot) {
   out = await hid(); if (out.length) throw new Error(`on ${c}'s home view ${out.join(", ")} is off the map or under a button`);
 }
 
+// A country with two parts, west and east of the longitude at, where the current spot picks the part (the South Pacific, Micronesia): each
+// part's first spot, another spot in it (mate) and its home view. With nothing saved, a spot opens on its part's home view with every spot
+// of the part on the map and clear of the buttons and the time bar; upright the part's width sets the zoom the fit for the names starts
+// from (home().z1), sideways its height. Another spot in the same part leaves the map where it is. A spot in the other part moves the map
+// to that part's home view and keeps the view left under its own part's key, where the next open finds it, and from Japan's the map's
+// country button brings back the part of the spot last open.
+async function twoParts(open, c, at, PARTS) {
+  for (const [part, other] of [["w", "e"], ["e", "w"]]) {
+    const P = PARTS[part], O = PARTS[other], page = await open({ spot: P.spot });
+    if (!await page.evaluate(id => !!ALL.spots[id], P.spot)) skip(`the page has no ${P.spot}`);
+    const v = await page.evaluate(() => ({ ...window.__ws.view(), h: window.__ws.home() })), byW = v.W/P.wide, byH = v.H*Math.cos(P.cy*Math.PI/180)/P.span;
+    if (land ? !(byH < byW) : !(byW < byH)) throw new Error(`on a ${v.W}x${v.H} screen the ${part} part's ${land ? "height" : "width"} isn't the tighter fit (${byW} by width, ${byH} by height)`);
+    if (v.MC !== c || !near(v.cx, v.h.cx, 1e-6) || !near(v.cy, v.h.cy, 1e-6) || !near(v.h.z1, Math.min(byW, byH), 1e-9) || v.z !== v.z0)
+      throw new Error(`${P.spot} opens on ${v.MC} at ${v.cx}, ${v.cy}, z ${v.z} (z0 ${v.z0}, z1 ${v.h.z1}); want ${c} on the home view's ${v.h.cx}, ${v.h.cy}, z1 ${Math.min(byW, byH)}`);
+    const out = await page.evaluate(([c, at, east]) => { const rect = e => e.getBoundingClientRect(), fx = rect(document.getElementById("wsFx"));
+      const over = [...document.querySelectorAll("#wsLayers button, #wsCtry button, #viewWs .zoom button, #wsPlay, #wsTime, #wsTl")].filter(b => b.offsetParent).map(rect);
+      return countrySpots(c).filter(id => (MAPM.E(ALL.spots[id].lon) >= at) === east).filter(id => { const s = ALL.spots[id], [x, y] = window.__ws.px(MAPM.E(s.lon), s.lat), X = fx.left + x, Y = fx.top + y;
+        return x < 0 || y < 0 || x > fx.width || y > fx.height || over.some(r => X > r.left - 6 && X < r.right + 6 && Y > r.top - 6 && Y < r.bottom + 6); }); }, [c, at, part === "e"]);
+    if (out.length) throw new Error(`on the ${part} part's home view ${out.join(", ")} is off the map or under a button`);
+    await page.evaluate(() => window.__ws.zoom(2)); await settle(page); const left = await page.evaluate(() => ({ ...window.__ws.view(), h: window.__ws.home() }));
+    await page.evaluate(id => switchSpot(id), P.mate); await settle(page);
+    const s = await page.evaluate(() => ({ cur: CUR, ...window.__ws.view() }));
+    if (s.cur !== P.mate || s.MC !== c || !near(s.cx, left.cx) || !near(s.cy, left.cy) || !near(s.z, left.z)) throw new Error(`after ${P.mate}, in the same part, the page is on ${s.cur} and the map moved from ${left.cx}, ${left.cy}, z ${left.z} to ${s.MC} at ${s.cx}, ${s.cy}, z ${s.z}`);
+    await page.evaluate(id => switchSpot(id), O.spot); await settle(page);
+    const m = await page.evaluate(k => ({ ...window.__ws.view(), h: window.__ws.home(), kept: JSON.parse(localStorage.getItem(k)) }), `waveslave-mapview-${c}-${part}`);
+    if (m.MC !== c || !near(m.cx, m.h.cx, 1e-6) || !near(m.cy, m.h.cy, 1e-6) || m.z !== m.z0 || near(m.h.cx, left.h.cx, 0.01)) throw new Error(`after ${O.spot} the map is ${m.MC} at ${m.cx}, ${m.cy}, z ${m.z}; want ${c} on the ${other} part's home view, ${m.h.cx}, ${m.h.cy}, z0 ${m.z0}`);
+    if (!m.kept || !near(m.kept.cx, left.cx) || !near(m.kept.cy, left.cy) || !near(m.kept.k, left.z/left.h.z1, 1e-9)) throw new Error(`waveslave-mapview-${c}-${part} holds ${JSON.stringify(m.kept)}, want cx ${left.cx}, cy ${left.cy}, k ${left.z/left.h.z1}`);
+    const b = await (await open({ spot: P.spot, saved: { key: `waveslave-mapview-${c}-${part}`, view: m.kept } })).evaluate(() => window.__ws.view());
+    if (!near(b.cx, left.cx, 1e-6) || !near(b.cy, left.cy, 1e-6) || !near(b.z, left.z, 1e-9)) throw new Error(`${P.spot} opened with that view kept is at ${b.cx}, ${b.cy}, z ${b.z}; want ${left.cx}, ${left.cy}, z ${left.z}`);
+    await page.click('#wsCtry button[data-c="jp"]'); await settle(page);
+    await page.click(`#wsCtry button[data-c="${c}"]`); await settle(page);
+    const n = await page.evaluate(() => ({ cur: CUR, ...window.__ws.view(), h: window.__ws.home() }));
+    if (n.cur !== O.spot || n.MC !== c || !near(n.cx, m.h.cx, 1e-6) || !near(n.cy, m.h.cy, 1e-6) || n.z !== n.z0) throw new Error(`after the map's Japan then ${c} buttons the page is on ${n.cur}, view() MC ${n.MC}, centre ${n.cx}, ${n.cy}, z ${n.z}; want ${O.spot}, ${c}, the ${other} part's home view ${m.h.cx}, ${m.h.cy}, z0 ${n.z0}`);
+  }
+}
+
 const CHECKS = {
   // A California view saved with a negative centre opens where it was left, upright and sideways: -117.5 at twice the home zoom is 242.5 at
   // 2·z1, the home zoom before the fit for the names, which saved views go by (with nothing saved, Trestles opens on the old California box,
@@ -92,7 +129,7 @@ const CHECKS = {
   // Every grid is made, finest first, with the Pacific layer last when the page carries it.
   async gridsLoaded(open) {
     const page = await open(home("tw")), got = JSON.stringify(await page.evaluate(() => window.__ws.grids()));
-    const want = JSON.stringify([...(NWG ? ["nw"] : []), "hi", "ca", ...(AKG ? ["ak"] : []), "au", ...(IDG ? ["id"] : []), ...(NZG ? ["nz"] : []), ...(PIG ? ["pi"] : []), "wp", ...(PAC ? ["pac"] : [])]);
+    const want = JSON.stringify([...(NWG ? ["nw"] : []), "hi", "ca", ...(AKG ? ["ak"] : []), "au", ...(IDG ? ["id"] : []), ...(NZG ? ["nz"] : []), ...(PIG ? ["pi"] : []), ...(MIG ? ["mi"] : []), "wp", ...(PAC ? ["pac"] : [])]);
     if (got !== want) throw new Error(`grids() is ${got}, want ${want}`);
   },
   // The Taiwan home view sits inside the West Pacific grid, so its pressure lines come from that grid; zoomed out they come from the Pacific layer (none without it).
@@ -134,6 +171,17 @@ const CHECKS = {
     if (!await page.evaluate(() => !!ALL.spots.cannonbeach)) skip("the page has no Alaska spots");
     const src = await page.evaluate(() => window.__ws.iso()), want = AKG && land ? "ak" : PAC ? "pac" : null;
     if (src !== want) throw new Error(`on Alaska's home view iso() is ${src}, want ${want}`);
+  },
+  // Micronesia's west home view (Guam and Saipan) lies inside the West Pacific grid both ways up, so its pressure lines come from that grid.
+  // The east one (Pohnpei to Majuro) held sideways sits inside Micronesia's own grid (2°S–14°N, 152–176°E); upright its width sets the zoom,
+  // so its height runs past it and the pressure lines come from the Pacific layer.
+  async micronesiaIso(open) {
+    for (const [name, want] of [["mi-w", "wp"], ["mi-e", MIG && land ? "mi" : PAC ? "pac" : null]]) {
+      const page = await open(home(name));
+      if (!await page.evaluate(() => !!ALL.spots.umatac)) skip("the page has no Micronesia spots");
+      const src = await page.evaluate(() => window.__ws.iso());
+      if (src !== want) throw new Error(`on ${name}'s home view iso() is ${src}, want ${want}`);
+    }
   },
   // Either side of 180° the Pacific layer has wind, and about the same wind: no seam at the dateline.
   async datelineSeam(open) {
@@ -212,41 +260,13 @@ const CHECKS = {
     if (n.c !== "ak" || n.MC !== "ak" || !near(n.cx, n.h.cx, 1e-6) || !near(n.cy, n.h.cy, 1e-6) || n.z !== n.z0) throw new Error(`after the map's Japan then Alaska buttons the page is on ${n.c}, view() MC ${n.MC}, centre ${n.cx}, ${n.cy}, z ${n.z}; want ak, ak, the home view's ${n.h.cx}, ${n.h.cy}, z0 ${n.z0}`);
     out = await hid(); if (out.length) throw new Error(`on Alaska's home view ${out.join(", ")} is off the map or under a button`);
   },
-  // The South Pacific has two parts, west (Fiji to the Samoas) and east (Rarotonga and Tahiti), and the current spot picks the part. With nothing
-  // saved, a spot opens on its part's home view with every spot of the part on the map and clear of the buttons and the time bar; upright the
-  // part's width sets the zoom the fit for the names starts from (home().z1), sideways its height. Another spot in the same part leaves the
-  // map where it is. A spot in the other part moves
-  // the map to that part's home view and keeps the view left under its own part's key, where the next open finds it, and from Japan's the
-  // map's South Pacific button brings back the part of the spot last open.
+  // The South Pacific has two parts, west (Fiji to the Samoas) and east (Rarotonga and Tahiti), and so has Micronesia, west (Guam and Saipan)
+  // and east (Pohnpei to Majuro); see twoParts.
   async southPacific(open) {
-    const PARTS = { w: { spot: "cloudbreak", mate: "amouli", cx: 182.85, cy: -17.8, span: 11, wide: 17.6 }, e: { spot: "teahupoo", mate: "papara", cx: 205.07, cy: -19.5, span: 8, wide: 15.2 } };
-    for (const [part, other] of [["w", "e"], ["e", "w"]]) {
-      const P = PARTS[part], O = PARTS[other], page = await open({ spot: P.spot });
-      if (!await page.evaluate(id => !!ALL.spots[id], P.spot)) skip(`the page has no ${P.spot}`);
-      const v = await page.evaluate(() => ({ ...window.__ws.view(), h: window.__ws.home() })), byW = v.W/P.wide, byH = v.H*Math.cos(P.cy*Math.PI/180)/P.span;
-      if (land ? !(byH < byW) : !(byW < byH)) throw new Error(`on a ${v.W}x${v.H} screen the ${part} part's ${land ? "height" : "width"} isn't the tighter fit (${byW} by width, ${byH} by height)`);
-      if (v.MC !== "pi" || !near(v.cx, v.h.cx, 1e-6) || !near(v.cy, v.h.cy, 1e-6) || !near(v.h.z1, Math.min(byW, byH), 1e-9) || v.z !== v.z0)
-        throw new Error(`${P.spot} opens on ${v.MC} at ${v.cx}, ${v.cy}, z ${v.z} (z0 ${v.z0}, z1 ${v.h.z1}); want pi on the home view's ${v.h.cx}, ${v.h.cy}, z1 ${Math.min(byW, byH)}`);
-      const out = await page.evaluate(east => { const rect = e => e.getBoundingClientRect(), fx = rect(document.getElementById("wsFx"));
-        const over = [...document.querySelectorAll("#wsLayers button, #wsCtry button, #viewWs .zoom button, #wsPlay, #wsTime, #wsTl")].filter(b => b.offsetParent).map(rect);
-        return countrySpots("pi").filter(id => (MAPM.E(ALL.spots[id].lon) >= 195) === east).filter(id => { const s = ALL.spots[id], [x, y] = window.__ws.px(MAPM.E(s.lon), s.lat), X = fx.left + x, Y = fx.top + y;
-          return x < 0 || y < 0 || x > fx.width || y > fx.height || over.some(r => X > r.left - 6 && X < r.right + 6 && Y > r.top - 6 && Y < r.bottom + 6); }); }, part === "e");
-      if (out.length) throw new Error(`on the ${part} part's home view ${out.join(", ")} is off the map or under a button`);
-      await page.evaluate(() => window.__ws.zoom(2)); await settle(page); const left = await page.evaluate(() => ({ ...window.__ws.view(), h: window.__ws.home() }));
-      await page.evaluate(id => switchSpot(id), P.mate); await settle(page);
-      const s = await page.evaluate(() => ({ cur: CUR, ...window.__ws.view() }));
-      if (s.cur !== P.mate || s.MC !== "pi" || !near(s.cx, left.cx) || !near(s.cy, left.cy) || !near(s.z, left.z)) throw new Error(`after ${P.mate}, in the same part, the page is on ${s.cur} and the map moved from ${left.cx}, ${left.cy}, z ${left.z} to ${s.MC} at ${s.cx}, ${s.cy}, z ${s.z}`);
-      await page.evaluate(id => switchSpot(id), O.spot); await settle(page);
-      const m = await page.evaluate(k => ({ ...window.__ws.view(), h: window.__ws.home(), kept: JSON.parse(localStorage.getItem(k)) }), "waveslave-mapview-pi-" + part);
-      if (m.MC !== "pi" || !near(m.cx, m.h.cx, 1e-6) || !near(m.cy, m.h.cy, 1e-6) || m.z !== m.z0 || near(m.h.cx, left.h.cx, 0.01)) throw new Error(`after ${O.spot} the map is ${m.MC} at ${m.cx}, ${m.cy}, z ${m.z}; want pi on the ${other} part's home view, ${m.h.cx}, ${m.h.cy}, z0 ${m.z0}`);
-      if (!m.kept || !near(m.kept.cx, left.cx) || !near(m.kept.cy, left.cy) || !near(m.kept.k, left.z/left.h.z1, 1e-9)) throw new Error(`waveslave-mapview-pi-${part} holds ${JSON.stringify(m.kept)}, want cx ${left.cx}, cy ${left.cy}, k ${left.z/left.h.z1}`);
-      const b = await (await open({ spot: P.spot, saved: { key: "waveslave-mapview-pi-" + part, view: m.kept } })).evaluate(() => window.__ws.view());
-      if (!near(b.cx, left.cx, 1e-6) || !near(b.cy, left.cy, 1e-6) || !near(b.z, left.z, 1e-9)) throw new Error(`${P.spot} opened with that view kept is at ${b.cx}, ${b.cy}, z ${b.z}; want ${left.cx}, ${left.cy}, z ${left.z}`);
-      await page.click('#wsCtry button[data-c="jp"]'); await settle(page);
-      await page.click('#wsCtry button[data-c="pi"]'); await settle(page);
-      const n = await page.evaluate(() => ({ cur: CUR, ...window.__ws.view(), h: window.__ws.home() }));
-      if (n.cur !== O.spot || n.MC !== "pi" || !near(n.cx, m.h.cx, 1e-6) || !near(n.cy, m.h.cy, 1e-6) || n.z !== n.z0) throw new Error(`after the map's Japan then South Pacific buttons the page is on ${n.cur}, view() MC ${n.MC}, centre ${n.cx}, ${n.cy}, z ${n.z}; want ${O.spot}, pi, the ${other} part's home view ${m.h.cx}, ${m.h.cy}, z0 ${n.z0}`);
-    }
+    await twoParts(open, "pi", 195, { w: { spot: "cloudbreak", mate: "amouli", cx: 182.85, cy: -17.8, span: 11, wide: 17.6 }, e: { spot: "teahupoo", mate: "papara", cx: 205.07, cy: -19.5, span: 8, wide: 15.2 } });
+  },
+  async micronesia(open) {
+    await twoParts(open, "mi", 152, { w: { spot: "umatac", mate: "tankbeach", cx: 145.22, cy: 14.24, span: 3.3, wide: 1.7 }, e: { spot: "ppass", mate: "majuro", cx: 164.74, cy: 6.21, span: 9.5, wide: 19 } });
   },
   // On the Forecast page the tide line says "Model tide" at a South Pacific spot that takes the tide model (Salani), and not at one that takes
   // NOAA's tides (Cloudbreak).
@@ -449,7 +469,7 @@ const CHECKS = {
     if (b.z !== b.z0 || !near(b.cx, b.h.cx, 1e-6) || !near(b.cy, b.h.cy, 1e-6)) throw new Error(`after two taps the view is z ${b.z} at ${b.cx}, ${b.cy}, want z0 ${b.z0} at the home view's ${b.h.cx}, ${b.h.cy}`);
   },
   // Each country's button brings a home view with all of the country's names in the clear, in English, Chinese and Japanese, on the phone
-  // and (upright runs) on a 1280x800 computer screen too: every one of its spots (in Australia and the South Pacific: those in the part it's on, each part in turn)
+  // and (upright runs) on a 1280x800 computer screen too: every one of its spots (in Australia, the South Pacific and Micronesia: those in the part it's on, each part in turn)
   // has its dot and its tag on the map with room around them, 16px or more inside the screen, under the top buttons and over the time bar,
   // and 8px or more from the buttons down the sides. The home view is never closer than the country's home zoom was (home().z1), and only
   // as far out as it needs: still at that zoom, or with the names spanning half of the clear map or more one way. Taiwan's towns never put
@@ -460,9 +480,9 @@ const CHECKS = {
       const page = await open({ spot: "pipeline", size }), cs = await page.evaluate(() => [...document.querySelectorAll("#wsCtry button")].map(b => b.dataset.c));
       for (const l of ["en", "zh", "ja"]) {
         await page.evaluate(l => setLang(l), l); await settle(page);
-        for (const c of [...cs, "margaret", "noosa", "cloudbreak", "teahupoo"]) {
-          // A country from another one's button, so its own flies to its home view; the two parts of Australia and of the South Pacific by
-          // picking a spot in each.
+        for (const c of [...cs, "margaret", "noosa", "cloudbreak", "teahupoo", "umatac", "ppass"]) {
+          // A country from another one's button, so its own flies to its home view; the two parts of Australia, the South Pacific and
+          // Micronesia by picking a spot in each.
           if (cs.includes(c)) for (const b of [c === cs[0] ? cs[1] : cs[0], c]) { await page.click(`#wsCtry button[data-c="${b}"]`); await settle(page); }
           else { await page.evaluate(id => switchSpot(id), c); await settle(page); }
           const r = await page.evaluate(([M, MB]) => { const cv = document.getElementById("wsFx").getBoundingClientRect(), v = window.__ws.view(), h = window.__ws.home(), tags = window.__ws.tags();

@@ -79,6 +79,9 @@ home views, split at 152°E and picked by the current spot's longitude:
 - East, Pohnpei to Majuro: centre 164.74°E, 6.21°N, 9.5° of latitude and at least 19° of longitude (about 20 px per degree upright,
   41 sideways). P-Pass and Mwand are 3.5 px apart upright and 7 sideways, tighter than Tahiti's pair; zooming in separates them.
 
+These are the views the map's name fitting (2026-10-18) starts from. On a phone, upright and sideways, every name of each part fits
+at these zooms in English, Chinese and Japanese, so neither part zooms out further.
+
 Each part keeps its own saved view (`waveslave-mapview-mi-w`, `-mi-e`), the first open with nothing saved is the current part's home
 view, and only a move to the other part recentres, as for the South Pacific. The grid holds the east part sideways and the middle
 band upright; the West Pacific grid and the Pacific layer fill in the rest. It runs after the South Pacific's in the finest-first

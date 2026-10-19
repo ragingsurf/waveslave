@@ -4,7 +4,8 @@
 //           On a page whose hook can zoom, also zoomed all the way out in each layer (out-wind, out-waves, out-swell, out-rain) and a swell across 180° (dateline).
 //   checks  prints ok / FAIL / skip for each check, and exits 1 on any FAIL or page error. Needs the page's test hook, window.__ws.
 // Every page opens in its own fresh browser context, offline (only the page itself loads, no service worker): a phone 390x844 (844x390 with land),
-// dpr 2, touch, reduced motion (so no streaks, and moves jump), the intro done, unlocked, English, and the map open full screen on load.
+// dpr 2, touch, reduced motion (so no streaks, and moves jump), the intro done, unlocked, English, World mode (every country; world: false for
+// Taiwan mode, the page's default) and the map open full screen on load.
 // The time bar starts at the current hour, so take two runs you mean to compare (main and the branch) in one sitting, and look at the time printed after each shot.
 // Playwright wherever node finds it (npm install playwright), else the copy this container keeps.
 const { chromium } = (() => { try { return require("playwright"); } catch (e) { return require("/opt/node22/lib/node_modules/playwright"); } })();
@@ -465,6 +466,42 @@ const CHECKS = {
     const kept = await page.evaluate(() => JSON.parse(localStorage.getItem("waveslave-mapview")));
     if (!kept || !near(kept.cx, v.cx) || !near(kept.cy, v.cy) || !near(kept.k, v.z/v.h.z1)) throw new Error(`waveslave-mapview holds ${JSON.stringify(kept)}, want cx ${v.cx}, cy ${v.cy}, k ${v.z/v.h.z1}`);
   },
+  // Taiwan mode, the page's default: no country row and no country buttons over the map, and zoomed out no other country's spot to tap (a
+  // tap where Pipeline is drops a pin instead). World mode (setWorld, the tap on the W) brings them back and is kept; switching it off from
+  // Hawaii brings the page and the map back to Taiwan. Then on Forecast the W itself switches it on and off.
+  async taiwanMode(open) {
+    const page = await open({ spot: "donghe", saved: MID, world: false });
+    const shown = () => page.evaluate(() => ({ world: WORLD, cls: document.documentElement.classList.contains("world"), kept: localStorage.getItem("waveslave-world"),
+      row: getComputedStyle(document.getElementById("ctry")).display !== "none", btns: [...document.querySelectorAll("#wsCtry button")].filter(b => b.offsetParent).length,
+      want: document.querySelectorAll("#ctry button").length, cur: CUR, cc: spotCountry(CUR), MC: window.__ws.view().MC }));
+    let a = await shown();
+    if (a.world || a.cls) throw new Error("the page opened in World mode, want Taiwan mode");
+    if (a.row || a.btns) throw new Error(`in Taiwan mode the country row ${a.row ? "shows" : "is hidden"} and ${a.btns} country buttons show over the map, want neither`);
+    await zoomOut(page);
+    await tapAt(page, await page.evaluate(() => { const s = ALL.spots.pipeline; return window.__ws.px(MAPM.E(s.lon), s.lat); })); await settle(page);
+    a = await shown(); if (a.cur !== "donghe" || a.world) throw new Error(`a tap where Pipeline is moved the page to ${a.cur}${a.world ? " in World mode" : ""}, want it to stay on donghe`);
+    await page.evaluate(() => setWorld(true)); await settle(page); a = await shown();
+    if (!a.world || !a.cls || a.kept !== "1") throw new Error(`after setWorld(true) WORLD is ${a.world}, the class ${a.cls}, waveslave-world ${a.kept}`);
+    if (!a.row || a.btns !== a.want) throw new Error(`in World mode the country row ${a.row ? "shows" : "is hidden"} and ${a.btns} country buttons show over the map, want ${a.want}`);
+    await page.evaluate(() => switchCountry("hi")); await settle(page);
+    await page.evaluate(() => setWorld(false)); await settle(page); a = await shown();
+    if (a.world || a.cls || a.kept !== "0" || a.row || a.btns) throw new Error(`after setWorld(false) WORLD is ${a.world}, the class ${a.cls}, waveslave-world ${a.kept}, the row ${a.row}, ${a.btns} buttons`);
+    if (a.cc !== "tw" || a.MC !== "tw") throw new Error(`after setWorld(false) from Hawaii the page is on ${a.cur} and the map on ${a.MC}, want Taiwan`);
+    // And the real switch: back on Forecast, a tap on the W in the logo turns World mode on, and another turns it off.
+    await page.click("#wsFs"); await settle(page);
+    for (const want of [true, false]) { await page.click("header .brand .w"); await settle(page); a = await shown();
+      if (a.world !== want || a.row !== want) throw new Error(`a tap on the W left WORLD ${a.world} and the country row ${a.row ? "showing" : "hidden"}, want ${want ? "World mode" : "Taiwan mode"}`); }
+  },
+  // A link to another country's spot opens it in World mode, kept for next time; in Taiwan mode the last spot open in another country is
+  // passed over for the last Taiwan one.
+  async worldLink(open) {
+    let page = await open({ spot: "pipeline", world: false });
+    let r = await page.evaluate(() => ({ world: WORLD, cur: CUR, kept: localStorage.getItem("waveslave-world") }));
+    if (!r.world || r.cur !== "pipeline" || r.kept !== "1") throw new Error(`the link to Pipeline opened ${r.cur} with WORLD ${r.world}, waveslave-world ${r.kept}; want pipeline in World mode, kept`);
+    page = await open({ spot: "", world: false, store: { "waveslave-spot": "pipeline", "waveslave-spot-tw": "nanwan" } });
+    r = await page.evaluate(() => ({ world: WORLD, cur: CUR }));
+    if (r.world || r.cur !== "nanwan") throw new Error(`with Pipeline last open in Taiwan mode the page opened ${r.cur}${r.world ? " in World mode" : ""}, want nanwan in Taiwan mode`);
+  },
   // Zoomed out on Taiwan's map, tapping Pipeline switches the page to it and opens its table, with no reload.
   async tapOtherCountrySpot(open) {
     const page = await open({ spot: "donghe", saved: MID }); await zoomOut(page);
@@ -543,12 +580,13 @@ const CHECKS = {
   fs.mkdirSync(outdir, { recursive: true });
   const browser = await chromium.launch(); let bad = false, ctxs = [], errs = [];
   // A fresh context for every page, so saved views and storage never carry over; the page itself is the only request let through.
-  async function open({ spot, saved, hook = true, size }) {
+  async function open({ spot, saved, hook = true, size, world = true, store = null }) {
     const ctx = await browser.newContext({ viewport: size || (land ? { width: 844, height: 390 } : { width: 390, height: 844 }), deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block" });
     ctxs.push(ctx);
     await ctx.route("**/*", r => r.request().url().split("#")[0] === PAGE ? r.continue() : r.abort());
-    await ctx.addInitScript(([saved, now, lock]) => { Date.now = () => now; try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", "ws"); localStorage.setItem("waveslave-lang", "en");
-      if (lock) sessionStorage.setItem("waveslave-unlock", lock); if (saved) localStorage.setItem(saved.key, JSON.stringify(saved.view)); } catch (e) {} }, [saved, NOW, LOCK]);
+    await ctx.addInitScript(([saved, now, lock, world, store]) => { Date.now = () => now; try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", "ws"); localStorage.setItem("waveslave-lang", "en");
+      if (world) localStorage.setItem("waveslave-world", "1"); for (const k in store || {}) localStorage.setItem(k, store[k]);
+      if (lock) sessionStorage.setItem("waveslave-unlock", lock); if (saved) localStorage.setItem(saved.key, JSON.stringify(saved.view)); } catch (e) {} }, [saved, NOW, LOCK, world, store]);
     const page = await ctx.newPage(); page.on("pageerror", e => errs.push(String(e)));
     await page.goto(PAGE + "#" + spot, { waitUntil: "load" });
     await page.waitForFunction(() => (document.getElementById("wsTime") || {}).textContent); // the map has drawn once

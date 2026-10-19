@@ -1,5 +1,6 @@
 <title>WaveSlave</title>
 <script>/* Language before first paint: the saved pick, else the browser's (zh → 中文, ja → 日本語). */try{var l=localStorage.getItem("waveslave-lang")||(/^zh/i.test(navigator.language)?"zh":/^ja/i.test(navigator.language)?"ja":"en");document.documentElement.lang=l==="zh"?"zh-Hant-TW":l==="ja"?"ja":"en";}catch(e){}</script>
+<script>/* World mode (the secret switch, the W in the logo) before first paint, so Taiwan mode never flashes up the country row. */try{if(localStorage.getItem("waveslave-world")==="1")document.documentElement.classList.add("world")}catch(e){}</script>
 <style>/* Opening animation cover: dark from the first paint until the intro takes over; it lifts by itself after 6 s if the intro never runs. */
 html.intro-on::after{content:"";position:fixed;inset:0;z-index:9997;background:#07050f;animation:introSafe 0s 6s forwards}@keyframes introSafe{to{visibility:hidden}}</style>
 <script>/* Opening animation once per visit, never for reduced motion, and not behind the passcode screen (it plays after the unlock reload). */try{if(!document.documentElement.classList.contains("locked")&&!sessionStorage.getItem("waveslave-intro")&&!matchMedia("(prefers-reduced-motion: reduce)").matches)document.documentElement.classList.add("intro-on")}catch(e){}</script>
@@ -43,7 +44,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--buoy);outline-offse
 
 header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:10px}
 /* 90s flame wordmark: Metal Mania, yellow-to-red fire fill, dark outline, red-hot glow. One look in both themes. */
-.brand{font-family:"Metal Mania","Impact","Arial Black",serif;font-weight:400;font-size:clamp(42px,12vw,72px);line-height:1;letter-spacing:.01em;
+.brand{font-family:"Metal Mania","Impact","Arial Black",serif;font-weight:400;font-size:clamp(42px,12vw,72px);line-height:1;letter-spacing:.01em;white-space:nowrap;
   display:inline-block;padding:2px 6px;transform:rotate(-7deg) skewX(-14deg);transform-origin:left bottom;margin:26px 0 4px 4px;
   background:linear-gradient(180deg,#fff7b0 0%,#ffd400 28%,#ff8a00 55%,#ff3d00 78%,#b80000 100%);
   -webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;
@@ -60,6 +61,24 @@ html:not(.brand-ok) .brand{visibility:hidden}
   background:radial-gradient(closest-side,rgba(255,70,0,.42),rgba(255,40,0,.16) 60%,transparent);transform:rotate(-7deg);
   will-change:opacity;animation:flicker 2.6s ease-in-out infinite}
 @keyframes flicker{0%,100%{opacity:.55}45%{opacity:1}60%{opacity:.3}}
+/* The secret switch (Bryan, Oct 19): a tap on the W turns World mode on and off (setWorld). Nothing gives it away: no pointer, no tap flash, and
+   the W looks like the rest of the wordmark until it's tapped. It's its own box, so it carries its own copy of the wordmark's fire (the same
+   gradient over the same height), or it would show only its outline, and gives back the font's W-a kerning (-.015em) its own box loses.
+   In World mode the neon W over it lights up; the header's flickers on. */
+.brand .w{position:relative;display:inline-block;padding-block:2px;margin-block:-2px;margin-right:-.015em;background:inherit;-webkit-background-clip:text;background-clip:text;-webkit-tap-highlight-color:transparent}
+.brand .w::after{content:"W";position:absolute;inset:0;padding-block:2px;pointer-events:none;opacity:0;
+  background:linear-gradient(180deg,#fff2ff 0%,#f3b4ff 24%,#d06bff 50%,#9b2cf0 76%,#5a10b0 100%);-webkit-background-clip:text;background-clip:text;
+  -webkit-text-stroke:1px #1a0030;filter:drop-shadow(0 0 2px rgba(225,140,255,.95)) drop-shadow(0 0 5px rgba(180,70,255,.7))}
+html.world .brand .w::after{opacity:1}
+/* A neon tube catching: a few hard blinks, then steady; and going out with a stutter. The W and each country (each at its own moment, --d) do
+   the same; only the W turns neon, the countries come on in their own colours. */
+@keyframes flickOn{0%{opacity:0;animation-timing-function:steps(1,end)}7%{opacity:1;animation-timing-function:steps(1,end)}11%{opacity:0;animation-timing-function:steps(1,end)}
+  26%{opacity:.85;animation-timing-function:steps(1,end)}30%{opacity:.1;animation-timing-function:steps(1,end)}38%{opacity:1;animation-timing-function:steps(1,end)}
+  52%{opacity:.5;animation-timing-function:steps(1,end)}55%,100%{opacity:1}}
+@keyframes flickOff{0%{opacity:1;animation-timing-function:steps(1,end)}15%{opacity:.15;animation-timing-function:steps(1,end)}30%{opacity:1;animation-timing-function:steps(1,end)}
+  50%{opacity:0;animation-timing-function:steps(1,end)}68%{opacity:.5;animation-timing-function:steps(1,end)}80%,100%{opacity:0}}
+html.igniting header .brand .w::after{animation:flickOn .9s both}
+html.dousing header .brand .w::after{animation:flickOff .4s both}
 .where{color:var(--muted);font-size:13px}
 /* EN / 中文 switch, pinned to the top right corner. */
 header{position:relative}
@@ -189,6 +208,18 @@ svg text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
 .ctry button{flex:none;border:0;background:none;color:var(--muted);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP",sans-serif;padding:6px clamp(5px,calc((100vw - 310px)/10),12px);border-radius:99px;cursor:pointer;position:relative;z-index:1;transition:color .36s,text-shadow .36s}
 html[lang="ja"] .ctry button{padding-inline:clamp(3px,calc((100vw - 350px)/10),12px)}
 .ctry button[aria-pressed="true"]{color:#ffb347;text-shadow:0 0 6px rgba(255,140,0,.7)}
+/* Taiwan mode (the default) has no country row, here or on the map. In World mode the row opens from shut (no height, the spot picker pulled up
+   over the column's 22px gap above it) and its countries flicker on; going back, they flicker out and it shuts again. The picker slides only in
+   World mode: shut goes on before the row shows and comes off as it hides, so neither moves it. */
+html:not(.world) #ctry,html:not(.world) .wsmap .wsctry{display:none}
+#ctry{transition:max-height .16s cubic-bezier(.2,.8,.2,1),margin .16s cubic-bezier(.2,.8,.2,1),padding .16s cubic-bezier(.2,.8,.2,1),border-width .16s}
+html.world #picker{transition:margin-top .16s cubic-bezier(.2,.8,.2,1)}
+html.world #ctry{max-height:60px}
+html.shut #ctry{max-height:0;margin-bottom:0;padding-block:0;border-width:0;overflow:hidden}
+html.shut #picker{margin-top:-22px}
+html.shut #ctry>*{opacity:0}
+html.igniting #ctry>*{animation:flickOn .9s calc(.14s + var(--d,0s)) both}
+html.dousing #ctry>*{animation:flickOff .34s var(--d2,0s) both}
 /* Sliding highlight: in each group of buttons with a pick, one bubble glides (place and size) to the picked one; glider() puts it there.
    Language, country, Forecast/Map and spot picker: a dark bubble under the words. Phone day chips: the ink (today: sea) fill. Map layers and the
    map's countries: the glowing ring, on top, with the fill fading across underneath. */
@@ -370,7 +401,7 @@ html{overscroll-behavior-y:none}
 <div class="wrap">
   <header>
     <div class="brandbox">
-      <h1 class="brand">WaveSlave</h1>
+      <h1 class="brand" aria-label="WaveSlave"><span class="w">W</span>aveSlave</h1>
     </div>
     <div class="lang" id="lang" role="group" aria-label="Language / 語言 / 言語"><button data-l="en" aria-pressed="true" lang="en">EN</button><button data-l="zh" aria-pressed="false" lang="zh-Hant-TW">中文</button><button data-l="ja" aria-pressed="false" lang="ja">日本語</button></div>
     <span class="fresh" id="fresh">Data snapshot</span>
@@ -525,8 +556,14 @@ function applyLang(){ const L = isZh() || isJa() ? LANG : "en"; document.documen
     e.setAttribute(a, L!=="en" && e.getAttribute(`data-${L}-${a}`) || e.getAttribute("data-"+k)); });
   document.querySelectorAll("#lang button").forEach(b => b.setAttribute("aria-pressed", b.dataset.l===LANG)); }
 function setLang(l){ if(l===LANG) return; LANG=l; try{ localStorage.setItem("waveslave-lang", l); }catch(e){} applyLang(); boot(CUR); WS.relang(); }
-// Spot comes from the link (#nanwan) or the last one picked on this device; Donghe otherwise.
-const SPOT0 = (() => { const h=location.hash.slice(1); if(ALL.spots[h]) return h; try{ const s=localStorage.getItem("waveslave-spot"); if(ALL.spots[s]) return s; }catch(e){} return "donghe"; })();
+// World mode shows every country; Taiwan mode, the default, only Taiwan's spots, in the forecast and on the map. The W in the logo switches
+// (setWorld), remembered on this device; the class "world" on the page was set from it before first paint.
+let WORLD = document.documentElement.classList.contains("world");
+function keepWorld(on){ WORLD = on; document.documentElement.classList.toggle("world", on); try{ localStorage.setItem("waveslave-world", on ? "1" : "0"); }catch(e){} }
+// Spot comes from the link (#nanwan) or the last one picked on this device; Donghe otherwise. In Taiwan mode the last one is the last Taiwan
+// spot; a link to another country's spot turns World mode on, so it still opens.
+const SPOT0 = (() => { const h=location.hash.slice(1); if(ALL.spots[h]){ if(spotCountry(h)!=="tw" && !WORLD) keepWorld(true); return h; }
+  try{ for(const k of ["waveslave-spot", "waveslave-spot-tw"]){ const s=localStorage.getItem(k); if(ALL.spots[s] && (WORLD || spotCountry(s)==="tw")) return s; } }catch(e){} return "donghe"; })();
 // Everything spot-specific renders inside boot(), so switching spots redraws in place (no reload, no white flash).
 let CUR = SPOT0;
 // Each spot belongs to a country (tw, jp, kr, hk, ph, id, ca, hi, au, nz, pi, mi, nw or ak); the picker lists the current spot's country, the switch above it changes country.
@@ -534,7 +571,7 @@ function spotCountry(id){ return (ALL.spots[id]||{}).country || "tw"; }
 function viewTz(){ return (ALL.spots[CUR]||{}).tz || 8; }
 const countrySpots = c => (ALL.order || Object.keys(ALL.spots)).filter(id => spotCountry(id)===c);
 // Every country is on the one Pacific map, so changing spot never reloads: a new country moves the map to its home view.
-function switchSpot(id){ if(!ALL.spots[id] || id===CUR) return; const was = CUR, other = spotCountry(id)!==spotCountry(was); CUR=id;
+function switchSpot(id){ if(!ALL.spots[id] || id===CUR) return; if(!WORLD && spotCountry(id)!=="tw") setWorld(true); const was = CUR, other = spotCountry(id)!==spotCountry(was); CUR=id;
   try{ localStorage.setItem("waveslave-spot", id); localStorage.setItem("waveslave-spot-"+spotCountry(id), id); }catch(e){}
   try{ history.replaceState(null, "", "#"+id); }catch(e){ location.hash=id; }
   // Australia's home is the current spot's coast, and any move inside Australia recentres on it. The South Pacific's and Micronesia's is the
@@ -546,6 +583,28 @@ function ctryEdges(){ const r = document.getElementById("ctry"); r.classList.tog
 // Country switch: back to the spot last open in that country, else its first spot.
 function switchCountry(c){ if(c===spotCountry(CUR)) return; let id; try{ id=localStorage.getItem("waveslave-spot-"+c); }catch(e){}
   switchSpot(ALL.spots[id] && spotCountry(id)===c ? id : countrySpots(c)[0]); }
+// World mode on or off. The W flickers to neon and the country row opens, its countries flickering on one by one; or they flicker out, the row
+// shuts and the page goes back to Taiwan. With reduced motion it just switches. A tap mid-flicker turns it straight back (gen drops the old one).
+let worldGen = 0;
+async function setWorld(on){ if(on===WORLD) return; const gen = ++worldGen, root = document.documentElement, ctry = document.getElementById("ctry"),
+    flick = !matchMedia("(prefers-reduced-motion: reduce)").matches && !!document.getAnimations;
+  // Until the animations on the country row (and the spot picker's slide) end; never longer than 1.5 s.
+  const settled = sel => Promise.race([Promise.all(document.getAnimations().filter(a => a.effect && a.effect.target instanceof Element && a.effect.target.matches(sel)).map(a => a.finished.catch(() => {}))),
+    new Promise(r => setTimeout(r, 1500))]);
+  const showing = root.classList.contains("world"); root.classList.remove("igniting", "dousing");
+  // Each country catches, and goes out, at its own moment.
+  [...ctry.children].forEach((b, i) => { b.style.setProperty("--d", ((i*37)%11/11*.22).toFixed(3)+"s"); b.style.setProperty("--d2", ((i*53)%7/7*.06).toFixed(3)+"s"); });
+  if(on){ if(flick && !showing){ root.classList.add("shut"); void ctry.offsetWidth; }
+    keepWorld(true); if(!flick){ root.classList.remove("shut"); WS.world(); return; }
+    // The bubble under the picked country goes straight there rather than gliding in from nowhere.
+    const pill = ctry.querySelector(".glide-pill"); if(pill && !showing) pill.classList.remove("glide");
+    void ctry.offsetWidth; root.classList.add("igniting"); root.classList.remove("shut"); WS.world();
+    await settled("#ctry, #ctry > *, #picker"); if(gen===worldGen) root.classList.remove("igniting"); return; }
+  keepWorld(false);
+  if(flick && showing){ root.classList.add("world", "dousing"); await settled("#ctry > *"); if(gen!==worldGen) return; }
+  if(spotCountry(CUR)!=="tw") switchCountry("tw");
+  if(flick && showing){ root.classList.add("world", "shut"); await settled("#ctry, #picker"); if(gen!==worldGen) return; }
+  root.classList.remove("world", "shut", "dousing"); WS.world(); }
 // Sliding highlight (Bryan, Oct 18): one bubble under a group's picked button that glides (place and size) to the next pick. sel finds the pick;
 // the bubble follows picks, redraws of the group (it goes back in from where it was, so it still glides), language and font changes.
 function glider(box, sel){ if(!box) return; let ro = null;
@@ -560,7 +619,7 @@ function glider(box, sel){ if(!box) return; let ro = null;
       box.scrollTo({left: b.offsetLeft-(box.clientWidth-b.offsetWidth)/2, behavior: pill.classList.contains("glide") ? "smooth" : "auto"});
     if(!pill.classList.contains("glide")) requestAnimationFrame(() => requestAnimationFrame(() => pill.classList.add("glide"))); };
   new MutationObserver(place).observe(box, {subtree: true, childList: true, attributes: true, attributeFilter: ["aria-pressed", "aria-selected", "aria-current"]});
-  if(window.ResizeObserver){ ro = new ResizeObserver(place); ro.observe(box); }
+  if(window.ResizeObserver){ ro = new ResizeObserver(place); ro.observe(box, {box: "border-box"}); }
   place(); }
 // A tap shows its pick at once and does the heavy redraw as the bubble lands, so the redraw never stutters the glide; taps in a row keep the last.
 const afterGlide = () => { let t = 0; return fn => { clearTimeout(t); if(matchMedia("(prefers-reduced-motion: reduce)").matches) return fn(); t = setTimeout(fn, 260); }; };
@@ -883,6 +942,8 @@ const WS = (() => {
   };
   const ISLE = "terrain";
   const ids = () => ALL.order || Object.keys(ALL.spots);
+  // The spots marked on the map: in Taiwan mode only Taiwan's. Every spot's data still shapes the colours near its coast.
+  const onMap = s => WORLD || spotCountry(s.id) === "tw";
   const spots = () => ids().map(id => { const s = ALL.spots[id];
     return { id, name: s.name, lat: s.lat, lon: MAPM.E(s.lon),
       // CWA's wind forecast ends after about 4 days; past that, Open-Meteo model wind (every 3 h) fills in. Rain from its hourly total.
@@ -1122,7 +1183,7 @@ const WS = (() => {
   // sides. Never closer than the home zoom; a country with parts (Australia, the South Pacific, Micronesia) fits the part it's on. The best
   // try, should nothing fit, is the one with the most of its tags placed.
   function fitHome() { const z1 = homeZ(HOME), g = base.getContext("2d"), A = clearArea(), st = TAGS[TAG], m = ROOM, mb = ROOMB;
-    const pa = PARTS[MC], mine = new Set(SP.filter(s => spotCountry(s.id) === MC && (!pa || (s.lon < pa.at) === (HOME.cx < pa.at)))), all = sample(times[ti]);
+    const pa = PARTS[MC], mine = new Set(SP.filter(s => spotCountry(s.id) === MC && (!pa || (s.lon < pa.at) === (HOME.cx < pa.at)))), all = sample(times[ti]).filter(q => onMap(q.s));
     const labs = new Map(all.map(q => { const L = tagLabel(q); L.wh = st.size(g, L); return [q.s.id, L]; }));
     let best = null;
     for (let i = 0, zi = z1; i < 40; i++, zi *= 0.94) { const zz = Math.max(zi, zmin), S = all.filter(q => named(q.s, zz)); let vx = HOME.cx, vy = HOME.cy;
@@ -1159,20 +1220,20 @@ const WS = (() => {
     landLayer(g, close);
     isobars(g); tracks(g, t); g.restore();
     // Spot markers: neon dot and swell arrow; tags in the TAG style when zoomed in near Taiwan (placed so tags never overlap: placeTags).
-    const A = clearArea(), boxes = A.btn.slice();
+    const A = clearArea(), boxes = A.btn.slice(), M = S.filter(q => onMap(q.s));
     g.textBaseline = "middle"; TAGHIT = [];
-    if (close) for (const q of S) { const [x,y] = px(q.s.lon, q.s.lat); boxes.push([x-5, y-5, 10, 10]); } // tags keep clear of the spot dots too
-    for (const q of S) { const [x,y] = px(q.s.lon, q.s.lat), cur = q.s.id===CUR;
+    if (close) for (const q of M) { const [x,y] = px(q.s.lon, q.s.lat); boxes.push([x-5, y-5, 10, 10]); } // tags keep clear of the spot dots too
+    for (const q of M) { const [x,y] = px(q.s.lon, q.s.lat), cur = q.s.id===CUR;
       if (close && q.v && q.v.dir != null) { const a = (q.v.dir+180)*Math.PI/180, dx = Math.sin(a), dy = -Math.cos(a);
         g.strokeStyle = "#fff"; g.lineWidth = 2; g.beginPath(); g.moveTo(x-dx*14, y-dy*14); g.lineTo(x+dx*4, y+dy*4); g.stroke(); }
       g.fillStyle = cur ? "#ff2bd6" : "#ffe600"; g.shadowColor = g.fillStyle; g.shadowBlur = 10; g.beginPath(); g.arc(x, y, close ? (cur?6:4.5) : (cur?4:2.5), 0, 7); g.fill(); g.shadowBlur = 0; }
     // Every tag is placed first (placeTags), then the leader lines are drawn and the tags over them, so a line out of a crowded cluster (Bali's four spots) runs under the tags it crosses.
-    const tags = close ? placeTags(g, S.filter(q => named(q.s, z)), px, A, boxes, SHEET, tagLabel).filter(Boolean) : [];
+    const tags = close ? placeTags(g, M.filter(q => named(q.s, z)), px, A, boxes, SHEET, tagLabel).filter(Boolean) : [];
     for (const {q, tx, ty, tw, th} of tags) TAGHIT.push([tx-6, ty-6, tw+12, th+12, q.s.id]);
     for (const {L, x, y, tx, ty, tw, th} of tags) if (Math.abs(ty-(y-th/2)) > 1) { const ex = tx+tw < x ? tx+tw : tx > x ? tx : x, ey = ty > y ? ty : ty+th < y ? ty+th : ty+th/2; g.strokeStyle = L.cur ? "#ff2bd6" : "#ffb347"; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x, y); g.lineTo(ex, ey); g.stroke(); }
     for (const {L, tx, ty, tw, th} of tags) { g.save(); TAGS[TAG].draw(g, L, tx, ty, tw, th); g.restore(); }
     drawTowns(g, boxes, ISLES[ISLE].towns);
-    if (SHEET) dial(g, S);
+    if (SHEET) dial(g, M);
     tLabel();
     if (PIN) pinMark(g); else PINBTN = PINX = PINBOX = null; // pin flag sits on top of the spot labels
     window.__wsS = S; }
@@ -1429,7 +1490,7 @@ const WS = (() => {
         if (PIN && PINBTN && Math.hypot(was[0]-PINBTN[0], was[1]-PINBTN[1]) < 20) { pinOpen(!PIN.open); if (!P.size) downAt = null; return; }
         const tag = TAGHIT.find(b => was[0] >= b[0] && was[0] <= b[0]+b[2] && was[1] >= b[1] && was[1] <= b[1]+b[3]); if (tag) { bd = 0; best = SP.find(s => s.id===tag[4]); }
         // A tap on a spot opens it; anywhere else in the Pacific box drops a pin there (outside the box there is no map, so nothing to ask about).
-        for (const s of SP) { const [sx,sy] = px(s.lon, s.lat), dd = Math.hypot(sx-was[0], sy-was[1]); if (dd < bd) { bd = dd; best = s; } } if (best) { PIN = null; PINBTN = PINX = null; switchSpot(best.id); openSheet(best.id); }
+        for (const s of SP) { if (!onMap(s)) continue; const [sx,sy] = px(s.lon, s.lat), dd = Math.hypot(sx-was[0], sy-was[1]); if (dd < bd) { bd = dd; best = s; } } if (best) { PIN = null; PINBTN = PINX = null; switchSpot(best.id); openSheet(best.id); }
         else { const [lon, lat] = ll(was[0], was[1]), B = MAPM.PBOX; if (lon >= B.l && lon <= B.r && lat >= B.s && lat <= B.n) dropPin(lon, lat); } }
       if (!P.size) downAt = null; };
     fx.onpointerup = up; fx.onpointercancel = up;
@@ -1457,6 +1518,9 @@ const WS = (() => {
       try { if (FS && TRUEFS && !document.fullscreenElement && sec.requestFullscreen && document.fullscreenEnabled && (!ua || ua.isActive)) sec.requestFullscreen().catch(() => {}); } catch(e) {} },
     hide() { keep(); cancelAnimationFrame(raf); raf = 0; if (playing) { clearInterval(playing); playing = 0; document.getElementById("wsPlay").textContent = "▶"; } },
     redraw() { if (built && raf) drawBase(); },
+    // World mode switched (setWorld): the other countries' spots and buttons come or go, so the home view is fitted again.
+    world() { if (!built) return; if (SHEET && !onMap({id: SHEET})) { SHEET = null; document.getElementById("wsSheet").hidden = true; }
+      if (!document.getElementById("viewWs").hidden) { refit(); clampView(); drawBase(); } },
     // The part of its country a spot is in, as homeOf picks it ("w" or "e": Australia's coasts, the South Pacific's and Micronesia's west and east), or "" in a country without parts.
     part(id) { const p = PARTS[spotCountry(id)]; return p ? (MAPM.E(ALL.spots[id].lon) < p.at ? "w" : "e") : ""; },
     // Another country picked (or the other part, or another spot in Australia): the map goes to its home view. With the map open, the view being left
@@ -1477,7 +1541,7 @@ const FX = (() => {
   const out = "cubic-bezier(.16,1,.3,1)", inn = "cubic-bezier(.5,0,.75,0)";
   const el = (css, html = "") => { const d = document.createElement("div"); d.style.cssText = "position:fixed;pointer-events:none;" + css; d.innerHTML = html; document.body.appendChild(d); return d; };
   const BACK = "background:radial-gradient(circle at 50% 50%,#24183f,#07050f 70%)";
-  const LOGO = '<div style="transform-origin:50% 50%"><div class="brand" style="margin:0;font-size:clamp(54px,16vw,120px);transform-origin:50% 50%">WaveSlave</div></div>';
+  const LOGO = '<div style="transform-origin:50% 50%"><div class="brand" style="margin:0;font-size:clamp(54px,16vw,120px);transform-origin:50% 50%"><span class="w">W</span>aveSlave</div></div>';
   // The shared stage: dark backdrop, the logo centred over it, the old view out, the new view in. Returns the pieces for each style to animate.
   function stage(open, ws, fc, dur, inAt = .55) { const back = el("inset:0;z-index:99;" + BACK), mark = el("inset:0;z-index:101;display:flex;align-items:center;justify-content:center", LOGO),
       from = open ? fc : ws, to = open ? ws : fc, t = {duration: dur, fill: "both"};
@@ -2025,7 +2089,7 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
   document.getElementById("spotList").innerHTML = ids.map(id => { const s=ALL.spots[id];
     return `<li${id===SPOT?' aria-current="true"':""}><b>${SPT(s,"name")}</b><span class="links">${(s.cams||[]).length ? s.cams.map((c,i)=>`<a href="${c[1]}" target="_blank" rel="noopener">${camName(s,i)}</a>`).join("") : `<span class="where">${zh?"還沒找到攝影機":ja?"カメラはまだ見つかっていません":"No cam found yet"}</span>`}</span></li>`; }).join("");
   document.querySelectorAll("a[data-spot]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); if(a.dataset.spot===SPOT) return;
-    document.querySelectorAll("#picker a").forEach(x => x.toggleAttribute("aria-current", x===a)); spotLater(() => go(a.dataset.spot)); }));
+    document.querySelectorAll("#picker a").forEach(x => x.toggleAttribute("aria-current", x===a)); const g = worldGen; spotLater(() => { if(g===worldGen) go(a.dataset.spot); }); }));
   document.querySelector(".picker a[aria-current]")?.scrollIntoView({inline:"center", block:"nearest"});
   document.title = `WaveSlave · ${nm}`;
 })();
@@ -2034,7 +2098,8 @@ drawDays(); drawDay();
 }
 applyLang();
 { const later = afterGlide(), bs = document.querySelectorAll("#lang button"); bs.forEach(b=>b.onclick=()=>{ pressOnly(bs, b); later(()=>setLang(b.dataset.l)); }); }
-{ const later = afterGlide(), bs = document.querySelectorAll("#ctry button"); bs.forEach(b=>b.onclick=()=>{ pressOnly(bs, b); later(()=>switchCountry(b.dataset.c)); }); }
+document.querySelector("header .brand .w").addEventListener("click", () => setWorld(!WORLD));
+{ const later = afterGlide(), bs = document.querySelectorAll("#ctry button"); bs.forEach(b=>b.onclick=()=>{ pressOnly(bs, b); const g = worldGen; later(()=>{ if(g===worldGen) switchCountry(b.dataset.c); }); }); }
 for(const [box, sel] of [["#lang", 'button[aria-pressed="true"]'], ["#ctry", 'button[aria-pressed="true"]'], [".tabs", 'button[aria-selected="true"]'], ["#picker", "a[aria-current]"],
   ["#days", '.day[aria-pressed="true"]'], ["#wsLayers", 'button[data-o][aria-pressed="true"]'], ["#wsCtry", 'button[aria-pressed="true"]']]) glider(document.querySelector(box), sel);
 boot(SPOT0);
@@ -2112,7 +2177,7 @@ if(VIEW!=="fc") setView(VIEW, true);
     const svg = document.createElementNS(NS, "svg"); svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
     svg.style.cssText = "position:fixed;inset:0;width:100vw;height:100vh;z-index:9998;pointer-events:none;overflow:visible"; document.body.appendChild(svg); els.push(svg);
     svg.innerHTML = '<defs><radialGradient id="isFlash"><stop offset="0" stop-color="#fffbe6"/><stop offset=".35" stop-color="#ffd27a" stop-opacity=".55"/><stop offset="1" stop-color="#ff6a00" stop-opacity="0"/></radialGradient></defs>';
-    const mark = el("left:50%;top:50%;z-index:9999", '<div style="transform-origin:50% 50%"><div class="brand" style="margin:0;font-size:clamp(54px,16vw,120px);white-space:nowrap">WaveSlave</div></div>');
+    const mark = el("left:50%;top:50%;z-index:9999", '<div style="transform-origin:50% 50%"><div class="brand" style="margin:0;font-size:clamp(54px,16vw,120px);white-space:nowrap"><span class="w">W</span>aveSlave</div></div>');
     const word = mark.firstChild, brand = word.firstChild, base = `translate(${-brand.offsetWidth / 2}px,${-brand.offsetHeight / 2}px)`; mark.style.transform = base;
     if (real) real.style.visibility = "hidden";
 

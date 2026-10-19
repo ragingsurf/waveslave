@@ -501,5 +501,22 @@ class LogSplitHainan(unittest.TestCase):
         self.assertEqual((d['spots']['riyue']['hist']['buoy'], d['spots']['riyue']['hist']['station']), ([], []))
 
 
+class EveryCountry(unittest.TestCase):
+    def test_each_country_logged(self):
+        # Every country in spots.json gets refresh.sh's history, log and correct runs on its own folder (Taiwan's log/, the rest log-<country>/),
+        # the workflow's step that restores lost log days names that folder (the cache may have lost it whole), and .gitignore keeps it out of the repo.
+        import re
+        with open(os.path.join(ROOT, 'spots.json')) as f: cs = dict.fromkeys(s['country'] for s in json.load(f))
+        sh, yml, ign = (open(os.path.join(ROOT, p), encoding='utf-8').read() for p in ('refresh.sh', '.github/workflows/refresh.yml', '.gitignore'))
+        restore = re.search(re.escape("for d in $(printf '%s\\n' ") + r'(.*?) \$\(ls', yml).group(1).split()
+        for c in cs:
+            d = 'log' if c == 'tw' else 'log-' + c
+            for line in ('python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/%s" "$G" %s ' % (d, c), 'python3 -I "$HERE/log.py" "$W/snap.json" "$HERE/%s" %s ' % (d, c),
+                         'python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/%s" %s ' % (d, c)):
+                self.assertIn('\n' + line, sh, c)
+            self.assertIn(d, restore, c)
+            self.assertIn(d + '/', ign.split('\n'), c)
+
+
 if __name__ == '__main__':
     unittest.main()

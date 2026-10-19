@@ -42,8 +42,8 @@ typhoon-only, share a spot's wave cell, or are known from one guide only.
 | What | Source | How |
 |---|---|---|
 | Swell forecast, model check | Open-Meteo marine, as for every country | the shared `openwave` and `openmodels` calls take in the 7 spots. Each has its own open-sea MFWAM cell, 1.5 to 11.3 km away (Xiangshui's is the farthest: MFWAM counts the nearer water off Lingshui as land) |
-| Wind forecast | ECMWF's IFS via Open-Meteo, then Open-Meteo's default (ECMWF here too), from the sea cell nearest each spot (`cell_selection=sea`) | one call for the 7 spots, as for Micronesia and Hong Kong. Six spots' default cells are centred 0.7 to 4.7 km inland and read 6 to 66% lighter; the sea cells lie on the coast or at sea, 2.4 to 8.2 km away. Shimei and Shenzhou share their sea cell, so their wind forecasts are the same |
-| Wind now | none | Sanya Phoenix (ZJSY) is the only airport near the surf that reports, every hour. It is 14.5 km from Dadonghai and 33 to 106 km from the rest, and over 14 days its wind tracked ECMWF's with r 0.49 to 0.62, even at its own position (earlier countries kept airports at about 0.75 or better). Bo'ao sends no METAR. China's station data (CMA) can't be used without permission |
+| Wind forecast | ECMWF's IFS via Open-Meteo, then Open-Meteo's default (ECMWF here too), from the sea cell nearest each spot (`cell_selection=sea`) | one call for the 7 spots, as for Micronesia and Hong Kong. Six spots' default cells are centred 0.7 to 4.7 km inland, and Xiangshui's lies on the coast 0.5 km away; the sea cells lie on the coast or at sea, 2.4 to 8.2 km away (Xiangshui's is the farthest), and give 6 to 66% more wind. Shimei and Shenzhou share their sea cell, so their wind forecasts are the same |
+| Wind now | none | Sanya Phoenix (ZJSY) is the only airport near the surf that reports, every hour. It is 14.5 km from Dadonghai and 33 to 106 km from the rest, and its wind tracked ECMWF's with r 0.49 to 0.57 over 14 days (0.59 to 0.62 over 7), even at its own position; earlier countries kept airports at about 0.75 or better, and the South Pacific accepted Pago Pago at 0.64. Bo'ao sends no METAR. China's station data (CMA) can't be used without permission |
 | Buoys | none | no open wave buoy near Hainan: NDBC lists none within 10–25°N, 104–118°E, and OSMC's platforms near the island are ships. The spots have none, as in the Philippines |
 | Tides | Open-Meteo's tide model, as for the Philippines | highs and lows picked from the hourly level; the page says "Model tide". China's official predictions (NMDIS) need a login. The model gives a mainly diurnal tide, about 0.7 m on average |
 | Sun times | computed | |
@@ -52,6 +52,11 @@ typhoon-only, share a spot's wave cell, or are known from one guide only.
 
 The log keeps the forecast only. With no buoy and no station wind, the corrections leave the forecast as it is; they start on their
 own if a source is added later.
+
+The past days' wind, which rates those days here since no station reads it, and the Map tab's wind after the four-day forecast come
+from the shared `openwx` call, which takes the default cells, as for Micronesia and Hong Kong. At Hainan those read lighter than the sea
+cells, so the wind can step up where the forecast starts and down where it ends. Moving them to the sea cells, for all three countries
+at once, is left for a follow-up.
 
 The wave models disagree here: at Houhai, Xiangshui, Riyue and Shimei, MFWAM (the page's model) ran at about half of ECMWF's wave model
 and GFS-Wave over 19–23 October, and for the east swell due on 22–23 October its Riyue maximum was 0.6 m against 1.2 m (ECMWF), 1.8 m
@@ -65,10 +70,11 @@ wide: 1.3}`: upright the width decides, sideways the height. These are the views
 No grid of its own: the spots' own wind and waves cover the home view (the map blends them in over the grid within about 1° of the
 spots), and the West Pacific grid fills in beyond. The home view's pressure lines come from the West Pacific grid.
 
-**Coastline.** The coarse outlines draw Hainan as one ring of 22 points, which puts Riyue Bay and Shimei Bay on land. A second DETAIL box (108.44–111.26°E, 17.95–20.25°N), as for Hong Kong, holds Natural Earth's 10 m land for the whole island and the
-tip of the Leizhou Peninsula across the strait; every coarser outline keeps only its pieces outside the box. Hong Kong's rings come out
-unchanged. The 10 m land still closes Dadonghai's small bay, so that spot's dot sits 0.7 km inside the coast: 2 px at the home view,
-about 20 px at the closest zoom. The map's country button is Hainan's outline.
+**Coastline.** The coarse outlines draw Hainan as one ring of 22 points, which puts Riyue Bay and Shimei Bay on land. A second DETAIL box (108.44–111.26°E, 17.95–20.20°N), as for Hong Kong, holds Natural Earth's 10 m land for the whole island; every
+coarser outline keeps only its pieces outside the box. Its north edge crosses the strait between Hainan's northern tip (20.16°N) and the
+Leizhou Peninsula's coarse coast (20.26°N), so the mainland keeps its coarse outline and no piece of its 10 m land is cut off inside the
+box. Hong Kong's rings come out unchanged. The 10 m land closes Dadonghai's small bay: that spot's dot, 0.16 km off the coarse coast,
+sits 0.7 km inside the new one, 2 px at the home view and about 20 px at the closest zoom. The map's country button is Hainan's outline.
 
 **First open.** Hainan's button makes the country column one button longer, and on an upright phone its foot came down over New
 Zealand's St Clair and Australia's Bells Beach on those countries' first open (their old map, with nothing saved). That first open now

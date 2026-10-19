@@ -113,23 +113,28 @@ class Fill(unittest.TestCase):
 
 
 class Refresh(unittest.TestCase):
-    def test_wind_forecast_from_the_sea_cells(self):
-        # refresh.sh's loop for Korea, the Philippines, Indonesia and Hainan, run with a stand-in curl that only notes each request: Hainan's
-        # wind forecast asks for the sea cell nearest each spot, ECMWF's first; the others ask as before; Hainan sends no METAR request
+    def loop(self, fail=''):
+        # refresh.sh's loop for Korea, the Philippines, Indonesia and Hainan, run with a stand-in curl that notes each request, and fails one
+        # holding fail the way curl -f fails on an HTTP error (exit 22); gives the requests in order and Hainan's query
         import re, subprocess, tempfile
         with open(os.path.join(ROOT, 'refresh.sh'), encoding='utf-8') as f: sh = f.read()
         get = re.search(r'^get\(\)\{.*?; \}$', sh, re.M).group(0)
         krids = re.search(r'^krids\(\)\{.*?; \}$', sh, re.S | re.M).group(0)
         loop = re.search(r'^for C in kr ph id hn; do$.*?^done$', sh, re.S | re.M).group(0)
         tmp = tempfile.mkdtemp(); bin_ = os.path.join(tmp, 'bin'); os.makedirs(bin_); os.makedirs(os.path.join(tmp, 'w', 'dl'))
-        with open(os.path.join(bin_, 'curl'), 'w') as f: f.write('#!/bin/sh\nfor a; do url=$a; done\necho "$url" >> "$T/calls"\n')
+        with open(os.path.join(bin_, 'curl'), 'w') as f:
+            f.write('#!/bin/sh\nfor a; do url=$a; done\necho "$url" >> "$T/calls"\nif [ -n "$F" ]; then case "$url" in *"$F"*) exit 22;; esac; fi\nexit 0\n')
         os.chmod(os.path.join(bin_, 'curl'), 0o755)
-        env = dict(os.environ, PATH=bin_ + os.pathsep + os.environ['PATH'], T=tmp)
+        env = dict(os.environ, PATH=bin_ + os.pathsep + os.environ['PATH'], T=tmp, F=fail)
         r = subprocess.run(['sh', '-c', 'HERE=$1; W=$2\n%s\n%s\n%s' % (get, krids, loop), 'sh', ROOT, os.path.join(tmp, 'w')], capture_output=True, text=True, env=env)
         self.assertEqual(r.returncode, 0, r.stderr)
         with open(os.path.join(tmp, 'calls')) as f: calls = f.read().split()
         hn = [s for s in SPOTS if s.get('country') == 'hn']
-        q = 'latitude=%s&longitude=%s' % (','.join(str(s['lat']) for s in hn), ','.join(str(s['lon']) for s in hn))
+        return calls, 'latitude=%s&longitude=%s' % (','.join(str(s['lat']) for s in hn), ','.join(str(s['lon']) for s in hn))
+
+    def test_wind_forecast_from_the_sea_cells(self):
+        # Hainan's wind forecast asks for the sea cell nearest each spot, ECMWF's first; the others ask as before; Hainan sends no METAR request
+        calls, q = self.loop()
         self.assertIn('https://api.open-meteo.com/v1/forecast?%s&hourly=wind_speed_10m,wind_direction_10m,precipitation&wind_speed_unit=kn'
                       '&timezone=Asia%%2FTaipei&forecast_days=4&cell_selection=sea&models=ecmwf_ifs' % q, calls)
         self.assertIn('https://marine-api.open-meteo.com/v1/marine?%s&hourly=sea_level_height_msl&timezone=GMT&past_days=5&forecast_days=10' % q, calls)
@@ -139,6 +144,12 @@ class Refresh(unittest.TestCase):
         self.assertFalse([u for u in calls if 'metar' in u and 'ZJ' in u])
         for c in ('kr', 'ph', 'id'):
             self.assertTrue([u for u in calls if u.startswith('https://api.open-meteo.com/v1/forecast?latitude=%s' % next(str(s['lat']) for s in SPOTS if s.get('country') == c))], c)
+
+    def test_fallback_from_the_sea_cells_too(self):
+        # When ECMWF's reply fails, the default model is asked for, still from the sea cells
+        calls, q = self.loop('cell_selection=sea&models=ecmwf_ifs')
+        u = 'https://api.open-meteo.com/v1/forecast?%s&hourly=wind_speed_10m,wind_direction_10m,precipitation&wind_speed_unit=kn&timezone=Asia%%2FTaipei&forecast_days=4' % q
+        self.assertEqual([x for x in calls if x.startswith(u)], [u + '&cell_selection=sea&models=ecmwf_ifs', u + '&cell_selection=sea&models=best_match'])
 
 
 if __name__ == '__main__':

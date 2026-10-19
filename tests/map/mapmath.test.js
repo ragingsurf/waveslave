@@ -248,8 +248,8 @@ test("coast edges along a cut line lie on it exactly", () => {
 
 test("DETAIL boxes: the coarse outlines give way to the 10 m land, meeting it on the boxes' edges", () => {
   // The page's own steps on template.html's COAST lines: longitudes east, then each outline reaching into a box cut to its pieces outside it,
-  // then the 10 m push after the comment. No coarse vertex lies on a box's edge, so only cuts run along one; the 10 m land keeps inside its box,
-  // its points on an edge exactly on it; and nothing coarse is left inside a box.
+  // then the 10 m push after the comment. No coarse vertex lies on a box's edge, so only cuts run along one; each box holds 10 m land, which
+  // keeps inside its box, its points on an edge exactly on it; and nothing coarse is left inside a box.
   const M = load(), src = fs.readFileSync(path.join(__dirname, "..", "..", "template.html"), "utf8").split("\n");
   const at = src.indexOf("  // Up close: Natural Earth 10 m land cut to the DETAIL boxes, simplified (tools/detail_coast.py).");
   assert.ok(at > 0, "no DETAIL push in template.html");
@@ -263,6 +263,7 @@ test("DETAIL boxes: the coarse outlines give way to the 10 m land, meeting it on
     assert.ok(l < r && s < n, B);
     for (const o of coarse) for (const [x, y] of o) assert.ok(Math.abs(x - l) > 1e-6 && Math.abs(x - r) > 1e-6 && Math.abs(y - s) > 1e-6 && Math.abs(y - n) > 1e-6, `${x}, ${y} is on ${B}`);
     assert.ok(coarse.some(o => o.some(p => inBox(p, B))), `nothing coarse reaches into ${B}`);
+    assert.ok(ten.some(o => o.some(p => inBox(p, B))), `no 10 m land in ${B}`);
     coarse = coarse.flatMap(o => o.some(([x]) => x > l) && o.some(([x]) => x < r) && o.some(([, y]) => y > s) && o.some(([, y]) => y < n) ? M.clipOut(o, B) : [o]);
     assert.deepEqual(coarse.filter(o => o.some(p => inBox(p, B))), []);
   }

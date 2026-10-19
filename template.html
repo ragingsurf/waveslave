@@ -1208,12 +1208,16 @@ const WS = (() => {
         vx -= dx/zz; vy = iy(Y + dy/zz); }
       if (zz === zmin) break; }
     return best; }
-  // The view slid sideways, as far as the box B lets it, until each of the country's dots sits ROOMB or more from the buttons, as fitHome
-  // has it: a dot by a button right of the middle moves left, one by a button left of it right.
-  function offButtons(B) { const A = clearArea(), Y = my(cy); let pl = 0, pr = 0;
-    for (const s of SP) { if (spotCountry(s.id) !== MC) continue; const x = W/2 + (s.lon-cx)*z, y = H/2 - (my(s.lat)-Y)*z;
+  // The view slid sideways, as far as the box B lets it, until each of the country's dots on the map sits ROOMB or more from the buttons, as
+  // fitHome has it: a dot by a button right of the middle moves left, one by a button left of it right. With dots by buttons on both sides
+  // it stays put, and it never slides a dot off the map (x0, x1: the edges of the dots on it).
+  function offButtons(B) { const A = clearArea(), Y = my(cy); let pl = 0, pr = 0, x0 = W, x1 = 0;
+    for (const s of SP) { const x = W/2 + (s.lon-cx)*z, y = H/2 - (my(s.lat)-Y)*z; if (spotCountry(s.id) !== MC || x < 0 || x > W || y < 0 || y > H) continue;
+      x0 = Math.min(x0, x-6); x1 = Math.max(x1, x+6);
       for (const b of A.btn) if (x-6 < b[0]+b[2]+ROOMB && x+6 > b[0]-ROOMB && y-6 < b[1]+b[3]+ROOMB && y+6 > b[1]-ROOMB) { if (b[0]+b[2]/2 > W/2) pl = Math.max(pl, x+6-b[0]+ROOMB); else pr = Math.max(pr, b[0]+b[2]+ROOMB-x+6); } }
-    [cx, cy] = MAPM.clampTo(B, W, H, z, cx - (pr-pl)/z, cy); }
+    if (pl && pr || !pl && !pr) return;
+    const dx = pr ? Math.min(pr, Math.max(0, W-x1)) : -Math.min(pl, Math.max(0, x0));
+    [cx, cy] = MAPM.clampTo(B, W, H, z, cx - dx/z, cy); }
   // The home view worked out again whenever the map takes its size, another country (or the other part of one) or language is picked
   // or the tags' font arrives: a map sitting on the old home view moves to the new one.
   const refit = () => { const at = z0 > 1 && z === z0 && cx === HV.cx && cy === HV.cy, f = fitHome(); HV = {cx: f.cx, cy: f.cy}; z0 = f.z; if (at) { cx = HV.cx; cy = HV.cy; z = z0; } };

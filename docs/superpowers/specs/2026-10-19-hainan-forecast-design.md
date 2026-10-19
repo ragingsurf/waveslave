@@ -79,8 +79,9 @@ sits 0.7 km inside the new one, 2 px at the home view and about 20 px at the clo
 **First open.** Hainan's button makes the country column one button longer, and on an upright phone its foot came down over New
 Zealand's St Clair and Australia's Bells Beach on those countries' first open (their old map, with nothing saved). That first open now
 slides sideways inside the old map's box, as the home view does, until the country's dots clear the buttons; this also clears
-California's Ocean Beach and Hawaii's Hanalei, which sat under the column already. Held sideways, Australia's first open fills its box's
-whole width and can't slide, so Snapper and Byron stay by the zoom buttons, as before.
+California's Ocean Beach and Hawaii's Hanalei, which sat under the column already. The slide stops at a dot by the map's edge, so it never
+takes one off the map, and with dots by buttons on both sides it stays put. Held sideways, Australia's first open reaches its box's east
+edge, so Snapper and Byron stay by the zoom buttons, as before.
 
 ## Architecture
 

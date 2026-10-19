@@ -54,7 +54,7 @@ Defaults I picked (say if you want otherwise):
   above it. With reduced motion the map jumps. (Until a later change the same day the countries were words in a second
   row under Pressure, and the buttons only faintly tinted.) Since a later change on 2026-10-18 (Bryan's request) the home
   view fits the country's names: from the country's home centre and zoom it moves, and zooms out a step at a time, until
-  every one of its spots (Australia's: on the coast you are on) has its dot and its tag in the clear map, 16px or more
+  every one of its spots (Australia's and the South Pacific's: in the part you are on) has its dot and its tag in the clear map, 16px or more
   inside the screen, under the top buttons and over the time bar, and 8px or more from the buttons down the sides. It is
   worked out again when the screen's size, the language or the tags' font changes. The map's own country's tags are
   placed first, another country's tag with no free place is left off, and another country's tags show only from 0.6 of

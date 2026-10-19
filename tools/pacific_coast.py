@@ -4,10 +4,10 @@
 #   python3 -I tools/pacific_coast.py <ne_50m_land.geojson> <template.html> [--eps 0.03]
 import argparse, json, sys
 
-# The six areas, east, as (l, r, s, n): the Pacific box (100°E-110°W, 50°S-60°N) less the West Pacific (100-163°E, 5°S-50°N) and California (128-114°W, 30-43°N) coast boxes.
-RECTS = ((100, 163, -50, -5), (100, 163, 50, 60), (163, 250, -50, 30), (163, 232, 30, 43), (246, 250, 30, 43), (163, 250, 43, 60))
+# The six areas, east, as (l, r, s, n): the Pacific box (100°E-110°W, 50°S-65°N) less the West Pacific (100-163°E, 5°S-50°N) and California (128-114°W, 30-43°N) coast boxes.
+RECTS = ((100, 163, -50, -5), (100, 163, 50, 65), (163, 250, -50, 30), (163, 232, 30, 43), (246, 250, 30, 43), (163, 250, 43, 65))
 # The lines the outlines are cut along, as the map's MAPM.CUTX and CUTY: the areas' edges, and 180° where Natural Earth splits islands.
-CUTX, CUTY = (100, 163, 180, 232, 246, 250), (-50, -5, 30, 43, 50, 60)
+CUTX, CUTY = (100, 163, 180, 232, 246, 250), (-50, -5, 30, 43, 50, 65)
 HI = (199, 206, 18.5, 22.5)  # the Hawaii coast's box, east
 AU = '  // Australian coastline:'  # the comment above the Australian push
 COMMENT = '  // Rest of the Pacific: Natural Earth 50 m land, cut around the detailed coasts above, simplified (tools/pacific_coast.py).'

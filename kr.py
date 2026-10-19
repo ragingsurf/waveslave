@@ -1,25 +1,26 @@
-# Sources for the countries with no open buoy feed of their own, Korea (whose buoys come through NOAA), the Philippines and
-# Indonesia, written into snap.json under the same keys snap.py writes for Taiwan from CWA:
+# Sources for the countries with no open buoy feed of their own, Korea (whose buoys come through NOAA), the Philippines, Indonesia
+# and Hainan, written into snap.json under the same keys snap.py writes for Taiwan from CWA:
 #   dwind  : airport reports (METAR) from NOAA's Aviation Weather Center (aviationweather.gov) [time, kt, from deg|None], the
-#            newest report of the spot's airport; variable wind (VRB) and calm have no direction. No Philippine spot has an
-#            airport near enough; in Indonesia only Bali's west-coast spots do
+#            newest report of the spot's airport; variable wind (VRB) and calm have no direction. No Philippine or Hainan spot has
+#            an airport near enough; in Indonesia only Bali's west-coast spots do
 #   wind   : a wind forecast model via Open-Meteo, 3-hourly [time, kt, from deg, 'Rain'|None, None]: JMA's MSM for Korea
-#            (Open-Meteo's KMA models answered with no data when this was built), ECMWF's IFS for the Philippines and Indonesia
+#            (Open-Meteo's KMA models answered with no data when this was built), ECMWF's IFS for the Philippines, Indonesia and
+#            Hainan (Hainan's from the sea cell nearest each spot)
 #   tides  : highs and lows picked from Open-Meteo's tide model (sea level, hourly), as for Australia
 #            {local date: [[local HH:MM, 'H'|'L', cm]]}
 #   sun    : computed {local date: {first, rise, set, last, phen}} in local time
-#   tz     : each spot's offset at build time (Asia/Seoul keeps UTC+9 all year, Asia/Manila and Asia/Makassar UTC+8, Asia/Jakarta
-#            UTC+7)
+#   tz     : each spot's offset at build time (Asia/Seoul keeps UTC+9 all year, Asia/Manila, Asia/Makassar and Asia/Shanghai
+#            UTC+8, Asia/Jakarta UTC+7)
 #   buoy   : Korea only: the Korea Meteorological Administration's moored buoys as NOAA NDBC copies them from the WMO weather
 #            reports (realtime2 .drift, 45 days, hourly) [time, height m, None, None, water °C], last 24 h, one row per hour, read
 #            as for California (ca.ndbc_rows). The heights come in 0.5 m steps and the .drift's period isn't a real one (0 or 1 s),
 #            so the period and the direction are None (buoyBy "kma"); KMA's own feed needs a key and a Korean mobile number. Each
 #            spot's list is tried in order, as for the Pacific islands (pi.py), and a main buoy ca.FAR_KM or more away marks the
-#            spot buoyFar. The Philippines and Indonesia have no open buoy
+#            spot buoyFar. The Philippines, Indonesia and Hainan have no open buoy
 # Data times are Taipei wall clock ("YYYY-MM-DDTHH:MM", UTC+8) like the rest of snap.json, readings on the nearest hour.
 # Silent buoys and stale wind follow ca.py's rules (ca.STALE_HOURS, ca.WIND_STALE_HOURS). A spot's windStation may be one
 # "metar:ICAO" or a list tried in order (its stationName likewise).
-# Usage: python3 -I kr.py <dl dir> <snap.json> <spots.json> [kr|ph|id]   (Korea when no country is given; it reads ndbc-<id>.drift,
+# Usage: python3 -I kr.py <dl dir> <snap.json> <spots.json> [kr|ph|id|hn]   (Korea when no country is given; it reads ndbc-<id>.drift,
 #        metar-<c>.json, open<c>.json and tide<c>.json, and each is optional: a missing one only blanks its own fields)
 import sys, os, json, datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # python3 -I leaves this folder off the path
@@ -61,7 +62,7 @@ def kma_rows(txt, now=None):
 
 
 def fill(snap, spots, dl, now, c='kr'):
-    """Fill every spot of country c (kr, ph or id) of snap (in place) from the downloads in dl; now (aware datetime) sets each
+    """Fill every spot of country c (kr, ph, id or hn) of snap (in place) from the downloads in dl; now (aware datetime) sets each
     spot's offset and the cut-off for stale wind. The Open-Meteo replies list every spot of c in spots.json, in its order."""
     K = [S for S in spots if S.get('country') == c]
     def part(name, f):

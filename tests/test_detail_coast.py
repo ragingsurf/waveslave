@@ -1,4 +1,4 @@
-# tools/detail_coast.py cuts Natural Earth 10 m land to the map's DETAIL boxes (Hong Kong) for the map's COAST.
+# tools/detail_coast.py cuts Natural Earth 10 m land to the map's DETAIL boxes (Hong Kong, Hainan) for the map's COAST.
 # Run: python3 -m unittest discover -s tests -v
 import contextlib, io, json, os, sys, tempfile, unittest
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)

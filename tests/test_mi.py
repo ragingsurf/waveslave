@@ -40,9 +40,9 @@ class Spots(unittest.TestCase):
             self.assertEqual(len(s['zh']['cams']), len(s['cams'])); self.assertEqual(len(s['ja']['cams']), len(s['cams']))
         self.assertEqual(len({s['id'] for s in SPOTS}), len(SPOTS))
         for c in ('tw', 'jp', 'kr', 'ph', 'id', 'ca', 'hi', 'au', 'nz', 'nw', 'pi', 'ak', 'mi'): self.assertEqual(sum(s.get('country', 'tw') == c for s in SPOTS), 8, c)
-        # after Alaska's and before Hong Kong's, the last added, so the shared Open-Meteo calls, which list every spot in its order, keep
-        # each other spot's place
-        self.assertEqual([s['id'] for s in SPOTS[-11:-3]], MI_IDS)
+        # after Alaska's and before Hong Kong's and Hainan's, the last added, so the shared Open-Meteo calls, which list every spot in its
+        # order, keep each other spot's place
+        self.assertEqual([s['id'] for s in SPOTS[-18:-10]], MI_IDS)
 
     def test_no_clock_changes(self):
         # none of the eight zones changes its clock, so the one offset the page draws with holds all year

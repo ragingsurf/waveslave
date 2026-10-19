@@ -1,6 +1,6 @@
 // Browser checks and phone screenshots of a built page (build one with tests/map/tool.py).
 // Usage: node tests/map/check.js <page.html> <outdir> shots|checks [land]
-//   shots   the seventeen home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
+//   shots   the eighteen home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
 //           On a page whose hook can zoom, also zoomed all the way out in each layer (out-wind, out-waves, out-swell, out-rain) and a swell across 180° (dateline).
 //   checks  prints ok / FAIL / skip for each check, and exits 1 on any FAIL or page error. Needs the page's test hook, window.__ws.
 // Every page opens in its own fresh browser context, offline (only the page itself loads, no service worker): a phone 390x844 (844x390 with land),
@@ -22,6 +22,7 @@ const NOW = Date.now();
 const HOMES = [["tw", "donghe", "waveslave-mapview", 120.9, 23.75], ["jp", "ichinomiya", "waveslave-mapview", 135.6, 33.4], ["ca", "trestles", "waveslave-mapview-ca", -119.5, 35.3],
   ["hi", "pipeline", "waveslave-mapview-hi", -157.3, 20.6], ["au-e", "snapper", "waveslave-mapview-au-e", 152, -32.5], ["au-w", "margaret", "waveslave-mapview-au-w", 115.5, -32.5],
   ["nw", "coxbay", "waveslave-mapview-nw", -124.7, 46.1], ["kr", "jukdo", "waveslave-mapview-kr", 127.75, 35.7], ["hk", "cheungsha", "waveslave-mapview-hk", 114.17, 22.32],
+  ["hn", "dadonghai", "waveslave-mapview-hn", 109.93, 18.44],
   ["ph", "cloud9", "waveslave-mapview-ph", 122.6, 13.8], ["id", "uluwatu", "waveslave-mapview-id", 116, -8.75], ["nz", "raglan", "waveslave-mapview-nz", 174.3, -41.8],
   ["pi-w", "cloudbreak", "waveslave-mapview-pi-w", -177.15, -17.8], ["pi-e", "teahupoo", "waveslave-mapview-pi-e", -154.93, -19.5],
   ["ak", "cannonbeach", "waveslave-mapview-ak", -144.6, 58.4], ["mi-w", "umatac", "waveslave-mapview-mi-w", 145.22, 14.24], ["mi-e", "ppass", "waveslave-mapview-mi-e", 164.74, 6.21]];
@@ -79,7 +80,7 @@ async function homeBox(open, c, spot) {
   out = await hid(); if (out.length) throw new Error(`on ${c}'s home view ${out.join(", ")} is off the map or under a button`);
 }
 
-// A country that never had a map of its own, so has no box to open on (Alaska, Hong Kong): c, its first spot and its home view A. With
+// A country that never had a map of its own, so has no box to open on (Alaska, Hong Kong, Hainan): c, its first spot and its home view A. With
 // nothing saved, the spot opens on the home view with every spot of the country on the map and clear of the buttons and the time bar.
 // Upright the home view's width sets the zoom the fit for the names starts from (home().z1), sideways its height. From Japan's, the map's
 // country button brings it back there. It gives back the first open's edges.
@@ -180,6 +181,14 @@ const CHECKS = {
     const src = await page.evaluate(() => window.__ws.iso()), want = HKG ? "hk" : "wp";
     if (src !== want) throw new Error(`iso() is ${src}, want ${want}`);
   },
+  // Hainan has no grid of its own: its home view, both ways up, lies inside the West Pacific grid (0–45°N, 100–160°E) and south of Hong
+  // Kong's, so its pressure lines come from the West Pacific grid.
+  async hainanIso(open) {
+    const page = await open(home("hn"));
+    if (!await page.evaluate(() => !!ALL.spots.dadonghai)) skip("the page has no Hainan spots");
+    const src = await page.evaluate(() => window.__ws.iso());
+    if (src !== "wp") throw new Error(`iso() is ${src}, want wp`);
+  },
   // New Zealand's likewise, inside its own grid (50–32°S, 150°E–162°W), which runs past 180°.
   async newZealandIso(open) {
     const page = await open(home("nz"));
@@ -249,6 +258,31 @@ const CHECKS = {
     const a = await page.evaluate(() => { const v = window.__ws.view(); return { z: v.z, want: Math.max(MAPM.cover(MAPM.OLDBOX.au, v.W, v.H), v.z0) }; });
     if (a.z !== a.want) throw new Error(`Margaret River opens at z ${a.z}, want ${a.want}`);
   },
+  // And none of the country's dots sits under a button there: the old map slides sideways inside its box until they clear the buttons
+  // (upright, Ocean Beach, Hanalei, Bells Beach and St Clair would sit under the country buttons). Australia opens on each of its parts.
+  // The slide never takes a dot off the map: each dot on the old map before it (centred on the home view's centre, kept inside the box) is
+  // still on it after, on smaller phones too (360x800 upright; 640x360, 667x375 and 736x414 sideways). There the slide can stop short, at
+  // the box's edge, at a dot by the map's edge or with dots by buttons on both sides, so its dots are only checked to stay on the map.
+  async firstOpenClear(open) {
+    for (const size of land ? [null, { width: 640, height: 360 }, { width: 667, height: 375 }, { width: 736, height: 414 }] : [null, { width: 360, height: 800 }])
+      for (const [name, spot, , hx, hy] of HOMES) {
+        const page = await open({ spot, size }), at = size ? ` on a ${size.width}x${size.height} screen` : "";
+        const c = await page.evaluate(s => ALL.spots[s] && MAPM.OLDBOX[spotCountry(s)] ? spotCountry(s) : "", spot);
+        if (!c) continue;  // a country that never had an old map, or a build from before that country
+        const e = await edges(page), b = await page.evaluate(c => MAPM.OLDBOX[c], c);
+        if (!(e.l >= b.l - 1e-9 && e.r <= b.r + 1e-9 && e.s >= b.s - 1e-9 && e.n <= b.n + 1e-9)) throw new Error(`${spot} opens${at} on ${e.l}..${e.r} by ${e.s}..${e.n}, not inside ${c}'s box`);
+        const gone = await page.evaluate(([c, hx, hy]) => { const v = window.__ws.view(), [ux, uy] = MAPM.clampTo(MAPM.OLDBOX[c], v.W, v.H, v.z, MAPM.E(hx), hy), on = ([x, y]) => x >= 0 && y >= 0 && x <= v.W && y <= v.H;
+          return countrySpots(c).filter(id => { const s = ALL.spots[id], lon = MAPM.E(s.lon);
+            return on([v.W/2 + (lon - ux)*v.z, v.H/2 - (MAPM.my(s.lat) - MAPM.my(uy))*v.z]) && !on(window.__ws.px(lon, s.lat)); }); }, [c, hx, hy]);
+        if (gone.length) throw new Error(`on ${name}'s first open${at} the slide took ${gone.join(", ")} off the map`);
+        if (size || near(e.l, b.l, 1e-6) && near(e.r, b.r, 1e-6)) continue;  // a smaller phone (above), or as wide as its box with no room to slide (sideways, Australia's Snapper and Byron stay by the zoom buttons)
+        const out = await page.evaluate(c => { const rect = e => e.getBoundingClientRect(), fx = rect(document.getElementById("wsFx"));
+          const over = [...document.querySelectorAll("#wsLayers button, #wsCtry button, #viewWs .zoom button")].filter(b => b.offsetParent).map(rect);
+          return countrySpots(c).filter(id => { const s = ALL.spots[id], [x, y] = window.__ws.px(MAPM.E(s.lon), s.lat), X = fx.left + x, Y = fx.top + y;
+            return x >= 0 && y >= 0 && x <= fx.width && y <= fx.height && over.some(r => X > r.left - 6 && X < r.right + 6 && Y > r.top - 6 && Y < r.bottom + 6); }); }, c);
+        if (out.length) throw new Error(`on ${name}'s first open ${out.join(", ")} sits under a button`);
+      }
+  },
   // Pacific NW: with nothing saved, Cox Bay opens on its old box; California then opens on its home view with the Pacific NW view kept
   // under its own key, and the map's own Pacific NW button brings it back to the Pacific NW home view.
   async pacificNorthwest(open) {
@@ -276,8 +310,9 @@ const CHECKS = {
     const e = await ownHome(open, "ak", "cannonbeach", { cx: 215.4, cy: 58.4, span: 6.2, wide: 24 });
     if (e.n > 65 + 1e-6) throw new Error(`Alaska's home view reaches ${e.n}°N at its top, past the box's top, 65°N`);
   },
-  // Nor did Hong Kong.
+  // Nor did Hong Kong, or Hainan.
   async hongKong(open) { await ownHome(open, "hk", "cheungsha", { cx: 114.17, cy: 22.32, span: 0.5, wide: 0.75 }); },
+  async hainan(open) { await ownHome(open, "hn", "dadonghai", { cx: 109.93, cy: 18.44, span: 0.95, wide: 1.3 }); },
   // The South Pacific has two parts, west (Fiji to the Samoas) and east (Rarotonga and Tahiti), and so has Micronesia, west (Guam and Saipan)
   // and east (Pohnpei to Majuro); see twoParts.
   async southPacific(open) {

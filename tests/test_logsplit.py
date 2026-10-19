@@ -328,5 +328,42 @@ class LogSplitSouthPacific(unittest.TestCase):
         self.assertIn('adj', d['spots']['amouli'])
 
 
+AK_IDS = ['bishopsbeach', 'cannonbeach', 'fossilbeach', 'oceancape', 'sandies', 'sealioncove', 'shelikof', 'surfersbeach']
+
+
+class LogSplitAlaska(unittest.TestCase):
+    # Alaska's log holds the forecast, every spot's buoy readings (far ones too) and the airport wind, from ca.py on the saved downloads
+    def setUp(self):
+        import datetime
+        sys.path.insert(0, ROOT); import ca
+        self.tmp = tempfile.mkdtemp(); self.snap = os.path.join(self.tmp, 'snap.json')
+        fix = os.path.join(HERE, 'fixtures', 'ak'); d = json.load(open(os.path.join(fix, 'snap_in.json')))
+        ca.fill(d, json.load(open(os.path.join(ROOT, 'spots.json'))), fix, datetime.datetime(2026, 10, 19, 0, 27, tzinfo=datetime.timezone.utc), 'ak')
+        with open(self.snap, 'w') as f: json.dump(d, f)
+
+    def test_log_ak_only(self):
+        run(['log.py', self.snap, self.tmp + '/log-ak', 'ak'])
+        rec = records(self.tmp + '/log-ak')[-1]
+        self.assertEqual(sorted(rec['spots']), AK_IDS)
+        c = rec['spots']['cannonbeach']
+        self.assertEqual((c['buoyId'], c['buoy'][-1], c['station'], len(c['fc'])), ('46083', ['2026-10-19T08:00', 2.5, 6.9, 246.0, 10.3], [['2026-10-19T08:00', 5.0, 90]], 24))
+
+    def test_other_logs_hold_no_alaska(self):
+        for c, d, ids in (('tw', 'log', ['donghe']), ('ca', 'log-ca', ['blacks']), ('nw', 'log-nw', ['coxbay'])):
+            run(['log.py', self.snap, self.tmp + '/' + d, c])
+            self.assertEqual(sorted(records(self.tmp + '/' + d)[-1]['spots']), ids, c)
+
+    def test_correct_and_history_ak(self):
+        before = json.load(open(self.snap))['spots']
+        run(['log.py', self.snap, self.tmp + '/log-ak', 'ak'])
+        run(['correct.py', self.snap, self.tmp + '/log-ak', 'ak'])
+        run(['history.py', self.snap, self.tmp + '/log-ak', self.tmp + '/cache', 'ak'])
+        d = json.load(open(self.snap))
+        for k in ('donghe', 'blacks', 'coxbay'): self.assertEqual(d['spots'][k], before[k])
+        self.assertEqual(sorted(json.load(open(self.tmp + '/cache/tides-ak.json'))), AK_IDS)
+        self.assertEqual((d['spots']['cannonbeach']['adj']['f'], d['spots']['cannonbeach']['adj']['days']), (1.0, 0))  # far: not learned from
+        self.assertEqual(d['spots']['bishopsbeach']['adj']['days'], 1)
+
+
 if __name__ == '__main__':
     unittest.main()

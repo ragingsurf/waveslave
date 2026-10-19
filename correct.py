@@ -4,6 +4,7 @@
 #            14 days of buoy readings back it up, and kept within 0.6-1.4 (a buoy is not the beach, so never trust it fully).
 #            Then per wave period band (<7, 7-9, 9-11, 11+ s, the forecast's own period): the band's own ratio relative to the spot's,
 #            shrunk the same way by the days that band was seen, so long-period swell and short wind chop each get their own trim.
+#            A spot whose main buoy is out at sea (buoyFar, 100 km or more away: see ca.py) keeps factor 1 and is not scored.
 #   wind   : wind station kt / CWA forecast kt (forecasts 0-36 h ahead, as issued), shrunk the same way and kept within 0.6-1.2.
 #            Skipped where the station barely moves (it reads under 30% of the forecast: a sheltered anemometer, not the beach).
 #   hourly heights (total, swell, wind sea) and swell2, and their past days under hist, are scaled by the height factor for the
@@ -58,7 +59,7 @@ out, outb, outw = {}, {}, {}
 COUNTRY = sys.argv[3] if len(sys.argv) > 3 else None
 for k, sp in d['spots'].items():
     if COUNTRY and sp.get('country', 'tw') != COUNTRY: continue
-    O = obs.get(k, {}); W = stn.get(k, {}); so = sf = 0; hits = n = miss = 0
+    O = {} if sp.get('buoyFar') else obs.get(k, {}); W = stn.get(k, {}); so = sf = 0; hits = n = miss = 0
     B = {}  # band -> [buoy sum, forecast sum, set of days]
     wo, wf, wdays = 0, 0, set()
     for r in runs:

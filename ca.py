@@ -1,4 +1,4 @@
-# NOAA sources for the California, Hawaii and Pacific Northwest spots, written into snap.json under the same keys snap.py writes for Taiwan from CWA:
+# NOAA sources for the California, Hawaii, Pacific Northwest and Alaska spots, written into snap.json under the same keys snap.py writes for Taiwan from CWA:
 #   buoy   : NOAA NDBC (NDBC, CDIP and Environment Canada buoys) [time, height m, average period s, from deg, water °C], last 24 h, one row
 #            per hour (NDBC keeps 45 days of 30-minute rows, so no rolling cache is needed). Environment Canada's buoys (buoyBy "eccc") send
 #            only a peak period and no direction: their period is peak / PEAK rounded up to 0.01 s, which the page's x1.3 turns back into
@@ -8,22 +8,24 @@
 #   tides  : NOAA CO-OPS highs and lows, or the Canadian Hydrographic Service's for a "chs:" station {local date: [[local HH:MM, 'H'|'L', cm]]}
 #   sun    : computed {local date: {first, rise, set, last, phen}} in local time
 #   tz     : the offset in force at build time (California, Oregon and Washington -7 or -8, Hawaii always -10, British Columbia -7 since
-#            March 2026); the page draws every time with it
+#            March 2026, Alaska -8 or -9); the page draws every time with it
 # A buoy silent for more than STALE_HOURS shows no reading (buoyQuiet), and a wind reading over WIND_STALE_HOURS old is skipped. A spot's windStation (and its stationName) may be a list tried in order;
 # so may its ndbc buoys, with buoyName, buoyKm and buoyBy lists that follow them; buoyMain then names the first, the only one correct.py
-# and history.py learn from. A spot's own zone (IANA name) wins over its country's.
+# and history.py learn from. A main buoy FAR_KM or more away marks the spot buoyFar: correct.py learns no height factor from it.
+# A spot's own zone (IANA name) wins over its country's.
 # Data times are Taipei wall clock ("YYYY-MM-DDTHH:MM", UTC+8) like the rest of snap.json, readings on the nearest hour.
 # Tides and sun are the spot's own clock by its own date, as for Taiwan and Japan.
-# Usage: python3 -I ca.py <dl dir> <snap.json> <spots.json> [ca|hi|nw]   (each source is optional: a missing one only blanks its own fields)
+# Usage: python3 -I ca.py <dl dir> <snap.json> <spots.json> [ca|hi|nw|ak]   (each source is optional: a missing one only blanks its own fields)
 import sys, os, json, math, datetime
 from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # python3 -I leaves this folder off the path; jp.py lives here
 import jp
 
 UTC, LA = datetime.timezone.utc, ZoneInfo('America/Los_Angeles')
-ZONES = {'ca': LA, 'hi': ZoneInfo('Pacific/Honolulu'), 'nw': LA}
+ZONES = {'ca': LA, 'hi': ZoneInfo('Pacific/Honolulu'), 'nw': LA, 'ak': ZoneInfo('America/Anchorage')}
 STALE_HOURS, WIND_STALE_HOURS = 6, 3
 PEAK = 1.3  # the page's BUOY_P: it shows average period x 1.3
+FAR_KM = 100  # a main buoy this far out measures the open sea, not the beach (Yakutat's and Kodiak's are 143-176 km out)
 
 
 def utc_to_tpe(dt):
@@ -157,7 +159,7 @@ def _pick(v, i):
 
 
 def fill(snap, spots, dl, now, country='ca'):
-    """Fill every spot of one NOAA country (ca, hi, nw) in snap (in place) from the downloads in dl; now (aware datetime) sets
+    """Fill every spot of one NOAA country (ca, hi, nw, ak) in snap (in place) from the downloads in dl; now (aware datetime) sets
     the offset and the cut-off for a silent buoy."""
     C = [S for S in spots if S.get('country') == country and S['id'] in snap['spots']]
     def part(name, f):
@@ -182,6 +184,7 @@ def fill(snap, spots, dl, now, country='ca'):
         by = _pick(S.get('buoyBy'), ub)
         if by: sp['buoyBy'] = by   # who runs the buoy, when it isn't NOAA's own: cdip, or eccc (Environment Canada)
         if len(S.get('ndbc') or []) > 1: sp['buoyMain'] = S['ndbc'][0]   # the past days and corrections leave out the backups' readings
+        if (_pick(S.get('buoyKm'), 0) or 0) >= FAR_KM: sp['buoyFar'] = True   # shown with its distance, but no height correction from it
         ws = S.get('windStation') or []; ws = ws if isinstance(ws, list) else [ws]; dw, used = [], 0
         for i, w in enumerate(ws):
             kind, sid = w.split(':', 1)

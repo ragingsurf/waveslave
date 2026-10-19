@@ -194,6 +194,16 @@ header{position:relative}
 @media (max-width:560px){
   .stage .days > .glide-pill,.stage .days > .glide-pill.today{background:var(--rc)}
   .stage .daydet{border-color:var(--rc)}
+  /* Phones: the strip, its day card and the chart all fit on one screen (Bryan, Oct 19). */
+  .stage{gap:10px;padding-top:12px}
+  .sth{flex-wrap:nowrap;gap:8px}.stt{font-size:20px;white-space:nowrap}.stp{font-size:12px;padding:4px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .stage #outH{display:none}
+  .stage .daydet{margin-top:8px;padding:8px 12px;gap:2px 12px}
+  .stage .daydet .big{font-size:24px}
+  .stage .daydet .nav button{padding:2px 0}
+  .stage .daypanel{padding-top:10px}
+  .stage .ph{margin-bottom:6px}.stage .ph h2{display:none}
+  .stage .readout{margin-bottom:8px}
 }
 .best{font-size:14px}.best b{color:var(--good)}
 .chart-box{overflow:hidden}
@@ -437,7 +447,7 @@ html{overscroll-behavior-y:none}
 
 
   <div class="stage" id="stage">
-  <div class="sth"><h2 class="stt" data-zh="逐日浪況" data-ja="日ごとの波">Day by day</h2><span class="stp" data-zh="👆 點選一天，下方圖表跟著換" data-ja="👆 日を選ぶと下のグラフが切り替わります">👆 Pick a day, the chart follows</span></div>
+  <div class="sth"><h2 class="stt" data-zh="逐日浪況" data-ja="日ごとの波">Day by day</h2><span class="stp" data-zh="👆 點選一天，下方圖表跟著換" data-ja="👆 日を選ぶとグラフが変わる">👆 Tap a day to chart it</span></div>
   <section aria-label="Last 4 days and 5-day outlook">
     <div class="label" id="outH" style="margin-bottom:8px">Last 4 days · 5-day outlook</div>
     <div class="days" id="days"></div>

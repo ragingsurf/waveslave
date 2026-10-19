@@ -1,5 +1,6 @@
-# The map's coast up close where the coarse outlines are too rough for the spots (Hong Kong, Hainan): Natural Earth 10 m land cut to each of the
-# map's DETAIL boxes (MAPM.DETAIL in template.html), simplified, and written into template.html as the COAST.push line after the boxes' clip-out.
+# The map's coast up close where the coarse outlines are too rough for the spots (Hong Kong, Hainan, Papua New Guinea): Natural Earth 10 m
+# land cut to each of the map's DETAIL boxes (MAPM.DETAIL in template.html), simplified, and written into template.html as the COAST.push
+# line after the boxes' clip-out.
 # A one-off, not part of the build:
 #   python3 -I tools/detail_coast.py <ne_10m_land.geojson> <template.html> [--eps 0.0005]
 import argparse, json, sys

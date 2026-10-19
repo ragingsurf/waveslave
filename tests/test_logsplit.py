@@ -555,6 +555,53 @@ class LogSplitVietnam(unittest.TestCase):
         self.assertEqual((d['spots']['mykhe']['hist']['buoy'], d['spots']['mykhe']['hist']['station']), ([], []))
 
 
+PG_IDS = ['lido', 'nago', 'nusa', 'ral', 'rubio', 'tupira', 'wewak']
+
+
+class LogSplitPapuaNewGuinea(unittest.TestCase):
+    # Papua New Guinea's spots have no buoy and no station: their log holds the forecast only, from pi.py on the saved downloads
+    def setUp(self):
+        import datetime
+        sys.path.insert(0, ROOT); import pi
+        self.tmp = tempfile.mkdtemp(); self.snap = os.path.join(self.tmp, 'snap.json')
+        fix = os.path.join(HERE, 'fixtures', 'pg'); d = json.load(open(os.path.join(fix, 'snap_in.json')))
+        pi.fill(d, json.load(open(os.path.join(ROOT, 'spots.json'))), fix, datetime.datetime(2026, 10, 19, 14, 51, tzinfo=datetime.timezone.utc), 'pg')
+        with open(self.snap, 'w') as f: json.dump(d, f)
+
+    def test_log_pg_only(self):
+        run(['log.py', self.snap, self.tmp + '/log-pg', 'pg'])
+        rec = records(self.tmp + '/log-pg')[-1]
+        self.assertEqual(sorted(rec['spots']), PG_IDS)
+        n = rec['spots']['nusa']
+        self.assertEqual((n['buoyId'], n['buoy'], n['station'], len(n['fc'])), (None, [], [], 24))
+
+    def test_other_logs_hold_no_papua_new_guinea(self):
+        for c, d, ids in (('tw', 'log', ['donghe']), ('kr', 'log-kr', ['jukdo']), ('ph', 'log-ph', ['cloud9']), ('mi', 'log-mi', ['ppass']), ('vn', 'log-vn', ['baidai'])):
+            run(['log.py', self.snap, self.tmp + '/' + d, c])
+            self.assertEqual(sorted(records(self.tmp + '/' + d)[-1]['spots']), ids, c)
+
+    def test_correct_and_history_pg(self):
+        import datetime
+        # history.py keeps the last 5 days' tides by today's clock, so Nusa's tide days move to today's (the 19th to today)
+        today = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)).date(); shift = today - datetime.date(2026, 10, 19)
+        d = json.load(open(self.snap)); t = d['spots']['nusa']['tides']
+        d['spots']['nusa']['tides'] = {(datetime.date.fromisoformat(x) + shift).isoformat(): v for x, v in t.items()}
+        with open(self.snap, 'w') as f: json.dump(d, f)
+        before = json.load(open(self.snap))['spots']
+        run(['log.py', self.snap, self.tmp + '/log-pg', 'pg'])
+        run(['correct.py', self.snap, self.tmp + '/log-pg', 'pg'])
+        run(['history.py', self.snap, self.tmp + '/log-pg', self.tmp + '/cache', 'pg'])
+        d = json.load(open(self.snap))
+        for k in ('donghe', 'jukdo', 'cloud9', 'ppass', 'baidai'): self.assertEqual(d['spots'][k], before[k])
+        t = json.load(open(self.tmp + '/cache/tides-pg.json'))
+        self.assertEqual(sorted(t), PG_IDS)
+        self.assertEqual(t['nusa'][today.isoformat()], [['07:30', 'L', 20], ['15:50', 'H', 84]])
+        # with no buoy the heights are only rounded to 0.1 m, as everywhere
+        self.assertEqual((d['spots']['nusa']['adj']['f'], d['spots']['nusa']['adj']['days']), (1.0, 0))
+        self.assertEqual([r[1] for r in d['spots']['nusa']['hourly']], [round(r[1], 1) for r in before['nusa']['hourly']])
+        self.assertEqual((d['spots']['nusa']['hist']['buoy'], d['spots']['nusa']['hist']['station']), ([], []))
+
+
 class EveryCountry(unittest.TestCase):
     def test_each_country_logged(self):
         # Every country in spots.json gets refresh.sh's history, log and correct runs on its own folder (Taiwan's log/, the rest log-<country>/),

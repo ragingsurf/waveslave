@@ -8,7 +8,8 @@ html.intro-on::after{content:"";position:fixed;inset:0;z-index:9997;background:#
 <style>html{background:#eef4f3}@media (prefers-color-scheme: dark){html{background:#07171d}}</style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anybody:wdth,wght@75..150,500..900&family=Metal+Mania&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&family=VT323&display=swap" media="print" onload="this.media='all'">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anybody:wdth,wght@75..150,500..900&family=Metal+Mania&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&family=VT323&display=swap" media="print" onload="this.media='all';if(document.fonts)document.fonts.load('1em &quot;Metal Mania&quot;').then(function(){document.documentElement.classList.add('brand-ok')},function(){})">
+<script>setTimeout(function(){document.documentElement.classList.add('brand-ok')},2500)</script>
 <style>
 /* Layout: one phone-first column. "Now" panel, then a 5-day strip that drives a day chart (waves / wind / tide on one time axis), then typhoon watch and spots. */
 :root{
@@ -49,6 +50,8 @@ header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-be
   -webkit-text-stroke:1px #200300;
   filter:drop-shadow(0 0 8px rgba(255,60,0,.7)) drop-shadow(2px 3px 0 #200300);will-change:transform}
 /* Under 390px wide the wordmark shrinks faster than the screen, so it still ends where the language switch in the corner begins, as at 390px. */
+/* Keep the wordmark hidden until Metal Mania has loaded, so it doesn't flash in Impact and then jump (shown anyway after 2.5s, e.g. offline). */
+html:not(.brand-ok) .brand{visibility:hidden}
 @media (max-width:389px){.brand{font-size:max(28px,calc(23.75vw - 45.8px))}}
 /* The flicker is a glow behind the wordmark that fades in and out (opacity only), so the phone draws the logo once and never repaints it
    while the page moves. Animating the logo's own blur filter repainted it every frame and made it glitch during pull-to-refresh on iPhone. */

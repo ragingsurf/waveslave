@@ -220,6 +220,7 @@ html[lang="ja"] .ctry button{padding-inline:clamp(3px,calc((100vw - 350px)/10),1
 /* Storm + spots */
 .two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
 @media (max-width:700px){.two{grid-template-columns:minmax(0,1fr)}}
+.two:has(>[hidden]){grid-template-columns:minmax(0,1fr)}
 .storm h3,.spots h3{font-family:var(--display);font-weight:800;font-stretch:115%;font-size:20px;margin-bottom:6px}
 .storm p{margin:4px 0}
 .storm h3,.spots h3{font-size:17px!important;margin-bottom:4px!important}
@@ -1924,6 +1925,8 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
   // Forecast source in the chart legend: CWA's wind forecast for Taiwan, JMA's model for Japan and Korea, ECMWF's for the Philippines, Indonesia, New Zealand and the South Pacific, NOAA's HRRR for California and the Pacific Northwest, GFS for Hawaii and Alaska.
   const lo = document.getElementById("legOff"); if(lo) lo.textContent = au ? (zh ? "離岸風（Open-Meteo 預報）" : ja ? "オフショア（Open-Meteo 予報）" : "Offshore wind (Open-Meteo forecast)") : hi || ak ? (zh ? "離岸風（NOAA GFS 預報）" : ja ? "オフショア（NOAA GFS 予報）" : "Offshore wind (NOAA GFS forecast)") : ca ? (zh ? "離岸風（NOAA HRRR 預報）" : ja ? "オフショア（NOAA HRRR 予報）" : "Offshore wind (NOAA HRRR forecast)") : jp || kr ? (zh ? "離岸風（日本氣象廳預報）" : ja ? "オフショア（気象庁予報）" : "Offshore wind (JMA forecast)") : ph || ind || nz || pi ? (zh ? "離岸風（ECMWF 預報）" : ja ? "オフショア（ECMWF 予報）" : "Offshore wind (ECMWF forecast)")
     : (zh ? "離岸風（氣象署預報）" : ja ? "オフショア（台湾気象署予報）" : "Offshore wind (CWA forecast)");
+  // Live cams list only the viewed country's spots, and the panel hides in a country with no cam yet rather than show a column of "No cam found yet".
+  document.querySelector("section.spots").hidden = !ids.some(id => (ALL.spots[id].cams||[]).length);
   document.getElementById("spotList").innerHTML = ids.map(id => { const s=ALL.spots[id];
     return `<li${id===SPOT?' aria-current="true"':""}><b>${SPT(s,"name")}</b><span class="links">${(s.cams||[]).length ? s.cams.map((c,i)=>`<a href="${c[1]}" target="_blank" rel="noopener">${camName(s,i)}</a>`).join("") : `<span class="where">${zh?"還沒找到攝影機":ja?"カメラはまだ見つかっていません":"No cam found yet"}</span>`}</span></li>`; }).join("");
   document.querySelectorAll("a[data-spot]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); if(a.dataset.spot===SPOT) return;

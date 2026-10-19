@@ -641,7 +641,8 @@ async function setWorld(on){ if(on===WORLD) return; const gen = ++worldGen, root
     await settled(); if(gen===worldGen) root.classList.remove("igniting"); return; }
   keepWorld(false);
   if(flick && showing){ void ctry.offsetWidth; root.classList.add("world", "dousing"); await settled(); if(gen!==worldGen) return; }
-  if(spotCountry(CUR)!=="tw") switchCountry("tw");
+  // Back to Taiwan, and the row back to its start (Taiwan's end), so Taiwan is in sight when World mode comes on again.
+  if(spotCountry(CUR)!=="tw") switchCountry("tw"); ctry.scrollLeft = 0;
   root.classList.remove("world", "dousing"); WS.world(); }
 // Sliding highlight (Bryan, Oct 18): one bubble under a group's picked button that glides (place and size) to the next pick. sel finds the pick;
 // the bubble follows picks, redraws of the group (it goes back in from where it was, so it still glides), language and font changes.
@@ -1120,7 +1121,7 @@ const WS = (() => {
   // Taiwan and Japan keep the key of the West Pacific map they shared, so each view notes its country (c) and opens only for that country.
   const viewKey = () => "waveslave-mapview"+(MC==="tw" || MC==="jp"?"":"-"+MC)+(PARTS[MC]?(HOME.cx < PARTS[MC].at ? "-w" : "-e"):"");
   // A view saved before the map ran east (California -119.5) opens on the same coast: 360 is added to a negative centre.
-  const lastView = () => { try { const v = JSON.parse(localStorage.getItem(viewKey())); if (v && v.c && v.c !== MC) return null; if (v && v.cx < 0) v.cx += 360; return v; } catch(e) { return null; } };
+  const lastView = () => { try { const v = JSON.parse(localStorage.getItem(viewKey())); if (v && v.cx < 0) v.cx += 360; return v; } catch(e) { return null; } };
   // k is the zoom over the country's home zoom on this screen before any fitting (homeZ), not over the fitted z0, which moves with the
   // language and the forecast in the tags: so a view opens again exactly where it was left, as views saved before the fit do.
   const keep = () => { if (z0 > 1) try { localStorage.setItem(viewKey(), JSON.stringify({cx, cy, k: z/homeZ(HOME), c: MC})); } catch(e) {} };
@@ -1150,7 +1151,8 @@ const WS = (() => {
     // First open: the saved view, else the country's old map filling the screen (Australia no further out than its home view), slid
     // sideways inside it so its dots clear the buttons (offButtons), else (the South Pacific, Alaska, Micronesia, Hong Kong and Hainan,
     // which never had one) its home view.
-    if (z === 1) { const LAST = lastView(), k = LAST && LAST.k > 0 ? LAST.k : 0, OLD = MAPM.OLDBOX[MC];
+    // A view another country left under the same key (Taiwan's and Japan's) doesn't open here, nor the old map: the home view does.
+    if (z === 1) { const LAST = lastView(), mine = LAST && (!LAST.c || LAST.c === MC), k = mine && LAST.k > 0 ? LAST.k : 0, OLD = !LAST && MAPM.OLDBOX[MC];
       if (k) { z = k*homeZ(HOME); cx = LAST.cx; cy = LAST.cy; } else if (!OLD) { z = z0; cx = HV.cx; cy = HV.cy; } else { z = MC === "au" ? Math.max(MAPM.cover(OLD, W, H), z0) : MAPM.cover(OLD, W, H); [cx, cy] = MAPM.clampTo(OLD, W, H, z, HOME.cx, HOME.cy); offButtons(OLD); } }
     else if (was) z = was*z0; clampView();
     if (parts.length) { const n = Math.min(4000, Math.round(W*H/260)); while (parts.length < n) { const p = {}; spawn(p); parts.push(p); } parts.length = n; } } // same streak density at any size, capped so big full screens stay smooth

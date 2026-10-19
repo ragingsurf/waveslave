@@ -502,13 +502,20 @@ const CHECKS = {
     if (!kept || !near(kept.cx, v.cx) || !near(kept.cy, v.cy) || !near(kept.k, v.z/v.h.z1)) throw new Error(`waveslave-mapview holds ${JSON.stringify(kept)}, want cx ${v.cx}, cy ${v.cy}, k ${v.z/v.h.z1}`);
   },
   // Opened from Forecast, the map shows the country picked there zoomed in, on its home view, however far out and wherever it was left,
-  // with no forecast card left open over it: Taiwan in Taiwan mode, then (World mode) Hawaii picked on Forecast. A page that loads on the map
-  // never opens on a view another country left under the key Taiwan and Japan share (here Japan's, zoomed in on Hasaki): Donghe is on screen.
+  // with no forecast card left open over it: Taiwan in Taiwan mode, then (World mode) Hawaii picked on Forecast. And a page that loads on the
+  // map opens a kept view only for the country that left it: Japan's map, zoomed in and left, keeps its view (marked c: "jp") under the key
+  // Taiwan and Japan share, and a link to Donghe opened after it, in a second tab, opens on Taiwan's home view.
   async openOnCountry(open) {
-    const page = await open({ spot: "donghe", world: false, saved: { key: "waveslave-mapview", view: { cx: 140.85, cy: 36.0, k: 3, c: "jp" } } });
+    const jp = await open({ spot: "hasaki", world: false }); await jp.evaluate(() => window.__ws.zoom(3)); await settle(jp);
+    const kept = await jp.evaluate(() => { dispatchEvent(new Event("pagehide")); return JSON.parse(localStorage.getItem("waveslave-mapview")); });
+    if (!kept || kept.c !== "jp") throw new Error(`leaving Japan's map kept ${JSON.stringify(kept)} under waveslave-mapview, want Japan's view marked c: "jp"`);
+    const page = await jp.context().newPage(); await page.goto(PAGE + "#donghe", { waitUntil: "load" });
+    await page.waitForFunction(() => (document.getElementById("wsTime") || {}).textContent); await settle(page);
     const at = () => page.evaluate(() => { const v = window.__ws.view(), h = window.__ws.home(), s = ALL.spots[CUR], p = window.__ws.px(MAPM.E(s.lon), s.lat);
       return { ...v, h, cur: CUR, cc: spotCountry(CUR), card: !document.getElementById("wsSheet").hidden, on: p[0] >= 0 && p[0] <= v.W && p[1] >= 0 && p[1] <= v.H }; });
-    let a = await at(); if (a.MC !== "tw" || !a.on) throw new Error(`with Japan's view kept under waveslave-mapview, the map opened on Donghe at cx ${a.cx}, cy ${a.cy} (MC ${a.MC}), Donghe ${a.on ? "on" : "off"} screen`);
+    let a = await at(); if (a.MC !== "tw" || !near(a.cx, a.h.cx, 1e-6) || !near(a.cy, a.h.cy, 1e-6) || a.z !== a.h.z)
+      throw new Error(`with Japan's view kept under waveslave-mapview, a link to Donghe opened the map on ${a.MC} at cx ${a.cx}, cy ${a.cy}, z ${a.z}, want Taiwan's home view cx ${a.h.cx}, cy ${a.h.cy}, z ${a.h.z}`);
+    await page.evaluate(() => setWorld(false)); await settle(page); // Taiwan mode (the link to Hasaki turned World mode on) until Hawaii is picked
     // To Forecast with ✕ (picking a country there with pick), then back with the Map tab: the map is on the picked country's home view.
     const reopen = async (label, pick) => { await page.click("#wsFs"); await settle(page); if (pick) { await page.evaluate(pick); await settle(page); }
       await page.click('.tabs button[data-v="ws"]'); await page.waitForFunction(() => !document.getElementById("viewWs").hidden && document.getElementById("viewFc").hidden); await settle(page);
@@ -522,7 +529,8 @@ const CHECKS = {
   },
   // Taiwan mode, the page's default: no country row and no country buttons over the map, and zoomed out no other country's spot to tap (a
   // tap where Pipeline is drops a pin instead). World mode (setWorld, the tap on the W) brings them back and is kept; switching it off from
-  // Hawaii brings the page and the map back to Taiwan. Then on Forecast the W itself switches it on and off, with nothing under the row moving.
+  // Hawaii brings the page and the map back to Taiwan. Then on Forecast the W itself switches it on and off, with nothing under the row moving,
+  // and the row comes back at its start.
   async taiwanMode(open) {
     const page = await open({ spot: "donghe", saved: MID, world: false });
     const shown = () => page.evaluate(() => ({ world: WORLD, cls: document.documentElement.classList.contains("world"), kept: localStorage.getItem("waveslave-world"),
@@ -547,6 +555,9 @@ const CHECKS = {
     for (const want of [true, false]) { await page.click("header .brand .w"); await settle(page); a = await shown();
       if (a.world !== want || a.row !== want) throw new Error(`a tap on the W left WORLD ${a.world} and the country row ${a.row ? "showing" : "hidden"}, want ${want ? "World mode" : "Taiwan mode"}`);
       if (a.picker !== at) throw new Error(`a tap on the W moved the spot picker from ${at} to ${a.picker} under the tabs (scrollY ${a.scroll})`); }
+    // The row scrolled to its far end comes back, after Taiwan mode, at its start: Taiwan in sight.
+    const left = await page.evaluate(async () => { const r = document.getElementById("ctry"); await setWorld(true); r.scrollLeft = r.scrollWidth; await setWorld(false); await setWorld(true); return r.scrollLeft; });
+    if (left !== 0) throw new Error(`back in World mode the country row is scrolled ${left}px along, want 0 (Taiwan in sight)`);
   },
   // A link to another country's spot opens it in World mode, kept for next time; in Taiwan mode the last spot open in another country is
   // passed over for the last Taiwan one.

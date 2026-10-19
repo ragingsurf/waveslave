@@ -154,13 +154,13 @@ class LogSplitPacificNorthwest(unittest.TestCase):
 
 
 class LogSplitKorea(unittest.TestCase):
-    # Korean spots have no buoy yet: their log holds the forecast and the airport wind
+    # Korea's log holds each spot's buoy (KMA's, through NOAA) and airport wind with the forecast, filled from kr.py's fixtures
     def setUp(self):
+        import datetime; sys.path.insert(0, ROOT); import kr
         self.tmp = tempfile.mkdtemp()
-        self.snap = os.path.join(self.tmp, 'snap.json'); shutil.copy(os.path.join(HERE, 'fixtures', 'kr', 'snap_in.json'), self.snap)
-        d = json.load(open(self.snap))
-        d['spots']['jukdo']['dwind'] = [['2026-10-18T13:00', 6.0, 170.0]]
-        d['src']['spots']['jukdo'] = '/2026-10-18T13:00'
+        self.snap = os.path.join(self.tmp, 'snap.json'); fix = os.path.join(HERE, 'fixtures', 'kr')
+        d = json.load(open(os.path.join(fix, 'snap_in.json')))
+        kr.fill(d, json.load(open(os.path.join(ROOT, 'spots.json'))), fix, datetime.datetime(2026, 10, 18, 5, 30, tzinfo=datetime.timezone.utc))
         with open(self.snap, 'w') as f: json.dump(d, f)
 
     def test_log_kr_only(self):
@@ -168,7 +168,8 @@ class LogSplitKorea(unittest.TestCase):
         rec = records(self.tmp + '/log-kr')[-1]
         self.assertEqual(sorted(rec['spots']), ['geumjin', 'iho', 'jukdo', 'manlipo'])
         j = rec['spots']['jukdo']
-        self.assertEqual((j['buoyId'], j['buoy'], j['station'], len(j['fc'])), (None, [], [['2026-10-18T13:00', 6.0, 170.0]], 24))
+        self.assertEqual((j['buoyId'], len(j['buoy']), j['buoy'][-1], j['station'], len(j['fc'])), ('22105', 3, ['2026-10-18T13:00', 1.5, None, None, 23.3], [['2026-10-18T13:00', 6.0, 170.0]], 24))
+        self.assertEqual((rec['spots']['iho']['buoyId'], rec['spots']['iho']['buoy']), (None, []))
 
     def test_other_logs_hold_no_korea(self):
         run(['log.py', self.snap, self.tmp + '/log', 'tw'])
@@ -184,9 +185,13 @@ class LogSplitKorea(unittest.TestCase):
         d = json.load(open(self.snap))
         for k in ('donghe', 'blacks'): self.assertEqual(d['spots'][k], before[k])
         self.assertEqual(sorted(json.load(open(self.tmp + '/cache/tides-kr.json'))), ['geumjin', 'iho', 'jukdo', 'manlipo'])
-        # with no buoy readings the wave heights stay as forecast
-        self.assertEqual((d['spots']['jukdo']['adj']['f'], d['spots']['jukdo']['adj']['days']), (1.0, 0))
-        self.assertEqual(d['spots']['jukdo']['hourly'], before['jukdo']['hourly'])
+        # Geumjin's day of buoy readings counts toward its height factor; Jukdo's, from the same buoy 119 km out to sea, does not
+        g, j = d['spots']['geumjin'], d['spots']['jukdo']
+        self.assertEqual((g['adj']['days'], j['adj']['days'], j['adj']['f']), (1, 0, 1.0))
+        self.assertEqual(j['hourly'], before['jukdo']['hourly'])  # and one day is too few to change Geumjin's
+        self.assertEqual(g['hourly'], before['geumjin']['hourly'])
+        # the past days show the buoy either way
+        self.assertEqual((j['hist']['buoy'][-1], g['hist']['buoy'][-1]), (['2026-10-18T13:00', 1.5, None, None],) * 2)
 
 
 class LogSplitPhilippines(unittest.TestCase):

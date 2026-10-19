@@ -1066,15 +1066,16 @@ const WS = (() => {
   // Full screen: the map panel fills the screen (phones and tablets also ask the browser for real full screen). The map only shows full screen:
   // ✕, Esc or leaving the browser's full screen all go back to Forecast.
   let FS = false;
-  // Where the map was last left (centre and zoom), so a reload or the page's own refresh opens it there again instead of on the country's old map.
+  // Where the map was last left (centre and zoom), so a page that loads with the map open (a reload) opens it there again instead of on the
+  // country's old map. (Opened from Forecast, the map goes to the country's home view instead: see show.)
   // A country with parts keeps one view per part, so a Perth spot never opens on the east coast left from a Gold Coast one.
-  // Taiwan and Japan keep the key of the West Pacific map they shared.
+  // Taiwan and Japan keep the key of the West Pacific map they shared, so each view notes its country (c) and opens only for that country.
   const viewKey = () => "waveslave-mapview"+(MC==="tw" || MC==="jp"?"":"-"+MC)+(PARTS[MC]?(HOME.cx < PARTS[MC].at ? "-w" : "-e"):"");
   // A view saved before the map ran east (California -119.5) opens on the same coast: 360 is added to a negative centre.
-  const lastView = () => { try { const v = JSON.parse(localStorage.getItem(viewKey())); if (v && v.cx < 0) v.cx += 360; return v; } catch(e) { return null; } };
+  const lastView = () => { try { const v = JSON.parse(localStorage.getItem(viewKey())); if (v && v.c && v.c !== MC) return null; if (v && v.cx < 0) v.cx += 360; return v; } catch(e) { return null; } };
   // k is the zoom over the country's home zoom on this screen before any fitting (homeZ), not over the fitted z0, which moves with the
   // language and the forecast in the tags: so a view opens again exactly where it was left, as views saved before the fit do.
-  const keep = () => { if (z0 > 1) try { localStorage.setItem(viewKey(), JSON.stringify({cx, cy, k: z/homeZ(HOME)})); } catch(e) {} };
+  const keep = () => { if (z0 > 1) try { localStorage.setItem(viewKey(), JSON.stringify({cx, cy, k: z/homeZ(HOME), c: MC})); } catch(e) {} };
   addEventListener("pagehide", () => { if (FS) keep(); });
   // Only phones and tablets (a touch screen as the main pointer) ask the browser for real full screen, to hide the address bar.
   // On a computer the map just fills the browser window, so the taskbar and browser tabs stay put.
@@ -1507,7 +1508,10 @@ const WS = (() => {
     built = true; }
   return {
     // still=true draws the map but holds its moving streaks until go(), so they don't compete with the opening animation for frames.
-    show(still) { if (!built) build(); size(); legend(); setT(ti); warm();
+    // home=true (opened from Forecast) shows the country picked there zoomed in, on its home view, wherever the map was left (Bryan, Oct 19);
+    // a forecast card or pin left open there closes, as it does when a country button flies off, since it would cover half the country.
+    show(still, home) { if (!built) build(); if (home) { unglide(); PIN = null; PINBTN = PINX = null; SHEET = null; document.getElementById("wsSheet").hidden = true; }
+      size(); if (home) { cx = HV.cx; cy = HV.cy; z = z0; clampView(); } legend(); setT(ti); warm();
       if (document.fonts) Promise.all([document.fonts.load('italic 800 13px "Anybody"'), document.fonts.load('17px "Metal Mania"'), document.fonts.load('16px "VT323"')]).then(() => { if (!document.getElementById("viewWs").hidden) { refit(); moved(); } }).catch(() => {}); parts = Array.from({length: Math.min(4000, Math.round(W*H/260))}, () => { const p = {}; spawn(p); return p; });
       cancelAnimationFrame(raf); raf = 0; if (!still) this.go(); },
     go() { if (!raf && !document.getElementById("viewWs").hidden && !matchMedia("(prefers-reduced-motion: reduce)").matches) raf = requestAnimationFrame(frame); },
@@ -1577,7 +1581,8 @@ function setView(v, instant){ VIEW=v; try{ localStorage.setItem("waveslave-view"
   if(v===SHOWN) return; SHOWN=v; if(ending) ending();
   const fc=document.getElementById("viewFc"), ws=document.getElementById("viewWs"), open=v==="ws", calm=instant || matchMedia("(prefers-reduced-motion: reduce)").matches;
   const done = open ? () => { ending = null; fc.hidden = true; WS.go(); } : () => { ending = null; ws.hidden = true; WS.full(false); WS.hide(); };
-  if(open){ ws.hidden=false; WS.full(true, calm); WS.show(!calm); if(calm) return done(); ending = FX.run("slam", true, ws, done, () => WS.goFull()); return; }
+  // Opened from Forecast the map shows the country picked there, zoomed in; a page that loads on the map (instant) opens it where it was left.
+  if(open){ ws.hidden=false; WS.full(true, calm); WS.show(!calm, !instant); if(calm) return done(); ending = FX.run("slam", true, ws, done, () => WS.goFull()); return; }
   fc.hidden=false; boot(CUR); WS.pause(); if(calm) return done();
   // A full-screen browser shows only the map, so leave full screen first and burn back to the forecast once the window has settled.
   const go = () => { clearTimeout(wait); document.removeEventListener("fullscreenchange", go); if(SHOWN==="fc" && ending===hold) ending = FX.run("slam", false, ws, done); };

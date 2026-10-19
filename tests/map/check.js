@@ -501,6 +501,25 @@ const CHECKS = {
     const kept = await page.evaluate(() => JSON.parse(localStorage.getItem("waveslave-mapview")));
     if (!kept || !near(kept.cx, v.cx) || !near(kept.cy, v.cy) || !near(kept.k, v.z/v.h.z1)) throw new Error(`waveslave-mapview holds ${JSON.stringify(kept)}, want cx ${v.cx}, cy ${v.cy}, k ${v.z/v.h.z1}`);
   },
+  // Opened from Forecast, the map shows the country picked there zoomed in, on its home view, however far out and wherever it was left,
+  // with no forecast card left open over it: Taiwan in Taiwan mode, then (World mode) Hawaii picked on Forecast. A page that loads on the map
+  // never opens on a view another country left under the key Taiwan and Japan share (here Japan's, zoomed in on Hasaki): Donghe is on screen.
+  async openOnCountry(open) {
+    const page = await open({ spot: "donghe", world: false, saved: { key: "waveslave-mapview", view: { cx: 140.85, cy: 36.0, k: 3, c: "jp" } } });
+    const at = () => page.evaluate(() => { const v = window.__ws.view(), h = window.__ws.home(), s = ALL.spots[CUR], p = window.__ws.px(MAPM.E(s.lon), s.lat);
+      return { ...v, h, cur: CUR, cc: spotCountry(CUR), card: !document.getElementById("wsSheet").hidden, on: p[0] >= 0 && p[0] <= v.W && p[1] >= 0 && p[1] <= v.H }; });
+    let a = await at(); if (a.MC !== "tw" || !a.on) throw new Error(`with Japan's view kept under waveslave-mapview, the map opened on Donghe at cx ${a.cx}, cy ${a.cy} (MC ${a.MC}), Donghe ${a.on ? "on" : "off"} screen`);
+    // To Forecast with ✕ (picking a country there with pick), then back with the Map tab: the map is on the picked country's home view.
+    const reopen = async (label, pick) => { await page.click("#wsFs"); await settle(page); if (pick) { await page.evaluate(pick); await settle(page); }
+      await page.click('.tabs button[data-v="ws"]'); await page.waitForFunction(() => !document.getElementById("viewWs").hidden && document.getElementById("viewFc").hidden); await settle(page);
+      a = await at(); if (a.MC !== a.cc || !near(a.cx, a.h.cx, 1e-6) || !near(a.cy, a.h.cy, 1e-6) || a.z !== a.h.z || !a.on || a.card)
+        throw new Error(`opened from Forecast on ${label} (${a.cur}), the map is on ${a.MC} at cx ${a.cx}, cy ${a.cy}, z ${a.z}${a.card ? " with a forecast card open" : ""}, want its home view cx ${a.h.cx}, cy ${a.h.cy}, z ${a.h.z}`); };
+    await zoomOut(page); await reopen("Taiwan, left zoomed all the way out");
+    const tag = await page.evaluate(() => window.__ws.tags().find(t => t[4] === "jinshan")); await tapAt(page, [tag[0] + tag[2]/2, tag[1] + tag[3]/2]); await settle(page);
+    if (!(await at()).card) throw new Error("a tap on Jinshan's tag opened no forecast card"); await reopen("Taiwan, Jinshan's card left open");
+    await reopen("Hawaii, picked on Forecast", () => { setWorld(true); switchCountry("hi"); });
+    await zoomOut(page); await reopen("Hawaii, left zoomed all the way out");
+  },
   // Taiwan mode, the page's default: no country row and no country buttons over the map, and zoomed out no other country's spot to tap (a
   // tap where Pipeline is drops a pin instead). World mode (setWorld, the tap on the W) brings them back and is kept; switching it off from
   // Hawaii brings the page and the map back to Taiwan. Then on Forecast the W itself switches it on and off, with nothing under the row moving.

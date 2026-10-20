@@ -51,6 +51,18 @@ class Template(unittest.TestCase):
         self.assertEqual(sorted({x for x, y in rings[1]}), [113.4371, 114])
         self.assertEqual(len(rings), 2)
 
+    def test_the_page_keeps_what_the_tool_reads(self):
+        # template.html's own DETAIL boxes stay on one line the tool can parse, with one clip-out loop and the push in place after it.
+        with open(os.path.join(ROOT, 'template.html'), encoding='utf-8') as f: lines = f.read().split('\n')
+        b = [l for l in lines if l.startswith(dc.BOXES)]; c = [i for i, l in enumerate(lines) if l.startswith(dc.CLIPOUT)]
+        self.assertEqual((len(b), len(c)), (1, 1))
+        boxes = json.loads(b[0][len(dc.BOXES):].rstrip(';'))
+        self.assertTrue(boxes and all(len(x) == 4 and x[0] < x[1] and x[2] < x[3] for x in boxes), boxes)
+        self.assertEqual(lines[c[0] + 2], dc.COMMENT)
+        push = lines[c[0] + 3]
+        self.assertTrue(push.startswith('  COAST.push(...[[') and push.endswith(');'), push[:40])
+        self.assertLessEqual(len(push.encode('utf-8')), dc.BUDGET)
+
 
 if __name__ == '__main__':
     unittest.main()

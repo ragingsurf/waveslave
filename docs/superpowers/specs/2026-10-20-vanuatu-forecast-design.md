@@ -122,7 +122,7 @@ would be specks at button size.
 
 ## Error handling
 
-As for Papua New Guinea: a source that is down only blanks its own part, and the build never fails on it. If the sea-cell request
+As for Papua New Guinea: a source that is down only blanks its own part, and the build never fails on it. If the ECMWF request
 fails, the default model is asked for, still from the sea cells; if both fail, the spots have no wind forecast for that run. A failed
 grid fetch keeps the last grid.
 

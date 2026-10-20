@@ -376,6 +376,20 @@ const CHECKS = {
       if (t.includes("Model tide") !== want) throw new Error(`${spot}'s Right now line reads "${t}", want ${want ? "" : "no "}"Model tide"`);
     }
   },
+  // On the Forecast page at Papua New Guinea's and Vanuatu's spots (Lido, Pango Point), the storm panel is Cyclone watch with links to the
+  // area's warning centres, and the wind legend credits ECMWF.
+  async cycloneWatch(open) {
+    for (const [spot, links] of [["lido", ["pngmet.gov.pg", "bom.gov.au/cyclone"]], ["pango", ["vmgd.gov.vu", "met.gov.fj"]]]) {
+      const page = await open({ spot });
+      if (!await page.evaluate(id => !!ALL.spots[id], spot)) skip(`the page has no ${spot}`);
+      await page.evaluate(() => setView("fc", true)); await settle(page);
+      const s = await page.evaluate(() => { const el = document.getElementById("storm");
+        return { hidden: el.hidden, h: (el.querySelector("h3") || {}).textContent, links: [...el.querySelectorAll("a")].map(a => a.href), leg: document.getElementById("legOff").textContent }; });
+      if (s.hidden || s.h !== "Cyclone watch") throw new Error(`${spot}'s storm panel ${s.hidden ? "is hidden" : `is headed "${s.h}"`}, want "Cyclone watch"`);
+      for (const l of links) if (!s.links.some(h => h.includes(l))) throw new Error(`${spot}'s Cyclone watch has no link to ${l} (it links ${s.links.join(", ")})`);
+      if (!s.leg.includes("ECMWF")) throw new Error(`${spot}'s wind legend reads "${s.leg}", want ECMWF`);
+    }
+  },
   // On every home view, a tag drawn for another country's spot keeps clear of the buttons over the map: at the screen's edge, one with nowhere
   // clear to go is left out (Sydney's, in the corner of New Zealand's home view held sideways).
   async foreignTagsClear(open) {

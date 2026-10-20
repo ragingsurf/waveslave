@@ -28,6 +28,9 @@ class Spots(unittest.TestCase):
             self.assertEqual((s['cams'], s['zh']['cams'], s['ja']['cams']), ([], [], []), s['id'])
         # Efate's four west of 169°E, where the map splits Vanuatu's two home views, Tanna's two east of it
         self.assertEqual([s['lon'] < 169 for s in vu], [True] * 4 + [False] * 2)
+        # the offshore wind of each, the landward normal checked against the guides' best wind (the spec's table): a range check alone would
+        # let an east coast's 270 pass as 90
+        self.assertEqual({s['id']: s['off'] for s in vu}, {'devils': 100, 'pango': 45, 'breakas': 0, 'tapi': 45, 'lenakel': 50, 'portres': 270})
         self.assertEqual(len({s['id'] for s in SPOTS}), len(SPOTS))
         # last in spots.json, so the shared Open-Meteo calls, which list every spot in its order, keep each other spot's place
         self.assertEqual([s['id'] for s in SPOTS[-6:]], VU_IDS)

@@ -234,7 +234,8 @@ fi
 # inside the West Pacific grid), Hong Kong 0.125° apart (21.5–23.125°N, 113.5–114.75°E, its home view either way up), Papua New
 # Guinea 2° apart (10°S–2°N, 136–156°E, both its home views either way up), Vanuatu 2° apart (24–12°S, 164–174°E, both its home views
 # either way up) and Baja 1° apart (21–35°N, 119–108°W, past the map's edge at 110°W so the Cape's two spots take its colours in full;
-# both its home views upright), all refetched only every ~6 h to keep Open-Meteo calls down.
+# the Cape's home view either way up and the coast's upright on a 390x844 phone), all refetched only every ~6 h to keep Open-Meteo
+# calls down.
 # Open-Meteo refuses longitudes past 180, so those are asked for as west ones (182 as -178), as pacific.sh does; the grid keeps them east.
 regrid(){ C=$1; AGE=$2; shift 2
   [ -n "$(python3 -I -c "import json,sys;print(any(s.get('country')==sys.argv[2] for s in json.load(open(sys.argv[1]))) or '')" "$HERE/spots.json" $C)" ] && [ -z "$(find "$G/grid-$C.json" -mmin -$AGE 2>/dev/null)" ] || return 0

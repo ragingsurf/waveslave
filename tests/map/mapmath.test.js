@@ -197,6 +197,15 @@ test("isoPick", () => {
   assert.equal(name(M.isoPick(G, 150.4, 152.52, -5.31, -0.71)), "pg");
   assert.equal(name(M.isoPick(G, 149.73, 153.19, -3.81, -2.21)), "pg");
   assert.equal(name(M.isoPick(G, 149.68, 153.24, -3.81, -2.21)), "pg");
+  // Vanuatu's first opens: Efate (Devil's Point to Tapi Point) upright, then sideways on a phone and a 20:9 phone, then Tanna (Lenakel and
+  // Port Resolution) the same three ways, all inside its grid (24–12°S, 164–174°E). Held sideways, Tanna's view reaches past 170°E, where
+  // the South Pacific's grid starts, but its west edge lies more than the half degree to spare outside that grid, so Vanuatu's draws.
+  assert.equal(name(M.isoPick(G, 168.06, 168.46, -18.19, -17.37)), "vu");
+  assert.equal(name(M.isoPick(G, 167.75, 168.78, -18, -17.55)), "vu");
+  assert.equal(name(M.isoPick(G, 167.74, 168.79, -18, -17.55)), "vu");
+  assert.equal(name(M.isoPick(G, 169.14, 169.64, -20.04, -19.02)), "vu");
+  assert.equal(name(M.isoPick(G, 168.7, 170.08, -19.83, -19.23)), "vu");
+  assert.equal(name(M.isoPick(G, 168.68, 170.1, -19.83, -19.23)), "vu");
   assert.equal(M.isoPick(G.slice(0, 12), 95, 170, -5, 50), null); // no Pacific grid
   // Half a degree of slack past a box edge, and a grid without pressure is passed over.
   assert.equal(name(M.isoPick(G, 99.6, 123, 21.75, 25.75)), "wp");

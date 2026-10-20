@@ -1,0 +1,51 @@
+name: Hourly heartbeat
+
+# GitHub drops most of refresh.yml's own scheduled runs, so this workflow keeps the hourly refresh going by itself.
+# One run stays awake for about 5.5 hours, checks every 5 minutes, and starts refresh.yml whenever the last refresh
+# (from any trigger: schedule, push, a manual or Claude start) began 55+ minutes ago. Before it ends it starts the
+# next heartbeat, so the chain never needs Claude or a token. The schedule below only restarts the chain if it ever
+# breaks; the concurrency group keeps at most one heartbeat awake and one waiting.
+on:
+  schedule:
+    - cron: "11,41 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write   # start refresh.yml and the next heartbeat with the built-in token
+
+concurrency:
+  group: heartbeat
+  cancel-in-progress: false
+
+jobs:
+  beat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Start refresh.yml every hour
+        run: |
+          end=$(( $(date +%s) + 330*60 ))
+          while [ "$(date +%s)" -lt "$end" ]; do
+            last=$(gh run list --workflow refresh.yml --limit 1 --json createdAt,status \
+                     --jq '.[0] | "\(.createdAt) \(.status)"' 2>/dev/null || true)
+            started=${last%% *}; status=${last##* }
+            age=99999
+            [ -n "$started" ] && age=$(( ( $(date +%s) - $(date -d "$started" +%s) ) / 60 ))
+            case "$status" in
+              queued|in_progress|pending|waiting|requested) echo "$(date -u +%H:%M) refresh already running" ;;
+              *)
+                if [ "$age" -ge 55 ]; then
+                  echo "$(date -u +%H:%M) last refresh ${age}m ago, starting one"
+                  gh workflow run refresh.yml --ref main || echo "start failed, will retry" >&2
+                else
+                  echo "$(date -u +%H:%M) last refresh ${age}m ago"
+                fi ;;
+            esac
+            sleep 300
+          done
+      - name: Hand over to the next heartbeat
+        if: always()
+        run: gh workflow run heartbeat.yml --ref main

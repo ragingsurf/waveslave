@@ -1,6 +1,6 @@
 // Browser checks and phone screenshots of a built page (build one with tests/map/tool.py).
 // Usage: node tests/map/check.js <page.html> <outdir> shots|checks [land]
-//   shots   the twenty-three home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
+//   shots   the twenty-five home views, each <outdir>/<name>.png, a picture of #wsBox (compare two with tool.py diff). Works on any build, main's included.
 //           On a page whose hook can zoom, also zoomed all the way out in each layer (out-wind, out-waves, out-swell, out-rain) and a swell across 180° (dateline).
 //   checks  prints ok / FAIL / skip for each check, and exits 1 on any FAIL or page error. Needs the page's test hook, window.__ws.
 // Every page opens in its own fresh browser context, offline (only the page itself loads, no service worker): a phone 390x844 (844x390 with land),
@@ -27,7 +27,8 @@ const HOMES = [["tw", "donghe", "waveslave-mapview", 120.9, 23.75], ["jp", "ichi
   ["pi-w", "cloudbreak", "waveslave-mapview-pi-w", -177.15, -17.8], ["pi-e", "teahupoo", "waveslave-mapview-pi-e", -154.93, -19.5],
   ["ak", "cannonbeach", "waveslave-mapview-ak", -144.6, 58.4], ["mi-w", "umatac", "waveslave-mapview-mi-w", 145.22, 14.24], ["mi-e", "ppass", "waveslave-mapview-mi-e", 164.74, 6.21],
   ["pg-w", "lido", "waveslave-mapview-pg-w", 143.35, -3.57], ["pg-e", "nusa", "waveslave-mapview-pg-e", 151.46, -3.01],
-  ["vu-w", "devils", "waveslave-mapview-vu-w", 168.265, -17.78], ["vu-e", "lenakel", "waveslave-mapview-vu-e", 169.39, -19.53]];
+  ["vu-w", "devils", "waveslave-mapview-vu-w", 168.265, -17.78], ["vu-e", "lenakel", "waveslave-mapview-vu-e", 169.39, -19.53],
+  ["bj-w", "kthirtyeight", "waveslave-mapview-bj-w", -114.73, 29.3], ["bj-e", "sanpedrito", "waveslave-mapview-bj-e", -110.19, 23.35]];
 const OLD_CA = { key: "waveslave-mapview-ca", view: { cx: -117.5, cy: 33.0, k: 2 } }; // saved before the map ran east, off California's home view and zoomed in
 const home = name => { const [, spot, key, cx, cy] = HOMES.find(h => h[0] === name); return { spot, saved: { key, view: { cx, cy, k: 1 } } }; }; // open(home("tw"))
 const MID = { key: "waveslave-mapview", view: { cx: 190, cy: 25, k: 1 } }; // Taiwan's map left in the middle of the Pacific, so zoomed out from there Hawaii is on screen
@@ -38,7 +39,7 @@ const PAC = !/\bpac: null\s*\}/.test(fs.readFileSync(file, "utf8"));
 // Whether it carries the Pacific Northwest grid (a grid is a JSON object, unlike the nw: {l: ...} boxes in the page's code).
 const NWG = /\bnw: \{"/.test(fs.readFileSync(file, "utf8"));
 // And Indonesia's (none in a build from before Indonesia, or before its first grid fetch), and New Zealand's, the South Pacific's, Alaska's, Micronesia's,
-// Hong Kong's, Papua New Guinea's and Vanuatu's likewise.
+// Hong Kong's, Papua New Guinea's, Vanuatu's and Baja's likewise.
 const IDG = /\bid: \{"/.test(fs.readFileSync(file, "utf8"));
 const NZG = /\bnz: \{"/.test(fs.readFileSync(file, "utf8"));
 const PIG = /\bpi: \{"/.test(fs.readFileSync(file, "utf8"));
@@ -47,6 +48,7 @@ const MIG = /\bmi: \{"/.test(fs.readFileSync(file, "utf8"));
 const HKG = /\bhk: \{"/.test(fs.readFileSync(file, "utf8"));
 const PGG = /\bpg: \{"/.test(fs.readFileSync(file, "utf8"));
 const VUG = /\bvu: \{"/.test(fs.readFileSync(file, "utf8"));
+const BJG = /\bbj: \{"/.test(fs.readFileSync(file, "utf8"));
 // A site build (web/head.html on top) opens on the passcode screen; each fresh context starts unlocked with the page's own code hash.
 const LOCK = (fs.readFileSync(file, "utf8").match(/\bH="([0-9a-f]{64})"/) || [])[1];
 
@@ -109,11 +111,11 @@ async function ownHome(open, c, spot, A) {
 }
 
 // A country with two parts, west and east of the longitude at, where the current spot picks the part (the South Pacific, Micronesia, Papua
-// New Guinea, Vanuatu): each part's first spot, another spot in it (mate) and its home view. With nothing saved, a spot opens on its part's
-// home view with every spot of the part on the map and clear of the buttons and the time bar; upright the part's width sets the zoom the
-// fit for the names starts from (home().z1), sideways its height. Another spot in the same part leaves the map where it is. A spot in the
-// other part moves the map to that part's home view and keeps the view left under its own part's key, where the next open finds it, and
-// from Japan's the map's country button brings back the part of the spot last open.
+// New Guinea, Vanuatu, Baja): each part's first spot, another spot in it (mate) and its home view. With nothing saved, a spot opens on its
+// part's home view with every spot of the part on the map and clear of the buttons and the time bar; upright the part's width sets the
+// zoom the fit for the names starts from (home().z1), sideways its height. Another spot in the same part leaves the map where it is. A
+// spot in the other part moves the map to that part's home view and keeps the view left under its own part's key, where the next open
+// finds it, and from Japan's the map's country button brings back the part of the spot last open.
 async function twoParts(open, c, at, PARTS) {
   for (const [part, other] of [["w", "e"], ["e", "w"]]) {
     const P = PARTS[part], O = PARTS[other], page = await open({ spot: P.spot });
@@ -160,7 +162,7 @@ const CHECKS = {
   // Every grid is made, finest first, with the Pacific layer last when the page carries it.
   async gridsLoaded(open) {
     const page = await open(home("tw")), got = JSON.stringify(await page.evaluate(() => window.__ws.grids()));
-    const want = JSON.stringify([...(HKG ? ["hk"] : []), ...(NWG ? ["nw"] : []), "hi", "ca", ...(AKG ? ["ak"] : []), "au", ...(IDG ? ["id"] : []), ...(NZG ? ["nz"] : []), ...(PIG ? ["pi"] : []), ...(MIG ? ["mi"] : []), ...(PGG ? ["pg"] : []), ...(VUG ? ["vu"] : []), "wp", ...(PAC ? ["pac"] : [])]);
+    const want = JSON.stringify([...(HKG ? ["hk"] : []), ...(NWG ? ["nw"] : []), "hi", "ca", ...(BJG ? ["bj"] : []), ...(AKG ? ["ak"] : []), "au", ...(IDG ? ["id"] : []), ...(NZG ? ["nz"] : []), ...(PIG ? ["pi"] : []), ...(MIG ? ["mi"] : []), ...(PGG ? ["pg"] : []), ...(VUG ? ["vu"] : []), "wp", ...(PAC ? ["pac"] : [])]);
     if (got !== want) throw new Error(`grids() is ${got}, want ${want}`);
   },
   // The Taiwan home view sits inside the West Pacific grid, so its pressure lines come from that grid; zoomed out they come from the Pacific layer (none without it).
@@ -260,6 +262,17 @@ const CHECKS = {
       if (src !== want) throw new Error(`on ${name}'s home view iso() is ${src}, want ${want}`);
     }
   },
+  // Baja's two home views upright, and the Cape's held sideways, sit inside its grid (21–35°N, 119–108°W), so their pressure lines come
+  // from it. Held sideways the Pacific coast's height sets the zoom, and its width runs west past the grid (the view stops at the map's
+  // east edge, 110°W), so the Pacific layer draws there.
+  async bajaIso(open) {
+    for (const [name, want] of [["bj-w", BJG && !land ? "bj" : PAC ? "pac" : null], ["bj-e", BJG ? "bj" : PAC ? "pac" : null]]) {
+      const page = await open(home(name));
+      if (!await page.evaluate(() => !!ALL.spots.kthirtyeight)) skip("the page has no Baja spots");
+      const src = await page.evaluate(() => window.__ws.iso());
+      if (src !== want) throw new Error(`on ${name}'s home view iso() is ${src}, want ${want}`);
+    }
+  },
   // Either side of 180° the Pacific layer has wind, and about the same wind: no seam at the dateline.
   async datelineSeam(open) {
     if (!PAC) skip("the page has no Pacific grid");
@@ -350,8 +363,9 @@ const CHECKS = {
   async hainan(open) { await ownHome(open, "hn", "dadonghai", { cx: 109.93, cy: 18.44, span: 0.95, wide: 1.3 }); },
   async vietnam(open) { await ownHome(open, "vn", "mykhe", { cx: 108.2, cy: 13.2, span: 6.6, wide: 3.4 }); },
   // The South Pacific has two parts, west (Fiji to the Samoas) and east (Rarotonga and Tahiti), and so have Micronesia, west (Guam and Saipan)
-  // and east (Pohnpei to Majuro), Papua New Guinea, west (its north coast, Lido to Tupira) and east (New Ireland, Kavieng to Rubio), and
-  // Vanuatu, west (Efate, Devil's Point to Tapi Point) and east (Tanna, Lenakel and Port Resolution); see twoParts.
+  // and east (Pohnpei to Majuro), Papua New Guinea, west (its north coast, Lido to Tupira) and east (New Ireland, Kavieng to Rubio),
+  // Vanuatu, west (Efate, Devil's Point to Tapi Point) and east (Tanna, Lenakel and Port Resolution), and Baja, west (its Pacific coast,
+  // K-38 to Scorpion Bay) and east (the Cape, San Pedrito and Cerritos); see twoParts.
   async southPacific(open) {
     await twoParts(open, "pi", 195, { w: { spot: "cloudbreak", mate: "amouli", cx: 182.85, cy: -17.8, span: 11, wide: 17.6 }, e: { spot: "teahupoo", mate: "papara", cx: 205.07, cy: -19.5, span: 8, wide: 15.2 } });
   },
@@ -364,10 +378,14 @@ const CHECKS = {
   async vanuatu(open) {
     await twoParts(open, "vu", 169, { w: { spot: "devils", mate: "tapi", cx: 168.265, cy: -17.78, span: 0.45, wide: 0.4 }, e: { spot: "lenakel", mate: "portres", cx: 169.39, cy: -19.53, span: 0.6, wide: 0.5 } });
   },
+  async baja(open) {
+    await twoParts(open, "bj", 248.5, { w: { spot: "kthirtyeight", mate: "puntabaja", cx: 245.27, cy: 29.3, span: 7.6, wide: 5.6 }, e: { spot: "sanpedrito", mate: "cerritos", cx: 249.81, cy: 23.35, span: 1.0, wide: 1.6 } });
+  },
   // On the Forecast page the tide line says "Model tide" at a South Pacific spot that takes the tide model (Salani), and not at one that takes
-  // NOAA's tides (Cloudbreak), and at Papua New Guinea's and Vanuatu's spots, which all take the model (Lido, Pango Point).
+  // NOAA's tides (Cloudbreak), at Papua New Guinea's and Vanuatu's spots, which all take the model (Lido, Pango Point), and in Baja at a spot
+  // south of Ensenada (Cerritos) but not at one that takes NOAA's (K-38).
   async modelTide(open) {
-    for (const [spot, want] of [["salani", true], ["cloudbreak", false], ["lido", true], ["pango", true]]) {
+    for (const [spot, want] of [["salani", true], ["cloudbreak", false], ["lido", true], ["pango", true], ["kthirtyeight", false], ["cerritos", true]]) {
       const page = await open({ spot });
       if (!await page.evaluate(id => !!ALL.spots[id], spot)) skip(`the page has no ${spot}`);
       await page.evaluate(() => setView("fc", true)); await settle(page);
@@ -377,16 +395,18 @@ const CHECKS = {
     }
   },
   // On the Forecast page at Papua New Guinea's and Vanuatu's spots (Lido, Pango Point), the storm panel is Cyclone watch with links to the
-  // area's warning centres, and the wind legend credits ECMWF.
+  // area's warning centres, and at Baja's (K-38) Hurricane watch with links to NOAA's National Hurricane Center and Mexico's National
+  // Meteorological Service; the wind legend credits ECMWF at all three.
   async cycloneWatch(open) {
-    for (const [spot, links] of [["lido", ["pngmet.gov.pg", "bom.gov.au/cyclone"]], ["pango", ["vmgd.gov.vu", "met.gov.fj"]]]) {
+    for (const [spot, head, links] of [["lido", "Cyclone watch", ["pngmet.gov.pg", "bom.gov.au/cyclone"]], ["pango", "Cyclone watch", ["vmgd.gov.vu", "met.gov.fj"]],
+      ["kthirtyeight", "Hurricane watch", ["nhc.noaa.gov/?epac", "smn.conagua.gob.mx"]]]) {
       const page = await open({ spot });
       if (!await page.evaluate(id => !!ALL.spots[id], spot)) skip(`the page has no ${spot}`);
       await page.evaluate(() => setView("fc", true)); await settle(page);
       const s = await page.evaluate(() => { const el = document.getElementById("storm");
         return { hidden: el.hidden, h: (el.querySelector("h3") || {}).textContent, links: [...el.querySelectorAll("a")].map(a => a.href), leg: document.getElementById("legOff").textContent }; });
-      if (s.hidden || s.h !== "Cyclone watch") throw new Error(`${spot}'s storm panel ${s.hidden ? "is hidden" : `is headed "${s.h}"`}, want "Cyclone watch"`);
-      for (const l of links) if (!s.links.some(h => h.includes(l))) throw new Error(`${spot}'s Cyclone watch has no link to ${l} (it links ${s.links.join(", ")})`);
+      if (s.hidden || s.h !== head) throw new Error(`${spot}'s storm panel ${s.hidden ? "is hidden" : `is headed "${s.h}"`}, want "${head}"`);
+      for (const l of links) if (!s.links.some(h => h.includes(l))) throw new Error(`${spot}'s ${head} has no link to ${l} (it links ${s.links.join(", ")})`);
       if (!s.leg.includes("ECMWF")) throw new Error(`${spot}'s wind legend reads "${s.leg}", want ECMWF`);
     }
   },
@@ -650,7 +670,7 @@ const CHECKS = {
     if (b.z !== b.z0 || !near(b.cx, b.h.cx, 1e-6) || !near(b.cy, b.h.cy, 1e-6)) throw new Error(`after two taps the view is z ${b.z} at ${b.cx}, ${b.cy}, want z0 ${b.z0} at the home view's ${b.h.cx}, ${b.h.cy}`);
   },
   // Each country's button brings a home view with all of the country's names in the clear, in English, Chinese and Japanese, on the phone
-  // and (upright runs) on a 1280x800 computer screen too: every one of its spots (in Australia, the South Pacific, Micronesia, Papua New Guinea and Vanuatu: those in the part it's on, each part in turn)
+  // and (upright runs) on a 1280x800 computer screen too: every one of its spots (in Australia, the South Pacific, Micronesia, Papua New Guinea, Vanuatu and Baja: those in the part it's on, each part in turn)
   // has its dot and its tag on the map with room around them, 16px or more inside the screen, under the top buttons and over the time bar,
   // and 8px or more from the buttons down the sides. The home view is never closer than the country's home zoom was (home().z1), and only
   // as far out as it needs: still at that zoom, or with the names spanning half of the clear map or more one way. Taiwan's towns never put
@@ -661,9 +681,9 @@ const CHECKS = {
       const page = await open({ spot: "pipeline", size }), cs = await page.evaluate(() => [...document.querySelectorAll("#wsCtry button")].map(b => b.dataset.c));
       for (const l of ["en", "zh", "ja"]) {
         await page.evaluate(l => setLang(l), l); await settle(page);
-        for (const c of [...cs, "margaret", "noosa", "cloudbreak", "teahupoo", "umatac", "ppass", "lido", "nusa", "devils", "lenakel"]) {
+        for (const c of [...cs, "margaret", "noosa", "cloudbreak", "teahupoo", "umatac", "ppass", "lido", "nusa", "devils", "lenakel", "kthirtyeight", "sanpedrito"]) {
           // A country from another one's button, so its own flies to its home view; the two parts of Australia, the South Pacific,
-          // Micronesia, Papua New Guinea and Vanuatu by picking a spot in each.
+          // Micronesia, Papua New Guinea, Vanuatu and Baja by picking a spot in each.
           if (cs.includes(c)) for (const b of [c === cs[0] ? cs[1] : cs[0], c]) { await page.click(`#wsCtry button[data-c="${b}"]`); await settle(page); }
           else { await page.evaluate(id => switchSpot(id), c); await settle(page); }
           const r = await page.evaluate(([M, MB]) => { const cv = document.getElementById("wsFx").getBoundingClientRect(), v = window.__ws.view(), h = window.__ws.home(), tags = window.__ws.tags();

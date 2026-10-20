@@ -29,9 +29,9 @@ class Spots(unittest.TestCase):
             self.assertEqual((len(s['zh']['cams']), len(s['ja']['cams'])), (len(s['cams']), len(s['cams'])), s['id'])
         self.assertEqual({s['id']: [c[1] for c in s['cams']] for s in vn if s['cams']}, {'mykhe': ['https://danangsurfcam.com/']})
         self.assertEqual(len({s['id'] for s in SPOTS}), len(SPOTS))
-        # after Hainan's and before Papua New Guinea's and Vanuatu's, the last added, so the shared Open-Meteo calls, which list every spot
-        # in its order, keep each other spot's place
-        self.assertEqual([s['id'] for s in SPOTS[-21:-13]], VN_IDS)
+        # after Hainan's and before Papua New Guinea's, Vanuatu's and Baja's, the last added, so the shared Open-Meteo calls, which list
+        # every spot in its order, keep each other spot's place
+        self.assertEqual([s['id'] for s in SPOTS[-29:-21]], VN_IDS)
 
     def test_no_clock_changes(self):
         import au

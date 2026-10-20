@@ -1,6 +1,6 @@
-# The map's coast up close where the coarse outlines are too rough for the spots (Hong Kong, Hainan, Papua New Guinea, Vanuatu): Natural
-# Earth 10 m land cut to each of the map's DETAIL boxes (MAPM.DETAIL in template.html), simplified, and written into template.html as the
-# COAST.push line after the boxes' clip-out.
+# The map's coast up close where the coarse outlines are too rough for the spots (Hong Kong, Hainan, Papua New Guinea, Vanuatu, the Cape
+# of Baja California): Natural Earth 10 m land cut to each of the map's DETAIL boxes (MAPM.DETAIL in template.html), simplified, and
+# written into template.html as the COAST.push line after the boxes' clip-out.
 # A one-off, not part of the build:
 #   python3 -I tools/detail_coast.py <ne_10m_land.geojson> <template.html> [--eps 0.0005]
 import argparse, json, sys
@@ -95,10 +95,13 @@ def main(land, template, eps):
     boxes = json.loads(lines[b[0]][len(BOXES):].rstrip(';'))
     out = []
     for ring in rings(land):
-        for box in boxes:  # east longitudes; the boxes all lie between 0 and 180, as Natural Earth's do there
-            if not reaches(ring, box): continue
-            p = clip(ring, box)
+        for box in boxes:  # east longitudes, as the page's outlines are by then; a box past 180° cuts Natural Earth's land on its west
+            west = box[0] > 180  # longitudes (250 is -110) and moves what it keeps back east
+            b = [box[0] - 360, box[1] - 360] + box[2:] if west else box
+            if not reaches(ring, b): continue
+            p = clip(ring, b)
             if not p: continue
+            if west: p = [[x + 360, y] for x, y in p]
             r = tidy(simplify(p, box, eps), box)
             if len(r) >= 4: out.append(r)
     push = '  COAST.push(...%s);' % json.dumps(out, separators=(',', ':'))

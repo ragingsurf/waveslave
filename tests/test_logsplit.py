@@ -650,6 +650,55 @@ class LogSplitVanuatu(unittest.TestCase):
         self.assertEqual((d['spots']['pango']['hist']['buoy'], d['spots']['pango']['hist']['station']), ([], []))
 
 
+BJ_IDS = ['abreojos', 'cerritos', 'killers', 'kthirtyeight', 'puntabaja', 'sanmiguel', 'sanpedrito', 'scorpion']
+
+
+class LogSplitBaja(unittest.TestCase):
+    # Baja's log holds the forecast and K-38's buoy readings (CDIP's Point Loma South), from pi.py on the saved downloads; no spot has a station
+    def setUp(self):
+        import datetime
+        sys.path.insert(0, ROOT); import pi
+        self.tmp = tempfile.mkdtemp(); self.snap = os.path.join(self.tmp, 'snap.json')
+        fix = os.path.join(HERE, 'fixtures', 'bj'); d = json.load(open(os.path.join(fix, 'snap_in.json')))
+        pi.fill(d, json.load(open(os.path.join(ROOT, 'spots.json'))), fix, datetime.datetime(2026, 10, 20, 20, 13, tzinfo=datetime.timezone.utc), 'bj')
+        with open(self.snap, 'w') as f: json.dump(d, f)
+
+    def test_log_bj_only(self):
+        run(['log.py', self.snap, self.tmp + '/log-bj', 'bj'])
+        rec = records(self.tmp + '/log-bj')[-1]
+        self.assertEqual(sorted(rec['spots']), BJ_IDS)
+        k, c = rec['spots']['kthirtyeight'], rec['spots']['cerritos']
+        self.assertEqual((k['buoyId'], k['buoy'][-1], k['station'], len(k['fc'])), ('46232', ['2026-10-21T04:00', 1.6, 10.0, 197.0, 24.3], [], 24))
+        self.assertEqual((c['buoyId'], c['buoy'], c['station'], len(c['fc'])), (None, [], [], 24))
+
+    def test_other_logs_hold_no_baja(self):
+        for c, d, ids in (('tw', 'log', ['donghe']), ('ca', 'log-ca', ['blacks']), ('mi', 'log-mi', ['ppass']), ('vu', 'log-vu', ['devils'])):
+            run(['log.py', self.snap, self.tmp + '/' + d, c])
+            self.assertEqual(sorted(records(self.tmp + '/' + d)[-1]['spots']), ids, c)
+
+    def test_correct_and_history_bj(self):
+        import datetime
+        # history.py keeps the last 5 days' tides by today's clock, so Cerritos's tide days move to today's (the 21st to today)
+        today = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)).date(); shift = today - datetime.date(2026, 10, 21)
+        d = json.load(open(self.snap)); t = d['spots']['cerritos']['tides']
+        d['spots']['cerritos']['tides'] = {(datetime.date.fromisoformat(x) + shift).isoformat(): v for x, v in t.items()}
+        with open(self.snap, 'w') as f: json.dump(d, f)
+        before = json.load(open(self.snap))['spots']
+        run(['log.py', self.snap, self.tmp + '/log-bj', 'bj'])
+        run(['correct.py', self.snap, self.tmp + '/log-bj', 'bj'])
+        run(['history.py', self.snap, self.tmp + '/log-bj', self.tmp + '/cache', 'bj'])
+        d = json.load(open(self.snap))
+        for k in ('donghe', 'ppass', 'devils', 'blacks'): self.assertEqual(d['spots'][k], before[k])
+        t = json.load(open(self.tmp + '/cache/tides-bj.json'))
+        self.assertEqual(sorted(t), BJ_IDS)
+        self.assertEqual(t['cerritos'][today.isoformat()], [['05:37', 'H', 114], ['11:36', 'L', 42], ['17:18', 'H', 110], ['23:35', 'L', 18]])
+        # K-38 learns from its buoy, 50 km off; with no buoy the heights are only rounded to 0.1 m, as everywhere
+        self.assertEqual(d['spots']['kthirtyeight']['adj']['days'], 1)
+        self.assertEqual((d['spots']['cerritos']['adj']['f'], d['spots']['cerritos']['adj']['days']), (1.0, 0))
+        self.assertEqual([r[1] for r in d['spots']['cerritos']['hourly']], [round(r[1], 1) for r in before['cerritos']['hourly']])
+        self.assertEqual((d['spots']['cerritos']['hist']['buoy'], d['spots']['cerritos']['hist']['station']), ([], []))
+
+
 class EveryCountry(unittest.TestCase):
     def test_each_country_logged(self):
         # Every country in spots.json gets refresh.sh's history, log and correct runs on its own folder (Taiwan's log/, the rest log-<country>/),

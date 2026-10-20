@@ -23,9 +23,9 @@ class Spots(unittest.TestCase):
             self.assertEqual((s['buoyKm'], s['buoyName'], s['zh']['buoyName'], s['ja']['buoyName']), (None, '', '', ''))
             self.assertEqual((s['windStation'], s['stationName'], s['zh']['stationName'], s['ja']['stationName']), ([], '', '', ''))
         self.assertEqual(len({s['id'] for s in SPOTS}), len(SPOTS))
-        # after Hong Kong's and before Vietnam's and Papua New Guinea's, the last added, so the shared Open-Meteo calls, which list every
-        # spot in its order, keep each other spot's place
-        self.assertEqual([s['id'] for s in SPOTS[-22:-15]], HN_IDS)
+        # after Hong Kong's and before Vietnam's, Papua New Guinea's and Vanuatu's, the last added, so the shared Open-Meteo calls, which
+        # list every spot in its order, keep each other spot's place
+        self.assertEqual([s['id'] for s in SPOTS[-28:-21]], HN_IDS)
 
 
 FIXDIR = os.path.join(HERE, 'fixtures', 'hn')  # live copies from 2026-10-19 10:31 UTC (ECMWF wind from the sea cells, tide model)

@@ -212,17 +212,17 @@ class Fill(unittest.TestCase):
                for f in ('lat', 'ndbc', 'metar', 'tideStation', 'mlat', 'mlon')}
         self.assertEqual(got, {'lat': '-17.887,-18.47,-21.072,-14.04,-14.285,-21.265,-17.78,-17.868', 'ndbc': '51209,51214', 'metar': 'NSTU',
                                'tideStation': 'TPT2871,1910000,1770000,1732417', 'mlat': '-21.072,-14.04,-21.265', 'mlon': '-175.336,-171.62,-159.81'})
-        for name in ('for C in pi mi pg; do', 'ndbc-$b.txt', 'metar-$C.json', 'get open$C', 'get "tide$C-$t"', 'get tide$C '): self.assertIn(name, sh)
+        for name in ('for C in pi mi pg vu; do', 'ndbc-$b.txt', 'metar-$C.json', 'get open$C', 'get "tide$C-$t"', 'get tide$C '): self.assertIn(name, sh)
         self.assertIn('"$HERE/pi.py" "$W/dl" "$W/snap.json" "$HERE/spots.json" $C', sh)
 
     def test_refresh_asks_for_whole_days(self):
         # pi.py reads NOAA's times and the tide model's as UTC, so refresh.sh asks for both in UTC. From there they reach back far enough
         # that the oldest past day the page keeps (Taipei's today-5) is whole on every island's clock, UTC+13 to UTC-11 (Micronesia's,
-        # +10 to +12, and Papua New Guinea's, +10, read in the same loop), and run on past the last day tab (the spot's today+4), at any
-        # hour of the day
+        # +10 to +12, Papua New Guinea's, +10, and Vanuatu's, +11, read in the same loop), and run on past the last day tab (the spot's
+        # today+4), at any hour of the day
         import re
         with open(os.path.join(ROOT, 'refresh.sh'), encoding='utf-8') as f: sh = f.read()
-        block = re.search(r'^for C in pi mi pg; do$.*?^done$', sh, re.S | re.M).group(0)
+        block = re.search(r'^for C in pi mi pg vu; do$.*?^done$', sh, re.S | re.M).group(0)
         back, hours = map(int, re.search(r"&begin_date=\$\(date -u -d '-(\d+) days' \+%Y%m%d\)&range=(\d+)&", block).groups())
         self.assertIn('&time_zone=gmt&', block)
         past, ahead = map(int, re.search(r'&timezone=GMT&past_days=(\d+)&forecast_days=(\d+)"', block).groups())

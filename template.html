@@ -21,15 +21,16 @@ html.intro-on::after{content:"";position:fixed;inset:0;z-index:9997;background:#
   --display:"Anybody","Arial Narrow",system-ui,sans-serif;
   --body:"Public Sans",system-ui,-apple-system,"Segoe UI","PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP","Microsoft JhengHei",sans-serif;
   --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+  --led:#d0281e; --led-amb:#a86400; --led-glow:0;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#07171d; --panel:#0d232b; --ink:#e3f0f0; --muted:#8aa6ad; --line:#1d3a44;
   --sea:#4fb3c8; --sea-soft:#164452; --swell:#9fe0ea; --buoy:#ff7a3d; --night:rgba(0,0,0,.28);
-  --good:#4cc78b; --fair:#e0b040; --bad:#ff7a66; color-scheme:dark}}
+  --good:#4cc78b; --fair:#e0b040; --bad:#ff7a66; --led:#ff4a3d; --led-amb:#ffcf5c; --led-glow:1; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#07171d; --panel:#0d232b; --ink:#e3f0f0; --muted:#8aa6ad; --line:#1d3a44;
   --sea:#4fb3c8; --sea-soft:#164452; --swell:#9fe0ea; --buoy:#ff7a3d; --night:rgba(0,0,0,.28);
-  --good:#4cc78b; --fair:#e0b040; --bad:#ff7a66; color-scheme:dark}
+  --good:#4cc78b; --fair:#e0b040; --bad:#ff7a66; --led:#ff4a3d; --led-amb:#ffcf5c; --led-glow:1; color-scheme:dark}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5}
 /* One column the page's width whatever is in it, and anything still too wide (a value drawn in a fallback font, say) is cut off at the page's
@@ -189,7 +190,14 @@ header{position:relative}
   background:radial-gradient(120% 60% at 50% 0%,color-mix(in srgb,var(--rc) 14%,transparent),transparent 70%),color-mix(in srgb,var(--bg) 55%,var(--panel));
   box-shadow:0 0 0 5px color-mix(in srgb,var(--rc) 12%,transparent),0 0 60px -10px color-mix(in srgb,var(--rc) 45%,transparent)}
 .sth{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px}
-.stt{font:800 24px/1 var(--display);font-stretch:115%;letter-spacing:-.01em}
+.stt{font:400 34px/1 VT323,var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--led-amb);text-shadow:0 0 calc(10px*var(--led-glow)) rgba(255,190,60,.6)}
+html:not([lang="en"]) .stt{font:700 24px/1 var(--body);letter-spacing:.02em}
+html:not([lang="en"]) .lv{font:700 16px/1 var(--body);letter-spacing:.04em}
+#nowH:has(.lv){display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.lv{display:inline-flex;align-items:center;gap:6px;font:400 26px/1 VT323,var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--led);text-shadow:0 0 calc(8px*var(--led-glow)) rgba(255,60,40,.8)}
+.lv i{flex:none;width:9px;height:9px;border-radius:50%;background:#ff3b30;box-shadow:0 0 0 3px rgba(255,59,48,.25),0 0 10px #ff3b30;animation:lvblink 1.2s steps(1,end) infinite}
+@keyframes lvblink{50%{opacity:.15}}
+@media (prefers-reduced-motion:reduce){.lv i{animation:none}}
 .stage .daypanel{background:transparent;border:0;border-top:1px solid color-mix(in srgb,var(--rc) 40%,transparent);border-radius:0;padding:16px 2px 0}
 .stage .daypanel h2{color:var(--rc);transition:color .36s}
 @media (min-width:561px){
@@ -204,7 +212,7 @@ header{position:relative}
   .stage .daydet{border-color:var(--rc)}
   /* Phones: the strip, its day card and the chart all fit on one screen (Bryan, Oct 19). */
   .stage{gap:10px;padding-top:12px}
-  .stt{font-size:20px;white-space:nowrap}
+  .stt{font-size:30px;white-space:nowrap}
   .stage #outH{display:none}
   .stage .daydet{margin-top:8px;padding:8px 12px;gap:2px 12px}
   .stage .daydet .big{font-size:24px}
@@ -310,13 +318,15 @@ html.dousing #ctry>*{animation:flickOff .34s var(--d2,0s) both}
 .spots li{display:grid;gap:2px;padding-bottom:10px;border-bottom:1px solid var(--line)}
 .spots li:last-child{border-bottom:0;padding-bottom:0}
 .spots .links{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px}
-footer{font-size:12.5px;color:var(--muted);max-width:68ch}
-footer.legal{font-size:11px;margin-top:8px}
-details.credits{font-size:11px;color:var(--muted);max-width:68ch}
+/* Bottom credits and notices: full page width, 10px, and pulled together past the page grid's 22px gap. */
+footer{font-size:10px;line-height:1.45;color:var(--muted)}
+footer.legal{margin-top:-16px}
+details.credits{font-size:10px;line-height:1.45;color:var(--muted)}
 details.credits summary{cursor:pointer;list-style:none}
 details.credits summary::-webkit-details-marker{display:none}
 details.credits summary u{text-decoration:underline dotted}
-details.credits footer{font-size:11px;margin-top:6px}
+details.credits footer{margin-top:4px}
+details.credits footer.legal{margin-top:4px}
 
 /* Past 12 h */
 .past-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;align-items:start}
@@ -467,7 +477,7 @@ html{overscroll-behavior-y:none}
 
 
   <div class="stage" id="stage">
-  <div class="sth"><h2 class="stt" data-zh="逐日浪況" data-ja="日ごとの波">Day by day</h2></div>
+  <div class="sth"><h2 class="stt" data-zh="挑一天" data-ja="日を選ぶ">Pick your day</h2></div>
   <section aria-label="Last 4 days and 5-day outlook">
     <div class="label" id="outH" style="margin-bottom:8px">Last 4 days · 5-day outlook</div>
     <div class="days" id="days"></div>
@@ -2120,7 +2130,11 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
   const windy = s => `https://www.windy.com/${s.lat}/${s.lon}/ecmwfWaves/waves?waves,${s.lat},${s.lon},10,p:surfspots`;
   document.getElementById("picker").innerHTML = ids.map(id => `<a href="#${id}" data-spot="${id}"${id===SPOT?' aria-current="page"':""}>${SPT(ALL.spots[id],"name")}</a>`).join("");
   const zh = isZh(), ja = isJa(), bn = SPT(DATA,"buoyName"), nm = SPT(DATA,"name");
-  document.getElementById("nowH").textContent = !DATA.buoyId ? (zh ? "目前" : ja ? "現在" : "Right now") : (zh ? `目前 · ${bn}浮標` : ja ? `現在 · ${bn}ブイ` : `Right now · ${bn} buoy`) + far;
+  // A live buoy gets a blinking LIVE tag in the readout's LED font (Bryan, Oct 20); spots without one keep "Right now".
+  const nowH = document.getElementById("nowH");
+  if(!DATA.buoyId) nowH.textContent = zh ? "目前" : ja ? "現在" : "Right now";
+  else { nowH.innerHTML = `<span class="lv"><i></i>${zh ? "即時" : ja ? "ライブ" : "Live"}</span><span class="lvb"></span>`;
+    nowH.querySelector(".lvb").textContent = (zh ? `${bn}浮標` : ja ? `${bn}ブイ` : `${bn} buoy`) + far; }
   document.getElementById("outH").textContent = zh ? `過去四天 · 五天預報 · ${nm}` : ja ? `過去4日 · 5日間予報 · ${nm}` : `Last 4 days · 5-day outlook · ${nm}`;
   document.getElementById("pastChart").setAttribute("aria-label", zh ? `${bn}浮標過去 12 小時浪高` : ja ? `${bn}ブイの過去12時間の波高` : `Wave height at the ${bn} buoy, last 12 hours`);
   const NOW = `<a href="https://nowphas.mlit.go.jp/" target="_blank" rel="noopener">`;

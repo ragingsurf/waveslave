@@ -6,8 +6,8 @@
 //   backend at https://chat.test answers /reports (no reports) and POST /me/sessions, and a fake socket answers hello (signed in as
 //   "Tester", an empty room) and echoes a report back. A phone 390x844, English, Taiwan mode, the Forecast view, the intro done.
 // - The page's clock stands still 15 minutes after the data's "updated" time, as on a page fresh from the hourly refresh, unless a check
-//   sets it. That matters: the snapshot leaves out a buoy or station reading over 3 hours old, where the Right now card shows its latest
-//   reading whatever its age.
+//   sets it. rightNow also runs 55 minutes and 5 hours after it, when the latest buoy or station reading can be over 3 hours old: the
+//   Right now card shows it whatever its age, and so must a report's snapshot, while a session's moment leaves it out (sessionCap).
 // - Every snapshot is also put through the backend's own checks (chat/src/mod.js validSnap, validReport and validSession), so the room
 //   would store it as it is.
 // Playwright wherever node finds it (npm install playwright), else the copy this container keeps.
@@ -22,7 +22,7 @@ const LOCK = (HTML.match(/\bH="([0-9a-f]{64})"/) || [])[1]; // a site build open
 const UPDATED = (HTML.match(/const ALL = \{"updated":\s*"([^"]+)"/) || [])[1];
 if (!UPDATED) { console.error("no ALL.updated in the page"); process.exit(2); }
 const CHAT = "https://chat.test", CONTACT = { name: "Test Operator", email: "chat@example.com" };
-const HOUR = 3600e3, DAY = 864e5, TZ = 8 * HOUR, FRESH = Date.parse(UPDATED) + 15 * 60e3;
+const HOUR = 3600e3, DAY = 864e5, TZ = 8 * HOUR, FRESH = Date.parse(UPDATED) + 15 * 60e3, LATE = Date.parse(UPDATED) + 55 * 60e3, STALE = Date.parse(UPDATED) + 5 * HOUR;
 const SPOTS = ["donghe", "jialeshui", "nanwan", "jinshan", "fulong", "wushi", "suao", "hualien"];
 
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -52,29 +52,55 @@ function wellFormed(snap, what) {
   if (bad.length) throw new Error(`${what}: ${bad.join("; ")} in ${JSON.stringify(snap)}`);
 }
 
+// The Right now card for each Taiwan spot on a page whose clock stands at `time`, beside CHAT._snap(id, now): the buoy's height, period
+// and direction and when it was read, the station's wind, its direction and time, and the tide, with the card's own rounding. Each
+// disagreement goes in bad, headed with `when`.
+async function cardAgrees(open, time, when, bad) {
+  const page = await open({ time });
+  for (const id of SPOTS) {
+    const got = await page.evaluate(id => { switchSpot(id); const f = [...document.querySelectorAll("#nowFacts .fact")].map(x => [x.querySelector(".v").textContent, x.querySelector(".s").textContent]);
+      return { h: document.getElementById("nowH1").textContent, sub: document.getElementById("nowSub").textContent, wind: f.find(x => / kt$/.test(x[0])) || null, tide: f.find(x => / cm$/.test(x[0])) || null,
+        snap: window.CHAT._snap(id, Date.now()), now: Date.now() }; }, id);
+    const s = got.snap, say = (what, card, snap) => { if (card !== snap) bad.push(`${when}, ${id} ${what}: the card ${JSON.stringify(card)}, the snapshot ${JSON.stringify(snap)}`); };
+    if (!s) { bad.push(`${when}, ${id}: no snapshot`); continue; }
+    wellFormed(s, `${when}, ${id}`);
+    say("height", got.h, s.bhs == null ? "–" : `${r1(s.bhs)}m`);
+    const per = /^([\d.]+) s period/.exec(got.sub), from = /waves from the (\w+)/.exec(got.sub), read = /read at (\d\d:\d\d)$/.exec(got.sub);
+    say("period", per ? per[1] : null, s.btp == null ? null : r1(s.btp));
+    say("wave direction", from ? from[1] : null, s.bdp == null ? null : compass(s.bdp));
+    say("buoy time", read ? read[1] : null, s.bhs_t ? s.bhs_t.slice(11, 16) : null);
+    if (got.wind) { say("wind", got.wind[0], s.ws == null ? null : `${Math.round(s.ws)} kt`);
+      const wf = / from (\w+) · /.exec(got.wind[1]), wt = /station (\d\d:\d\d)$/.exec(got.wind[1]);
+      if (wf) say("wind direction", wf[1], compass(s.wd)); say("wind time", wt ? wt[1] : null, s.ws_t && s.ws_t.slice(11, 16)); }
+    // With no station reading the card shows no wind, and the snapshot may take the model's for the hour instead.
+    else if (s.ws != null && s.ws_t !== taipei(Math.floor(got.now / HOUR) * HOUR)) bad.push(`${when}, ${id}: the card has no wind, the snapshot ${s.ws} kt from ${s.ws_t}`);
+    say("tide", got.tide ? got.tide[0] : null, s.tide == null ? null : `${Math.round(s.tide * 100)} cm`);
+    say("tide time", s.tide_t, taipei(got.now));
+    if (s.bhs == null || s.ws == null || s.tide == null) bad.push(`${when}, ${id}: the built page has a buoy, a station and a tide for now, but the snapshot is ${JSON.stringify(s)}`);
+  }
+  await page.context().close();
+}
+
 const CHECKS = {
-  // "Now", for each Taiwan spot, agrees with the Right now card as it reads: the buoy's height, period and direction and when it was read,
-  // the station's wind, its direction and time, and the tide, with the card's own rounding.
+  // "Now", for each Taiwan spot, agrees with the Right now card as it reads (cardAgrees): on a page fresh from the refresh (15 minutes
+  // after it), at 55 minutes (the next refresh not in yet, when a buoy 2 or more hours behind is over 3 hours old) and at 5 hours (a page
+  // left open, every reading over 3 hours old).
   async rightNow(open) {
-    const page = await open({}), bad = [];
+    const bad = [];
+    for (const [when, time] of [["at +15 min", FRESH], ["at +55 min", LATE], ["at +5 h", STALE]]) await cardAgrees(open, time, when, bad);
+    if (bad.length) throw new Error(bad.join("; "));
+  },
+  // A session's moment keeps the 3-hour limit on measured readings: 5 hours after the refresh, ten minutes ago has no buoy and no
+  // station wind (the model's wind for that hour, if any), where now has the card's buoy and station.
+  async sessionCap(open) {
+    const page = await open({ time: STALE }), bad = [], ms = STALE - 10 * 60e3, hour = taipei(Math.floor(ms / HOUR) * HOUR);
     for (const id of SPOTS) {
-      const got = await page.evaluate(id => { switchSpot(id); const f = [...document.querySelectorAll("#nowFacts .fact")].map(x => [x.querySelector(".v").textContent, x.querySelector(".s").textContent]);
-        return { h: document.getElementById("nowH1").textContent, sub: document.getElementById("nowSub").textContent, wind: f.find(x => / kt$/.test(x[0])) || null, tide: f.find(x => / cm$/.test(x[0])) || null,
-          snap: window.CHAT._snap(id, Date.now()), now: Date.now() }; }, id);
-      const s = got.snap, say = (what, card, snap) => { if (card !== snap) bad.push(`${id} ${what}: the card ${JSON.stringify(card)}, the snapshot ${JSON.stringify(snap)}`); };
-      if (!s) { bad.push(`${id}: no snapshot`); continue; }
-      wellFormed(s, id);
-      say("height", got.h, s.bhs == null ? "–" : `${r1(s.bhs)}m`);
-      const per = /^([\d.]+) s period/.exec(got.sub), from = /waves from the (\w+)/.exec(got.sub), read = /read at (\d\d:\d\d)$/.exec(got.sub);
-      say("period", per ? per[1] : null, s.btp == null ? null : r1(s.btp));
-      say("wave direction", from ? from[1] : null, s.bdp == null ? null : compass(s.bdp));
-      say("buoy time", read ? read[1] : null, s.bhs_t ? s.bhs_t.slice(11, 16) : null);
-      say("wind", got.wind ? got.wind[0] : null, s.ws == null ? null : `${Math.round(s.ws)} kt`);
-      if (got.wind) { const wf = / from (\w+) · /.exec(got.wind[1]), wt = /station (\d\d:\d\d)$/.exec(got.wind[1]);
-        if (wf) say("wind direction", wf[1], compass(s.wd)); say("wind time", wt ? wt[1] : null, s.ws_t.slice(11, 16)); }
-      say("tide", got.tide ? got.tide[0] : null, s.tide == null ? null : `${Math.round(s.tide * 100)} cm`);
-      say("tide time", s.tide_t, taipei(got.now));
-      if (s.bhs == null || s.ws == null || s.tide == null) bad.push(`${id}: the built page has a buoy, a station and a tide for now, but the snapshot is ${JSON.stringify(s)}`);
+      const got = await page.evaluate(([id, ms]) => ({ then: window.CHAT._snap(id, ms), now: window.CHAT._snap(id, Date.now()) }), [id, ms]), t = got.then;
+      if (!t) { bad.push(`${id}: no snapshot ten minutes ago`); continue; }
+      wellFormed(t, id);
+      if (t.bhs != null || t.btp != null || t.bdp != null) bad.push(`${id}: ten minutes ago has the buoy's ${t.bhs} m from ${t.bhs_t}, over 3 hours before`);
+      if (t.ws != null && t.ws_t !== hour) bad.push(`${id}: ten minutes ago has the wind from ${t.ws_t}, not the model's for ${hour}`);
+      if (!got.now || got.now.bhs == null || got.now.ws == null || got.now.ws_t === hour) bad.push(`${id}: now is ${JSON.stringify(got.now)}, want the card's buoy and station`);
     }
     if (bad.length) throw new Error(bad.join("; "));
   },

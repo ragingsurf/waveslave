@@ -1170,13 +1170,17 @@ Object.assign(HOOK, { login: guard(login), signin: guard(finishSignin), sheet: g
 //             (hist.wx and wx). Later: the CWA forecast (wind), its nearest within 3 hours, as the page's windAt() takes it.
 //   Tide      tide: tides[day], interpolated at that minute as the page's tide reading is
 //   Buoy      bhs, btp, bdp: the latest on-the-hour reading (hist.buoy and buoy)
-// A measured reading (buoy or station) counts up to 3 hours before the moment, so "now" is the reading the Right now card shows on a page
-// fresh from the hourly refresh, while an hour long past or still to come has none. The conversions are those of boot()'s Right now
-// block: periods ×1.3, heights in metres and wind in knots as the data has them, and the tide in metres to the centimetre the card shows.
+// Now (a report, or any moment within a minute of the clock) reads the buoy and the station as the Right now card does (template.html
+// boot(), "right now": DATA.buoy's and DATA.dwind's last rows): buoy's latest row with a height and dwind's latest with a speed, up to
+// now and however old, so a report carries what the card shows even when the next refresh is late. A buoy gone quiet shows "–" on the
+// card and gives none here, though hist.buoy still has its older rows. Any other moment, a session's, takes a measured reading only up
+// to 3 hours before it, so an hour long past or still to come never picks up an unrelated one. The conversions are those of boot()'s
+// Right now block: periods ×1.3, heights in metres and wind in knots as the data has them, and the tide in metres to the centimetre the
+// card shows.
 // A value that's missing, or outside the range the backend takes (chat/src/mod.js SNAP_KEYS), is left out, never sent as null: the room
 // refuses a snapshot with either. null when nothing is known. Times are never written with toISOString(), whose milliseconds the room
 // refuses, and never on the device's clock.
-const HOUR = 3600e3, MEASURED = 3 * HOUR;
+const HOUR = 3600e3, MEASURED = 3 * HOUR, NOW_SPAN = 60e3; // a session's measured readings go back 3 hours; "now" is within a minute
 const BUOY_P = 1.3; // template.html boot(): "const BUOY_P = 1.3", the period every buoy and forecast row is shown with
 const SNAP_RANGE = { hs: [0, 15], tp: [0, 30], dp: [0, 360], shs: [0, 15], stp: [0, 30], sdp: [0, 360], ws: [0, 120], wd: [0, 360], tide: [-5, 5], bhs: [0, 15], btp: [0, 30], bdp: [0, 360] };
 const SNAP_TIME = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?Z?$/; // mod.js ISO_TIME
@@ -1196,21 +1200,23 @@ function tideAt(s, t) {
 function snapshot(id, ms) {
   const s = isSpot(id) ? own(ALL.spots, id) : null; if (!s || fin(ms) == null) return null;
   const H = s.hist && typeof s.hist === "object" ? s.hist : {}, hour = Math.floor(ms / HOUR) * HOUR, out = {};
+  const clock = Date.now(), now = Math.abs(ms - clock) < NOW_SPAN, since = now ? -Infinity : ms - MEASURED;
   const put = (key, v, t) => { const r = SNAP_RANGE[key]; if (fin(v) != null && v >= r[0] && v <= r[1]) { out[key] = v; out[key + "_t"] = t; } };
   const period = p => fin(p) == null ? null : p * BUOY_P;
   const atHour = list => list.find(r => tp(r[0]) === hour);
-  const latest = (list, ok) => { let best = null, bt = -Infinity; for (const r of list) { const t = tp(r[0]); if (t <= ms && t > ms - MEASURED && t > bt && ok(r, t)) { best = r; bt = t; } } return best; };
+  const latest = (list, ok) => { let best = null, bt = -Infinity; for (const r of list) { const t = tp(r[0]); if (t <= ms && t > since && t > bt && ok(r, t)) { best = r; bt = t; } } return best; };
   const w = atHour(rowsOf(H.wave, s.hourly));
   if (w) { put("hs", w[1], w[0]); put("tp", period(w[2]), w[0]); put("dp", w[3], w[0]); put("shs", w[4], w[0]); put("stp", period(w[5]), w[0]); put("sdp", w[6], w[0]); }
-  if (ms <= Date.now()) {
-    const st = latest(rowsOf(H.station, s.dwind), r => fin(r[1]) != null), m = st ? null : atHour(rowsOf(H.wx, s.wx).filter(r => fin(r[4]) != null));
+  if (now || ms <= clock) {
+    const st = latest(now ? rowsOf(s.dwind) : rowsOf(H.station, s.dwind), r => fin(r[1]) != null), m = st ? null : atHour(rowsOf(H.wx, s.wx).filter(r => fin(r[4]) != null));
     if (st) { put("ws", st[1], st[0]); put("wd", st[2], st[0]); } else if (m) { put("ws", m[4], m[0]); put("wd", m[5], m[0]); }
   } else {
     let f = null, fd = Infinity; for (const r of rowsOf(s.wind)) { const d = Math.abs(tp(r[0]) - ms); if (fin(r[1]) != null && d < fd) { f = r; fd = d; } }
     if (f && fd <= 3 * HOUR) { put("ws", f[1], f[0]); put("wd", f[2], f[0]); }
   }
   const cm = tideAt(s, ms); if (fin(cm) != null) put("tide", Math.round(cm) / 100, taipei(ms));
-  const b = latest(rowsOf(H.buoy, s.buoy), (r, t) => t % HOUR === 0 && fin(r[1]) != null); // template.html boot(): bObs, the on-the-hour rows with a height
+  // Now: the card's row, buoy's latest with a height. Otherwise template.html boot()'s bObs, the on-the-hour rows with a height.
+  const b = now ? latest(rowsOf(s.buoy), r => fin(r[1]) != null) : latest(rowsOf(H.buoy, s.buoy), (r, t) => t % HOUR === 0 && fin(r[1]) != null);
   if (b) { put("bhs", b[1], b[0]); put("btp", period(b[2]), b[0]); put("bdp", b[3], b[0]); }
   if (!Object.keys(out).length) return null;
   if (typeof ALL.updated === "string" && ALL.updated.length <= 24 && SNAP_TIME.test(ALL.updated)) out.updated = ALL.updated;

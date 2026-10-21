@@ -968,8 +968,8 @@ export class Room extends DurableObject {
   // why a message was hidden, and the LINE account code (sub_hash) that unban takes. A socket that sends five bad
   // frames (invalid ones, or writes before signing in) is closed with 1008. gone is not a bad frame: a working app gets
   // it from ordinary races (a double tap, a like on a message hidden just as it was tapped). A frame over 4 KB closes
-  // it with 1009. Each address may hold 5 sockets. The room's own close codes: 4401 signed out everywhere (or the account is
-  // deleted), 4403 banned, 4426 reload for the new chat, and 4429 resting.
+  // it with 1009. Each address may hold 5 sockets. The room's own close codes: 4401 signed out everywhere (or the
+  // account is deleted), 4403 banned, 4426 reload for the new chat, and 4429 resting.
 
   // GET /ws, once the Worker has checked the Origin: a new socket, unless the visitor's address already holds 5. The
   // address is kept only as a tag on its sockets, and only as its HMAC under SUB_PEPPER, so the room never holds an IP
@@ -1102,9 +1102,9 @@ export class Room extends DurableObject {
 
   // say {text, spot?, reply_to?}: a text message of up to 500 characters, as normalise() leaves it, trimmed. It is
   // tagged with the spot the app's filter showed (none for All), and a reply takes its parent's tag instead, from a
-  // parent that is there to see (gone when it isn't). A say that starts with a slash is dropped: chat.js sends those as admin frames, so one
-  // that comes as say is not from chat.js. The hard-block filters read the checking copy; a blocked text stays in the
-  // sender's box, and counts against no limit.
+  // parent that is there to see (gone when it isn't). A say that starts with a slash is dropped: chat.js sends those as
+  // admin frames, so one that comes as say is not from chat.js. The hard-block filters read the checking copy; a
+  // blocked text stays in the sender's box, and counts against no limit.
   onSay(ws, user, frame) {
     if (typeof frame.text !== "string") return "invalid";
     const { stored, check } = normalise(frame.text);
@@ -1224,11 +1224,11 @@ export class Room extends DurableObject {
 
   // ---- The report button (spec "Moderation", step 4) -------------------------------------------------------------
 
-  // flag {id, reason}, on a message that is there to see (gone when it isn't). Flags are kept by LINE account (sub_hash), so an account
-  // flags a message once, however often it signs up again. A self-flag, a flag on Bryan's messages and one on a message
-  // he restored are ignored, and nothing is kept. Otherwise the message hides once 3 counted flags reach it, or at once
-  // on a one-flag hide (see FLAGS_TO_HIDE and flagger()). The flagger gets no answer either way, so nobody learns
-  // whether their flag counted. 20 flags a day.
+  // flag {id, reason}, on a message that is there to see (gone when it isn't). Flags are kept by LINE account
+  // (sub_hash), so an account flags a message once, however often it signs up again. A self-flag, a flag on Bryan's
+  // messages and one on a message he restored are ignored, and nothing is kept. Otherwise the message hides once 3
+  // counted flags reach it, or at once on a one-flag hide (see FLAGS_TO_HIDE and flagger()). The flagger gets no answer
+  // either way, so nobody learns whether their flag counted. 20 flags a day.
   onFlag(ws, user, frame) {
     if (!isId(frame.id) || !REASONS.includes(frame.reason)) return "invalid";
     const msg = this.one(

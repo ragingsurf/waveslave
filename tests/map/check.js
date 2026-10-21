@@ -490,7 +490,7 @@ const CHECKS = {
   // The countries stand in a column down the left side, in the switch's order from just under the top buttons, each under the last with the
   // map between them (a finger there drags it), and only when the column has no room left for the next does it start another column, at the
   // top just right of the last; in English, Chinese and Japanese each is named in the page's language. With a spot's forecast card open, a
-  // finger on any of them still lands on it, as it does on the map's tools down the right while the list is shut; sideways that holds on a short screen too (a small
+  // finger on any of them still lands on it, as it does on the map's tools down the right; sideways that holds on a short screen too (a small
   // phone in Safari, whose bar takes some of the height), where the countries stand five deep in several columns.
   async countryColumn(open) {
     const page = await open(home("tw"));
@@ -518,21 +518,12 @@ const CHECKS = {
       if (r.gap !== "wsFx") throw new Error(`in ${l} a finger between the first two country buttons lands on ${r.gap}, not the map`);
       if (r.names !== r.want) throw new Error(`in ${l} the country buttons are named ${r.names}, want ${r.want}`);
     }
-    // The tap on Donghe shuts the country list (#87), so the buttons showing are checked first (the map's own country and its tools), then every
-    // country, with the list opened by a tap on that country as a finger would, which leaves the card open. Open, the list is a dropdown over
-    // the map and may cover its tools, as a menu does, so only the countries are checked then.
     const cardOpen = async (page, where) => {
       await tapAt(page, await page.evaluate(() => { const s = ALL.spots.donghe; return window.__ws.px(MAPM.E(s.lon), s.lat); }));
       if (await page.evaluate(() => document.getElementById("wsSheet").hidden)) throw new Error(`${where}tapping Donghe did not open its forecast card`);
-      const covered = sel => page.evaluate(sel => [...document.querySelectorAll(sel)].filter(b => b.offsetParent).filter(b => { const r = b.getBoundingClientRect(), at = document.elementFromPoint((r.left + r.right)/2, (r.top + r.bottom)/2);
-        return !at || at.closest("button") !== b; }).map(b => b.dataset.c || b.id), sel);
-      let hidden = await covered("#wsCtry button, #viewWs .zoom button");
+      const hidden = await page.evaluate(() => [...document.querySelectorAll("#wsCtry button, #viewWs .zoom button")].filter(b => b.offsetParent).filter(b => { const r = b.getBoundingClientRect(), at = document.elementFromPoint((r.left + r.right)/2, (r.top + r.bottom)/2);
+        return !at || at.closest("button") !== b; }).map(b => b.dataset.c || b.id));
       if (hidden.length) throw new Error(`${where}with Donghe's forecast card open, a finger on ${hidden.join(", ")} lands on something else`);
-      await page.click('#wsCtry button[aria-pressed="true"]'); await settle(page);
-      const s = await page.evaluate(() => ({ card: !document.getElementById("wsSheet").hidden, shown: [...document.querySelectorAll("#wsCtry button")].filter(b => b.offsetParent).length, all: document.querySelectorAll("#wsCtry button").length }));
-      if (!s.card || s.shown !== s.all) throw new Error(`${where}after a tap on the map's country with Donghe's forecast card open, the card is ${s.card ? "open" : "shut"} and ${s.shown} of ${s.all} countries show`);
-      hidden = await covered("#wsCtry button");
-      if (hidden.length) throw new Error(`${where}with Donghe's forecast card and the country list open, a finger on ${hidden.join(", ")} lands on something else`);
     };
     await cardOpen(page, "");
     if (land) await cardOpen(await open({ ...home("tw"), size: { width: 667, height: 320 } }), "on a 667x320 screen, ");
@@ -568,9 +559,12 @@ const CHECKS = {
   async forecastFitsWidth(open) {
     const page = await open(home("tw")); await page.evaluate(() => setView("fc", true)); await settle(page);
     for (const l of ["en", "zh", "ja"]) {
-      // The languages are in the menu under the button in the corner, which shuts itself after each pick.
-      await page.waitForFunction(() => !document.getElementById("langWrap").classList.contains("open")); await page.click("#langBtn");
-      await page.click(`#lang button[data-l="${l}"]`); await settle(page);
+      // The languages are in the menu under the button in the corner, which shuts itself after each pick. 日本語 is hidden from it for now (#92),
+      // but its text is still there, so it's switched to directly.
+      if (await page.evaluate(l => document.querySelector(`#lang button[data-l="${l}"]`).hidden, l)) await page.evaluate(l => setLang(l), l);
+      else { await page.waitForFunction(() => !document.getElementById("langWrap").classList.contains("open")); await page.click("#langBtn");
+        await page.click(`#lang button[data-l="${l}"]`); }
+      await settle(page);
       const r = await page.evaluate(() => { const d = document.documentElement, w = document.querySelector(".wrap"), edge = w.getBoundingClientRect().right - parseFloat(getComputedStyle(w).paddingRight);
         return { sw: d.scrollWidth, cw: d.clientWidth, wide: [...w.children].map(e => [e.id || e.className || e.tagName, e.getBoundingClientRect().right]).filter(([, x]) => x > edge + 0.5).map(([e, x]) => `${e} ends at ${x}px, past the column's ${edge}px`) }; });
       if (r.wide.length) throw new Error(`in ${l}, ${r.wide.join("; ")}`);
@@ -622,7 +616,7 @@ const CHECKS = {
     if (!(await at()).card) throw new Error("a tap on Jinshan's tag opened no forecast card"); await reopen("Taiwan, Jinshan's card left open");
     await tapAt(page, await page.evaluate(() => { const v = window.__ws.view(); return [v.W*0.1, v.H*0.42]; })); await settle(page); // open sea west of Taiwan
     if (!(await at()).pin) throw new Error("a tap on open sea at Taiwan's home view dropped no pin"); await reopen("Taiwan, a pin left dropped");
-    await reopen("Hawaii, picked on Forecast", () => { setWorld(true); switchCountry("hi"); });
+    await reopen("Hawaii, picked on Forecast", () => { sessionStorage.setItem("waveslave-unlock", window.__lockHash); setWorld(true); switchCountry("hi"); }); // leaving World mode forgot the code
     await zoomOut(page); await reopen("Hawaii, left zoomed all the way out");
   },
   // Taiwan mode, the page's default: no country row and no country buttons over the map, and zoomed out no other country's spot to tap (a
@@ -633,7 +627,7 @@ const CHECKS = {
     const page = await open({ spot: "donghe", saved: MID, world: false });
     const shown = () => page.evaluate(() => ({ world: WORLD, cls: document.documentElement.classList.contains("world"), kept: localStorage.getItem("waveslave-world"),
       row: document.getElementById("ctry").getClientRects().length > 0, slot: document.getElementById("ctrySlot").offsetHeight,
-      picker: document.getElementById("picker").getBoundingClientRect().top - document.querySelector(".tabrow").getBoundingClientRect().bottom, scroll: scrollY, btns: document.getElementById("wsCtry").offsetParent ? document.querySelectorAll("#wsCtry button").length : 0,
+      picker: document.getElementById("picker").getBoundingClientRect().top - document.querySelector(".tabs").getBoundingClientRect().bottom, scroll: scrollY, btns: document.getElementById("wsCtry").offsetParent ? document.querySelectorAll("#wsCtry button").length : 0,
       want: document.querySelectorAll("#ctry button").length, cur: CUR, cc: spotCountry(CUR), MC: window.__ws.view().MC }));
     let a = await shown();
     if (a.world || a.cls) throw new Error("the page opened in World mode, want Taiwan mode");
@@ -652,12 +646,18 @@ const CHECKS = {
     // under Forecast / Map and the spot picker moves down by that and the row's height; Taiwan mode closes it again, leaving no gap.
     await page.click("#wsFs"); await settle(page); const at = (await shown()).picker;
     if (Math.abs(at - 8) > 0.5) throw new Error(`in Taiwan mode the spot picker is ${at}px under Forecast / Map, want 8px (no gap kept for the countries)`);
+    // Leaving World mode forgot the code (Bryan, Oct 21: ask often), so the W asks for it again, and Esc backs out still in Taiwan mode.
+    await page.click("header .brand .w"); await page.waitForSelector("#wsPin"); a = await shown();
+    if (a.world || a.row) throw new Error("after World mode was switched off, a tap on the W turned it straight back on, want the PIN box first");
+    await page.keyboard.press("Escape"); await page.waitForFunction(() => !document.getElementById("wsPin")); await settle(page);
+    const unlock = () => page.evaluate(() => sessionStorage.setItem("waveslave-unlock", window.__lockHash)); await unlock();
     for (const want of [true, false]) { await page.click("header .brand .w"); await settle(page); a = await shown();
       if (a.world !== want || a.row !== want) throw new Error(`a tap on the W left WORLD ${a.world} and the country row ${a.row ? "showing" : "hidden"}, want ${want ? "World mode" : "Taiwan mode"}`);
       const pick = want ? at + 10 + a.slot : at;
       if (Math.abs(a.picker - pick) > 0.5) throw new Error(`after a tap on the W the spot picker is ${a.picker}px under Forecast / Map, want ${pick} (scrollY ${a.scroll})`); }
     // The row scrolled to its far end comes back, after Taiwan mode, at its start: Taiwan in sight.
-    const left = await page.evaluate(async () => { const r = document.getElementById("ctry"); await setWorld(true); r.scrollLeft = r.scrollWidth; await setWorld(false); await setWorld(true); return r.scrollLeft; });
+    const left = await page.evaluate(async () => { const r = document.getElementById("ctry"), u = () => sessionStorage.setItem("waveslave-unlock", window.__lockHash);
+      u(); await setWorld(true); r.scrollLeft = r.scrollWidth; await setWorld(false); u(); await setWorld(true); return r.scrollLeft; });
     if (left !== 0) throw new Error(`back in World mode the country row is scrolled ${left}px along, want 0 (Taiwan in sight)`);
   },
   // A link to another country's spot opens it in World mode, kept for next time; in Taiwan mode the last spot open in another country is

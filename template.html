@@ -1,6 +1,6 @@
 <title>WaveSlave</title>
-<script>/* Language before first paint: the saved pick, else the browser's (zh → 中文, ja → 日本語). */try{var l=localStorage.getItem("waveslave-lang")||(/^zh/i.test(navigator.language)?"zh":/^ja/i.test(navigator.language)?"ja":"en");document.documentElement.lang=l==="zh"?"zh-Hant-TW":l==="ja"?"ja":"en";}catch(e){}</script>
-<script>/* World mode (the secret switch, the W in the logo) before first paint, so Taiwan mode never flashes up the country row. */try{if(localStorage.getItem("waveslave-world")==="1")document.documentElement.classList.add("world")}catch(e){}</script>
+<script>/* Language before first paint: the saved pick, else the browser's (zh → 中文). 日本語 is switched off for now, so a saved ja reads as English. */try{var l=localStorage.getItem("waveslave-lang")||(/^zh/i.test(navigator.language)?"zh":"en");document.documentElement.lang=l==="zh"?"zh-Hant-TW":"en";}catch(e){}</script>
+<script>/* World mode (the secret switch, the W in the logo) before first paint, so Taiwan mode never flashes up the country row. Behind the World passcode (web/head.html) it waits for the code each time the page opens. */try{if(localStorage.getItem("waveslave-world")==="1"&&(!window.__worldLock||wsUnlocked()))document.documentElement.classList.add("world")}catch(e){}</script>
 <style>/* Opening animation cover: dark from the first paint until the intro takes over; it lifts by itself after 6 s if the intro never runs. */
 html.intro-on::after{content:"";position:fixed;inset:0;z-index:9997;background:#07050f;animation:introSafe 0s 6s forwards}@keyframes introSafe{to{visibility:hidden}}</style>
 <script>/* Opening animation once per visit, never for reduced motion, and not behind the passcode screen (it plays after the unlock reload). */try{if(!document.documentElement.classList.contains("locked")&&!sessionStorage.getItem("waveslave-intro")&&!matchMedia("(prefers-reduced-motion: reduce)").matches)document.documentElement.classList.add("intro-on")}catch(e){}</script>
@@ -81,17 +81,19 @@ html.world .brand .w::after{opacity:1}
 html.igniting header .brand .w::after{animation:flickOn .9s both}
 html.dousing header .brand .w::after{animation:flickOff .4s both}
 .where{color:var(--muted);font-size:13px}
-/* Language (Bryan, Oct 21): one small button pinned to the top right corner, naming the page's language; a tap drops down English, 中文 and
-   日本語 to switch to, the current one lit. The page already follows the phone's language, so most visitors never need it. */
+/* The top right corner (Bryan, Oct 21): the language button, and under it how fresh the data is, both right-aligned beside the logo.
+   Language: one small button naming the page's language; a tap drops down English and 中文 to switch to (日本語 is hidden for now), the current one lit.
+   The page already follows the phone's language, so most visitors never need it. */
 header{position:relative}
-.langwrap{position:absolute;top:0;right:0;z-index:20}
+.hdtools{position:absolute;top:0;right:0;z-index:20;display:flex;flex-direction:column;align-items:flex-end;gap:12px}
+.langwrap{position:relative}
 .langbtn{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:99px;background:var(--panel);border:1px solid var(--line);color:var(--muted);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP","Microsoft JhengHei",sans-serif;white-space:nowrap;cursor:pointer}
 .lang{position:absolute;top:calc(100% + 6px);right:0;display:flex;flex-direction:column;gap:2px;min-width:128px;padding:6px;border-radius:14px;background:var(--panel);border:1px solid var(--line);box-shadow:0 14px 34px rgba(0,0,0,.45);transition:opacity .16s,transform .16s,visibility .16s}
 .langwrap:not(.open) .lang{visibility:hidden;opacity:0;transform:translateY(-4px);pointer-events:none}
 .lang button{border:0;background:none;color:var(--ink);font:600 14px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP","Microsoft JhengHei",sans-serif;text-align:left;padding:9px 12px;border-radius:99px;cursor:pointer;position:relative;z-index:1;transition:color .36s,text-shadow .36s}
 .lang button[aria-pressed="true"]{color:#ffb347;text-shadow:0 0 6px rgba(255,140,0,.7)}
-/* How fresh the data is (Bryan, Oct 21): a quiet line at the end of the Forecast / Map row, "Updated 18:44" by a green light, with the age
-   once the data is an hour old; past 12 hours the day too, all in amber. */
+/* How fresh the data is (Bryan, Oct 21): a quiet line under the language button, "Updated 18:44" by a green light; from an hour old the
+   age instead, "Updated 3 h ago", short enough to sit beside the logo on a small phone; past 12 hours in amber. */
 .fresh{font-size:12px;color:var(--muted);white-space:nowrap}
 .fresh::before{content:"";display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;background:var(--good);box-shadow:0 0 6px var(--good);vertical-align:1px}
 .fresh.stale{color:var(--fair)}
@@ -105,6 +107,7 @@ header{position:relative}
 .hero-num{font-family:var(--display);font-weight:800;font-stretch:120%;font-size:clamp(64px,16vw,104px);line-height:.85;letter-spacing:-.02em}
 .hero-num small{font-size:.35em;font-weight:600;margin-left:4px;color:var(--muted)}
 .hero-sub{font-size:16px;margin-top:8px}
+.hero-sub .dim{color:var(--muted)}
 .rating-pill{display:inline-flex;align-items:center;gap:8px;margin-top:14px;padding:6px 12px 6px 8px;border-radius:99px;font-weight:600;font-size:14px;background:color-mix(in srgb,var(--rc) 14%,transparent);color:var(--rc)}
 /* The board pick (Bryan picked this quiver, Oct 18): shortboard, mid-length and longboard standing beside the wave height at their real
    lengths, the pick lit. On a screen too narrow for both, the boards drop under the number. */
@@ -259,9 +262,6 @@ svg text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
    Forecast / Map. The space above the countries is their slot's own margin, not a gap, so it opens and closes with the slot (setWorld). */
 .ctl{display:grid;grid-template-columns:minmax(0,1fr)}
 .ctl .picker{margin-top:8px}
-/* Forecast / Map with the freshness line at the far end of its row; where both don't fit (a long line, when the data is old), the line drops
-   under the switch. */
-.tabrow{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 10px}
 /* The country row's slot: it clips the row while it opens and closes. */
 .ctryslot{overflow:hidden;margin-top:10px}
 .ctry{position:relative;display:flex;width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none;overscroll-behavior-x:contain;gap:2px;padding:3px;margin:0;border-radius:99px;background:var(--panel);border:1px solid var(--line)}
@@ -449,13 +449,19 @@ html{overscroll-behavior-y:none}
 .wsmap.fs .wsctry button[aria-pressed="true"]{color:#ffb347;background:#0a0f12}
 /* Shut, the map's countries are just its own (with a ▾); open, each shows its outline and name. */
 .wsmap.fs .wsctry:not(.open) button:not([aria-pressed="true"]){display:none}
-.wsmap.fs .wsctry button{position:relative}
+.wsmap.fs .wsctry button{position:relative;border-radius:99px}
+/* Opening, the other countries slide down one after another; shutting (.shutting, for a moment before .open goes) they slide back up (Bryan, Oct 21). */
+.wsmap.fs .wsctry.open button:not([aria-pressed="true"]){animation:wsDrop .28s cubic-bezier(.2,.8,.3,1) calc(var(--i,0)*16ms) backwards}
+.wsmap.fs .wsctry.shutting button:not([aria-pressed="true"]){animation:wsLift .18s ease-in forwards;pointer-events:none}
+@keyframes wsDrop{from{opacity:0;transform:translateY(-16px)}}
+@keyframes wsLift{to{opacity:0;transform:translateY(-16px)}}
+@media (prefers-reduced-motion:reduce){.wsmap.fs .wsctry button{animation:none!important}}
 .wsmap.fs .wsctry:not(.open) button[aria-pressed="true"]::after{content:"▾";position:absolute;right:-1px;bottom:-3px;font-size:10px;line-height:1;color:#ffb347}
 .wsmap.fs .wsctry.open button:has(svg){width:auto;display:flex;align-items:center;gap:6px;padding:0 10px 0 5px}
 .wsmap.fs .wsctry.open button:has(svg) svg{margin:0!important}
 .wsmap.fs .wsctry.open button:not([aria-pressed="true"]){background:#1c1340}
 .wsmap.fs .wsctry.open button:has(svg)::after{content:attr(aria-label);font-size:12px;white-space:nowrap}
-.wsmap .wsctry > .glide-pill{z-index:1;border-radius:10px;background:none;border:1px solid #ffb347;box-shadow:0 0 8px rgba(255,140,0,.4)}
+.wsmap .wsctry > .glide-pill{z-index:1;border-radius:99px;background:none;border:1px solid #ffb347;box-shadow:0 0 8px rgba(255,140,0,.4)}
 /* With a spot's card open the countries stay clear of it: sideways the card sits between them (however many columns they take: --ctryr is their
    right edge) and the map tools, upright they stop above it. */
 @media (orientation:landscape){.wsmap.fs .sheet{left:calc(var(--ctryr,calc(42px + env(safe-area-inset-left))) + 10px);right:calc(52px + env(safe-area-inset-right))}}
@@ -477,11 +483,13 @@ html{overscroll-behavior-y:none}
     <div class="brandbox">
       <h1 class="brand" aria-label="WaveSlave"><span class="w">W</span>aveSlave</h1>
     </div>
+    <div class="hdtools">
     <div class="langwrap" id="langWrap"><button class="langbtn" id="langBtn" aria-haspopup="true" aria-expanded="false" aria-controls="lang" aria-label="Language / 語言 / 言語"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 2.6 15.4 0 18M12 3c-2.6 2.6-2.6 15.4 0 18"/></svg><span id="langName">EN</span></button>
-    <div class="lang" id="lang" role="group" aria-label="Language / 語言 / 言語"><button data-l="en" aria-pressed="true" lang="en">English</button><button data-l="zh" aria-pressed="false" lang="zh-Hant-TW">中文</button><button data-l="ja" aria-pressed="false" lang="ja">日本語</button></div></div>
+    <div class="lang" id="lang" role="group" aria-label="Language / 語言 / 言語"><button data-l="en" aria-pressed="true" lang="en">English</button><button data-l="zh" aria-pressed="false" lang="zh-Hant-TW">中文</button><button data-l="ja" aria-pressed="false" lang="ja" hidden>日本語</button></div></div>
+    <span class="fresh" id="fresh">Data snapshot</span></div>
   </header>
   <div class="ctl">
-    <div class="tabrow"><nav class="tabs" role="tablist" aria-label="View"><button role="tab" data-v="fc" aria-selected="true" data-zh="預報" data-ja="予報">Forecast</button><button role="tab" data-v="ws" aria-selected="false" data-zh="地圖" data-ja="地図">Map</button></nav><span class="fresh" id="fresh">Data snapshot</span></div>
+    <nav class="tabs" role="tablist" aria-label="View"><button role="tab" data-v="fc" aria-selected="true" data-zh="預報" data-ja="予報">Forecast</button><button role="tab" data-v="ws" aria-selected="false" data-zh="地圖" data-ja="地図">Map</button></nav>
     <div class="ctryslot" id="ctrySlot"><div class="ctry" id="ctry" role="group" aria-label="Country"><button data-c="tw" data-zh="台灣" data-ja="台湾">Taiwan</button><button data-c="jp" data-zh="日本" data-ja="日本">Japan</button><button data-c="kr" data-zh="韓國" data-ja="韓国">Korea</button><button data-c="hk" data-zh="香港" data-ja="香港">Hong Kong</button><button data-c="hn" data-zh="海南" data-ja="海南島">Hainan</button><button data-c="vn" data-zh="越南" data-ja="ベトナム">Vietnam</button><button data-c="ph" data-zh="菲律賓" data-ja="フィリピン">Philippines</button><button data-c="id" data-zh="印尼" data-ja="インドネシア">Indonesia</button><button data-c="pg" data-zh="巴布亞紐幾內亞" data-ja="パプアニューギニア">Papua New Guinea</button><button data-c="ca" data-zh="加州" data-ja="カリフォルニア">California</button><button data-c="bj" data-zh="下加州" data-ja="バハ・カリフォルニア">Baja</button><button data-c="hi" data-zh="夏威夷" data-ja="ハワイ">Hawaii</button><button data-c="au" data-zh="澳洲" data-ja="オーストラリア">Australia</button><button data-c="nz" data-zh="紐西蘭" data-ja="ニュージーランド">New Zealand</button><button data-c="vu" data-zh="萬那杜" data-ja="バヌアツ">Vanuatu</button><button data-c="pi" data-zh="南太平洋" data-ja="南太平洋">South Pacific</button><button data-c="mi" data-zh="密克羅尼西亞" data-ja="ミクロネシア">Micronesia</button><button data-c="nw" data-zh="太平洋西北" data-ja="太平洋岸北西部">Pacific NW</button><button data-c="ak" data-zh="阿拉斯加" data-ja="アラスカ">Alaska</button></div></div>
     <nav class="picker" id="picker" aria-label="Choose a spot" data-zh-aria-label="選擇浪點" data-ja-aria-label="ポイントを選ぶ"></nav>
   </div>
@@ -579,8 +587,14 @@ html{overscroll-behavior-y:none}
 const HOME_ICONS = {"bj":"M8.7,3.2 9.2,3.9 9.0,5.0 9.6,7.6 12.8,10.9 13.1,12.3 14.5,13.7 14.8,14.8 14.7,14.1 15.4,14.9 15.7,16.5 16.9,18.5 16.9,19.4 17.4,20.0 17.7,19.5 18.5,20.1 19.2,21.7 18.1,22.4 17.6,21.1 14.2,18.6 14.1,16.1 12.1,14.5 12.2,14.0 11.3,14.5 8.7,12.3 10.0,12.1 10.7,12.5 10.1,12.0 10.5,11.7 10.5,10.7 7.4,8.0 4.7,1.9 9.3,1.5Z","vu":"M20.8,13.2 22.4,12.9 22.5,13.8 20.7,18.0 20.3,18.6 17.6,19.8 16.8,19.1 13.0,20.0 12.1,19.5 11.6,18.5 11.1,19.1 10.8,17.8 9.1,18.5 9.5,16.7 6.2,18.1 7.0,17.1 8.9,16.3 9.1,15.3 8.4,15.6 8.1,14.2 5.7,13.4 4.5,13.9 3.2,15.7 2.6,15.8 1.5,14.6 2.8,11.5 4.7,10.0 7.1,6.5 8.3,5.5 9.8,5.2 10.5,6.4 11.3,5.8 15.4,5.4 16.1,5.9 16.4,7.1 17.8,8.4 18.9,11.1 19.8,11.5ZM4.1,7.7 4.2,6.1 5.7,4.7 7.5,4.0 8.5,4.9 7.9,5.1 5.0,6.7Z","pg":"M1.7,6.5 5.2,7.7 5.9,8.2 6.6,8.2 8.4,9.7 8.3,10.5 10.8,11.3 11.2,12.2 10.0,12.3 10.3,13.3 11.6,14.1 12.2,15.6 13.3,15.5 13.1,16.2 14.3,16.4 13.8,16.6 14.0,16.9 15.4,17.2 14.7,17.3 15.2,17.7 14.8,17.9 14.0,17.7 14.3,17.6 12.4,17.0 11.0,17.0 9.9,15.9 10.0,15.5 9.5,15.5 8.8,14.2 7.1,13.8 7.1,13.5 6.6,13.4 6.6,13.8 6.3,13.5 6.2,13.8 5.4,13.3 5.8,14.0 5.0,13.9 5.3,14.4 3.3,14.4 4.6,14.7 5.0,15.2 5.0,15.5 4.0,15.9 1.7,15.6ZM17.6,9.0 17.4,9.8 17.0,9.9 17.1,10.5 16.2,10.6 15.9,11.2 14.9,11.7 12.9,11.5 11.9,10.8 12.0,10.5 12.6,10.6 14.1,10.6 14.4,9.9 14.4,10.6 15.5,10.6 16.0,9.9 16.5,9.7 16.4,8.7 16.9,8.9 17.2,8.7ZM22.5,12.2 22.1,12.5 21.6,12.3 21.5,11.7 20.8,11.2 20.7,10.5 20.9,10.6ZM18.6,8.9 18.2,9.7 17.4,7.9 15.3,6.8 15.4,6.6 17.1,7.4ZM10.6,5.7 10.3,6.0 9.4,5.9 9.6,5.7Z","vn":"M14.3,14.0 14.5,13.2 13.8,12.5 14.2,12.0 13.2,11.5 11.1,8.3 9.4,7.4 9.6,6.9 10.4,7.0 10.8,6.4 10.0,5.8 10.4,5.5 9.7,5.0 9.1,5.5 8.4,5.2 7.9,4.6 8.1,3.9 7.7,4.0 7.0,2.9 7.5,2.4 8.2,2.9 8.6,2.4 9.5,2.8 11.3,1.5 12.1,2.2 13.4,2.3 13.2,3.6 15.0,4.3 13.9,5.1 13.2,4.9 13.1,6.1 12.2,6.5 11.8,7.9 12.4,8.9 16.3,13.2 17.0,16.8 16.6,16.9 16.4,18.7 14.0,20.0 13.3,19.6 13.4,20.1 12.9,20.1 13.3,20.4 12.7,20.2 13.2,20.7 12.4,20.2 13.0,21.1 12.0,20.5 12.5,21.4 10.5,22.4 11.1,20.6 10.2,19.9 11.0,19.2 12.5,19.5 12.0,18.3 14.3,17.3Z","hn":"M22.3,7.3 22.5,7.6 21.1,8.6 20.7,8.3 20.9,7.8 20.4,8.0 20.4,9.1 19.3,10.0 18.6,12.1 17.7,12.0 18.3,12.8 18.6,12.2 18.0,14.4 17.3,15.2 17.8,15.5 17.9,14.6 18.2,15.5 17.6,15.6 17.0,16.6 16.4,16.6 17.0,16.3 15.9,16.6 14.3,18.1 13.8,18.0 14.2,18.3 13.9,19.2 13.2,19.1 13.7,18.6 11.3,19.1 11.2,20.2 10.7,20.2 11.2,20.7 10.3,20.6 10.2,21.1 9.7,21.2 9.7,20.3 9.0,20.9 9.2,20.4 8.7,20.1 6.3,20.1 6.0,19.4 4.8,19.3 2.2,18.1 1.7,13.7 1.5,12.6 2.1,12.1 1.6,11.0 2.1,10.1 4.4,9.0 4.9,8.1 6.2,7.6 6.7,6.9 7.5,7.0 7.2,6.3 6.3,6.9 6.3,6.1 7.5,5.1 8.9,5.9 9.9,5.7 9.4,5.4 9.4,4.8 11.1,4.3 11.1,4.7 11.8,4.8 11.9,4.4 12.1,5.0 13.0,4.4 13.4,5.2 13.6,4.7 14.6,4.6 14.8,4.3 14.1,4.5 14.9,3.7 16.5,3.8 17.1,5.1 16.8,3.6 18.5,4.4 18.8,5.1 18.4,3.7 19.4,2.8 20.4,4.3 21.6,4.4Z","hk":"M16.1,4.5 15.4,5.8 17.0,4.7 18.3,6.6 20.0,6.5 17.0,8.7 15.4,8.0 15.6,8.9 13.8,8.9 15.4,10.0 15.4,10.9 16.4,9.4 17.5,9.6 17.7,10.4 18.3,9.8 17.9,9.0 19.6,7.6 20.5,9.9 21.0,8.4 22.4,9.4 22.5,10.3 21.8,10.1 21.3,10.9 22.1,12.2 20.9,13.5 19.4,11.2 17.9,11.2 18.0,12.6 17.1,12.6 19.2,15.0 18.3,15.4 18.6,16.5 17.1,13.9 16.5,15.6 14.8,14.1 14.0,15.3 11.5,12.0 8.3,12.8 6.5,11.3 6.6,11.9 5.5,12.3 3.7,10.5 5.4,9.7 7.5,7.3 8.7,7.7 11.0,5.4 13.1,5.3 14.0,4.2ZM1.8,19.0 1.6,17.5 3.6,15.1 6.7,14.9 9.2,13.0 9.3,13.9 8.0,14.4 7.6,18.2 6.9,18.5 6.8,17.4 5.5,17.4 4.5,18.7 3.6,18.0ZM15.6,15.4 16.9,16.5 17.1,18.7 15.8,17.3 15.7,19.2 14.7,18.5 14.4,17.2 13.7,17.7 11.8,15.7ZM12.7,19.7 11.7,19.8 11.5,17.4 12.2,18.3 13.3,18.7Z","mi":"M16.9,2.2 17.4,3.3 18.2,4.0 20.1,4.3 20.1,4.9 17.9,8.5 11.8,13.4 11.1,15.5 10.6,20.2 9.4,22.1 8.5,22.5 6.7,22.2 5.3,20.2 4.9,17.9 4.0,17.2 4.8,16.2 5.0,14.6 3.9,12.8 4.1,12.5 5.4,12.4 11.8,8.5 13.1,6.6 14.5,2.6 15.9,1.6 16.6,1.5Z","ak":"M17.5,17.1 18.4,18.3 19.0,17.5 19.7,17.5 21.5,20.7 22.5,21.2 22.2,22.4 21.9,21.2 21.3,21.7 21.7,21.0 20.6,20.1 20.7,19.3 20.3,19.1 20.4,18.7 19.9,18.7 19.5,17.7 19.7,19.0 19.1,18.1 18.6,18.1 19.2,18.7 18.9,19.0 17.1,17.6 17.3,17.1 16.8,17.4 16.2,16.9 14.7,17.1 14.4,16.3 13.7,16.5 13.5,15.8 12.6,16.1 12.7,15.7 12.3,16.2 12.3,17.1 11.8,17.0 10.5,18.0 10.9,17.3 10.5,17.3 10.7,16.3 12.0,16.1 11.4,15.8 11.8,15.4 9.8,16.8 9.1,19.1 6.1,21.4 4.1,22.1 5.3,21.2 5.8,21.4 5.8,20.9 7.4,19.7 7.7,18.0 7.0,18.6 7.0,18.2 6.6,18.2 6.5,18.8 5.8,18.1 4.8,18.5 4.9,16.3 4.5,17.1 3.8,17.3 3.0,16.5 4.0,16.1 3.1,16.0 2.6,15.3 3.5,13.3 4.1,13.6 5.5,12.8 5.1,11.8 5.5,11.4 4.5,11.9 4.2,11.5 2.6,11.6 2.1,10.9 2.6,10.7 1.5,10.2 3.5,9.0 4.0,9.0 3.9,9.6 5.4,9.5 4.7,8.5 5.1,9.1 5.8,9.2 4.9,8.8 5.0,8.3 4.0,8.2 2.2,6.4 2.5,5.6 4.0,5.2 4.9,3.3 5.9,2.9 6.0,3.4 6.1,2.6 7.1,2.4 7.9,1.5 8.4,2.0 8.2,2.5 8.7,2.1 9.2,2.5 10.2,2.5 10.4,3.1 11.9,3.0 14.4,3.9 15.2,3.7 16.4,4.4 16.4,16.7 17.5,16.7ZM9.9,19.4 10.2,19.8 9.3,20.5 9.1,20.1 9.0,19.7 9.4,19.9 9.4,19.4ZM20.5,20.9 21.3,21.8 21.1,22.3ZM19.3,19.0 19.8,19.2 19.6,19.7 18.9,19.2ZM2.6,16.7 2.9,17.2 2.6,17.3 1.9,16.8Z","pi":"M21.0,14.2 22.0,15.4 22.5,17.4 22.2,19.4 20.7,20.4 17.1,19.3 15.7,17.5 14.6,15.5 14.0,13.6 13.6,13.6 13.0,14.5 8.7,15.5 3.8,14.2 3.1,11.6 2.4,10.9 1.6,9.2 1.5,8.4 1.9,6.3 3.1,5.0 4.8,4.3 6.7,3.8 8.6,3.6 10.6,4.0 12.3,4.7 14.2,6.1 14.8,7.4 14.9,12.1 15.9,13.4 17.6,13.8Z","nz":"M12.3,15.6 12.2,16.2 12.7,16.6 11.9,16.4 10.6,17.3 9.9,20.0 8.4,21.3 7.0,21.3 6.1,20.5 5.1,20.6 5.0,20.0 4.7,20.3 6.1,18.1 7.0,16.9 10.0,14.9 12.2,11.2 12.6,11.2 12.2,11.4 12.7,12.4 13.6,11.8 13.5,12.4 14.2,12.0 13.7,12.4 14.2,12.3 13.8,12.6 14.1,13.2ZM17.3,9.7 16.2,12.3 15.3,12.9 14.5,12.4 15.2,10.6 13.5,9.3 14.5,8.5 15.0,6.9 14.5,5.8 14.9,5.9 14.4,5.8 14.0,5.0 14.3,5.2 14.3,4.4 13.7,4.0 13.9,4.8 13.1,3.6 13.4,3.2 13.0,3.5 12.7,3.1 12.2,1.9 12.7,1.9 13.1,2.6 14.0,3.3 14.2,3.0 14.5,4.0 14.2,4.0 14.8,4.8 14.6,5.6 15.7,6.1 15.4,5.0 16.0,5.3 16.2,6.7 17.6,7.3 18.6,6.6 19.3,6.8 18.5,9.2 17.9,8.9ZM6.8,22.1 6.0,22.5 6.3,21.9 6.5,21.4Z","id":"M19.7,12.8 19.5,12.2 20.0,12.4 21.0,11.5 22.5,12.0 22.4,14.9 22.1,14.5 21.5,14.6 21.3,13.4ZM10.2,10.2 11.0,8.8 11.8,8.9 11.9,9.9 12.4,10.4 11.9,10.3 11.3,11.9 10.6,10.5 10.0,10.6ZM10.3,12.4 8.7,12.2 9.3,11.2 10.6,10.5 10.9,11.4ZM10.2,10.2 9.8,11.1 8.7,11.6 8.6,12.2 7.9,11.0 8.1,9.9 8.5,10.4ZM19.7,12.8 19.2,12.2 18.8,12.7 18.4,12.1 19.3,11.8 17.9,11.5 18.6,11.0 19.3,11.2ZM5.8,11.6 6.5,12.3 5.5,13.1 4.6,12.1ZM5.3,11.2 4.1,11.0 3.7,10.2 3.8,9.7 4.1,9.9 4.9,10.7 5.3,10.7ZM3.3,10.7 2.7,9.1 3.1,9.1 3.9,10.1ZM12.7,11.2 13.4,10.2 13.9,10.4 12.9,11.0 13.2,11.5 13.6,11.2 14.4,11.2 13.5,11.7 14.0,12.3ZM2.8,9.8 1.6,8.7 1.5,8.3 1.9,8.4 2.9,8.8ZM5.3,11.2 5.8,11.6 4.9,12.1 4.2,11.6ZM13.4,12.2 13.0,12.2 13.1,13.4 12.7,13.0 12.7,11.8ZM9.1,13.9 10.3,14.4 10.3,14.9 8.7,14.6ZM6.9,13.6 7.8,14.0 7.7,14.4 6.7,14.2ZM11.3,11.9 11.0,12.5 10.4,12.8 10.3,12.4 10.8,11.5ZM4.2,12.0 3.3,10.7 3.8,10.5 4.5,11.4ZM8.7,14.6 7.6,14.2 8.4,14.0 9.1,13.9ZM6.4,12.8 6.3,13.5 5.6,13.4 5.3,13.1ZM14.0,12.3 14.2,12.8 13.8,12.9 13.3,12.4ZM16.4,10.9 16.3,10.1 16.6,9.8 16.6,10.2 17.0,10.7 16.5,10.6 16.7,11.2Z","tw":"M6.7,15.1 7.4,13.2 7.2,12.9 7.4,12.6 7.2,12.5 7.6,10.9 7.4,10.9 8.1,10.4 8.9,8.9 8.6,9.1 9.1,8.5 9.2,7.9 9.5,7.8 10.6,5.8 11.1,5.5 12.1,3.6 14.0,2.9 14.8,2.0 15.7,2.5 15.7,2.8 16.9,3.0 16.9,3.6 17.3,3.7 16.9,4.0 16.4,4.6 16.6,6.5 15.2,9.1 15.4,9.6 14.4,13.6 14.0,14.3 14.2,14.8 11.8,18.1 11.3,19.5 11.2,22.0 10.6,21.6 10.3,21.8 10.4,20.8 10.0,19.6 8.1,18.2 7.4,15.7Z","nw":"M15.9,22.5 8.8,22.2 8.5,20.7 9.2,18.7 9.4,12.9 11.0,13.1 11.5,14.2 12.4,14.4 17.5,13.4 21.0,13.4 21.6,14.1 20.5,17.1 21.0,17.6 20.8,22.5ZM11.4,6.2 20.8,6.2 21.0,13.4 17.5,13.4 14.2,14.3 11.6,14.3 11.1,13.2 9.3,12.8 9.6,11.9 9.2,11.4 9.7,11.2 9.2,11.2 8.3,8.3 8.3,7.7 11.0,8.5 11.4,8.3 11.6,9.0 10.8,10.2 11.8,9.1 11.7,10.4 11.0,10.7 11.5,10.8 12.1,10.2 12.3,8.6ZM4.2,2.1 7.0,2.9 8.1,4.9 9.4,5.7 10.4,7.0 10.6,7.6 10.1,7.9 9.2,7.6 7.6,6.8 8.1,5.7 7.9,6.2 7.0,6.4 5.9,5.2 5.2,4.9 5.9,4.5 4.3,4.0 4.1,3.3 3.1,3.4 3.1,2.6 3.7,2.7 3.8,2.2 2.8,2.4 2.3,1.9 3.0,1.5Z","jp":"M19.7,3.5 20.7,3.8 21.5,3.2 21.2,4.2 21.4,4.7 22.0,4.6 19.8,5.3 19.0,6.6 17.4,5.7 16.4,6.1 15.8,5.8 15.6,6.2 16.5,6.9 15.3,7.3 15.0,5.7 15.7,5.2 15.7,4.7 16.8,4.7 17.3,3.0 17.1,1.7 17.5,1.5ZM4.9,18.8 5.6,18.8 5.4,19.2 5.8,19.3 5.9,19.8 5.1,21.9 4.8,21.9 4.4,22.5 4.5,21.5 4.3,22.3 3.7,21.9 4.2,19.9 3.9,19.4 4.0,20.1 3.3,20.2 3.2,19.5 3.6,19.8 3.1,19.3 4.4,18.3ZM8.6,17.8 9.0,17.8 9.1,18.4 8.4,19.3 7.8,18.9 6.8,20.0 6.5,19.7 6.4,19.0 5.9,19.1 7.0,18.0 7.3,18.3 8.2,17.7ZM16.6,7.5 16.9,7.4 16.9,8.4 17.5,10.3 16.9,11.8 16.3,12.2 16.4,13.7 15.9,14.9 16.2,15.7 15.6,16.5 15.0,16.8 15.3,15.9 15.0,15.8 14.8,16.5 14.3,16.3 13.9,17.3 13.7,16.5 13.1,17.3 11.8,17.3 12.0,17.1 11.6,17.1 11.5,16.7 11.2,17.2 11.5,17.7 10.9,17.9 10.2,18.9 9.5,18.2 9.9,17.3 9.1,17.1 7.2,17.7 6.3,17.7 6.1,18.4 5.6,18.1 4.6,18.2 4.7,17.6 7.0,16.0 9.6,15.6 9.8,16.0 10.4,15.8 11.5,13.3 12.1,13.1 11.6,13.7 12.0,14.2 13.3,13.5 14.5,12.2 15.0,11.1 15.3,10.0 14.9,9.6 15.2,8.5 15.7,7.7 16.1,8.3 16.5,8.2 16.7,7.7 16.1,7.7 16.3,7.3Z","ca":"M20.3,17.0 21.1,18.5 20.1,20.5 20.4,22.0 15.8,22.5 15.2,20.8 14.1,19.9 13.5,19.8 13.3,19.2 12.2,19.0 11.4,18.3 9.5,18.0 9.5,16.8 7.3,14.1 7.4,12.9 6.4,12.1 6.2,11.4 6.3,10.8 7.0,11.5 6.5,10.4 7.9,10.3 6.4,10.1 6.2,10.8 5.3,10.4 5.5,9.9 4.1,8.4 3.8,6.4 2.9,5.1 3.4,2.9 3.1,1.5 10.7,1.5 10.7,8.2Z","hi":"M4.9,6.5 4.5,6.7 4.0,6.6 3.3,6.0 4.1,5.3 4.9,5.3 5.1,5.7ZM1.7,6.8 1.5,7.0 1.6,6.6 2.3,6.2ZM10.9,8.4 11.2,8.4 11.6,9.0 11.4,9.2 10.9,9.2 10.2,8.8 10.2,9.0 9.7,9.0 9.1,7.9 9.7,7.8 10.3,7.4ZM13.2,9.4 15.1,9.7 14.6,10.1 12.9,9.9ZM16.0,10.6 16.8,10.5 17.9,11.3 17.5,11.8 16.3,12.0 16.0,11.1 15.5,11.1 15.2,10.7 15.3,10.2 15.6,10.2ZM14.6,11.3 14.1,11.3 13.8,10.7 14.5,10.7 14.8,11.0ZM19.5,18.5 19.1,18.7 18.3,18.3 18.3,17.0 17.7,15.5 18.6,14.4 18.3,13.8 18.5,13.3 21.0,14.5 21.4,15.0 21.5,15.5 21.8,15.6 22.5,16.4 21.5,17.3 20.5,17.5 19.7,18.1Z","au":"M15.1,2.4 15.3,3.5 16.0,3.8 16.4,5.7 17.5,6.3 17.9,7.3 18.2,7.3 19.3,9.0 19.5,10.2 19.2,11.5 18.5,12.6 18.0,14.4 17.1,14.6 16.4,15.2 15.8,14.6 15.2,15.0 14.3,14.8 13.6,14.3 13.4,13.4 13.0,13.5 12.9,12.8 12.4,13.3 12.8,12.1 11.9,13.2 11.3,12.1 10.0,11.6 7.7,12.0 6.7,12.7 5.2,12.7 4.3,13.2 3.1,12.9 3.4,11.7 2.3,9.1 2.6,9.2 2.4,8.8 2.8,9.1 2.4,8.3 2.7,7.1 2.7,7.3 3.8,6.5 5.7,6.0 6.2,5.3 6.2,4.8 6.5,4.5 6.7,5.0 6.8,4.4 7.3,4.5 7.1,4.1 7.8,3.3 8.4,3.4 8.7,4.0 8.9,3.7 9.3,3.9 9.7,2.6 10.6,2.5 10.3,2.0 11.6,2.5 12.0,2.3 12.1,2.6 12.3,2.4 12.4,2.6 11.8,3.8 13.9,5.1 14.7,1.9ZM15.9,15.9 17.2,16.0 17.1,17.1 16.8,16.9 16.7,17.3 16.3,17.2Z","kr":"M8.1,4.9 9.6,2.9 12.6,2.7 13.6,1.5 16.6,6.9 17.1,9.0 16.9,11.7 17.4,11.7 16.2,15.0 14.0,15.3 13.8,16.2 12.6,15.7 11.5,15.9 11.5,16.8 10.5,16.4 10.8,17.2 10.3,17.8 9.8,17.5 10.1,16.7 9.4,17.2 7.8,18.4 7.0,17.0 7.8,16.9 8.0,16.4 7.5,16.4 7.0,15.2 8.1,13.5 7.7,13.2 8.5,12.4 7.8,11.2 7.7,9.2 6.6,8.9 7.7,7.9 8.9,8.7 9.2,8.2 8.5,7.2ZM7.2,22.5 6.8,21.9 8.3,21.3 9.0,21.4 8.9,22.0Z","ph":"M10.7,1.5 11.9,2.0 12.6,1.8 12.4,3.1 13.0,4.0 11.2,6.9 11.8,8.8 12.5,9.2 13.1,8.6 13.9,9.5 14.2,9.0 15.0,9.3 14.6,9.6 15.0,10.5 15.5,10.6 15.4,11.4 13.0,9.2 13.1,10.4 11.8,9.2 11.1,9.6 10.0,9.4 10.5,8.0 9.9,7.6 9.7,8.3 9.1,7.7 8.6,5.4 9.6,5.6 10.0,1.7ZM18.5,16.6 18.9,17.2 18.7,17.7 19.4,19.9 18.7,20.5 18.7,21.4 18.0,19.9 17.5,20.8 17.9,21.5 17.6,22.4 17.2,21.8 16.8,22.1 15.4,21.2 15.6,19.6 15.3,19.2 14.6,19.0 14.3,19.6 13.1,19.1 12.2,20.4 12.7,18.6 14.4,17.6 15.1,18.0 14.9,18.6 15.6,18.4 16.7,17.2 17.7,17.1 17.6,15.9ZM13.9,17.0 12.8,16.0 13.5,15.4 13.4,14.7 14.1,13.9 14.6,14.3ZM17.3,11.5 18.1,13.8 17.2,13.7 15.8,11.4ZM12.9,12.9 14.0,13.0 13.4,14.2 12.1,14.8 12.3,12.8 12.0,12.6ZM4.8,18.0 7.8,14.7 8.3,13.5 8.5,14.7ZM10.1,9.9 11.4,10.5 11.2,11.8 10.8,11.9 9.5,10.0ZM16.2,13.4 16.9,13.6 17.3,15.0 16.9,14.9 16.9,15.5 16.5,15.2 16.5,14.1 16.0,14.0 15.8,13.1ZM14.3,16.4 14.8,14.8 15.4,13.5 15.3,14.9ZM16.2,15.8 15.2,16.1 15.2,15.6 15.8,15.3ZM14.9,11.8 15.4,12.4 15.4,12.7 14.9,12.3 14.5,12.0 14.0,12.4 14.1,11.4Z"};
 const ALL = __DATA__;
 // ---- Language: English or Traditional Chinese (Taiwan), switched top right and remembered on this device; first visit follows the browser.
-let LANG = (() => { try{ const l=localStorage.getItem("waveslave-lang"); if(l==="en"||l==="zh"||l==="ja") return l; }catch(e){} const n=navigator.language||""; return /^zh/i.test(n) ? "zh" : /^ja/i.test(n) ? "ja" : "en"; })();
+// 日本語 is switched off for now: its button is hidden and never picked from a saved choice or the phone; its translations stay, so setLang("ja") still works.
+let LANG = (() => { try{ const l=localStorage.getItem("waveslave-lang"); if(l==="en"||l==="zh") return l; }catch(e){} const n=navigator.language||""; return /^zh/i.test(n) ? "zh" : "en"; })();
 const isZh = () => LANG==="zh", isJa = () => LANG==="ja";
+// Opens or shuts the full-screen map's country list; shutting lets the countries slide back up before they go.
+function wsCtryOpen(on){ const w = document.getElementById("wsCtry"); clearTimeout(w._shut); w.classList.remove("shutting");
+  if (on) return w.classList.add("open");
+  if (!w.classList.contains("open") || matchMedia("(prefers-reduced-motion: reduce)").matches) return w.classList.remove("open");
+  w.classList.add("shutting"); w._shut = setTimeout(() => w.classList.remove("open", "shutting"), 180); }
 // English words and short phrases -> 中文. Sentences with numbers in them are written out in place with isZh().
 const TR = {
   "Today":"今天", "Tomorrow":"明天", "Yesterday":"昨天", "Sun":"週日", "Mon":"週一", "Tue":"週二", "Wed":"週三", "Thu":"週四", "Fri":"週五", "Sat":"週六",
@@ -640,10 +654,13 @@ function langOpen(on){ document.getElementById("langWrap").classList.toggle("ope
 // World mode shows every country; Taiwan mode, the default, only Taiwan's spots, in the forecast and on the map. The W in the logo switches
 // (setWorld), remembered on this device; the class "world" on the page was set from it before first paint.
 let WORLD = document.documentElement.classList.contains("world");
-function keepWorld(on){ WORLD = on; document.documentElement.classList.toggle("world", on); try{ localStorage.setItem("waveslave-world", on ? "1" : "0"); }catch(e){} }
+// The World passcode (web/head.html): until the code is in for this visit, World mode opens the PIN box first (wsPin) and comes on once it's right.
+const worldLocked = () => !!window.__worldLock && !(window.wsUnlocked && wsUnlocked());
+function keepWorld(on){ WORLD = on; if(!on && window.wsRelock) wsRelock(); document.documentElement.classList.toggle("world", on); try{ localStorage.setItem("waveslave-world", on ? "1" : "0"); }catch(e){} }
 // Spot comes from the link (#nanwan) or the last one picked on this device; Donghe otherwise. In Taiwan mode the last one is the last Taiwan
 // spot; a link to another country's spot turns World mode on, so it still opens.
-const SPOT0 = (() => { const h=location.hash.slice(1); if(ALL.spots[h]){ if(spotCountry(h)!=="tw" && !WORLD) keepWorld(true); return h; }
+let SPOT_PEND = null;   // a link to another country's spot while World mode waits for the passcode: opened once it's in
+const SPOT0 = (() => { const h=location.hash.slice(1); if(ALL.spots[h]){ if(spotCountry(h)!=="tw" && !WORLD){ if(worldLocked()) SPOT_PEND = h; else { keepWorld(true); return h; } } else return h; }
   try{ for(const k of ["waveslave-spot", "waveslave-spot-tw"]){ const s=localStorage.getItem(k); if(ALL.spots[s] && (WORLD || spotCountry(s)==="tw")) return s; } }catch(e){} return "donghe"; })();
 // Everything spot-specific renders inside boot(), so switching spots redraws in place (no reload, no white flash).
 let CUR = SPOT0;
@@ -652,7 +669,7 @@ function spotCountry(id){ return (ALL.spots[id]||{}).country || "tw"; }
 function viewTz(){ return (ALL.spots[CUR]||{}).tz || 8; }
 const countrySpots = c => (ALL.order || Object.keys(ALL.spots)).filter(id => spotCountry(id)===c);
 // Every country is on the one Pacific map, so changing spot never reloads: a new country moves the map to its home view.
-function switchSpot(id){ if(!ALL.spots[id] || id===CUR) return; if(!WORLD && spotCountry(id)!=="tw") setWorld(true); const was = CUR, other = spotCountry(id)!==spotCountry(was); CUR=id;
+function switchSpot(id){ if(!ALL.spots[id] || id===CUR) return; if(!WORLD && spotCountry(id)!=="tw"){ if(worldLocked()) return wsPin(() => switchSpot(id), () => {}); setWorld(true); } const was = CUR, other = spotCountry(id)!==spotCountry(was); CUR=id;
   try{ localStorage.setItem("waveslave-spot", id); localStorage.setItem("waveslave-spot-"+spotCountry(id), id); }catch(e){}
   try{ history.replaceState(null, "", "#"+id); }catch(e){ location.hash=id; }
   // Australia's home is the current spot's coast, and any move inside Australia recentres on it. The South Pacific's, Micronesia's, Papua
@@ -668,7 +685,7 @@ function switchCountry(c){ if(c===spotCountry(CUR)) return; let id; try{ id=loca
 // the row closes and the page goes back to Taiwan. With reduced motion it just switches. A tap mid-flicker turns it straight back (gen drops
 // the old one).
 let worldGen = 0;
-async function setWorld(on){ if(on===WORLD) return; const gen = ++worldGen, root = document.documentElement, ctry = document.getElementById("ctry"),
+async function setWorld(on){ if(on===WORLD) return; if(on && worldLocked()) return wsPin(() => setWorld(true), () => {}); const gen = ++worldGen, root = document.documentElement, ctry = document.getElementById("ctry"),
     slot = document.getElementById("ctrySlot"), flick = !matchMedia("(prefers-reduced-motion: reduce)").matches && !!document.getAnimations;
   // Until the countries' flicker ends; never longer than 1.5 s.
   const settled = () => Promise.race([Promise.all(document.getAnimations().filter(a => a.effect && a.effect.target instanceof Element && a.effect.target.parentNode===ctry).map(a => a.finished.catch(() => {}))),
@@ -1198,7 +1215,7 @@ const WS = (() => {
   if (window.ResizeObserver) new ResizeObserver(() => { const box = document.getElementById("wsBox"), k = box.clientWidth + "x" + box.clientHeight;
     if (!FS || !built || document.getElementById("viewWs").hidden || k === seen || rsz) return; rsz = requestAnimationFrame(() => { rsz = 0; seen = box.clientWidth + "x" + box.clientHeight; size(); drawBase(); }); }).observe(document.getElementById("wsBox"));
   // Escape is the chat room's own while it's open (html.chat-open), so it doesn't close the map behind it.
-  document.addEventListener("keydown", e => { if (e.key !== "Escape" || document.documentElement.classList.contains("chat-open")) return; const w = document.getElementById("wsCtry"); if (w.classList.contains("open")) w.classList.remove("open"); else if (FS) setView("fc"); });
+  document.addEventListener("keydown", e => { if (e.key !== "Escape" || document.documentElement.classList.contains("chat-open")) return; const w = document.getElementById("wsCtry"); if (w.classList.contains("open") && !w.classList.contains("shutting")) wsCtryOpen(false); else if (FS) setView("fc"); });
   function screenH() { const so = screen.orientation && screen.orientation.type, land = so ? so.startsWith("landscape") : Math.abs(window.orientation || 0) === 90 || innerWidth > innerHeight;
     const sw = screen.width || innerWidth, sh = screen.height || innerHeight, dev = land ? Math.min(sw, sh) : Math.max(sw, sh), vv = window.visualViewport ? visualViewport.height : innerHeight;
     return { land, h: Math.min(vv, innerHeight, dev) }; }
@@ -1356,7 +1373,7 @@ const WS = (() => {
   const expo = (dir, off) => dir==null ? 1 : (d => d<=45 ? 1 : d<=90 ? .5 : .2)(adiff(dir, off+180));
   function rateOf(h, p, w, off) { let s = h<0.4?0 : h<0.8?1 : h<1.2?2 : h<=2.5?3 : h<=3.5?2 : 1; s += p<6?0 : p<8?1 : p<10?2 : 3;
     if (w && w.from != null) { const k = kindOf(w.from, off), kt = w.rain ? w.kt/2 : w.kt; if (k==="off" && kt>=3) s+= kt<20?3:1; else if (kt<3) s+=2; else if (k==="cross") s+= kt<10?0:-1; else s+= kt<10?-1:-2; }
-    s = Math.max(0, Math.min(8, s)); if (s>=7 && !(w && w.from != null && kindOf(w.from, off)==="off" && (w.rain ? w.kt/2 : w.kt)>=3)) s = 6; return s<=1?0 : s<=3?1 : s<=5?2 : s<=6?3 : 4; }
+    s = Math.max(0, Math.min(8, s)); if (h>=0.4) s = Math.max(s, 2); if (s>=7 && !(w && w.from != null && kindOf(w.from, off)==="off" && (w.rain ? w.kt/2 : w.kt)>=3)) s = 6; return s<=1?0 : s<=3?1 : s<=5?2 : s<=6?3 : 4; }
   const cellBg = (v, max, P) => { const c = ramp(v/max, P), lum = (c[0]*299+c[1]*587+c[2]*114)/1000; return `background:rgb(${c});color:${lum>140?"#120b2e":"#fff"}`; };
   const arrow = dir => dir==null ? "" : `<i class="ar" style="transform:rotate(${dir+180}deg)">↑</i>`;
   const hh = t => String(new Date(t+viewTz()*36e5).getUTCHours()).padStart(2,"0");
@@ -1575,12 +1592,12 @@ const WS = (() => {
     // A button for each country in the switch above the spot picker (#ctry), made from it so that a country added there shows up here too: the country's
     // outline, its name read out and shown on hover in the page's language (applyLang swaps them), or a copy of the switch's button while it has no outline.
     const ctryLater = afterGlide();
-    document.getElementById("wsCtry").replaceChildren(...[...document.querySelectorAll("#ctry button")].map(b => { const c = b.dataset.c, d = HOME_ICONS[c], n = d ? document.createElement("button") : b.cloneNode(true);
+    document.getElementById("wsCtry").replaceChildren(...[...document.querySelectorAll("#ctry button")].map((b, i) => { const c = b.dataset.c, d = HOME_ICONS[c], n = d ? document.createElement("button") : b.cloneNode(true); n.style.setProperty("--i", i);
       if (d) { n.dataset.c = c; n.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" style="display:block;margin:auto"><path d="${d}" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg>`;
         for (const a of ["aria-label", "title"]) { n.setAttribute(a, b.textContent); for (const l of ["en", "zh", "ja"]) n.setAttribute(`data-${l}-${a}`, b.dataset[l] || b.textContent); } }
       // Shut, only the map's country shows; a tap on it opens the list (Bryan, Oct 21). A pick from the list flies there and shuts it.
-      n.onclick = () => { const w = document.getElementById("wsCtry"); if (!w.classList.contains("open")) { w.classList.add("open"); return; }
-        w.classList.remove("open"); pressOnly(document.querySelectorAll("#wsCtry button"), n); ctryLater(() => flyTo(c)); }; return n; })); ctryOn();
+      n.onclick = () => { const w = document.getElementById("wsCtry"); if (!w.classList.contains("open")) { wsCtryOpen(true); return; }
+        wsCtryOpen(false); pressOnly(document.querySelectorAll("#wsCtry button"), n); ctryLater(() => flyTo(c)); }; return n; })); ctryOn();
     // The zoom buttons and the countries sit just under the top buttons, however many rows those take (a narrow phone, a longer language): --barb is the bar's bottom edge.
     const bar = document.getElementById("wsLayers"), sec = document.getElementById("viewWs");
     if (window.ResizeObserver) new ResizeObserver(() => sec.style.setProperty("--barb", bar.offsetTop + bar.offsetHeight + "px")).observe(bar);
@@ -1595,7 +1612,7 @@ const WS = (() => {
     // A finger on the pin readout moves the pin instead of scrolling the page.
     fx.addEventListener("touchstart", e => { if (e.touches.length === 1) { const r = fx.getBoundingClientRect(), t = e.touches[0]; if (onPin([t.clientX-r.left, t.clientY-r.top])) e.preventDefault(); } }, {passive: false});
     const rel = e => { const r = fx.getBoundingClientRect(); return [e.clientX-r.left, e.clientY-r.top]; };
-    fx.onpointerdown = e => { unglide(); document.getElementById("wsCtry").classList.remove("open"); P.set(e.pointerId, rel(e)); fx.setPointerCapture(e.pointerId); if (P.size === 1) downAt = rel(e); else downAt = null; pinch = null;
+    fx.onpointerdown = e => { unglide(); wsCtryOpen(false); P.set(e.pointerId, rel(e)); fx.setPointerCapture(e.pointerId); if (P.size === 1) downAt = rel(e); else downAt = null; pinch = null;
       drag = P.size === 1 && onPin(downAt) ? {ox: downAt[0]-PINBOX[4], oy: downAt[1]-PINBOX[5], moved: false} : null; };
     fx.onpointermove = e => { if (!P.has(e.pointerId)) return; const prev = P.get(e.pointerId), cur = rel(e); P.set(e.pointerId, cur);
       if (drag && P.size === 1) { if (!drag.moved && Math.hypot(cur[0]-downAt[0], cur[1]-downAt[1]) < 6) return; drag.moved = true;
@@ -1778,6 +1795,8 @@ function score(h,p,w,off=DATA.off){
   // A station that sent no direction: near-calm still counts as glassy, a stronger wind neither helps nor hurts.
   if(w){ const k=w.from==null?null:windKind(w.from,off), kt=w.sky==="Rain"?w.kt/2:w.kt; if(k==="off" && kt>=3) s+= kt<20?3:1; else if(kt<3) s+=2; else if(k==="cross") s+= kt<10?0:-1; else if(k) s+= kt<10?-1:-2; }
   s=Math.max(0,Math.min(8,s));
+  // Flat means too small to ride: waves of 0.4 m+ that wind or size knock down read as Poor, not Flat (Bryan, Oct 21).
+  if(h>=0.4) s=Math.max(s,2);
   // Firing needs an offshore wind (3 kt+; Bryan lowered it from 10 kt on Oct 13); anything else tops out at Good.
   return s>=7 && !(w && w.from!=null && windKind(w.from,off)==="off" && (w.sky==="Rain"?w.kt/2:w.kt)>=3) ? 6 : s;
 }
@@ -1789,14 +1808,14 @@ hours.forEach(x => { x.w = windAt(x.t); const b = x.t<=nowMs ? bObs.get(x.t) : n
 const hourByT = new Map(hours.map(x=>[x.t,x]));
 const isDay = (t,key) => { const s=DATA.sun[key]; if(!s) return true; const hm=hhmm(t); return hm>=s.first && hm<=s.last; };
 
-// ---- freshness: "Updated 18:44"; from an hour old it adds the age, and past 12 hours the day too, in amber (stale).
+// ---- freshness: "Updated 18:44"; from an hour old the age instead, "Updated 3 h ago", in amber past 12 hours (stale).
 const updated = Date.parse(DATA.updated);
 (() => { const el=document.getElementById("fresh"); const ageH=(nowMs-updated)/36e5, stale=ageH>12;
-  const when = ageH<1 ? "" : " · "+(isZh() ? (ageH<48 ? Math.round(ageH)+" 小時前" : Math.round(ageH/24)+" 天前")
+  const ago = isZh() ? (ageH<48 ? Math.round(ageH)+" 小時前" : Math.round(ageH/24)+" 天前")
     : isJa() ? (ageH<48 ? Math.round(ageH)+" 時間前" : Math.round(ageH/24)+" 日前")
-    : ageH<48 ? Math.round(ageH)+" h ago" : Math.round(ageH/24)+" days ago");
-  const at = (stale ? dayName(dayKey(updated),todayKey).replace(/^(Today|Tomorrow|Yesterday)$/,m=>m.toLowerCase())+" " : "")+hhmm(updated);
-  el.textContent = isZh() ? "更新於 "+at+when : isJa() ? at+" 更新"+when : "Updated "+at+when;
+    : ageH<48 ? Math.round(ageH)+" h ago" : Math.round(ageH/24)+" days ago";
+  el.textContent = ageH<1 ? (isZh() ? "更新於 "+hhmm(updated) : isJa() ? hhmm(updated)+" 更新" : "Updated "+hhmm(updated))
+    : isZh() ? ago+"更新" : isJa() ? ago+"に更新" : "Updated "+ago;
   el.classList.toggle("stale", stale); })();
 
 // A surfboard standing in a w x h box, nose at the top. Shape numbers are in board widths (x, -.5 to .5) and lengths (y, 0 nose to 1 tail):
@@ -1824,14 +1843,17 @@ function boardPath(w,h,p){ const X=x=>(w/2+x*(w-1.8)).toFixed(2), Y=y=>(.9+y*(h-
     document.getElementById("nowRating").innerHTML = ""; document.getElementById("nowBoard").hidden = true; }
   else {
   document.getElementById("nowH1").innerHTML = r1(b[1])+"<small>m</small>";
-  // Environment Canada's buoys send no wave direction, and a reading can leave out its period: neither is made up (no "from" or arrow,
+  // Under the height, just the numbers (Bryan, Oct 21; it was a sentence, "8.8 s period, waves from the ENE ↙ · read at 19:00"):
+  // "8.8 s · ENE ↙ · 19:00", the reading's time in grey, in every language.
+  // Environment Canada's buoys send no wave direction, and a reading can leave out its period: neither is made up (no direction,
   // a dash for the period), and the rating takes the forecast's value for that hour instead. Korea's buoys (KMA's, as NOAA copies
   // them from the weather reports) send heights in 0.5 m steps and neither, so they say that in place of the period.
-  const fh = hourByT.get(bt) || {}, nd = b[3]==null, bdir = nd ? fh.dir : b[3], bp = b[2]!=null ? b[2]*BUOY_P : fh.p || 0, per = b[2]!=null ? `${r1(bp)} s` : "–";
-  const arw = nd ? "" : ` <span class="dir" style="transform:rotate(${b[3]+180}deg)">↑</span>`, kma = DATA.buoyBy==="kma" && b[2]==null;
-  document.getElementById("nowSub").innerHTML = isZh() ? `${kma ? "浪高以 0.5 m 為單位" : `週期 <b class="mono">${per}</b>`}${nd ? "" : `，浪來自<b>${compass(b[3])}</b>`}${arw} · ${hhmm(bt)} 測得`
-    : isJa() ? `${kma ? "波高は 0.5 m 刻み" : `周期 <b class="mono">${per}</b>`}${nd ? "" : `、<b>${compass(b[3])}</b>からの波`}${arw} · ${hhmm(bt)} 観測`
-    : `${kma ? "Heights in 0.5 m steps" : `<b class="mono">${per}</b> period`}${nd ? "" : `, waves from the <b>${compass(b[3])}</b>`}${arw} · read at ${hhmm(bt)}`;
+  const fh = hourByT.get(bt) || {}, nd = b[3]==null, bdir = nd ? fh.dir : b[3], bp = b[2]!=null ? b[2]*BUOY_P : fh.p || 0;
+  const kma = DATA.buoyBy==="kma" && b[2]==null, dot = `<span class="dim"> · </span>`;
+  document.getElementById("nowSub").innerHTML = (kma ? (isZh() ? "浪高以 0.5 m 為單位" : isJa() ? "波高は 0.5 m 刻み" : "Heights in 0.5 m steps")
+      : `<b><span class="mono">${b[2]!=null ? r1(bp) : "–"}</span>&#8239;s</b>`)
+    + (nd ? "" : `${dot}<b>${compass(b[3])}</b> <span class="dir" style="transform:rotate(${b[3]+180}deg)">↑</span>`)
+    + `${dot}<span class="dim">${hhmm(bt)}</span>`;
   const r = rate(score(b[1]*exposure(bdir), bp, w));
   const v = document.getElementById("nowRating"); v.style.setProperty("--rc", RATE[r][1]);
   v.innerHTML = `<span class="dots">${[0,1,2,3,4].map(i=>`<i class="${i<=r?"on":""}"></i>`).join("")}</span>${RATE[r][0]}`;
@@ -2222,6 +2244,7 @@ document.querySelector("header .brand .w").addEventListener("click", () => setWo
 for(const [box, sel] of [["#lang", 'button[aria-pressed="true"]'], ["#ctry", 'button[aria-pressed="true"]'], [".tabs", 'button[aria-selected="true"]'], ["#picker", "a[aria-current]"],
   ["#days", '.day[aria-pressed="true"]'], ["#wsLayers", 'button[data-o][aria-pressed="true"]'], ["#wsCtry", 'button[aria-pressed="true"]']]) glider(document.querySelector(box), sel);
 boot(SPOT0);
+if(SPOT_PEND) switchSpot(SPOT_PEND);   // the other country's spot the link asked for, behind the World passcode
 if(VIEW!=="fc") setView(VIEW, true);
 
 // ---- Wave of the week title: water spray blasting off the end of the letters (placed once the font has loaded).

@@ -447,13 +447,19 @@ html{overscroll-behavior-y:none}
 .wsmap.fs .wsctry button[aria-pressed="true"]{color:#ffb347;background:#0a0f12}
 /* Shut, the map's countries are just its own (with a ▾); open, each shows its outline and name. */
 .wsmap.fs .wsctry:not(.open) button:not([aria-pressed="true"]){display:none}
-.wsmap.fs .wsctry button{position:relative}
+.wsmap.fs .wsctry button{position:relative;border-radius:99px}
+/* Opening, the other countries slide down one after another; shutting (.shutting, for a moment before .open goes) they slide back up (Bryan, Oct 21). */
+.wsmap.fs .wsctry.open button:not([aria-pressed="true"]){animation:wsDrop .28s cubic-bezier(.2,.8,.3,1) calc(var(--i,0)*16ms) backwards}
+.wsmap.fs .wsctry.shutting button:not([aria-pressed="true"]){animation:wsLift .18s ease-in forwards;pointer-events:none}
+@keyframes wsDrop{from{opacity:0;transform:translateY(-16px)}}
+@keyframes wsLift{to{opacity:0;transform:translateY(-16px)}}
+@media (prefers-reduced-motion:reduce){.wsmap.fs .wsctry button{animation:none!important}}
 .wsmap.fs .wsctry:not(.open) button[aria-pressed="true"]::after{content:"▾";position:absolute;right:-1px;bottom:-3px;font-size:10px;line-height:1;color:#ffb347}
 .wsmap.fs .wsctry.open button:has(svg){width:auto;display:flex;align-items:center;gap:6px;padding:0 10px 0 5px}
 .wsmap.fs .wsctry.open button:has(svg) svg{margin:0!important}
 .wsmap.fs .wsctry.open button:not([aria-pressed="true"]){background:#1c1340}
 .wsmap.fs .wsctry.open button:has(svg)::after{content:attr(aria-label);font-size:12px;white-space:nowrap}
-.wsmap .wsctry > .glide-pill{z-index:1;border-radius:10px;background:none;border:1px solid #ffb347;box-shadow:0 0 8px rgba(255,140,0,.4)}
+.wsmap .wsctry > .glide-pill{z-index:1;border-radius:99px;background:none;border:1px solid #ffb347;box-shadow:0 0 8px rgba(255,140,0,.4)}
 /* With a spot's card open the countries stay clear of it: sideways the card sits between them (however many columns they take: --ctryr is their
    right edge) and the map tools, upright they stop above it. */
 @media (orientation:landscape){.wsmap.fs .sheet{left:calc(var(--ctryr,calc(42px + env(safe-area-inset-left))) + 10px);right:calc(52px + env(safe-area-inset-right))}}
@@ -579,6 +585,11 @@ const ALL = __DATA__;
 // 日本語 is switched off for now: its button is hidden and never picked from a saved choice or the phone; its translations stay, so setLang("ja") still works.
 let LANG = (() => { try{ const l=localStorage.getItem("waveslave-lang"); if(l==="en"||l==="zh") return l; }catch(e){} const n=navigator.language||""; return /^zh/i.test(n) ? "zh" : "en"; })();
 const isZh = () => LANG==="zh", isJa = () => LANG==="ja";
+// Opens or shuts the full-screen map's country list; shutting lets the countries slide back up before they go.
+function wsCtryOpen(on){ const w = document.getElementById("wsCtry"); clearTimeout(w._shut); w.classList.remove("shutting");
+  if (on) return w.classList.add("open");
+  if (!w.classList.contains("open") || matchMedia("(prefers-reduced-motion: reduce)").matches) return w.classList.remove("open");
+  w.classList.add("shutting"); w._shut = setTimeout(() => w.classList.remove("open", "shutting"), 180); }
 // English words and short phrases -> 中文. Sentences with numbers in them are written out in place with isZh().
 const TR = {
   "Today":"今天", "Tomorrow":"明天", "Yesterday":"昨天", "Sun":"週日", "Mon":"週一", "Tue":"週二", "Wed":"週三", "Thu":"週四", "Fri":"週五", "Sat":"週六",
@@ -1195,7 +1206,7 @@ const WS = (() => {
   let seen = "", rsz = 0;
   if (window.ResizeObserver) new ResizeObserver(() => { const box = document.getElementById("wsBox"), k = box.clientWidth + "x" + box.clientHeight;
     if (!FS || !built || document.getElementById("viewWs").hidden || k === seen || rsz) return; rsz = requestAnimationFrame(() => { rsz = 0; seen = box.clientWidth + "x" + box.clientHeight; size(); drawBase(); }); }).observe(document.getElementById("wsBox"));
-  document.addEventListener("keydown", e => { if (e.key !== "Escape") return; const w = document.getElementById("wsCtry"); if (w.classList.contains("open")) w.classList.remove("open"); else if (FS) setView("fc"); });
+  document.addEventListener("keydown", e => { if (e.key !== "Escape") return; const w = document.getElementById("wsCtry"); if (w.classList.contains("open") && !w.classList.contains("shutting")) wsCtryOpen(false); else if (FS) setView("fc"); });
   function screenH() { const so = screen.orientation && screen.orientation.type, land = so ? so.startsWith("landscape") : Math.abs(window.orientation || 0) === 90 || innerWidth > innerHeight;
     const sw = screen.width || innerWidth, sh = screen.height || innerHeight, dev = land ? Math.min(sw, sh) : Math.max(sw, sh), vv = window.visualViewport ? visualViewport.height : innerHeight;
     return { land, h: Math.min(vv, innerHeight, dev) }; }
@@ -1572,12 +1583,12 @@ const WS = (() => {
     // A button for each country in the switch above the spot picker (#ctry), made from it so that a country added there shows up here too: the country's
     // outline, its name read out and shown on hover in the page's language (applyLang swaps them), or a copy of the switch's button while it has no outline.
     const ctryLater = afterGlide();
-    document.getElementById("wsCtry").replaceChildren(...[...document.querySelectorAll("#ctry button")].map(b => { const c = b.dataset.c, d = HOME_ICONS[c], n = d ? document.createElement("button") : b.cloneNode(true);
+    document.getElementById("wsCtry").replaceChildren(...[...document.querySelectorAll("#ctry button")].map((b, i) => { const c = b.dataset.c, d = HOME_ICONS[c], n = d ? document.createElement("button") : b.cloneNode(true); n.style.setProperty("--i", i);
       if (d) { n.dataset.c = c; n.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" style="display:block;margin:auto"><path d="${d}" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg>`;
         for (const a of ["aria-label", "title"]) { n.setAttribute(a, b.textContent); for (const l of ["en", "zh", "ja"]) n.setAttribute(`data-${l}-${a}`, b.dataset[l] || b.textContent); } }
       // Shut, only the map's country shows; a tap on it opens the list (Bryan, Oct 21). A pick from the list flies there and shuts it.
-      n.onclick = () => { const w = document.getElementById("wsCtry"); if (!w.classList.contains("open")) { w.classList.add("open"); return; }
-        w.classList.remove("open"); pressOnly(document.querySelectorAll("#wsCtry button"), n); ctryLater(() => flyTo(c)); }; return n; })); ctryOn();
+      n.onclick = () => { const w = document.getElementById("wsCtry"); if (!w.classList.contains("open")) { wsCtryOpen(true); return; }
+        wsCtryOpen(false); pressOnly(document.querySelectorAll("#wsCtry button"), n); ctryLater(() => flyTo(c)); }; return n; })); ctryOn();
     // The zoom buttons and the countries sit just under the top buttons, however many rows those take (a narrow phone, a longer language): --barb is the bar's bottom edge.
     const bar = document.getElementById("wsLayers"), sec = document.getElementById("viewWs");
     if (window.ResizeObserver) new ResizeObserver(() => sec.style.setProperty("--barb", bar.offsetTop + bar.offsetHeight + "px")).observe(bar);
@@ -1592,7 +1603,7 @@ const WS = (() => {
     // A finger on the pin readout moves the pin instead of scrolling the page.
     fx.addEventListener("touchstart", e => { if (e.touches.length === 1) { const r = fx.getBoundingClientRect(), t = e.touches[0]; if (onPin([t.clientX-r.left, t.clientY-r.top])) e.preventDefault(); } }, {passive: false});
     const rel = e => { const r = fx.getBoundingClientRect(); return [e.clientX-r.left, e.clientY-r.top]; };
-    fx.onpointerdown = e => { unglide(); document.getElementById("wsCtry").classList.remove("open"); P.set(e.pointerId, rel(e)); fx.setPointerCapture(e.pointerId); if (P.size === 1) downAt = rel(e); else downAt = null; pinch = null;
+    fx.onpointerdown = e => { unglide(); wsCtryOpen(false); P.set(e.pointerId, rel(e)); fx.setPointerCapture(e.pointerId); if (P.size === 1) downAt = rel(e); else downAt = null; pinch = null;
       drag = P.size === 1 && onPin(downAt) ? {ox: downAt[0]-PINBOX[4], oy: downAt[1]-PINBOX[5], moved: false} : null; };
     fx.onpointermove = e => { if (!P.has(e.pointerId)) return; const prev = P.get(e.pointerId), cur = rel(e); P.set(e.pointerId, cur);
       if (drag && P.size === 1) { if (!drag.moved && Math.hypot(cur[0]-downAt[0], cur[1]-downAt[1]) < 6) return; drag.moved = true;

@@ -669,6 +669,19 @@ describe("DELETE /me", () => {
     expect(await handoff.json()).toEqual({ error: "banned" });
   });
 
+  it("on a banned LINE account, keeps the ban: the transaction only marks its subs row deleted", async () => {
+    // DELETE /me never gets this far for a banned account (above), so this calls the transaction itself, the way a
+    // later route to it would.
+    const r = await freshRoom();
+    const u = await addUser(r);
+    await r.rows("UPDATE subs SET banned = 1 WHERE sub_hash = ?", u.sub);
+    await r.inRoom((room) => {
+      room.forgetAccount(room.account(u.id, 0), T);
+    });
+    expect(await r.rows("SELECT banned, deleted_at FROM subs WHERE sub_hash = ?", u.sub)).toEqual([{ banned: 1, deleted_at: T }]);
+    expect(await r.rows("SELECT count(*) AS n FROM users WHERE id = ?", u.id)).toEqual([{ n: 0 }]);
+  });
+
   it("while a POST /me/sessions body is still arriving, leaves nothing of the account: the log gets 401, and no row is written", async () => {
     // The room reads a request's body without its input gate shut, so other requests run in the meantime. Here the
     // account goes while the log's body is held back, the way a slow phone connection would hold it.

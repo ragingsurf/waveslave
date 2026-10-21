@@ -1,6 +1,6 @@
 # Taiwan chat for WaveSlave: design
 
-Date: 2026-10-21. Status: draft for Bryan's review. Plan: `docs/superpowers/plans/2026-10-21-taiwan-chat.md` (written after approval).
+Date: 2026-10-21. Status: approved by Bryan (2026-10-21). Plan: `docs/superpowers/plans/2026-10-21-taiwan-chat.md`.
 
 ## Goal
 

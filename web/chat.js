@@ -95,7 +95,7 @@ const STR = {
     posted: "Report posted", stars: n => `${n} of 5 stars`, future: "The start can't be later than now.", tooLong: "A session can be up to 12 hours.",
     saved: "Saved to your diary", savedShared: "Saved, and shared to the chat", notShared: why => `Saved to your diary, but it couldn't be shared: ${why}`,
     full: "Your diary is full (1,000 sessions). Delete one in My sessions first.", loading: "Loading…", sharedTag: "Shared",
-    deleteWhat: "Your messages, shared sessions, session logs and nickname are deleted now, on every device. Your reports stay, as “a surfer”. This can't be undone.",
+    deleteWhat: "Your messages, shared sessions, session logs and nickname are deleted now, on every device. Your reports stay, as “a surfer”. Copies kept as evidence of a broken rule stay for up to 180 days. This can't be undone.",
     deleted: "Your account is deleted", signedOut: "Signed out on every device",
     // The privacy note (Taiwan's Personal Data Protection Act, Article 8): short at first sign-in, in full behind More.
     privacyHead: "Privacy note", contactHead: "Contact",
@@ -105,7 +105,7 @@ const STR = {
       ["Why", "Your data is used only to run the chat."],
       ["What is kept", "Your nickname, a one-way code made from your LINE ID (never the ID itself), your messages, reports and session logs. Cloudflare also sees your IP address when you connect."],
       ["Where, and who handles it", "Cloudflare stores the chat on servers outside Taiwan. LINE (LY Corp) handles sign-in. Messages, reports and shared sessions are public, under your nickname."],
-      ["How long", "Room messages and shared sessions: 30 days. Reports: 1 year, with your nickname taken off after 30 days. Private session logs: until you delete them, or after 2 years without signing in. Cloudflare keeps recovery copies for up to 30 days, and anything hidden for child safety is kept for 180 days."],
+      ["How long", "Room messages and shared sessions: 30 days. Reports: 1 year, with your nickname taken off after 30 days. Private session logs: until you delete them, or after 2 years without signing in. Cloudflare keeps recovery copies for up to 30 days. Anything hidden for child safety, and messages kept as evidence of a broken rule, are kept for 180 days."],
       ["Your rights", `"Download my data" and "Delete my account" are in the chat's menu at any time, or write to ${c.email}.`],
       ["If you don't sign in", "You can still read everything. Signing in is only for posting."]],
   },
@@ -160,7 +160,7 @@ const STR = {
     posted: "已送出回報", stars: n => `${n} 顆星（滿分 5 顆）`, future: "開始時間不能晚於現在。", tooLong: "一次衝浪最長 12 小時。",
     saved: "已存入你的日誌", savedShared: "已儲存，並分享到聊天室", notShared: why => `已存入你的日誌，但無法分享：${why}`,
     full: "日誌已滿（1,000 筆），請先在「我的日誌」刪除一筆。", loading: "載入中…", sharedTag: "已分享",
-    deleteWhat: "你的訊息、分享的日誌、私人日誌和暱稱會立即從所有裝置上刪除。你的浪況回報會保留，顯示為「一位浪友」。刪除後無法復原。",
+    deleteWhat: "你的訊息、分享的日誌、私人日誌和暱稱會立即從所有裝置上刪除。你的浪況回報會保留，顯示為「一位浪友」。因違反版規而保留為證據的副本最多保存 180 天。刪除後無法復原。",
     deleted: "你的帳號已刪除", signedOut: "已登出所有裝置",
     privacyHead: "隱私權說明", contactHead: "聯絡我們",
     privacyShort: "要發言，聊天室會保存你的暱稱、由 LINE ID 單向產生的代碼，以及你發表的內容。資料由 Cloudflare 存放在台灣以外的伺服器，登入由 LINE（LY Corp）處理。發言內容是公開的。完整的隱私權說明在「更多」裡。",
@@ -169,7 +169,7 @@ const STR = {
       ["蒐集目的", "你的資料只用於營運聊天室。"],
       ["保存哪些資料", "你的暱稱、由 LINE ID 單向產生的代碼（不會保存 ID 本身），以及你的訊息、回報與衝浪日誌。你連線時，Cloudflare 也會看到你的 IP 位址。"],
       ["存放地點與經手者", "聊天室的資料由 Cloudflare 存放在台灣以外的伺服器；登入由 LINE（LY Corp）處理。訊息、回報與分享的日誌會以你的暱稱公開。"],
-      ["保存多久", "聊天室訊息與分享的日誌：30 天。回報：1 年，30 天後移除你的暱稱。私人日誌：保留到你刪除為止，或 2 年未登入後刪除。Cloudflare 的復原備份最多保留 30 天；因兒少安全而隱藏的內容保留 180 天。"],
+      ["保存多久", "聊天室訊息與分享的日誌：30 天。回報：1 年，30 天後移除你的暱稱。私人日誌：保留到你刪除為止，或 2 年未登入後刪除。Cloudflare 的復原備份最多保留 30 天；因兒少安全而隱藏的內容，以及因違反版規而保留為證據的訊息，保留 180 天。"],
       ["你的權利", `你隨時可以在聊天室選單中使用「下載我的資料」或「刪除我的帳號」，也可以寫信到 ${c.email}。`],
       ["不登入的話", "你仍然可以閱讀所有內容，只有發言需要登入。"]],
   },
@@ -224,7 +224,7 @@ const STR = {
     posted: "波情報を投稿しました", stars: n => `星${n}つ（5段階）`, future: "開始時刻を今より後にはできません。", tooLong: "1回のセッションは最長12時間です。",
     saved: "日記に保存しました", savedShared: "保存して、チャットに共有しました", notShared: why => `日記に保存しましたが、共有できませんでした：${why}`,
     full: "日記がいっぱいです（1,000件）。先に「マイセッション」で1件削除してください。", loading: "読み込み中…", sharedTag: "共有中",
-    deleteWhat: "メッセージ、共有したセッション、セッション記録、ニックネームが、すべての端末から今すぐ削除されます。波情報は「サーファー」として残ります。元に戻すことはできません。",
+    deleteWhat: "メッセージ、共有したセッション、セッション記録、ニックネームが、すべての端末から今すぐ削除されます。波情報は「サーファー」として残ります。ルール違反の証拠として保存されたコピーは最長180日間残ります。元に戻すことはできません。",
     deleted: "アカウントを削除しました", signedOut: "すべての端末でログアウトしました",
     privacyHead: "プライバシーについて", contactHead: "お問い合わせ",
     privacyShort: "投稿するには、ニックネーム、LINE IDから一方向に作ったコード、投稿内容をチャットに保存します。データはCloudflareが台湾国外に保存し、ログインはLINE（LY Corp）が扱います。投稿は公開されます。プライバシーについての全文は「詳しく」にあります。",
@@ -233,7 +233,7 @@ const STR = {
       ["利用目的", "データはチャットの運営のためだけに使います。"],
       ["保存する情報", "ニックネーム、LINE IDから一方向に作ったコード（ID自体は保存しません）、メッセージ、報告、セッション記録。接続時にはCloudflareがIPアドレスを受け取ります。"],
       ["保存場所と取り扱う事業者", "チャットのデータはCloudflareが台湾国外のサーバーに保存します。ログインはLINE（LY Corp）が扱います。メッセージ・報告・共有したセッションはニックネームとともに公開されます。"],
-      ["保存期間", "ルームのメッセージと共有したセッション：30日。報告：1年（30日後にニックネームを外します）。非公開のセッション記録：削除するまで、または2年間ログインがないと削除。Cloudflareの復旧用コピーは最長30日、子どもの安全のため非表示にした内容は180日保存されます。"],
+      ["保存期間", "ルームのメッセージと共有したセッション：30日。報告：1年（30日後にニックネームを外します）。非公開のセッション記録：削除するまで、または2年間ログインがないと削除。Cloudflareの復旧用コピーは最長30日、子どもの安全のため非表示にした内容と、ルール違反の証拠として保存したメッセージは180日保存されます。"],
       ["あなたの権利", `チャットのメニューの「データをダウンロード」と「アカウントを削除」はいつでも使えます。${c.email} への連絡もできます。`],
       ["ログインしない場合", "すべて閲覧できます。ログインが必要なのは投稿だけです。"]],
   },
@@ -293,21 +293,24 @@ function ask(id) { const n = ++asked; askedAt = Date.now();
     data = { spot: id, reports: withLive(id, j.reports.filter(isReport)) }; online = count(j.online); lastId = count(j.last_id) || 0; draw();
   }).catch(guard(() => { if (n !== asked) return; data = null; online = null; lastId = 0; draw(); })); }
 
-// The report strip, the last child of the "Right now" card (#nowReports in template.html): up to 3 chips for the spot, each a dot
-// coloured by conditions (Clean green, OK amber, Choppy or Blown out red), size and conditions, then crowd and age. With none, the
-// button and "No reports in the last 4 h". It stays hidden away from Taiwan, while asking, and when the backend can't be reached.
+// The report strip, the last child of the "Right now" card (#nowReports in template.html): up to 3 chips for the spot from the last
+// 4 hours, each a dot coloured by conditions (Clean green, OK amber, Choppy or Blown out red), size and conditions, then crowd and age.
+// With none, the button and "No reports in the last 4 h". It stays hidden away from Taiwan, while asking, and when the backend can't be
+// reached. It is drawn again each minute, asking nothing, so the ages move on and a report past 4 hours leaves (the button keeps the focus).
 function drawStrip() {
-  const s = document.getElementById("nowReports"); if (!s) return;
+  const s = document.getElementById("nowReports"); if (!s) return; const had = s.contains(document.activeElement);
   const d = data && data.spot === shown && inTaiwan(shown) ? data : null;
   s.hidden = !d; s.textContent = ""; if (!d) return;
   const post = el("button", { type: "button", class: "rp-post" }, S("postReport"));
   post.addEventListener("click", guard(() => enter({ sheet: "report", spot: shown })));
-  const chips = d.reports.slice(0, 3).map(r => el("li", { class: "rp-chip" },
+  const since = Date.now() - 4 * 3600e3, chips = d.reports.filter(r => r.ts > since).slice(0, 3).map(r => el("li", { class: "rp-chip" },
     el("b", null, el("i", { class: "rp-dot", "data-cond": r.cond, "aria-hidden": "true" }), `${L("size", r.size)} · ${L("cond", r.cond)}`),
     el("span", null, `${L("crowdChip", r.crowd)} · ${ago(r.ts)}`)));
   s.append(el("div", { class: "rp-hd" }, el("span", { class: "label" }, S("reportsHead")), post),
     chips.length ? el("ul", { class: "rp-row" }, ...chips) : el("p", { class: "rp-none" }, S("noReports")));
+  if (had) post.focus({ preventScroll: true });
 }
+setInterval(guard(() => { if (document.visibilityState !== "hidden") drawStrip(); }), 60e3);
 
 // The CHAT button: CHAT, how many are online, and a pink dot while there's a message newer than the last one seen. The CSS shows it in
 // Taiwan (html.tw, set by boot()) on the Forecast view only.
@@ -358,7 +361,8 @@ const R = {
   online: null, state: "idle", filter: "all", replyTo: null, pending: [], hidden: null, locked: null, fresh: false,
   sheet: null, pop: null, opener: null, noteT: 0, agesT: 0, longAt: 0,
 };
-const sock = { ws: null, ready: false, tries: 0, retryT: 0, openT: 0, deadT: 0, pongT: 0, awayT: 0, held: 0,
+// token: the session token the newest socket said hello with (null for a reader's). Another tab can store a new one meanwhile.
+const sock = { ws: null, ready: false, tries: 0, retryT: 0, openT: 0, deadT: 0, pongT: 0, awayT: 0, held: 0, token: null,
   // One frame to the room, as JSON. Only once the room has answered hello, so a write never goes before the sign-in it needs.
   send(frame) { const ws = sock.ws; if (!ws || ws.readyState !== 1 || !sock.ready) return false;
     const text = JSON.stringify(frame); if (new TextEncoder().encode(text).length > FRAME_MAX) return false;
@@ -413,7 +417,7 @@ function connect() {
   let ws; try { ws = new WebSocket(WS_URL); } catch (e) { return lost(1006); }
   sock.ws = ws;
   sock.openT = setTimeout(guard(() => { if (ws === sock.ws && ws.readyState === 0) { stopSocket(); lost(1006); } }), OPEN_MS);
-  ws.onopen = guard(() => { if (ws !== sock.ws) return; clearTimeout(sock.openT); alive(ws); const token = load(KEYS.token);
+  ws.onopen = guard(() => { if (ws !== sock.ws) return; clearTimeout(sock.openT); alive(ws); const token = load(KEYS.token); sock.token = token;
     ws.send(JSON.stringify(token ? { type: "hello", v: PROTO, token } : { type: "hello", v: PROTO })); });
   ws.onmessage = guard(e => { if (ws !== sock.ws) return; alive(ws); if (typeof e.data === "string" && e.data !== "pong") onFrame(e.data); });
   ws.onclose = guard(e => { if (ws !== sock.ws) return; sock.ws = null; lost(e.code); });
@@ -426,11 +430,13 @@ function alive(ws) { clearTimeout(sock.deadT); clearTimeout(sock.pongT); sock.de
 function retry(ms) { clearTimeout(sock.retryT); sock.retryT = setTimeout(guard(() => { if (R.open) connect(); }), ms); }
 // The socket closed, or never opened.
 function lost(code) {
-  sock.ready = false; R.older = false; clearTimeout(sock.openT); clearTimeout(sock.deadT); clearTimeout(sock.pongT); restorePending(true);
+  sock.ready = false; R.older = false; clearTimeout(sock.openT); clearTimeout(sock.deadT); clearTimeout(sock.pongT);
+  // Texts still waiting stay on the list for the next socket's history to settle (settlePending()); resting or too old, none comes soon.
   if (!R.open) return;
+  if (code === 4429 || code === 4426) restorePending(true);
   if (code === 4429) { setState("resting"); const now = Date.now(); return retry(Math.ceil((now + 1) / DAY) * DAY - now + Math.random() * 60e3); }
   if (code === 4426) return setState("update");
-  if (code === 4401 || code === 4403) { if (code === 4403) note(S("banned"), true); signOutQuietly(); sock.tries = 0; return connect(); }
+  if (code === 4401 || code === 4403) { if (code === 4403) note(S("banned"), true); return tokenRefused(true); }
   setState("offline"); retry(BACKOFF[Math.min(sock.tries++, BACKOFF.length - 1)]);
 }
 // Is the socket still there? Asked on coming back to the foreground. An open socket that doesn't answer "ping" within 10 s is replaced;
@@ -472,9 +478,10 @@ const ON = {
       const gap = !whole && sock.held < low - 1;
       if (gap) { R.msgs.clear(); R.gone.clear(); }
       const heldOlder = [...R.msgs.keys()].some(id => id < low);
-      for (const id of [...R.msgs.keys()]) if ((whole || id >= low) && !ids.has(id)) { R.msgs.delete(id); R.gone.add(id); }
+      for (const id of [...R.msgs.keys()]) if ((whole || id >= low) && !ids.has(id)) { reportGone(id); R.msgs.delete(id); R.gone.add(id); }
       R.start = whole || (R.start && heldOlder);
       for (const m of list) R.msgs.set(m.id, m);
+      settlePending(list);
       if (R.replyTo && !R.msgs.has(R.replyTo)) { R.replyTo = null; drawReply(); } // the reply line shows what a reply would go to
       const first = R.fresh; R.fresh = false; sock.ready = true; sock.tries = 0; setState("live");
       if (isAdmin()) sock.send({ type: "hidden_list" });
@@ -499,7 +506,7 @@ const ON = {
   // Likes changed, or a message went (deleted, or hidden for everyone but Bryan).
   update(f) {
     const id = f.id, m = Number.isSafeInteger(id) ? R.msgs.get(id) : null;
-    if (f.deleted === true || f.hidden === true) { R.msgs.delete(id); R.gone.add(id); if (R.replyTo === id) { R.replyTo = null; drawReply(); } }
+    if (f.deleted === true || f.hidden === true) { reportGone(id); R.msgs.delete(id); R.gone.add(id); if (R.replyTo === id) { R.replyTo = null; drawReply(); } }
     else if (m && count(f.likes) != null) m.likes = count(f.likes);
     else return;
     render();
@@ -510,12 +517,12 @@ const ON = {
     const code = typeof f.code === "string" ? f.code : "invalid", about = typeof f.for === "string" ? f.for : "";
     if (code === "gone") return gone(about, f);
     const hook = own(HOOK.error, about); if (typeof hook === "function" && hook(code) !== false) return;
-    if (about === "hello") { if (code === "banned") note(S("banned"), true); if (code === "auth" || code === "banned") signOutQuietly(); return; }
+    if (about === "hello") { if (code === "banned") note(S("banned"), true); if (code === "auth" || code === "banned") tokenRefused(false); return; }
     if (about === "older") { R.older = false; const s = slowFor(code); if (s) setTimeout(guard(() => { if (R.built && R.el.list.scrollTop < 60) olderPage(); }), s * 1e3); return; }
     if (about === "nick" && R.sheet && R.sheet.name === "nick") { R.sheet.state.sent = false; R.sheet.state.err = nickWhy(code); return drawSheet(); }
     if (about === "say") restorePending();
     if (about === "admin") return note(S("adminNo"), true);
-    if (code === "auth") { signOutQuietly(); sock.tries = 0; return connect(); }
+    if (code === "auth") return tokenRefused(true);
     note(why(code), true);
   },
   // One of Bryan's tools did its work (or a log was shared, which the sheets take). Lock and unlock reach all his screens;
@@ -557,7 +564,7 @@ function gone(about, f) {
   note(S("gone"));
 }
 // A message that isn't there any more leaves the list, as a delete would take it.
-function dropMsg(id) { if (!R.msgs.delete(id)) return; R.gone.add(id); if (R.replyTo === id) { R.replyTo = null; drawReply(); } render(); }
+function dropMsg(id) { reportGone(id); if (!R.msgs.delete(id)) return; R.gone.add(id); if (R.replyTo === id) { R.replyTo = null; drawReply(); } render(); }
 // After merging: the oldest id held, and at most KEEP_MSGS messages, so a room left open for days drops its oldest. Only while it is
 // read at its newest, though: a page of older messages scrolled up to is never cut (o.older), or "Load older messages" would ask for
 // the same page for ever, and nothing goes from under someone reading far up. The cut comes once they are back at the newest.
@@ -588,13 +595,35 @@ function nickWhy(code) {
 }
 // The token stopped working (signed out everywhere, deleted, banned): it goes, and the bar shows the LINE button again.
 function signOutQuietly() { save(KEYS.token, null); R.me = null; R.replyTo = null; R.pending = []; if (R.built) drawAll(); }
-// A text that never made it (refused, or the socket dropped first) goes back in the box, unless something new is being typed there.
-// The room answers a socket's frames in turn, so a refusal is for the oldest text still waiting; a drop loses them all (all), and the
-// oldest goes back.
-function restorePending(all) { const p = R.pending.shift(); if (all) R.pending = []; if (!p || !R.built) return;
-  if (!R.el.input.value) R.el.input.value = p.text;
+// The room refused the token this socket said hello with. It goes only while it is still the one stored, as in me(): another tab may
+// have signed in since (or signed out and in again), and that tab's token must not go with it. Then this socket just starts again with
+// the stored one. again: start again in either case (a hello refused leaves the socket reading on, so it needn't).
+function tokenRefused(again) {
+  if (load(KEYS.token) !== sock.token) return tokenMoved();
+  signOutQuietly(); if (again) { sock.tries = 0; connect(); }
+}
+// Another tab signed in or out: the token stored isn't the one this socket said hello with, so a new socket says hello with it (and the
+// bar is drawn for it). Asked on coming back to the page and when the stored token changes; false when there was nothing to do.
+function tokenMoved() {
+  if (!R.open || R.state === "update" || load(KEYS.token) === sock.token) return false;
+  R.me = null; R.replyTo = null; sock.tries = 0; connect(); if (R.built) drawAll(); return true;
+}
+// A text that never made it (refused) goes back in the box, unless something new is being typed there. The room answers a socket's
+// frames in turn, so a refusal is for the oldest text still waiting. all: the rest go too (the chat rests, or the page is too old).
+// Returns whether it went back.
+function restorePending(all) { const p = R.pending.shift(); if (all) R.pending = []; if (!p || !R.built) return false;
+  const back = !R.el.input.value; if (back) R.el.input.value = p.text;
   if (p.reply && R.msgs.has(p.reply)) R.replyTo = p.reply;
-  drawReply(); drawSend(); }
+  drawReply(); drawSend(); return back; }
+// The texts still waiting when a socket went, dropped or replaced without a word (no frame for 100 s, no pong, the network changed):
+// the next socket's history (list) settles them. One it shows as ours, posted after the text was sent, went in (each message settles one
+// text); the oldest of the rest goes back in the box with a line to say so, and the list starts again empty.
+function settlePending(list) {
+  if (!R.pending.length) return;
+  const posted = list.filter(m => isMine(m) && m.kind === "text");
+  R.pending = R.pending.filter(p => { const i = posted.findIndex(m => m.id > p.after && m.body.text === p.sent); if (i >= 0) posted.splice(i, 1); return i < 0; });
+  if (restorePending(true)) note(S("failed"), true);
+}
 
 // ---- Building the room (mockup 2). Built once, on first open; relang() redraws its words in place, so the box keeps what's typed.
 function build() {
@@ -785,7 +814,7 @@ function sendText() {
   const admin = /^[/／]/.test(text), f = admin ? { type: "admin", code: text } : { type: "say", text, ...(R.replyTo ? { reply_to: R.replyTo } : R.filter !== "all" ? { spot: R.filter } : {}) };
   if (!sock.send(f)) return note(R.state === "resting" ? S("resting") : S("offline"), true);
   box.value = ""; clearNote(); drawSend();
-  if (!admin) { R.pending.push({ text, sent: asStored(text), reply: R.replyTo }); R.replyTo = null; drawReply(); }
+  if (!admin) { R.pending.push({ text, sent: asStored(text), reply: R.replyTo, after: Math.max(0, ...R.msgs.keys()) }); R.replyTo = null; drawReply(); }
 }
 // A write from the menus; a reader is asked to sign in first.
 function write(frame) { if (!signedIn()) { needSignIn(); return false; } const ok = sock.send(frame); if (!ok) note(S("offline"), true); return ok; }
@@ -870,15 +899,16 @@ function moreSheet() {
     el("h3", null, S("privacyHead")), S("privacy", CONTACT).map(([h, p]) => [el("h4", null, h), el("p", null, p)]),
     el("h3", null, S("contactHead")), el("p", null, CONTACT.name, el("br"), mail)] };
 }
-// Change nickname, once a week: the room says when the next change is due.
+// Change nickname, once a week: the room says when the next change is due. Saving the name as it is closes the sheet and sends nothing,
+// so it can't use up the week (a change of case is a change).
 function nickSheet(st) {
   const box = el("input", { class: "cr-in cr-field", type: "text", maxlength: "20", dir: "auto", autocomplete: "off", "aria-label": S("nickname") });
   box.value = st.value ?? (R.me ? R.me.nick : "");
   box.addEventListener("input", guard(() => { st.value = box.value; }));
   const go = el("button", { type: "button", class: "cr-pill cr-go" }, S("save"));
-  const submit = guard(() => { const nick = box.value.trim(); if (!nick || st.sent) return; st.value = box.value; st.err = null;
+  const submit = guard(() => { const nick = box.value.trim(); if (!nick || st.sent) return; if (R.me && nick === R.me.nick) return closeSheet(); st.value = box.value; st.err = null;
     if (sock.send({ type: "nick", nick })) st.sent = true; else st.err = S("offline"); drawSheet(); });
-  go.addEventListener("click", submit); box.addEventListener("keydown", guard(e => { if (e.key === "Enter" && !e.isComposing) submit(); }));
+  go.addEventListener("click", submit); box.addEventListener("keydown", guard(e => { if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) submit(); }));
   return { title: S("changeNick"), body: [el("label", { class: "cr-lab" }, S("nickname")), box, st.err ? el("p", { class: "cr-err", role: "alert" }, st.err) : null, el("div", { class: "cr-go-row" }, go)] };
 }
 // Bryan's hidden messages, newest first, each with why and what it was flagged for, and Restore or Keep as evidence.
@@ -928,8 +958,9 @@ document.addEventListener("visibilitychange", guard(() => {
   if (!R.open) return;
   clearTimeout(sock.awayT);
   if (document.visibilityState === "hidden") sock.awayT = setTimeout(guard(() => { if (document.visibilityState === "hidden" && R.open) { stopSocket(); setState("away"); } }), AWAY_MS);
-  else { check(); markSeen(); drawBar(); }
+  else { if (!tokenMoved()) check(); markSeen(); drawBar(); }
 }));
+addEventListener("storage", guard(e => { if (e.key === KEYS.token || e.key === null) { if (!tokenMoved() && R.built) drawBar(); } }));
 addEventListener("offline", guard(() => { if (R.open && sock.ws) { stopSocket(); lost(1006); } }));
 addEventListener("online", guard(() => { if (R.open && R.state !== "update") { sock.tries = 0; connect(); } }));
 
@@ -1020,7 +1051,7 @@ function signupSheet(st) {
   const can = () => !!st.tick && !!(st.nick || "").trim() && !st.sending;
   nick.value = st.nick || ""; tick.checked = !!st.tick; join.disabled = !can();
   nick.addEventListener("input", guard(() => { st.nick = nick.value; join.disabled = !can(); }));
-  nick.addEventListener("keydown", guard(e => { if (e.key === "Enter" && !e.isComposing && can()) signup(st); }));
+  nick.addEventListener("keydown", guard(e => { if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229 && can()) signup(st); }));
   tick.addEventListener("change", guard(() => { st.tick = tick.checked; join.disabled = !can(); }));
   join.addEventListener("click", guard(() => signup(st)));
   const more = el("button", { type: "button", class: "cr-link", "data-k": "more" }, S("more"));
@@ -1188,10 +1219,11 @@ function sessionsSheet(st) {
   return { title: S("mySessions"), body: [st.note ? el("p", { class: "cr-fine", role: "status" }, st.note) : null,
     rows.length ? rows : st.err ? el("p", { class: "cr-err", role: "alert" }, st.err) : el("p", null, st.list ? S("noSessions") : S("loading"))] };
 }
+// A log already deleted on another screen (404) leaves the list as if this Delete had done it, with a line to say so.
 async function deleteLog(st, l) {
   l.busy = true; l.err = null; drawSheet();
   try { await me(`/me/sessions/${l.id}`, { method: "DELETE" }); st.list = st.list.filter(x => x !== l); }
-  catch (e) { l.busy = false; l.confirm = false; l.err = meWhy(e); }
+  catch (e) { if (e && e.status === 404) { st.list = st.list.filter(x => x !== l); st.note = S("gone"); } else { l.busy = false; l.confirm = false; l.err = meWhy(e); } }
   if (R.sheet && R.sheet.state === st) drawSheet();
 }
 // Share or Unshare, on the socket. The row waits for the room's answer with a flag of its own (sharing, apart from a delete's busy), and
@@ -1224,18 +1256,24 @@ function newMessage(m, mine) {
   const s = R.sheet; if (mine && s && s.name === "report" && s.state.sent && m.spot === s.state.sent) { clearTimeout(s.state.t); closeSheet(); note(S("posted")); }
 }
 // A report seen on the socket goes on its spot's strip at once. /reports may be answered from the browser's minute-long copy for a while
-// after, so ask() puts back any of these the answer doesn't have yet (withLive()).
+// after, so ask() puts back any of these the answer doesn't have yet (withLive()), for 2 minutes: after that an answer without it is the
+// room's word that it went (deleted while the room was shut, with no socket to say so). A report deleted or hidden while the page watches
+// (update, a gone answer, a history without it, or one Bryan's socket gets marked hidden) is kept here marked gone instead, so it leaves
+// the strip at once and stays off it when that copy still has it. One Bryan restores comes back.
 const live = [];
 const sameReport = (a, b) => a.ts === b.ts && a.size === b.size && a.cond === b.cond && a.crowd === b.crowd;
-function liveReport(m) {
-  const r = { spot: m.spot, ts: m.ts, size: m.body.size, cond: m.body.cond, crowd: m.body.crowd };
-  if (!live.some(x => x.spot === r.spot && sameReport(x, r))) live.push(r);
-  if (live.length > 50) live.shift();
-  if (data && data.spot === m.spot) { data.reports = withLive(m.spot, data.reports); draw(); }
-}
+function liveEntry(m) { let r = live.find(x => x.id === m.id);
+  if (!r) { r = { id: m.id, spot: m.spot, ts: m.ts, size: m.body.size, cond: m.body.cond, crowd: m.body.crowd, gone: false, at: Date.now() }; live.push(r); if (live.length > 50) live.shift(); }
+  return r; }
+function liveReport(m) { const r = liveEntry(m); r.gone = !!m.hidden; r.at = Date.now(); restrip(r.spot); }
+// Message id went (deleted or hidden): if it was a report, it leaves the strip. Asked before the message leaves R.msgs.
+function reportGone(id) { const m = R.msgs.get(id), r = live.find(x => x.id === id) || (m && m.kind === "report" ? liveEntry(m) : null);
+  if (r) { r.gone = true; restrip(r.spot); } }
+function restrip(spot) { if (data && data.spot === spot) { data.reports = withLive(spot, data.reports); draw(); } }
 function withLive(spot, reports) {
-  const since = Date.now() - 4 * 3600e3, add = live.filter(r => r.spot === spot && r.ts > since && !reports.some(x => sameReport(x, r))).map(({ ts, size, cond, crowd }) => ({ ts, size, cond, crowd }));
-  return add.length ? reports.concat(add).sort((a, b) => b.ts - a.ts) : reports;
+  const now = Date.now(), here = live.filter(r => r.spot === spot), kept = reports.filter(x => !here.some(r => r.gone && sameReport(x, r)));
+  const add = here.filter(r => !r.gone && r.ts > now - 4 * 3600e3 && now - r.at < 120e3 && !kept.some(x => sameReport(x, r))).map(({ ts, size, cond, crowd }) => ({ ts, size, cond, crowd }));
+  return add.length ? kept.concat(add).sort((a, b) => b.ts - a.ts) : kept;
 }
 Object.assign(HOOK, { login: guard(login), signin: guard(finishSignin), sheet: guard(sheet), msg: guard(newMessage),
   ok: { share: f => logShared(f.session_id, true), unshare: f => logShared(f.session_id, false) }, error: { report: reportRefused, share: shareRefused, unshare: shareRefused } });
@@ -1477,6 +1515,10 @@ if (opening) { try { history.replaceState(null, "", location.pathname + "#" + CU
 document.head.append(el("style", null, CSS));
 document.body.append(fab);
 const credits = document.getElementById("chatCredits"); if (credits) credits.hidden = false;
+// The credits' Privacy link opens the note in place, not by loading the whole page again. One listener on the document, never on the
+// link itself, since applyLang() writes the credits' HTML anew; a click meant for a new tab or window goes on as a link.
+document.addEventListener("click", guard(e => { const a = e.target instanceof Element ? e.target.closest('a[href="?chat=privacy"]') : null;
+  if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); enter({ privacy: true }); }));
 if (signin) { const back = load(KEYS.ret, true); save(KEYS.ret, null, true); if (back && own(ALL.spots, back) && inTaiwan(back) && back !== CUR) switchSpot(back); }
 window.CHAT.spot(CUR);
 if (opening) enter(signin ? { signin } : q.get("chat") === "privacy" ? { privacy: true } : {});

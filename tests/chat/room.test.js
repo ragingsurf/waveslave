@@ -34,7 +34,8 @@ const USERS = {
   bryan: { nick: "Bryan", role: "admin" }, kai: { nick: "阿凱" }, mika: { nick: "Mika" }, leo: { nick: "Leo" }, fish: { nick: "小魚" },
   shalom: { nick: "שלום" }, evil: { nick: "<img src=x onerror=alert(2)>" },
   p1: { nick: "Poster1" }, p2: { nick: "Poster2" }, p3: { nick: "Poster3" }, p4: { nick: "Poster4" }, p5: { nick: "Poster5" },
-  p6: { nick: "Poster6" }, p7: { nick: "Poster7" }, p8: { nick: "Poster8" },
+  p6: { nick: "Poster6" }, p7: { nick: "Poster7" }, p8: { nick: "Poster8" }, p9: { nick: "Poster9" }, p10: { nick: "Poster10" },
+  p11: { nick: "Poster11" }, p12: { nick: "Poster12" },
 };
 const LONG = "W".repeat(500), EMOJI = "🏄🌊🤙🏄🌊🤙🏄🌊🤙🏄", RLO = "‮abc";
 const SPOTS = [null, "jinshan", "fulong", "wushi", null, "suao", "donghe"];
@@ -342,8 +343,9 @@ const CHECKS = {
     await page.waitForFunction(() => document.querySelector("#chatSheetTitle").textContent === "ルール" && !document.querySelector(".chatroom .cr-shade").hidden);
     if (await page.inputValue(".chatroom .cr-in") !== draft) throw new Error("the box lost its text on the second switch");
   },
-  // The nickname changes from the room's menu, once a week: a name the room refuses says why and leaves the sheet up, a good one closes
-  // it and shows on the next message, and a second change says when the next one is due.
+  // The nickname changes from the room's menu, once a week: saving the name as it is closes the sheet and sends nothing (so it can't use
+  // up the week), a name the room refuses says why and leaves the sheet up, a good one closes it and shows on the next message, and a
+  // second change says when the next one is due.
   async nickname(open) {
     const page = await open({ as: "p5" }); await openRoom(page);
     const sheet = () => page.evaluate(() => ({ open: !document.querySelector(".chatroom .cr-shade").hidden, title: document.querySelector("#chatSheetTitle").textContent,
@@ -353,6 +355,10 @@ const CHECKS = {
     await start();
     const s = await sheet();
     if (!s.open || s.title !== "Change nickname (once a week)" || s.value !== "Poster5") throw new Error(`the nickname sheet reads ${JSON.stringify(s)}`);
+    const sent = []; page.sockets.at(-1).on("framesent", f => { try { const j = JSON.parse(f.payload); if (j.type === "nick") sent.push(j.nick); } catch (e) {} });
+    await page.press(".chatroom .cr-sheet .cr-field", "Enter");
+    await page.waitForFunction(() => document.querySelector(".chatroom .cr-shade").hidden, null, { timeout: 5e3 }).catch(() => { throw new Error("saving the name as it is left the sheet up"); });
+    await start();
     await page.fill(".chatroom .cr-sheet .cr-field", "x"); await page.press(".chatroom .cr-sheet .cr-field", "Enter");
     await errSays("2–20 characters").catch(async () => { throw new Error(`a 1-letter name: ${JSON.stringify(await sheet())}`); });
     await page.fill(".chatroom .cr-sheet .cr-field", "Wave Rider"); await page.press(".chatroom .cr-sheet .cr-field", "Enter");
@@ -364,6 +370,7 @@ const CHECKS = {
     if ((await sheet()).value !== "Wave Rider") throw new Error("the sheet doesn't start from the new name");
     await page.fill(".chatroom .cr-sheet .cr-field", "Wave Rider Two"); await page.press(".chatroom .cr-sheet .cr-field", "Enter");
     await errSays("Once a week: you can change it again in 7 days").catch(async () => { throw new Error(`a second change: ${JSON.stringify(await sheet())}`); });
+    if (!eq(sent, ["x", "Wave Rider", "Wave Rider Two"])) throw new Error(`the room was sent the names ${JSON.stringify(sent)}`);
   },
   // The ⋯ button opens Reply, 👍 and Report on someone else's message, by keyboard too: Enter opens it on the first item, the arrows move,
   // Escape shuts it and goes back to ⋯ with the room still open, and ⋯ keeps the focus when the 👍 that went from there redraws the
@@ -493,7 +500,7 @@ const CHECKS = {
     if (drops !== had + 1) throw new Error(`Retry opened ${drops - had} sockets`);
   },
   // ?chat=privacy (the credits' Privacy link) opens the room with the house rules, the privacy note and the contact; the credits' chat line
-  // shows once the chat is on.
+  // shows once the chat is on. On a page already up, the link opens the same sheet in place, without loading the page again.
   async privacyLink(open) {
     const page = await open({ query: "?chat=privacy" });
     await page.waitForFunction(() => !document.querySelector(".chatroom .cr-shade").hidden);
@@ -504,6 +511,11 @@ const CHECKS = {
     if (!s.credits || /chat=/.test(s.href)) throw new Error(`the credits' chat line is ${s.credits ? "shown" : "hidden"}, the address ${s.href}`);
     await page.keyboard.press("Escape");
     if (!(await page.evaluate(() => document.querySelector(".chatroom .cr-shade").hidden && document.documentElement.classList.contains("chat-open")))) throw new Error("Escape didn't close just the sheet");
+    const up = await open({});
+    await up.evaluate(() => { window.__stayed = 1; document.querySelector('#chatCredits a[href="?chat=privacy"]').click(); });
+    await up.waitForFunction(() => { const s = document.querySelector(".chatroom .cr-shade"), t = document.querySelector("#chatSheetTitle"); return !!s && !s.hidden && t?.textContent === "House rules"; }, null, { timeout: 5e3 })
+      .catch(() => { throw new Error("the credits' Privacy link didn't open the note"); });
+    if (!(await up.evaluate(() => window.__stayed === 1 && !/chat=/.test(location.href)))) throw new Error("the credits' Privacy link loaded the page again");
   },
   // Bryan's tools, as he uses them (the seeded admin). His menu offers Lock or Unlock, whichever applies, from the room's own word: on a
   // page opened while the room is locked too, and both his pages follow a lock or unlock made on either. Locked, a reader's text is
@@ -656,7 +668,8 @@ const CHECKS = {
   },
   // Share and Unshare in My sessions wait for the room with a flag of their own. One the room never answers (the socket dropped) gives
   // the row back after 10 s, saying it didn't go through; a refused share's why goes on its own row, not on one whose Delete is on its
-  // way; and a log the room has no more of (gone) leaves the list, with a line to say so. A stand-in room, and /me/sessions answered here.
+  // way; and a log the room has no more of (gone) leaves the list, with a line to say so, as does one whose Delete finds it deleted
+  // already on another screen (404). A stand-in room, and /me/sessions answered here.
   async shareAnswers(open) {
     const replies = [], shares = [];
     const page = await open({ as: "p1", clock: true, ws: route => route.onMessage(m => { const f = JSON.parse(m);
@@ -687,6 +700,11 @@ const CHECKS = {
     await page.waitForFunction(sel => !document.querySelector(sel), row(1), { timeout: 5e3 }).catch(() => { throw new Error("a log the room has no more of stays in the list"); });
     const top = await page.evaluate(() => document.querySelector(".chatroom .cr-sheet-b > .cr-fine")?.textContent ?? null);
     if (top !== "That's gone already" || !eq(shares, [1, 3, 1])) throw new Error(`with the log gone the sheet says ${JSON.stringify(top)} (shares sent: ${shares})`);
+    await page.route(`${CHAT()}/me/sessions/3`, r => r.fulfill({ status: r.request().method() === "OPTIONS" ? 204 : 404, headers: cors, contentType: "application/json", body: JSON.stringify({ error: "not found" }) }));
+    await page.click(`${row(3)} [data-k="delete"]`); await page.click(`${row(3)} [data-k="delete"]`);
+    await page.waitForFunction(sel => !document.querySelector(sel), row(3), { timeout: 5e3 })
+      .catch(async () => { throw new Error(`a log deleted already on another screen stays in the list: ${JSON.stringify(await rowLook(3))}`); });
+    if (await page.evaluate(() => document.querySelector(".chatroom .cr-sheet-b > .cr-fine")?.textContent ?? null) !== "That's gone already") throw new Error("the sheet doesn't say the log was gone");
   },
   // While a report is on its way the sheet's picks hold still, so the report that comes back is the one the sheet shows, and it closes the
   // sheet. A stand-in room that takes the report, then echoes it.
@@ -733,23 +751,142 @@ const CHECKS = {
       await until(() => gets === 3, () => `back in the foreground with a socket still opening the page has tried ${gets} sockets, want 3`);
     } finally { for (const c of conns) c.destroy(); await new Promise(r => hole.close(r)); }
   },
+  // A report that reached the strip on the socket leaves it when it goes: deleted by its poster (update on every page), or hidden by
+  // Bryan's Delete (update on everyone else's page, a msg marked hidden on his). Nor does it come back with the next /reports answer,
+  // which can be the browser's minute-old copy.
+  async reportGone(open) {
+    const bryan = await open({ as: "bryan" }), p9 = await open({ as: "p9" }), p10 = await open({ as: "p10" });
+    for (const p of [bryan, p9, p10]) await openRoom(p);
+    const strip = p => p.evaluate(() => { const s = document.getElementById("nowReports"); return s.hidden ? null : [...s.querySelectorAll(".rp-chip b")].map(b => b.textContent); });
+    const shows = (p, chip, want, what) => p.waitForFunction(([c, w]) => { const s = document.getElementById("nowReports");
+      return !s.hidden && [...s.querySelectorAll(".rp-chip b")].some(b => b.textContent === c) === w; }, [chip, want], { timeout: 10e3 })
+      .catch(async () => { throw new Error(`${what}: the strip shows ${JSON.stringify(await strip(p))}`); });
+    const report = async (page, size, cond, crowd) => { await page.click(".chatroom .cr-rep");
+      await page.waitForSelector('.chatroom .cr-sheet [data-k="spot:jinshan"][aria-pressed="true"]');
+      for (const k of [`size:${size}`, `cond:${cond}`, `crowd:${crowd}`, "post"]) await page.click(`.chatroom .cr-sheet [data-k="${k}"]`);
+      await notes(page, "Report posted"); };
+    const cardId = (page, big) => page.evaluate(t => +[...document.querySelectorAll(".chatroom article")].find(a => a.querySelector(".cm-big")?.textContent === t)?.dataset.id, big);
+    const del = async (page, id) => { await page.click(`.chatroom article[data-id="${id}"] .cm-more`); await page.click('.chatroom .cr-pop >> text="Delete"'); await page.click(".chatroom .cr-pop >> text=/^Delete/"); };
+    await report(p9, "head", "choppy", "packed");
+    for (const p of [p10, bryan]) await shows(p, "Head · Choppy", true, "a report just posted");
+    await del(p9, await cardId(p9, "Head high · Choppy · Packed"));
+    for (const p of [p10, bryan]) await shows(p, "Head · Choppy", false, "a report its poster deleted");
+    await report(p10, "overhead", "blown", "empty");
+    for (const p of [p9, bryan]) await shows(p, "Overhead · Blown out", true, "a second report");
+    await del(bryan, await cardId(bryan, "Overhead · Blown out · Empty"));
+    for (const p of [p9, bryan]) await shows(p, "Overhead · Blown out", false, "a report Bryan hid");
+    for (const p of [p9, bryan]) {
+      await p.evaluate(() => { window.CHAT.spot("fulong"); window.CHAT.spot("jinshan"); });
+      await p.waitForFunction(() => !document.getElementById("nowReports").hidden, null, { timeout: 10e3 }); await wait(500);
+      const chips = await strip(p);
+      if (chips.some(c => c === "Head · Choppy" || c === "Overhead · Blown out")) throw new Error(`after asking /reports again the strip shows ${JSON.stringify(chips)}`);
+    }
+  },
+  // Two tabs: the room is open as a reader's in one, and the other signs in. Back in the first, its socket starts again with the new
+  // token, so a text goes out signed in: not on the reader's socket, where the room would refuse it and the refusal would sign both tabs
+  // out. A token stored while the first tab is in view (the storage event) starts its socket again at once.
+  async twoTabs(open) {
+    const a = await open({}), b = await open({ tab: a });
+    await openRoom(a); await openRoom(b);
+    // The frames each new socket of b's gets, by type, from now on.
+    const got = []; b.on("websocket", s => s.on("framereceived", f => { try { got.push(JSON.parse(f.payload).type); } catch (e) {} }));
+    const fresh = () => got.includes("me") && got.lastIndexOf("history") > got.indexOf("me");
+    const signedInAgain = async what => { for (let i = 0; i < 100 && !fresh(); i++) await wait(100);
+      if (!fresh()) throw new Error(`${what}: b's socket didn't start again signed in (frames ${got.join(", ")})`); got.length = 0; };
+    // b hears no storage event, as a tab in the background may not: only coming back tells it.
+    await b.evaluate(() => { window.__deaf = true; addEventListener("storage", e => { if (window.__deaf) e.stopImmediatePropagation(); }, true); });
+    const first = token("u-p11"), stored = () => b.evaluate(() => localStorage.getItem("waveslave-chat-token"));
+    await a.evaluate(t => localStorage.setItem("waveslave-chat-token", t), first);
+    await visibility(b, "hidden"); await visibility(b, "visible");
+    await signedInAgain("back in the tab");
+    await say(b, "Signed in from the other tab").catch(async () => { throw new Error(`the text never showed; the token is ${await stored() ? "still" : "no longer"} stored, the note says ${JSON.stringify(await b.textContent(".chatroom .cr-note"))}`); });
+    if ((await articles(b)).find(x => x.text === "Signed in from the other tab").nick !== "Poster11") throw new Error("the text went out as someone else");
+    if (await stored() !== first) throw new Error("the token the other tab stored went");
+    await b.evaluate(() => { window.__deaf = false; });
+    const second = token("u-p12");
+    await a.evaluate(t => localStorage.setItem("waveslave-chat-token", t), second);
+    await signedInAgain("with a new token stored while in view");
+    await say(b, "And again, as someone new");
+    if ((await articles(b)).find(x => x.text === "And again, as someone new").nick !== "Poster12" || await stored() !== second) throw new Error("the new token wasn't the one used, or went");
+  },
+  // The room refusing the token a socket said hello with (error auth for a write, or a 4401 close) signs out only while that token is
+  // still the one stored: one another tab stored meanwhile stays, and a new socket says hello with it. With the token it said hello with
+  // still stored, a 4401 signs out, and the room reads on as a reader's. A stand-in room that records each hello's token.
+  async tokenGuard(open) {
+    const hellos = []; let cur = null;
+    const page = await open({ as: "p1", ws: route => { cur = route; route.onMessage(m => { const f = JSON.parse(m);
+      if (f.type === "hello") { hellos.push(f.token ?? null); if (f.token) route.send(JSON.stringify({ type: "me", nick: "Poster1", role: "user" })); route.send(JSON.stringify({ type: "history", messages: [standIn(1)] })); }
+      if (f.type === "say") route.send(JSON.stringify({ type: "error", code: "auth", for: "say" })); }); } });
+    await openRoom(page);
+    const stored = () => page.evaluate(() => localStorage.getItem("waveslave-chat-token")), put = t => page.evaluate(t => localStorage.setItem("waveslave-chat-token", t), t);
+    const hello = async (k, t, what) => { for (let i = 0; i < 50 && hellos.length < k; i++) await wait(100);
+      if (hellos.length !== k || hellos[k - 1] !== t || await stored() !== t) throw new Error(`${what}: hellos ${JSON.stringify(hellos.map(h => h && h.slice(-6)))}, the token stored ${JSON.stringify((await stored() || "").slice(-6))}`); };
+    // Stored in this tab's storage straight, so no storage event says so: as if another tab signed in again while this one was deaf to it.
+    const second = token("u-p2"); await put(second);
+    await page.fill(".chatroom .cr-in", "On the old socket"); await page.press(".chatroom .cr-in", "Enter");
+    await hello(2, second, "error auth for a text, with a newer token stored");
+    await page.waitForFunction(() => document.querySelector(".chatroom .cr-in").value === "On the old socket", null, { timeout: 5e3 }).catch(() => { throw new Error("the refused text isn't back in the box"); });
+    const third = token("u-p3"); await put(third); cur.close({ code: 4401, reason: "signed out" });
+    await hello(3, third, "a 4401 close, with a newer token stored");
+    cur.close({ code: 4401, reason: "signed out" });
+    await hello(4, null, "a 4401 close with the socket's own token stored");
+    await page.waitForFunction(() => document.querySelector(".chatroom .cr-line").getClientRects().length > 0, null, { timeout: 5e3 }).catch(() => { throw new Error("signed out, the LINE button isn't shown"); });
+  },
+  // Review Focus 1: a text sent into a socket that is replaced without a close (no frame for 100 s, or no pong after a return) is settled
+  // by the next socket's history. One the history doesn't show goes back in the box with a line to say so; one it shows as ours stays
+  // out, so it isn't sent twice; and the next refusal is for the next text, never an older one. A stand-in room that takes texts without
+  // a word: it drops them, or keeps them, or refuses them.
+  async pendingSwap(open) {
+    let n = 0, mute = false, mode = "drop"; const all = [standIn(1)];
+    const page = await open({ as: "p1", clock: true, ws: route => { n++; route.onMessage(m => { if (m === "ping") { if (!mute) route.send("pong"); return; }
+      const f = JSON.parse(m);
+      if (f.type === "hello") { route.send(JSON.stringify({ type: "me", nick: "Poster1", role: "user" })); route.send(JSON.stringify({ type: "history", messages: all.slice(-100) })); }
+      if (f.type === "say" && mode === "keep") all.push(standIn(all.length + 1, { nick: "Poster1", body: { text: f.text } }));
+      if (f.type === "say" && mode === "refuse") route.send(JSON.stringify({ type: "error", code: "blocked:link", for: "say" })); }); } });
+    await openRoom(page);
+    const until = async (f, what) => { for (let i = 0; i < 50 && !f(); i++) await wait(100); if (!f()) throw new Error(what); };
+    const look = () => page.evaluate(() => ({ box: document.querySelector(".chatroom .cr-in").value, note: document.querySelector(".chatroom .cr-note").textContent }));
+    const send = async t => { await page.fill(".chatroom .cr-in", t); await page.press(".chatroom .cr-in", "Enter"); if ((await look()).box !== "") throw new Error(`"${t}" didn't go: ${JSON.stringify(await look())}`); };
+    await send("Lost in a dead socket");
+    await page.clock.fastForward(101e3);
+    await until(() => n === 2, `100 s without a frame the page has ${n - 1} new sockets, want 1`);
+    await page.waitForFunction(() => document.querySelector(".chatroom .cr-in").value === "Lost in a dead socket", null, { timeout: 5e3 })
+      .catch(async () => { throw new Error(`after the dead socket: ${JSON.stringify(await look())}`); });
+    if ((await look()).note !== "That didn't go through. Try again.") throw new Error(`the text came back, but the line says ${JSON.stringify((await look()).note)}`);
+    await page.fill(".chatroom .cr-in", ""); mode = "keep";
+    await send("Kept, never echoed");
+    mute = true; await visibility(page, "hidden"); await visibility(page, "visible"); await wait(300);
+    await page.clock.fastForward(11e3);
+    await until(() => n === 3, `with no pong in 10 s the page has ${n - 2} new sockets, want 1`);
+    await textArticle(page, "Kept, never echoed"); await wait(300);
+    const kept = await look();
+    if (kept.box !== "" || kept.note === "That didn't go through. Try again.") throw new Error(`a text the new history shows as posted: ${JSON.stringify(kept)}`);
+    mute = false; mode = "refuse";
+    await page.fill(".chatroom .cr-in", "The third one"); await page.press(".chatroom .cr-in", "Enter");
+    await page.waitForFunction(() => /^Links can't be posted here/.test(document.querySelector(".chatroom .cr-note").textContent), null, { timeout: 5e3 })
+      .catch(async () => { throw new Error(`the refusal: ${JSON.stringify(await look())}`); });
+    if ((await look()).box !== "The third one") throw new Error(`the refusal put ${JSON.stringify((await look()).box)} back in the box`);
+  },
 };
 
 (async () => {
   let browser, bad = false, ctxs = [], errs = [];
   // A fresh context for every page: the page and the backend load, everything else is cut off. as: a seeded account to sign in as;
   // clock: the page's timers under Playwright's clock; ws: a stand-in for the room's socket; url: the chat's address in place of the
-  // backend's (only its socket goes there). page.sockets lists the sockets it opened, page.dialogs any alert.
-  async function open({ as = null, spot = "jinshan", query = "", clock = false, ws = null, url = null }) {
-    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block" });
-    ctxs.push(ctx);
-    await ctx.route("**/*", r => { const u = r.request().url(); return u.startsWith(ORIGIN() + "/") || u.startsWith(CHAT() + "/") ? r.continue() : r.abort(); });
-    if (clock) await ctx.clock.install();
-    await ctx.addInitScript(([o, lock]) => {
-      try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", "fc"); localStorage.setItem("waveslave-lang", "en"); localStorage.setItem("waveslave-world", "0");
-        if (o.token && !sessionStorage.getItem("signed")) { localStorage.setItem("waveslave-chat-token", o.token); sessionStorage.setItem("signed", "1"); }
-        if (lock) sessionStorage.setItem("waveslave-unlock", lock); } catch (e) {}
-      window.__chatUrl = o.url; window.__chatContact = o.contact; }, [{ token: as ? token("u-" + as) : null, url: url || CHAT(), contact: CONTACT }, LOCK]);
+  // backend's (only its socket goes there); tab: a page whose context this one opens in instead, as a second tab sharing its storage
+  // (the other options are that page's). page.sockets lists the sockets it opened, page.dialogs any alert.
+  async function open({ as = null, spot = "jinshan", query = "", clock = false, ws = null, url = null, tab = null }) {
+    const ctx = tab ? tab.context() : await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block" });
+    if (!tab) {
+      ctxs.push(ctx);
+      await ctx.route("**/*", r => { const u = r.request().url(); return u.startsWith(ORIGIN() + "/") || u.startsWith(CHAT() + "/") ? r.continue() : r.abort(); });
+      if (clock) await ctx.clock.install();
+      await ctx.addInitScript(([o, lock]) => {
+        try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", "fc"); localStorage.setItem("waveslave-lang", "en"); localStorage.setItem("waveslave-world", "0");
+          if (o.token && !sessionStorage.getItem("signed")) { localStorage.setItem("waveslave-chat-token", o.token); sessionStorage.setItem("signed", "1"); }
+          if (lock) sessionStorage.setItem("waveslave-unlock", lock); } catch (e) {}
+        window.__chatUrl = o.url; window.__chatContact = o.contact; }, [{ token: as ? token("u-" + as) : null, url: url || CHAT(), contact: CONTACT }, LOCK]);
+    }
     const page = await ctx.newPage(); page.sockets = []; page.dialogs = [];
     if (ws) await page.routeWebSocket(/\/ws$/, ws);
     page.on("websocket", s => page.sockets.push(s)); page.on("pageerror", e => errs.push(String(e)));

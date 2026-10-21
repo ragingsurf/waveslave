@@ -88,12 +88,15 @@ const CHECKS = {
     got = await page.evaluate(() => window.CHAT._opened.slice());
     if (got.length !== 2 || got[1].sheet != null || got[1].spot != null) throw new Error(`the CHAT button asked the room for ${JSON.stringify(got[1])}, want no sheet and no spot`);
   },
-  // No reports in the last 4 hours: the strip shows the button and "No reports in the last 4 h".
+  // No reports in the last 4 hours: the strip shows the button and "No reports in the last 4 h". So does an answer with only a report from
+  // before then (the strip keeps to its 4 hours on a page left open).
   async noReports(open) {
-    const page = await open({ backend: () => ({ body: { reports: [], online: 0, last_id: 0 } }) });
-    await page.waitForFunction(() => !document.getElementById("nowReports").hidden);
-    const l = await look(page);
-    if (l.chips.length || l.none !== "No reports in the last 4 h" || !/Post a report/.test(l.post || "")) throw new Error(`the strip shows ${JSON.stringify(l)}`);
+    for (const reports of [[], [{ ts: NOW - 241*MIN, size: "chest", cond: "clean", crowd: "few" }]]) {
+      const page = await open({ backend: () => ({ body: { reports, online: 0, last_id: 0 } }) });
+      await page.waitForFunction(() => !document.getElementById("nowReports").hidden);
+      const l = await look(page);
+      if (l.chips.length || l.none !== "No reports in the last 4 h" || !/Post a report/.test(l.post || "")) throw new Error(`with ${reports.length} reports the strip shows ${JSON.stringify(l)}`);
+    }
   },
   // Switching spot asks /reports once for each new spot, with its own chips; switching language (the strip redraws in it) or going to the
   // map and back asks nothing.

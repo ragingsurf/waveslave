@@ -60,45 +60,119 @@ function press(k){if(busy)return;if(d.classList.contains("bad")){d.classList.rem
 d.addEventListener("click",function(e){var b=e.target.closest("button");if(!b||busy)return;if(b.classList.contains("lk-x"))close(cancel);else press(b.classList.contains("lk-del")?"del":b.getAttribute("data-n"))});
 function key(e){if(/^[0-9]$/.test(e.key))press(e.key);else if(e.key==="Backspace")press("del");else if(e.key==="Escape"&&cancel&&!busy)close(cancel)}addEventListener("keydown",key)};
 document.documentElement.classList.contains("locked")&&addEventListener("DOMContentLoaded",function(){wsLock(function(){location.reload()})});</script>
-<style>/* The World PIN box (Bryan, Oct 21): a small smoky box with a number pad over the page, no words. The right PIN blows the smoke away and
-   World mode lights up; a wrong one shakes it and flashes the dots red. A tap outside it, or Esc, backs out. */
-#wsPin{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(6,2,14,.38);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);animation:pnFade .25s ease-out;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
-#wsPin.out{animation:pnFadeOut .55s ease-in forwards}
-#wsPin .pn-box{position:relative;isolation:isolate;overflow:hidden;width:236px;padding:22px 18px 18px;border-radius:22px;border:1px solid rgba(214,160,255,.22);
-  background:rgba(26,16,38,.58);-webkit-backdrop-filter:blur(16px) saturate(1.2);backdrop-filter:blur(16px) saturate(1.2);
-  box-shadow:0 18px 50px rgba(0,0,0,.55),0 0 34px rgba(160,70,255,.18),inset 0 1px 0 rgba(255,255,255,.08);animation:pnIn .35s cubic-bezier(.2,1.3,.4,1)}
-#wsPin .pn-box::before,#wsPin .pn-box::after{content:"";position:absolute;z-index:-1;width:190%;height:190%;left:-45%;top:-45%;pointer-events:none;filter:blur(22px);opacity:.75;
-  background:radial-gradient(30% 24% at 30% 35%,rgba(190,170,215,.38),transparent 70%),radial-gradient(26% 30% at 70% 60%,rgba(150,80,230,.32),transparent 70%),radial-gradient(22% 18% at 45% 80%,rgba(210,200,230,.25),transparent 70%);
-  animation:pnSmoke 9s ease-in-out infinite alternate}
-#wsPin .pn-box::after{animation-duration:13s;animation-direction:alternate-reverse;opacity:.55;transform:rotate(140deg)}
-#wsPin .pn-dots{display:flex;justify-content:center;gap:14px;margin-bottom:18px}
-#wsPin .pn-dots i{width:11px;height:11px;border-radius:50%;border:1.5px solid rgba(225,190,255,.7);transition:background .12s,box-shadow .12s}
-#wsPin .pn-dots i.on{background:#e7b8ff;box-shadow:0 0 8px #b45cff,0 0 2px #fff}
-#wsPin .pn-pad{display:grid;grid-template-columns:repeat(3,58px);gap:10px 14px;justify-content:center}
-#wsPin button{width:58px;height:58px;border-radius:50%;border:1px solid rgba(225,190,255,.18);background:rgba(255,255,255,.06);color:#f3e8ff;
-  font:500 24px/1 "JetBrains Mono",ui-monospace,monospace;cursor:pointer;touch-action:manipulation;transition:background .1s,box-shadow .1s}
-#wsPin button:active{background:rgba(190,110,255,.38);box-shadow:0 0 14px rgba(180,80,255,.55)}
-#wsPin button:focus{outline:0}#wsPin button:focus-visible{outline:1px solid #d9a6ff;outline-offset:2px}
-#wsPin button.pn-del{border-color:transparent;background:none;font-size:20px;color:rgba(243,232,255,.7)}
-#wsPin.bad .pn-box{animation:pnShake .4s}#wsPin.bad .pn-dots i{border-color:#ff5c7a;background:#ff5c7a;box-shadow:0 0 8px #ff2050}
-#wsPin.ok .pn-dots i{background:#fff;box-shadow:0 0 12px #c77dff,0 0 24px #9b2cf0}
-#wsPin.out .pn-box{animation:pnPoof .55s ease-in forwards}
-@keyframes pnFade{from{opacity:0}}@keyframes pnFadeOut{to{opacity:0}}
-@keyframes pnIn{from{opacity:0;transform:scale(.85) translateY(10px);filter:blur(6px)}}
-@keyframes pnPoof{to{opacity:0;transform:scale(1.25) translateY(-14px);filter:blur(14px)}}
-@keyframes pnSmoke{0%{transform:translate(-6%,4%) rotate(0deg) scale(1)}50%{transform:translate(5%,-3%) rotate(25deg) scale(1.1)}100%{transform:translate(-3%,-6%) rotate(-15deg) scale(.95)}}
-@keyframes pnShake{20%,60%{transform:translateX(-9px)}40%,80%{transform:translateX(9px)}}
-@media (prefers-reduced-motion: reduce){#wsPin .pn-box::before,#wsPin .pn-box::after{animation:none}}</style>
-<script>/* The World PIN box: wsPin(done, cancel). Same code and same per-visit unlock as the passcode screen. */
+<style>/* The World PIN box, "Incense ring" (Bryan, Oct 21): smoke draws a ring, the pad rises out of it, the dots are embers. Wrong: they
+   flicker out. Right: they flare, the ring widens away, a spark lifts to the W. Tap outside or Esc backs out. */
+#wsPin{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;
+  --b:clamp(46px,min(14.5vw,7.8vh),60px);--g:clamp(9px,3vw,13px);--e:cubic-bezier(.2,.8,.2,1)}
+#wsPin .ip-d,#wsPin .ip-d::before{position:absolute;inset:0;background:rgba(8,6,12,.8);opacity:0;transition:opacity .6s}
+#wsPin .ip-d::before{content:"";background:radial-gradient(var(--px) var(--py),rgba(9,6,13,.65),rgba(9,6,13,.5) 55%,transparent);opacity:1;transition-duration:.45s}#wsPin.ok .ip-d::before{opacity:0}
+#wsPin canvas{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
+#wsPin .ip-p{position:relative;display:flex;flex-direction:column;align-items:center}
+#wsPin .ip-e{display:flex;gap:20px;height:22px;align-items:center;margin-bottom:22px;opacity:0;transform:translateY(10px);transition:opacity .45s .24s,transform .6s var(--e) .24s}
+#wsPin .ip-e i{position:relative;width:7px;height:7px;border-radius:50%;background:rgba(196,186,210,.24);box-shadow:0 0 0 1px rgba(226,216,240,.12)}
+#wsPin .ip-e b,#wsPin .ip-e b::before,#wsPin .ip-e i::after{content:"";position:absolute;left:50%;top:50%;border-radius:50%}
+#wsPin .ip-e b{width:24px;height:24px;margin:-12px;opacity:0;transform:scale(.3);transition:opacity .28s,transform .42s var(--e);
+  background:radial-gradient(#fff4e6 0 9%,#ffc28a 17%,rgba(255,128,62,.62) 30%,rgba(255,96,40,.16) 52%,transparent 70%)}
+#wsPin .ip-e b::before{width:40px;height:40px;margin:-20px;background:radial-gradient(rgba(255,120,60,.22),transparent 68%)}
+#wsPin .ip-e i.on b{opacity:1;transform:none}#wsPin .ip-e i.on b::before{animation:ipBr 2.1s ease-in-out infinite alternate}
+#wsPin .ip-e i::after{width:34px;height:34px;margin:-17px;opacity:0;transform:scale(.5);transition:opacity .3s,transform .5s var(--e);
+  background:radial-gradient(#fff 0 8%,#f3b4ff 18%,rgba(208,107,255,.55) 34%,rgba(155,44,240,.14) 54%,transparent 72%)}
+#wsPin .ip-k{display:grid;grid-template-columns:repeat(3,var(--b));gap:var(--g) calc(var(--g) + 8px)}
+#wsPin button{position:relative;width:var(--b);height:var(--b);padding:0;border-radius:50%;border:1px solid rgba(232,222,246,.13);background:rgba(255,255,255,.035);color:rgba(244,238,252,.9);
+  font:400 calc(var(--b)*.39)/1 "Public Sans",system-ui,sans-serif;cursor:pointer;touch-action:manipulation;
+  opacity:0;transform:translateY(14px);transition:opacity .45s calc(.26s + var(--d)),transform .6s var(--e) calc(.26s + var(--d))}
+#wsPin button::before{content:"";position:absolute;inset:-1px;border-radius:50%;box-shadow:0 0 0 1px rgba(243,180,255,.42),0 0 18px rgba(176,84,255,.22);
+  background:radial-gradient(rgba(208,107,255,.26),rgba(155,44,240,.08) 60%,transparent 74%);opacity:0;transition:opacity .45s}
+#wsPin button.pr::before{opacity:1;transition-duration:.05s}
+#wsPin .ip-x{border-color:transparent;background:none;color:rgba(240,232,250,.55)}#wsPin .ip-x svg{display:block;margin:auto}
+#wsPin button:focus{outline:0}#wsPin button:focus-visible{outline:1px solid rgba(243,180,255,.7);outline-offset:3px}
+#wsPin.in .ip-d{opacity:1}#wsPin.in .ip-e,#wsPin.in button{opacity:1;transform:none}
+#wsPin.bad .ip-e{animation:ipNo .44s cubic-bezier(.3,.6,.4,1)}#wsPin.bad i.on b{animation:ipOut .56s linear forwards}#wsPin.rs b{transition:none}
+#wsPin.ok .ip-e i b{opacity:0;transition:opacity .35s}#wsPin.ok .ip-e i::after{opacity:1;transform:scale(1.15)}
+#wsPin.ok .ip-k{opacity:0;transform:translateY(-4px) scale(.98);transition:.42s ease-in-out .06s}
+#wsPin.ok .ip-e{opacity:0;transform:translateY(-6px);transition:.45s ease-in .26s}
+#wsPin.lift .ip-d{opacity:0;transition:opacity .56s cubic-bezier(.33,0,.4,1)}
+#wsPin.out .ip-p{opacity:0;transform:translateY(8px) scale(.985);transition:.33s ease-in}#wsPin.out .ip-d{opacity:0;transition:opacity .36s ease-in}
+/* Reduced motion: a still ring, plain fades. */
+#wsPin.rm canvas{opacity:0}#wsPin.rm.in canvas{opacity:1}#wsPin.rm.out canvas,#wsPin.rm.lift canvas{opacity:0}#wsPin.rm.bad i.on b{opacity:0}
+#wsPin.rm *,#wsPin.rm ::before,#wsPin.rm ::after{transform:none!important;transition:opacity .35s!important;animation:none!important}#wsPin.rm.rs *{transition:none!important}
+#wsPin.rm.ok .ip-e{transition-delay:.3s!important}
+@keyframes ipBr{from{opacity:.55}}
+@keyframes ipNo{18%{translate:-6px}38%{translate:5px}58%{translate:-3px}78%{translate:1.5px}}
+@keyframes ipOut{12%{opacity:.35}22%{opacity:.9}36%{opacity:.2}50%{opacity:.6}70%{opacity:.1}to{opacity:0}}</style>
+<script>/* The World PIN box: wsPin(done, cancel). */
 window.wsPin=function(done,cancel){if(document.getElementById("wsPin"))return;
-var d=document.createElement("div");d.id="wsPin";d.setAttribute("role","dialog");d.setAttribute("aria-modal","true");d.setAttribute("aria-label","PIN");
-d.innerHTML='<div class="pn-box"><div class="pn-dots"><i></i><i></i><i></i><i></i></div><div class="pn-pad">'+[1,2,3,4,5,6,7,8,9].map(function(n){return'<button type="button" data-n="'+n+'">'+n+"</button>"}).join("")+'<span></span><button type="button" data-n="0">0</button><button type="button" class="pn-del" aria-label="Delete">⌫</button></div></div>';
-document.body.appendChild(d);var box=d.firstChild,dots=d.querySelector(".pn-dots"),code="",busy=false;
-function draw(){[].forEach.call(dots.children,function(e,i){e.className=i<code.length?"on":""})}
+var M=Math,R=M.random,PI=M.PI,rm=matchMedia("(prefers-reduced-motion: reduce)").matches,d=document.createElement("div"),i;
+d.innerHTML='<div id="wsPin" role="dialog" aria-modal="true" aria-label="PIN"'+(rm?' class="rm"':"")+'><div class="ip-d"></div><canvas></canvas><div class="ip-p"><div class="ip-e">'+"<i><b></b></i>".repeat(4)+'</div><div class="ip-k">'+
+  [1,2,3,4,5,6,7,8,9].map(function(n){return'<button data-n="'+n+'" style="--d:'+((n-1)/3|0)*40+'ms">'+n+"</button>"}).join("")+
+  '<span></span><button data-n="0" style="--d:120ms">0</button><button class="ip-x" aria-label="Delete" style="--d:120ms"><svg viewBox="0 0 24 18" width="23" height="17" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8.5 2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-12L2 9zM12 6l6 6m0-6-6 6"/></svg></button></div></div></div>';
+d=document.body.appendChild(d.firstChild);
+var cv=d.children[1],pad=d.children[2],dots=pad.firstChild,g=cv.getContext("2d"),code="",busy=false,shut=false,dead=false,raf=0,T0=performance.now(),lt=0,
+  W,H,K,ox,oy,rx,ry,vx=0,vy=0,stir=0,xt=-1,xk=0,xd=1,sp=null,P=[],Q=[],tm=[],F=[R()*9,R()*9,R()*9];
+function now(){return(performance.now()-T0)/1000}
+function later(f,ms){tm.push(setTimeout(function(){if(!dead)f()},ms))}
+function sm(a,b,x){x=(x-a)/(b-a);x=x<0?0:x>1?1:x;return x*x*(3-2*x)}
+function spr(w,h,f){var c=document.createElement("canvas");c.width=w;c.height=h;f(c.getContext("2d"));return c}
+function rad(c,n,st){var r=c.createRadialGradient(n,n,0,n,n,n);st.forEach(function(s,j){r.addColorStop(j/(st.length-1),s)});c.fillStyle=r;c.fillRect(0,0,2*n,2*n)}
+function blob(rgb,n){var st=[];for(i=0;i<=10;i++)st.push("rgba("+rgb+","+(M.exp(-.032*i*i)*(1-i*i/100)).toFixed(3)+")");return spr(n,n,function(c){rad(c,n/2,st)})}
+// Wisp: soft body + blurred filaments bowed like a bit of the ring.
+function wisp(rgb){return spr(256,96,function(c){var j,y,k;c.scale(4,1.5);rad(c,32,["rgba("+rgb+",.36)","rgba("+rgb+",.15)","rgba(0,0,0,0)"]);c.setTransform(1,0,0,1,0,0);
+  c.shadowColor="rgba("+rgb+",.8)";c.shadowOffsetY=2000;c.lineCap="round";
+  for(j=0;j<6;j++){y=46+(R()-.5)*26-2000;k=12+R()*8;c.shadowBlur=j&1?3+R()*4:8+R()*10;c.lineWidth=1.2+R()*2.6;c.globalAlpha=j&1?.3+R()*.3:.2+R()*.3;c.beginPath();c.moveTo(14,y-k/2);c.bezierCurveTo(90,y+k*.83+(R()-.5)*10,166,y+k*.83+(R()-.5)*10,242,y-k/2+(R()-.5)*8);c.stroke()}
+  c.globalAlpha=1;c.shadowColor="transparent";c.globalCompositeOperation="destination-in";c.scale(4,1.5);rad(c,32,["#000","rgba(0,0,0,.7)","rgba(0,0,0,0)"])})}
+var SH=blob("214,208,226",64),SL=blob("196,140,255",64),SA=blob("176,168,186",16),SW=[wisp("222,216,234"),wisp("214,208,228")],SWL=wisp("226,180,255"),
+  SK=spr(64,64,function(c){rad(c,32,["#fff","rgba(250,215,255,.8)","rgba(232,150,255,.4)","rgba(208,107,255,.14)","rgba(180,70,250,.04)","rgba(155,44,240,0)"])});
+function geo(){W=d.clientWidth;H=d.clientHeight;K=M.max(.75,M.min(devicePixelRatio||1,2)*.5);cv.width=M.round(W*K);cv.height=M.round(H*K);var B=pad.querySelector("button").offsetWidth;
+  ox=W/2;oy=H/2;ry=M.min(pad.offsetHeight/2+.3*B,H/2-30);rx=M.min(M.max(pad.offsetWidth/2+.62*B,ry/1.15),W/2-24);d.style.cssText="--px:"+rx*1.2+"px;--py:"+ry*1.15+"px"}
+geo();
+// Bits are reborn elsewhere as they fade, so no loop; the first are born bottom-up, drawing the ring.
+function born(p,t,first){var u=first?(p.i+R()*.8)/N:R(),k=p.k,s=rx*.6*(.75+R()*.5);p.a=PI/2+(u*2-1)*PI;p.t0=first?t+.6*M.pow(M.abs(u*2-1),.8):t;
+  p.L=rm?1e9:first?3.5+R()*6.5:6+R()*5;p.fi=first?.3:1.3;p.f=first;p.o=(R()+R()+R()-1.5)*.045;p.w=(.035+R()*.05)*(R()<.72?1:-1);p.sg=(p.w>0?1:-1)*(.5+R()*.5);
+  p.r0=(R()-.5)*.14;p.ph=R()*9;p.f1=.2+R()*.3;p.x=p.y=0;p.m=k==1?SW[R()*2|0]:k?SL:SH;p.s=k==1?s:s*1.25;p.h=k==1?s*(.3+R()*.14):s*.8;p.al=k==1?.24+R()*.22:k?.08+R()*.05:.09+R()*.05}
+var N=rm?36:46;for(i=0;i<N;i++){P.push({i:i,k:i%4==0?0:i%11==5?2:1});born(P[i],0,1)}
+function flow(x,y,t){var a=x*.0091+t*.23+F[0],b=y*.0087-t*.19+F[1],cu=M.cos((x*.8+y*.6)*.0053+t*.13+F[2])*6.9;vx=11.3*M.sin(a)*M.cos(b)+cu*.6;vy=-11.8*M.cos(a)*M.sin(b)-cu*.8}
+function dr(m,x,y,a,w,h,al){if(al<.004)return;var c=M.cos(a),s=M.sin(a);g.globalAlpha=al>1?1:al;g.setTransform(K*c*w,K*s*w,-K*s*h,K*c*h,K*x,K*y);g.drawImage(m,-.5,-.5,1,1)}
+function paint(t,dt){var E=1,G=1,th=0,q,j,p,o,ag,ca,sa,rr,X,Y,gr,u,v;
+  if(xt>=0){q=M.min(1,(t-xt)/xd);if(xk){E=1+.95*(1-M.pow(1-q,3));G=M.pow(1-q,1.5);th=q}else{E=1+.07*q;G=(1-q)*(1-q)}}
+  stir*=M.exp(-dt*2.4);E*=1+.02*stir;g.setTransform(1,0,0,1,0,0);g.clearRect(0,0,cv.width,cv.height);
+  for(j=0;j<N;j++){p=P[j];ag=t-p.t0;if(ag<0)continue;if(ag>p.L){if(xt>=0)continue;born(p,t,0);ag=0}
+    p.a+=(p.w+stir*p.sg)*dt;ca=M.cos(p.a);sa=M.sin(p.a);rr=E*(1+p.o+ag*.006);X=ox+rx*rr*ca+p.x;Y=oy+ry*rr*sa+p.y;
+    if(dt){flow(X,Y,t);p.x+=vx*dt;p.y+=(vy-(1.5+ag*1.6)*M.pow((1-sa)/2,1.5))*dt}
+    gr=(p.f?.62+.38*sm(0,1.3,ag):.8+.2*sm(0,1.5,ag))+ag*.025;
+    dr(p.m,X,Y,M.atan2(ry*ca,-rx*sa)+p.r0+.18*M.sin(t*p.f1+p.ph),p.s*gr*(1+.35*th),p.h*gr*(1-.5*th),p.al*G*sm(0,p.fi,ag)*sm(p.L,p.L-1.8,ag)*(p.f?1+.6*M.exp(-ag*2.5):1))}
+  for(j=Q.length-1;j>=0;j--){o=Q[j];ag=t-o.t0;if(ag<0)continue;if(ag>o.L){Q.splice(j,1);continue}
+    flow(o.x,o.y,t);o.x+=(o.vx+vx*.5)*dt;o.y+=(o.vy+vy*.5)*dt;gr=1+o.gr*ag/o.L;dr(o.m,o.x,o.y,o.a,o.s*gr,o.h*gr,o.al*sm(0,o.fi,ag)*(1-sm(o.L*.3,o.L,ag)))}
+  if(sp&&(q=(t-sp.t)/sp.T)>0){
+    if(q<1){u=q*q*(3-2*q);v=1-u;X=v*v*v*sp.x0+3*v*u*(v*sp.x1+u*sp.x2)+u*u*u*sp.x3;Y=v*v*v*sp.y0+3*v*u*(v*sp.y1+u*sp.y2)+u*u*u*sp.y3;
+      if(M.hypot(X-sp.lx,Y-sp.ly)>6){Q.push({m:R()<.5?SWL:SW[0],x:X,y:Y,vx:(R()-.5)*8,vy:-4-R()*6,a:M.atan2(Y-sp.ly,X-sp.lx)+(R()-.5)*.4,s:24+R()*12,h:8+R()*4,al:.3,t0:t,L:.5+R()*.3,fi:.05,gr:1.3});sp.lx=X;sp.ly=Y}
+      u=sm(0,.18,q);dr(SL,X,Y,0,60,60,.45*u);dr(SK,X,Y,0,24,24,u)}
+    else if((q=(t-sp.t-sp.T)/.18)<1){v=(1-q)*(1-q);u=sp.wr*(1.2+1.3*q);dr(SL,sp.x3,sp.y3,0,u,u,.75*v);u=24*(1+.7*q);dr(SK,sp.x3,sp.y3,0,u,u,v)}}}
+function frame(ms){if(dead)return;raf=requestAnimationFrame(frame);var t=(ms-T0)/1000;paint(t,M.min(.05,M.max(0,t-lt)));lt=t}
+function still(){for(var j=0;j<N;j++)P[j].t0=-2.5;paint(0,0)}
+if(rm)still();else raf=requestAnimationFrame(frame);
+void d.offsetWidth;d.classList.add("in");
+function draw(){[].forEach.call(dots.children,function(e,j){e.className=j<code.length?"on":""})}
+function flash(b){b.classList.add("pr");clearTimeout(b._t);b._t=setTimeout(function(){b.classList.remove("pr")},130)}
 function sha(s){return window.crypto&&crypto.subtle?crypto.subtle.digest("SHA-256",new TextEncoder().encode(s)).then(function(b){return[].map.call(new Uint8Array(b),function(x){return(x+256).toString(16).slice(1)}).join("")}):Promise.resolve("")}
-function close(fn,ms){busy=true;removeEventListener("keydown",key);d.classList.add("out");setTimeout(function(){d.remove();if(fn)fn()},ms)}
-function check(){busy=true;sha("waveslave:"+code).then(function(h){if(h===window.__lockHash){d.classList.add("ok");try{sessionStorage.setItem("waveslave-unlock",h)}catch(e){}setTimeout(function(){close(done,450)},window.__lockHold||220);return}
-d.classList.remove("bad");void d.offsetWidth;d.classList.add("bad");if(navigator.vibrate)navigator.vibrate([60,40,60]);setTimeout(function(){code="";draw();d.classList.remove("bad");busy=false},500)})}
-function press(k){if(busy)return;code=k==="del"?code.slice(0,-1):code.length<4?code+k:code;draw();if(code.length===4)check()}
-d.addEventListener("click",function(e){if(busy)return;var b=e.target.closest("button");if(b)press(b.classList.contains("pn-del")?"del":b.getAttribute("data-n"));else if(!box.contains(e.target))close(cancel,300)});
-function key(e){if(/^[0-9]$/.test(e.key))press(e.key);else if(e.key==="Backspace")press("del");else if(e.key==="Escape"&&!busy)close(cancel,300)}addEventListener("keydown",key)};</script>
+function finish(fn){dead=true;cancelAnimationFrame(raf);tm.forEach(clearTimeout);removeEventListener("keydown",key);removeEventListener("resize",rs);d.removeEventListener("wheel",nw);d.remove();P=Q=[];fn&&fn()}
+function quit(){if(shut)return;shut=busy=true;d.classList.add("out");xt=now();xk=0;xd=.36;later(function(){finish(cancel)},380)}
+function win(h){shut=true;try{sessionStorage.setItem("waveslave-unlock",h)}catch(e){}d.classList.add("ok");
+  if(rm){later(function(){d.classList.add("lift")},350);return later(function(){finish(done)},760)}
+  var t=now(),a=dots.getBoundingClientRect(),w=document.querySelector("header .brand .w"),r=w&&w.getBoundingClientRect(),ok=r&&r.width,x0=a.left+a.width/2,y0=a.top+a.height/2,
+    x3=ok?r.left+r.width/2:x0,y3=ok?r.top+r.height/2:-40,dy=M.max(60,y0-y3);
+  xt=t;xk=1;xd=1;sp={t:t+.2,T:.58,wr:ok?M.max(r.width,r.height):40,x0:x0,y0:y0,x1:x0,y1:y0-dy*.55,x2:x3+(x0-x3)*.35,y2:y3+dy*.25,x3:x3,y3:y3,lx:x0,ly:y0};
+  later(function(){d.classList.add("lift")},400);later(function(){finish(done)},980)}
+function nope(){d.classList.add("bad");if(navigator.vibrate)navigator.vibrate([50,40,50]);var t=now();
+  if(!rm)[].forEach.call(dots.children,function(e){var r=e.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2,j,s;
+    for(j=0;j<2;j++){s=2.4+R()*1.8;Q.push({m:SA,x:x+(R()-.5)*6,y:y,vx:(R()-.5)*12,vy:-7-R()*12,a:0,s:s,h:s,al:.42,t0:t+.08+R()*.3,L:1+R()*.7,fi:.1,gr:.2})}
+    Q.push({m:SW[1],x:x,y:y-5,vx:(R()-.5)*4,vy:-13,a:-PI/2+(R()-.5)*.6,s:22,h:7,al:.2,t0:t+.12,L:1.6,fi:.35,gr:1})});
+  later(function(){d.classList.add("rs");code="";draw();void d.offsetWidth;d.classList.remove("bad","rs");busy=false},rm?420:600)}
+function check(){busy=true;sha("waveslave:"+code).then(function(h){later(function(){if(!shut){if(h===window.__lockHash)win(h);else nope()}},150)})}
+function press(k){if(busy)return;stir=M.min(stir+.22,.5);code=k==="del"?code.slice(0,-1):code.length<4?code+k:code;draw();if(code.length===4)check()}
+d.addEventListener("pointerdown",function(e){var b=e.target.closest("button");if(b&&!busy)flash(b)});
+d.addEventListener("click",function(e){var b=e.target.closest("button");if(b)return press(b.classList.contains("ip-x")?"del":b.getAttribute("data-n"));
+  var x=(e.clientX-ox)/(rx+16),y=(e.clientY-oy)/(ry+16);if(x*x+y*y>1)quit()});
+function key(e){if(shut)return;var b=/^[0-9]$/.test(e.key)?d.querySelector('[data-n="'+e.key+'"]'):e.key==="Backspace"?d.querySelector(".ip-x"):null;
+  if(b){if(!busy)flash(b);press(e.key==="Backspace"?"del":e.key)}else if(e.key==="Escape")quit()}
+function rs(){geo();if(rm)still()}function nw(e){e.preventDefault()}
+addEventListener("keydown",key);addEventListener("resize",rs);d.addEventListener("wheel",nw,{passive:false})};</script>

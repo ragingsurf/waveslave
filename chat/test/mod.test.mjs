@@ -157,6 +157,17 @@ test("normalise: Chinese numerals become digits in the checking copy only", () =
 test("normalise: Chinese and full-width full stops become dots in the checking copy", () => {
   assert.equal(normalise("line。me").check, "line.me");
   assert.equal(normalise("line．me").check, "line.me");
+  assert.equal(normalise("0912。345。678").check, "0912.345.678");
+  assert.equal(normalise("〇九一二。三四五").check, "0912.345"); // the numerals are digits by then
+  assert.equal(normalise("line\n。me").check, "line\n.me"); // a line break between them changes nothing
+});
+
+test("normalise: after anything but a Latin letter or a digit, 。 stays the end of a sentence", () => {
+  assert.equal(normalise("今天浪很好。Net").check, "今天浪很好。net");
+  assert.equal(normalise("好。").check, "好。");
+  assert.equal(normalise("。me").check, "。me");
+  assert.equal(normalise("line 。me").check, "line 。me");
+  assert.equal(normalise("今天浪很好。Net").stored, "今天浪很好。Net");
 });
 
 test("normalise: odd input does not throw", () => {
@@ -239,6 +250,30 @@ test("blocked: links", () => {
   assert.equal(rule("kiwi.surf/abc"), "link");
 });
 
+test("blocked: links whose names are in Chinese or mix scripts", () => {
+  assert.equal(rule("金山浪.com"), "link");
+  assert.equal(rule("衝浪.tw"), "link");
+  assert.equal(rule("surf台灣.com"), "link");
+  assert.equal(rule("免費.com/x"), "link");
+  assert.equal(rule("看這裡 衝浪.tw/abc 很讚"), "link");
+  assert.equal(rule("去金山浪.com看"), "link"); // Chinese right after the name
+  assert.equal(rule("衝浪．tw"), "link"); // a full-width dot is a dot
+  assert.equal(rule("台灣surf。com"), "link"); // a Latin letter before the 。 makes it a dot, as in "example。com"
+  assert.equal(rule("サーフィン.jp"), "link");
+});
+
+test("blocked: a Chinese sentence that ends in 。 and goes on in English is not a link", () => {
+  // After a Chinese character, 。 is the end of a sentence, not a dot in a name.
+  assert.equal(rule("今天浪很好。Net is slow"), null);
+  assert.equal(rule("去金山衝浪。TW 的浪最棒"), null);
+  assert.equal(rule("好浪。Info at the shop"), null);
+  assert.equal(rule("今天很乾淨。Com on down"), null);
+  assert.equal(rule("風很大。IO is crowded"), null);
+  assert.equal(rule("衝浪。tw"), null); // the price of reading 。 that way: a Chinese name with 。 for its dot passes
+  assert.equal(rule("今天浪很好。明天也是。"), null);
+  assert.equal(rule("e.g. 浪很好"), null);
+});
+
 test("blocked: ordinary punctuation is not a link", () => {
   assert.equal(rule("Great waves.See you at 7"), null);
   assert.equal(rule("Fun session.It was clean"), null);
@@ -256,6 +291,8 @@ test("blocked: the allowHosts list lets chosen sites through", () => {
   assert.equal(rule("https://waveslave.tw.evil.com/x", withHost), "link");
   assert.equal(rule("https://notwaveslave.tw/x", withHost), "link");
   assert.equal(rule("https://waveslave.tw/ and https://evil.com", withHost), "link");
+  assert.equal(rule("請上waveslave.tw查", withHost), null); // Chinese written straight before it, with no space
+  assert.equal(rule("請上衝浪.tw查", withHost), "link");
   assert.equal(rule("https://waveslave.tw/#jinshan"), "link"); // nothing is allowed by default
 });
 

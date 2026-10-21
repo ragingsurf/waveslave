@@ -84,12 +84,18 @@ const LOOKALIKES = {
   z: "\u{0396}",                                                  // Greek capital Zeta
 };
 
-// Chinese numerals become digits and the ideographic full stop becomes a dot, so a phone number or a
-// link can't be hidden behind them.
+// Chinese numerals become digits, so a phone number can't be hidden behind them. The ideographic full stop
+// is folded in normalise() itself, as it depends on what comes before it.
 const OTHER_FOLDS = {
   "〇": "0", "零": "0", "一": "1", "二": "2", "三": "3", "四": "4", "五": "5", "六": "6", "七": "7", "八": "8", "九": "9",
-  "。": ".",
 };
+
+// The ideographic full stop becomes a dot right after a Latin letter or a digit, so "line。me", "example。com"
+// and "0912。345。678" are read as typed with a dot. After anything else it is left as it is: after a Chinese
+// character it ends a sentence, and "今天浪很好。Net is slow" must not read as the link "今天浪很好.net". A
+// written-out Chinese name with 。 for its dot ("衝浪。tw") passes for the same reason; with a real dot it is a link.
+const IDEO_STOP = "。";
+const DOT_AFTER = /^[a-z0-9]$/;
 
 const FOLD = new Map(Object.entries(OTHER_FOLDS));
 for (const [latin, look] of Object.entries(LOOKALIKES)) for (const ch of look) FOLD.set(ch, latin);
@@ -100,7 +106,8 @@ for (const [latin, look] of Object.entries(LOOKALIKES)) for (const ch of look) F
 //           either side of it do not run together and the text stays on one line. Case and everything else
 //           is kept as typed.
 //   check:  stored, accents dropped, then each character folded to lower case or to its plain look-alike
-//           (Cyrillic, Greek and similar letters to Latin, Chinese numerals to digits). The one difference
+//           (Cyrillic, Greek and similar letters to Latin, Chinese numerals to digits, and 。 to a dot after a
+//           Latin letter or a digit, see IDEO_STOP). The other difference
 //           from stored: where the message had a tab or line break the check copy has a "\n", not a space.
 //           Removing it would glue the words either side of it together ("hello<newline>line.me" would read
 //           "helloline.me", and "buy<newline>vape" would lose its word edge), and a space would let
@@ -112,8 +119,11 @@ export function normalise(text) {
   const parts = String(text ?? "").normalize("NFKC").split(BREAKS).map((part) => part.replace(INVISIBLE, "").normalize("NFKC"));
   const stored = parts.join(" ");
   let check = "";
+  let last = ""; // the last character written to check that isn't a line break, for IDEO_STOP
   for (const ch of parts.join("\n").normalize("NFD").replace(COMBINING, "").normalize("NFC")) {
-    check += FOLD.get(ch) ?? ch.toLowerCase();
+    const out = ch === IDEO_STOP ? (DOT_AFTER.test(last) ? "." : ch) : FOLD.get(ch) ?? ch.toLowerCase();
+    check += out;
+    if (out !== "\n") last = out;
   }
   return { stored, check };
 }
@@ -138,12 +148,16 @@ const TELEGRAM = /(?<![a-z0-9-])(?:(?:t\.me|telegram\.(?:me|org|dog))(?![a-z0-9]
 // Domains caught even with no scheme and no path. Words that are also top-level domains (.top, .fun,
 // .live, .work, .shop, ...) are left out on purpose: a message typed "Good surf.Fun day" would be refused.
 // Those still count as links when they have a path ("scam.top/abc"), a "www." or a scheme.
+// The names before the top-level domain may be in any script (金山浪.com, surf台灣.com), as browsers take
+// them; the top-level domain itself is a Latin one. The end of the domain only has to be clear of Latin
+// letters and digits, so Chinese written straight after it ("金山浪.com看") doesn't hide it.
 const BARE_TLDS = "com|net|org|info|biz|xyz|cc|io|tw|jp|kr|hk|cn|tv|sg|edu|gov";
+const LABEL = "[\\p{L}\\p{N}][\\p{L}\\p{N}-]*\\.";
 const LINK = new RegExp(
-  "[a-z][a-z0-9+.-]*:\\/\\/" +                                                  // any scheme://
-  "|(?<![a-z0-9-])www\\d?\\." +                                                 // www.
-  "|(?<![a-z0-9-])(?:[a-z0-9][a-z0-9-]*\\.)+(?:" + BARE_TLDS + ")(?![a-z0-9-])" + // name.com
-  "|(?<![a-z0-9-])(?:[a-z0-9][a-z0-9-]*\\.)+[a-z]{2,24}\\/\\S",                   // name.anything/path
+  "[a-z][a-z0-9+.-]*:\\/\\/" +                                                    // any scheme://
+  "|(?<![a-z0-9-])www\\d?\\." +                                                   // www.
+  "|(?<![\\p{L}\\p{N}-])(?:" + LABEL + ")+(?:" + BARE_TLDS + ")(?![a-z0-9-])" +   // name.com
+  "|(?<![\\p{L}\\p{N}-])(?:" + LABEL + ")+[a-z]{2,24}\\/\\S",                     // name.anything/path
   "u");
 
 // Taiwan mobile numbers: 09xxxxxxxx, or +886 9xxxxxxxx (also 886, 00886, and a leftover 0 after 886).

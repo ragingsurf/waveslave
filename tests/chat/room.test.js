@@ -43,7 +43,7 @@ function seedMessages(now) {
   const people = ["kai", "mika", "leo", "fish"];
   for (let i = 0; i < 150; i++) {
     const who = people[i % 4], spot = SPOTS[i % SPOTS.length];
-    if (i % 25 === 7) add(who, "report", spot || "jinshan", { size: "chest", cond: "clean", crowd: "few", snap: { hs: 1.1, tp: 9, ws: 6, wd: 45, bhs: 1.0, hs_t: "2026-10-21T07:00" } });
+    if (i % 25 === 7) add(who, "report", spot || "jinshan", { size: "chest", cond: "clean", crowd: "few", snap: { hs: 1.1, tp: 9, ws: 6, wd: 45, bhs: 1.0, hs_t: "2026-10-21T18:00", ws_t: "2026-10-21T18:00", bhs_t: "2026-10-21T16:00" } });
     else if (i % 30 === 11) add(who, "session", spot || "wushi", { start: now - 3 * 3600e3, end: now - 1.5 * 3600e3, stars: 4, board: "minimal", note: "Kept nosediving on takeoff", cond: { hs: 0.9, tp: 7, ws: 9, wd: 40, tide: 0.3 } });
     else add(who, "text", spot, { text: `Message ${i + 1}` });
   }
@@ -603,6 +603,13 @@ const CHECKS = {
     await page.context().setOffline(false);
     if (after !== "") throw new Error(`a text that went in comes back in the box on a drop: ${JSON.stringify(after)}`);
   },
+  // A report's card times the buoy by the buoy's own reading (bhs_t), not the model's hour (hs_t): "buoy 1.0 m at 16:00".
+  async reportCard(open) {
+    const page = await open({}); await openRoom(page);
+    const subs = await page.evaluate(() => [...document.querySelectorAll(".chatroom article .cm-card")].filter(c => /^Surf report/.test(c.querySelector(".cm-cap").textContent))
+      .map(c => c.querySelector(".cm-sub")?.textContent ?? null));
+    if (!subs.includes("Forecast said 1.1 m @ 9 s, NE 6 kt · buoy 1.0 m at 16:00") || subs.some(t => /buoy 1\.0 m at 18:00/.test(t || ""))) throw new Error(`the report cards read ${JSON.stringify([...new Set(subs)])}`);
+  },
   // A room left open long enough to hold 600 messages (KEEP_MSGS) still pages up to its first: an older page is never cut as it arrives.
   // Back at the newest, a new message cuts the oldest, to 600, and scrolling up loads them again. A stand-in room of 680.
   async olderPastCap(open) {
@@ -680,6 +687,27 @@ const CHECKS = {
     await page.waitForFunction(sel => !document.querySelector(sel), row(1), { timeout: 5e3 }).catch(() => { throw new Error("a log the room has no more of stays in the list"); });
     const top = await page.evaluate(() => document.querySelector(".chatroom .cr-sheet-b > .cr-fine")?.textContent ?? null);
     if (top !== "That's gone already" || !eq(shares, [1, 3, 1])) throw new Error(`with the log gone the sheet says ${JSON.stringify(top)} (shares sent: ${shares})`);
+  },
+  // While a report is on its way the sheet's picks hold still, so the report that comes back is the one the sheet shows, and it closes the
+  // sheet. A stand-in room that takes the report, then echoes it.
+  async reportHeld(open) {
+    let held = null, cur = null;
+    const page = await open({ as: "p1", ws: route => { cur = route; route.onMessage(m => { const f = JSON.parse(m);
+      if (f.type === "hello") { route.send(JSON.stringify({ type: "me", nick: "Poster1", role: "user" })); route.send(JSON.stringify({ type: "history", messages: [standIn(1)] })); }
+      if (f.type === "report") held = f; }); } });
+    await openRoom(page);
+    await page.click(".chatroom .cr-rep");
+    await page.waitForSelector('.chatroom .cr-sheet [data-k="spot:jinshan"][aria-pressed="true"]');
+    for (const k of ["size:chest", "cond:clean", "crowd:few", "post"]) await page.click(`.chatroom .cr-sheet [data-k="${k}"]`);
+    for (let i = 0; i < 50 && !held; i++) await wait(100);
+    if (!held || held.spot !== "jinshan" || held.size !== "chest") throw new Error(`the room got ${JSON.stringify(held)}`);
+    const on = await page.evaluate(() => [...document.querySelectorAll(".chatroom .cr-sheet .cr-opt")].filter(b => !b.disabled).map(b => b.dataset.k));
+    if (on.length) throw new Error(`while the report is on its way ${on.join(", ")} can still be picked`);
+    for (const k of ["spot:fulong", "size:head"]) await page.click(`.chatroom .cr-sheet [data-k="${k}"]`, { force: true });
+    cur.send(JSON.stringify({ type: "msg", msg: { id: 2, ts: Date.now(), nick: "Poster1", role: null, kind: "report", spot: held.spot,
+      body: { size: held.size, cond: held.cond, crowd: held.crowd, ...(held.snap ? { snap: held.snap } : {}) }, reply_to: null, likes: 0 } }));
+    await page.waitForFunction(() => document.querySelector(".chatroom .cr-shade").hidden && document.querySelector(".chatroom .cr-note").textContent === "Report posted", null, { timeout: 5e3 })
+      .catch(async () => { throw new Error(`the echo didn't close the sheet: ${JSON.stringify(await page.evaluate(() => document.querySelector(".chatroom .cr-sheet-b")?.textContent.slice(-80)))}`); });
   },
   // A socket that never opens (a black-holed network, a captive portal) counts as dropped after 12 s: "Chat is offline · Retry", and a
   // new try a second later, not after the browser's own minute or two. Back in the foreground, one still trying to open starts again at

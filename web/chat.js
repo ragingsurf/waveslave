@@ -32,6 +32,9 @@ const KEYS = { token: "waveslave-chat-token", v: "waveslave-chat-v", seen: "wave
 const CODES = { size: ["flat", "knee", "waist", "chest", "head", "overhead"], cond: ["clean", "ok", "choppy", "blown"], crowd: ["empty", "few", "busy", "packed"],
   board: ["short", "fish", "minimal", "long", "softtop"], reason: ["spam", "harass", "sexual", "child", "other"] };
 
+// A wait in seconds as the slow-down line says it: seconds under a minute, minutes under an hour, else hours (the daily limits, 5 shares
+// and 20 logs a day, can mean most of a day), each rounded up, with the language's own units.
+const waitIn = (s, sec, min, h) => s < 60 ? `${s}${sec}` : s < 3600 ? `${Math.ceil(s / 60)}${min}` : `${Math.ceil(s / 3600)}${h}`;
 // ---- Strings: every word the chat shows, in English, 中文 (Taiwan) and 日本語. Spot names come from the page (SPT(spot, "name")).
 const STR = {
   en: {
@@ -83,7 +86,7 @@ const STR = {
     shareLog: "Share", unshareLog: "Unshare", noSessions: "No sessions yet",
     // When something goes wrong
     offline: "Chat is offline", retry: "Retry", resting: "Chat is resting until 08:00", loginFailed: "Couldn't sign in with LINE, try again",
-    banned: "This LINE account can't post here", slowDown: s => `Slow down a little · try again in ${s} s`, reloadNew: "Reload for the new chat",
+    banned: "This LINE account can't post here", slowDown: s => `Slow down a little · try again in ${waitIn(s, " s", " min", " h")}`, reloadNew: "Reload for the new chat",
     locked: "The room is locked. You can still read.", failed: "That didn't go through. Try again.", gone: "That's gone already",
     blocked: { link: "Links can't be posted here. Edit it and send again.", line: "LINE IDs and invites can't be posted here. Edit it and send again.",
       phone: "Phone numbers can't be posted here. Edit it and send again.", other: "That can't be posted here. Edit it and send again." },
@@ -148,7 +151,7 @@ const STR = {
     note: "筆記", notePh: "起乘一直插頭", autoAdded: "自動加入", share: "分享到聊天室，請大家給建議", save: "儲存",
     shareLog: "分享", unshareLog: "取消分享", noSessions: "還沒有日誌",
     offline: "聊天室離線", retry: "重試", resting: "聊天室休息中，08:00 恢復", loginFailed: "無法用 LINE 登入，請再試一次",
-    banned: "這個 LINE 帳號無法在這裡發言", slowDown: s => `慢一點 · ${s} 秒後再試`, reloadNew: "請重新整理以使用新版聊天室",
+    banned: "這個 LINE 帳號無法在這裡發言", slowDown: s => `慢一點 · ${waitIn(s, " 秒", " 分鐘", " 小時")}後再試`, reloadNew: "請重新整理以使用新版聊天室",
     locked: "聊天室已鎖定，仍可閱讀。", failed: "沒有送出，請再試一次。", gone: "已經不在了",
     blocked: { link: "這裡不能貼連結，修改後再送出。", line: "這裡不能留 LINE ID 或邀請，修改後再送出。", phone: "這裡不能留電話號碼，修改後再送出。",
       other: "這段內容不能在這裡發表，修改後再送出。" },
@@ -212,7 +215,7 @@ const STR = {
     note: "メモ", notePh: "テイクオフでパーリングばかり", autoAdded: "自動で追加", share: "チャットに共有してアドバイスをもらう", save: "保存",
     shareLog: "共有", unshareLog: "共有をやめる", noSessions: "まだ記録はありません",
     offline: "チャットに接続できません", retry: "再試行", resting: "チャットは08:00まで休止中です", loginFailed: "LINEでログインできませんでした。もう一度お試しください",
-    banned: "このLINEアカウントでは投稿できません", slowDown: s => `少しペースを落としてください · ${s}秒後に再試行`, reloadNew: "新しいチャットを使うには再読み込みしてください",
+    banned: "このLINEアカウントでは投稿できません", slowDown: s => `少しペースを落としてください · ${waitIn(s, "秒", "分", "時間")}後に再試行`, reloadNew: "新しいチャットを使うには再読み込みしてください",
     locked: "ルームはロック中です。閲覧はできます。", failed: "送信できませんでした。もう一度お試しください。", gone: "すでにありません",
     blocked: { link: "リンクは投稿できません。直してから送ってください。", line: "LINE IDや招待は投稿できません。直してから送ってください。",
       phone: "電話番号は投稿できません。直してから送ってください。", other: "この内容は投稿できません。直してから送ってください。" },
@@ -351,6 +354,7 @@ const R = {
   oldest: 0, start: false, older: false, // the oldest id held, whether the room has nothing older, and whether a page of older is on its way
   me: null,           // {nick, role} once the socket is signed in
   pinErr: null,       // what the code box says about the last code tried (the home-screen app's sign-in)
+  pinBusy: false,     // while that code is being checked
   online: null, state: "idle", filter: "all", replyTo: null, pending: [], hidden: null, locked: null, fresh: false,
   sheet: null, pop: null, opener: null, noteT: 0, agesT: 0, longAt: 0,
 };
@@ -684,7 +688,7 @@ function drawStatus() { const s = R.el.status; s.textContent = "";
 function drawBar() { const E = R.el, on = signedIn();
   E.barIn.hidden = !on; E.barOut.hidden = on; E.menuBtn.hidden = false;
   E.pinBox.hidden = on || !pendingV(); E.pinLab.textContent = S("pinBox"); E.pinGo.textContent = S("pinGo"); E.pinIn.setAttribute("aria-label", S("pinBox"));
-  E.pinErr.textContent = R.pinErr || ""; E.pinErr.hidden = !R.pinErr;
+  E.pinErr.textContent = R.pinErr || ""; E.pinErr.hidden = !R.pinErr; E.pinGo.disabled = !!R.pinBusy;
   E.rep.textContent = S("report"); E.log.textContent = S("log"); E.send.textContent = S("send");
   E.input.setAttribute("placeholder", S("say")); E.input.setAttribute("aria-label", S("say")); E.lineWord.textContent = S("lineLogin"); drawSend(); }
 const drawSend = () => { if (R.built) R.el.send.hidden = !R.el.input.value.trim(); };
@@ -742,9 +746,10 @@ function msgEl(m) {
   if (m.likes > 0) a.append(el("p", { class: "cm-foot" }, `👍 ${m.likes}`));
   return a;
 }
-// "Surf report · Jinshan 金山 / Chest high · Clean · Few people / Forecast said 1.1 m @ 9 s, NE 6 kt · buoy 1.0 m at 07:00".
+// "Surf report · Jinshan 金山 / Chest high · Clean · Few people / Forecast said 1.1 m @ 9 s, NE 6 kt · buoy 1.0 m at 07:00". The time is
+// the buoy's reading's when there is one (the forecast's is only its hour), else the forecast's.
 function reportCard(m) { const b = m.body, s = b.snap || {}, fc = [waves(s), wind(s)].filter(Boolean).join(", "), buoy = fin(s.bhs) == null ? null : `${s.bhs.toFixed(1)} m`;
-  const at = [s.hs_t, s.ws_t, s.bhs_t].find(t => typeof t === "string" && /T\d\d:\d\d/.test(t));
+  const time = k => typeof s[k] === "string" && /T\d\d:\d\d/.test(s[k]) ? s[k] : null, at = buoy ? time("bhs_t") : time("hs_t") || time("ws_t");
   return el("div", { class: "cm-card" }, el("div", { class: "cm-cap" }, `${S("surfReport")} · ${spotFull(m.spot)}`),
     el("div", { class: "cm-big" }, [L("sizeHigh", b.size), L("cond", b.cond), L("crowdChip", b.crowd)].join(" · ")),
     fc || buoy ? el("div", { class: "cm-sub" }, S("forecastSaid", fc, buoy, at ? at.slice(11, 16) : null)) : null); }
@@ -997,11 +1002,14 @@ function signedInAs(token) {
   drawAll(); note(S("signedIn"));
   if (R.open) { sock.tries = 0; connect(); }
 }
-// The code box: the pin, for this page's waiting sign-in.
+// The code box: the pin, for this page's waiting sign-in. One at a time: while a pin is being checked, Sign in is off and Enter does
+// nothing, so a double tap can't use up two of the three tries, or open the sign-up sheet twice.
 function pinEntered() { const v = pendingV(), pin = R.el.pinIn.value.replace(/\D/g, "");
+  if (R.pinBusy) return;
   if (!v) return drawBar();
   if (!/^\d{6}$/.test(pin)) { R.pinErr = S("pinWrong"); return drawBar(); }
-  R.pinErr = null; drawBar(); redeem(v, { pin }, null); }
+  R.pinErr = null; R.pinBusy = true; drawBar();
+  redeem(v, { pin }, null).finally(guard(() => { R.pinBusy = false; drawBar(); })); }
 // The page with no v: the pin, and nothing else.
 function pinSheet(st) { return { title: S("pinTitle"), body: [el("p", null, S("pinShown")), el("p", { class: "cr-pin-code" }, st.pin)] }; }
 // First sign-in (mockup 3): the short privacy notice (the full one opens in place), the nickname prefilled from the LINE name, and the one
@@ -1075,12 +1083,12 @@ function deleteSheet(st) {
 // ---- The report and log sheets (mockups 4 and 5): rows of pills, one pick each. A tap on one picks it and builds the sheet again.
 //   pills(st, key, head, codes, label, o)   a row of pills under the label head; st[key] is the pick, and each pill's data-k is
 //                                           "<key>:<code>". o.aria(code) names a pill whose text doesn't say it all; with no head, the
-//                                           row goes under the label above it (o.under, that row's key).
+//                                           row goes under the label above it (o.under, that row's key); o.off holds the pick still.
 function pills(st, key, head, codes, label, o = {}) {
   const id = "chatOpt-" + (head ? key : o.under);
   return [head ? el("div", { class: "cr-lab cr-lab-top", id }, head) : null, el("div", { class: "cr-opts", role: "group", "aria-labelledby": id }, codes.map(c => {
     const b = el("button", { type: "button", class: "cr-opt", "data-k": `${key}:${c}`, "aria-pressed": String(st[key] === c), "aria-label": o.aria ? o.aria(c) : null }, label(c));
-    b.addEventListener("click", guard(() => { st[key] = c; st.err = null; drawSheet(); })); return b; }))];
+    b.disabled = !!o.off; b.addEventListener("click", guard(() => { if (o.off) return; st[key] = c; st.err = null; drawSheet(); })); return b; }))];
 }
 // + Report and the strip's "Post a report": the report form, preset to a spot. Signed out, the LINE button is asked for first.
 function sheet(name, spot) {
@@ -1089,13 +1097,14 @@ function sheet(name, spot) {
   if (name === "report") openSheet("report", reportSheet, st); else if (name === "log") openSheet("log", logSheet, st);
 }
 // Post a report: spot, size, conditions and crowd, four taps with the spot preset. It goes on the socket with what the page shows for that
-// spot now (snapshot()); the sheet shuts when the room has it, and says why when the room refuses it.
+// spot now (snapshot()); the sheet shuts when the room has it, and says why when the room refuses it. While it's on its way (st.sent,
+// the spot it went for) the picks hold still, so the sheet always shows the report that was sent.
 function reportSheet(st) {
-  const post = el("button", { type: "button", class: "cr-pill cr-go", "data-k": "post" }, S("post"));
+  const post = el("button", { type: "button", class: "cr-pill cr-go", "data-k": "post" }, S("post")), off = { off: !!st.sent };
   post.disabled = !(st.size && st.cond && st.crowd) || !!st.sent; post.addEventListener("click", guard(() => postReport(st)));
   return { title: S("postTitle"), body: [el("p", { class: "cr-lead" }, S("postSub")),
-    pills(st, "spot", S("spotHead"), TW(), spotName), pills(st, "size", S("sizeHead"), CODES.size, c => L("size", c)),
-    pills(st, "cond", S("condHead"), CODES.cond, c => L("cond", c)), pills(st, "crowd", S("crowdHead"), CODES.crowd, c => L("crowd", c)),
+    pills(st, "spot", S("spotHead"), TW(), spotName, off), pills(st, "size", S("sizeHead"), CODES.size, c => L("size", c), off),
+    pills(st, "cond", S("condHead"), CODES.cond, c => L("cond", c), off), pills(st, "crowd", S("crowdHead"), CODES.crowd, c => L("crowd", c), off),
     st.err ? el("p", { class: "cr-err", role: "alert" }, st.err) : null,
     el("div", { class: "cr-go-row cr-go-split" }, el("span", null, S("showsOn", spotName(st.spot))), post)] };
 }
@@ -1103,7 +1112,7 @@ function postReport(st) {
   if (st.sent || !(st.size && st.cond && st.crowd)) return;
   const snap = snapshot(st.spot, Date.now());
   if (!sock.send({ type: "report", spot: st.spot, size: st.size, cond: st.cond, crowd: st.crowd, ...(snap ? { snap } : {}) })) { st.err = R.state === "resting" ? S("resting") : S("offline"); return drawSheet(); }
-  st.sent = true; st.err = null; clearTimeout(st.t);
+  st.sent = st.spot; st.err = null; clearTimeout(st.t);
   // A socket that drops before the room answers leaves the sheet as it was, to send again.
   st.t = setTimeout(guard(() => { if (R.sheet && R.sheet.state === st && st.sent) { st.sent = false; st.err = S("failed"); drawSheet(); } }), 10e3);
   drawSheet();
@@ -1212,7 +1221,7 @@ function reportRefused(code) { const s = R.sheet;
 function newMessage(m, mine) {
   if (m.kind !== "report") return;
   liveReport(m);
-  const s = R.sheet; if (mine && s && s.name === "report" && s.state.sent && m.spot === s.state.spot) { clearTimeout(s.state.t); closeSheet(); note(S("posted")); }
+  const s = R.sheet; if (mine && s && s.name === "report" && s.state.sent && m.spot === s.state.sent) { clearTimeout(s.state.t); closeSheet(); note(S("posted")); }
 }
 // A report seen on the socket goes on its spot's strip at once. /reports may be answered from the browser's minute-long copy for a while
 // after, so ask() puts back any of these the answer doesn't have yet (withLive()).

@@ -231,6 +231,14 @@ const STEPS = {
       token: localStorage.getItem("waveslave-chat-token"), href: location.href }));
     if (!/^\d{6}$/.test(shown.pin) || !shown.text.startsWith("Signed in with LINE. Go back to the WaveSlave app and enter this code:") || shown.inputs || shown.token || /#[cp]=/.test(shown.href))
       throw new Error(`the browser without v shows ${JSON.stringify(shown)}`);
+    // A wrong code tapped in twice uses one of the three tries, not two: Sign in is off while the first is checked (each redeem held
+    // here for 300 ms, so the second tap comes while it's on its way).
+    const redeems = []; await b.route(`${CHAT()}/auth/redeem`, async r => { if (r.request().method() === "POST") { redeems.push(r.request().postDataJSON()); await wait(300); } return r.continue(); });
+    await b.fill(".chatroom .cr-pinbox input", shown.pin === "000000" ? "111111" : "000000"); await b.dblclick(".chatroom .cr-pinbox button");
+    await b.waitForFunction(() => document.querySelector(".chatroom .cr-pinbox .cr-err").textContent === "That code isn't right. Check it and try again."
+      && !document.querySelector(".chatroom .cr-pinbox button").disabled, null, { timeout: 10e3 }).catch(() => { throw new Error("a wrong code doesn't say so"); });
+    if (redeems.length !== 1) throw new Error(`a double tap on Sign in sent ${redeems.length} redeems`);
+    await b.unroute(`${CHAT()}/auth/redeem`);
     await b.fill(".chatroom .cr-pinbox input", shown.pin); await b.click(".chatroom .cr-pinbox button");
     await b.waitForSelector('.chatroom .cr-sheet [data-k="nick"]');
     if (await b.inputValue('.chatroom .cr-sheet [data-k="nick"]') !== line.name) throw new Error("the sign-up sheet isn't prefilled");

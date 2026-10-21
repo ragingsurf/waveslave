@@ -241,6 +241,14 @@ const CHECKS = {
     if (!await page.evaluate(() => window.CHAT._strings.en.lineLogin === "Log in with LINE" && window.CHAT._strings.zh.lineLogin === "使用LINE帳號登入" && window.CHAT._strings.ja.lineLogin === "LINEでログイン"))
       throw new Error("the LINE button's wording isn't LINE's own");
   },
+  // A long wait reads in minutes or hours, never as 61234 s: the day's limits on shares and logs answer with waits of up to a day.
+  async longWaits(open) {
+    const page = await open({}), got = await page.evaluate(() => ["en", "zh", "ja"].map(l => [30, 600, 61234].map(s => window.CHAT._strings[l].slowDown(s))));
+    const want = [["Slow down a little · try again in 30 s", "Slow down a little · try again in 10 min", "Slow down a little · try again in 18 h"],
+      ["慢一點 · 30 秒後再試", "慢一點 · 10 分鐘後再試", "慢一點 · 18 小時後再試"],
+      ["少しペースを落としてください · 30秒後に再試行", "少しペースを落としてください · 10分後に再試行", "少しペースを落としてください · 18時間後に再試行"]];
+    if (!eq(got, want)) throw new Error(`waits read ${JSON.stringify(got)}`);
+  },
   // chat.js adds one global, window.CHAT = {spot, relang}, and nothing else; and it has no HTML sinks.
   async noGlobals(open) {
     const names = async page => { await settle(page); await wait(300); return page.evaluate(() => Object.getOwnPropertyNames(window)); };

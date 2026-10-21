@@ -1571,9 +1571,12 @@ export class Room extends DurableObject {
   // {id, error} when the card can't go: the log is kept either way, private, and can be shared later. 20 logs a day,
   // and 1,000 in all.
   async logSession(request) {
+    // The body is read before the account. Reading it isn't a storage call, so other requests run in the meantime,
+    // and one of them could delete the account, ban it or sign it out. Nothing awaits once userFromToken() has read
+    // the account, so the log is written for the account as it is at that moment, or not at all.
+    const body = await readJson(request);
     const user = await this.userFromToken(bearer(request));
     if (!user) return refuse(401, "auth");
-    const body = await readJson(request);
     const log = validSession(body, this.now());
     if (!log || (body.share !== undefined && typeof body.share !== "boolean")) return refuse(400, "invalid");
     const kept = this.one(`SELECT count(*) AS n FROM (SELECT 1 FROM sessions WHERE uid = ? LIMIT ${SESSIONS_MAX})`, user.id).n;

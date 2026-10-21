@@ -124,6 +124,35 @@ async function me(r, who, method, path = "", body) {
   return { status: res.status, data: await res.json() };
 }
 
+// A request body that sends its first byte at once and holds the rest back until release(). pulled settles once
+// something has started reading it.
+function heldBody(text) {
+  const bytes = new TextEncoder().encode(text);
+  let release;
+  let started;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const pulled = new Promise((resolve) => {
+    started = resolve;
+  });
+  let first = true;
+  const stream = new ReadableStream({
+    async pull(controller) {
+      if (first) {
+        first = false;
+        controller.enqueue(bytes.slice(0, 1));
+        started();
+        return;
+      }
+      await gate;
+      controller.enqueue(bytes.slice(1));
+      controller.close();
+    },
+  });
+  return { stream, pulled, release };
+}
+
 // POST /me/sessions with SESSION, changed by `more`.
 const logSession = (r, user, more = {}) => me(r, user, "POST", "/sessions", { ...SESSION, ...more });
 
@@ -761,6 +790,68 @@ describe("DELETE /me", () => {
     });
     expect(handoff.status).toBe(403);
     expect(await handoff.json()).toEqual({ error: "banned" });
+  });
+
+  it("while a POST /me/sessions body is still arriving, leaves nothing of the account: the log gets 401, and no row is written", async () => {
+    // The room reads a request's body without its input gate shut, so other requests run in the meantime. Here the
+    // account goes while the log's body is held back, the way a slow phone connection would hold it.
+    const r = await freshRoom();
+    const u = await addUser(r);
+    const reader = await join(r);
+    const held = heldBody(JSON.stringify({ ...SESSION, share: true }));
+    const posting = r.stub.fetch("https://room/r/me/sessions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${u.token}`, "Content-Type": "application/json" },
+      body: held.stream,
+    });
+    await held.pulled;
+    // Time for the room to get as far as it can before the rest of the body comes.
+    await settle();
+    await r.inRoom(() => {});
+
+    expect(await me(r, u, "DELETE")).toEqual({ status: 200, data: { ok: true } });
+    held.release();
+
+    const res = await posting;
+    expect({ status: res.status, data: await res.json() }).toEqual({ status: 401, data: { error: "auth" } });
+    expect(await holding(r, u.id)).toEqual([]);
+    expect(await holding(r, u.sub)).toEqual(["subs.sub_hash"]);
+    await settle();
+    expect(all(reader, "msg")).toEqual([]);
+  });
+
+  it("refuses a POST /me/sessions whose account is signed out everywhere or banned while its body arrives: 401, no log", async () => {
+    for (const what of ["signout", "ban"]) {
+      const r = await freshRoom();
+      const u = await addUser(r);
+      const [id] = await addMessages(r, u.id, 1);
+      const admin = await join(r, await addUser(r, { role: "admin" }));
+      const held = heldBody(JSON.stringify({ ...SESSION, share: true }));
+      const posting = r.stub.fetch("https://room/r/me/sessions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${u.token}`, "Content-Type": "application/json" },
+        body: held.stream,
+      });
+      await held.pulled;
+      await settle();
+      await r.inRoom(() => {});
+
+      if (what === "signout") {
+        expect(await me(r, u, "POST", "/signout")).toEqual({ status: 200, data: { ok: true } });
+      } else {
+        admin.send({ type: "ban", msg_id: id });
+        expect(await take(admin, ofType("ok"))).toMatchObject({ for: "ban", sub_hash: u.sub });
+      }
+      held.release();
+
+      const res = await posting;
+      expect({ what, status: res.status, data: await res.json() }).toEqual({ what, status: 401, data: { error: "auth" } });
+      expect(await r.rows("SELECT count(*) AS n FROM sessions")).toEqual([{ n: 0 }]);
+      expect(await r.rows("SELECT key FROM limits WHERE key > ? AND key < ?", `${u.sub}:`, `${u.sub};`)).toEqual([]);
+      // No card came. (The ban sends Bryan the banned message again, marked hidden.)
+      await settle();
+      expect(all(admin, "msg").filter((f) => f.msg.kind === "session")).toEqual([]);
+    }
   });
 
   it("leaves the LINE account free to sign up again as a new person, with the same nickname and nothing of before", async () => {

@@ -215,10 +215,8 @@ describe("say", () => {
       { type: "say", text: "x".repeat(501) },
       { type: "say", text: "hi", spot: "pipeline" },
       { type: "say", text: "hi", spot: 5 },
-      { type: "say", text: "hi", reply_to: 999_999 },
       { type: "say", text: "hi", reply_to: "1" },
       { type: "say", text: "hi", reply_to: 0 },
-      { type: "say", text: "hi", reply_to: hidden },
     ];
     let s;
     for (const [k, frame] of bad.entries()) {
@@ -226,6 +224,11 @@ describe("say", () => {
       if (k % 4 === 0) s = await join(r, a);
       s.send(frame);
       expect(await nextError(s), JSON.stringify(frame).slice(0, 60)).toEqual({ type: "error", code: "invalid", for: "say" });
+    }
+    // A reply to a message that isn't there to see is gone, not invalid.
+    for (const reply_to of [999_999, hidden]) {
+      c.send({ type: "say", text: "hi", reply_to });
+      expect(await nextError(c), String(reply_to)).toEqual({ type: "error", code: "gone", for: "say" });
     }
     expect(await textCount(r)).toBe(2);
   });
@@ -314,6 +317,36 @@ describe("frames", () => {
     c.send("ping");
     await take(c, (f) => f === "pong");
     expect(c.closed).toBeNull();
+  });
+
+  it("doesn't count a frame about a message that has just gone as bad: error gone, and the socket stays open", async () => {
+    const r = await freshRoom(T);
+    const a = await addUser(r);
+    const b = await addUser(r);
+    const ca = await join(r, a);
+    const cb = await join(r, b);
+    say(ca, "Here a moment");
+    const { msg } = await take(cb, ofType("msg"));
+    ca.send({ type: "delete", id: msg.id });
+    await take(cb, (f) => f?.type === "update" && f.deleted);
+    // b's taps were on their way as it went: a like, a reply and a flag, twice over, and a's second tap on Delete.
+    for (let k = 0; k < 2; k++) {
+      cb.send({ type: "like", id: msg.id });
+      cb.send({ type: "say", text: "Nice", reply_to: msg.id });
+      cb.send({ type: "flag", id: msg.id, reason: "spam" });
+    }
+    for (const type of ["like", "say", "flag", "like", "say", "flag"]) {
+      expect(await nextError(cb)).toEqual({ type: "error", code: "gone", for: type });
+    }
+    ca.send({ type: "delete", id: msg.id });
+    expect(await nextError(ca)).toEqual({ type: "error", code: "gone", for: "delete" });
+    cb.send("ping");
+    await take(cb, (f) => f === "pong");
+    expect([ca.closed, cb.closed]).toEqual([null, null]);
+    expect(await r.inRoom((room, state) => state.getWebSockets().map((ws) => ws.deserializeAttachment().bad))).toEqual([0, 0]);
+    // And b can still post.
+    say(cb, "Still here");
+    await take(ca, msgWith("Still here"));
   });
 });
 
@@ -486,15 +519,18 @@ describe("like", () => {
     expect((await r.rows("SELECT count(*) AS n FROM likes"))[0].n).toBe(30);
   });
 
-  it("refuses a like on a message that isn't there, or is hidden (error invalid)", async () => {
+  it("refuses a like on a message that isn't there, or is hidden (error gone), or on an id that isn't one (error invalid)", async () => {
     const r = await freshRoom();
     const a = await addUser(r);
     const [hidden] = await addMessages(r, a.id, 1, { hidden_by: "admin" });
     const c = await join(r, a);
-    for (const id of [999_999, hidden, "1"]) {
+    for (const id of [999_999, hidden]) {
       c.send({ type: "like", id });
-      expect(await nextError(c), String(id)).toEqual({ type: "error", code: "invalid", for: "like" });
+      expect(await nextError(c), String(id)).toEqual({ type: "error", code: "gone", for: "like" });
     }
+    c.send({ type: "like", id: "1" });
+    expect(await nextError(c)).toEqual({ type: "error", code: "invalid", for: "like" });
+    expect(await r.rows("SELECT * FROM likes")).toEqual([]);
   });
 });
 
@@ -526,10 +562,10 @@ describe("delete", () => {
     const cb = await join(r, b);
     say(ca, "Mine");
     const { msg } = await take(cb, ofType("msg"));
-    for (const id of [msg.id, 999_999]) {
-      cb.send({ type: "delete", id });
-      expect(await nextError(cb)).toEqual({ type: "error", code: "invalid", for: "delete" });
-    }
+    cb.send({ type: "delete", id: msg.id });
+    expect(await nextError(cb)).toEqual({ type: "error", code: "invalid", for: "delete" });
+    cb.send({ type: "delete", id: 999_999 });
+    expect(await nextError(cb)).toEqual({ type: "error", code: "gone", for: "delete" });
     await settle();
     expect(all(ca, "update")).toEqual([]);
     expect(await textCount(r)).toBe(1);

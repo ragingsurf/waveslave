@@ -167,18 +167,22 @@ describe("flags", () => {
     expect((await r.rows("SELECT count(*) AS n FROM flags"))[0].n).toBe(20);
   });
 
-  it("refuses a flag with a reason that isn't one, or on a message that isn't there or is hidden (error invalid)", async () => {
+  it("refuses a flag with a reason that isn't one (error invalid), or on a message that isn't there or is hidden (error gone)", async () => {
     const r = await freshRoom();
     const author = await addUser(r);
     const [id] = await addMessages(r, author.id, 1);
     const [hidden] = await addMessages(r, author.id, 1, { hidden_by: "ban" });
     const flagger = await addFlagger(r);
-    for (const frame of [{ id, reason: "boring" }, { id }, { id: String(id), reason: "spam" }, { id: 999_999, reason: "spam" }, { id: hidden, reason: "spam" }]) {
-      // A socket each: every one of these is a bad frame, and five close a socket.
-      const c = await join(r, flagger);
+    const c = await join(r, flagger);
+    for (const frame of [{ id, reason: "boring" }, { id }, { id: String(id), reason: "spam" }]) {
       c.send({ type: "flag", ...frame });
       expect(await nextError(c), JSON.stringify(frame)).toEqual({ type: "error", code: "invalid", for: "flag" });
     }
+    for (const frame of [{ id: 999_999, reason: "spam" }, { id: hidden, reason: "spam" }]) {
+      c.send({ type: "flag", ...frame });
+      expect(await nextError(c), JSON.stringify(frame)).toEqual({ type: "error", code: "gone", for: "flag" });
+    }
+    expect(c.closed).toBeNull(); // three bad frames and two gone ones
     expect(await r.rows("SELECT * FROM flags")).toEqual([]);
   });
 
@@ -312,10 +316,12 @@ describe("restore", () => {
     expect(await r.rows("SELECT rejected FROM flags WHERE msg_id = ?", id)).toEqual([{ rejected: 1 }]);
   });
 
-  it("refuses a restore of a message that isn't there (error invalid)", async () => {
+  it("answers a restore of a message that isn't there with error gone, and one of an id that isn't one with invalid", async () => {
     const r = await freshRoom();
     const admin = await join(r, await addUser(r, { role: "admin" }));
     admin.send({ type: "restore", id: 999_999 });
+    expect(await nextError(admin)).toEqual({ type: "error", code: "gone", for: "restore" });
+    admin.send({ type: "restore", id: "1" });
     expect(await nextError(admin)).toEqual({ type: "error", code: "invalid", for: "restore" });
   });
 });
@@ -568,15 +574,15 @@ describe("ban", () => {
     expect(await hiddenBy(r, id)).toBe("flags");
   });
 
-  it("can't ban Bryan, or the author of a message that isn't there or has no author left (error invalid)", async () => {
+  it("can't ban Bryan (error invalid), or the author of a message that isn't there or has no author left (error gone)", async () => {
     const r = await freshRoom();
     const bryan = await addUser(r, { role: "admin" });
     const [his] = await addMessages(r, bryan.id, 1);
     const [orphan] = await addMessages(r, null, 1, { kind: "report", spot: "nanwan" });
     const admin = await join(r, bryan);
-    for (const msg_id of [his, orphan, 999_999, String(his)]) {
+    for (const [msg_id, code] of [[his, "invalid"], [orphan, "gone"], [999_999, "gone"], [String(his), "invalid"]]) {
       admin.send({ type: "ban", msg_id });
-      expect(await nextError(admin), String(msg_id)).toEqual({ type: "error", code: "invalid", for: "ban" });
+      expect(await nextError(admin), String(msg_id)).toEqual({ type: "error", code, for: "ban" });
     }
     expect(admin.closed).toBeNull();
     expect(await r.rows("SELECT banned FROM subs WHERE sub_hash = ?", bryan.sub)).toEqual([{ banned: 0 }]);
@@ -585,7 +591,7 @@ describe("ban", () => {
 });
 
 describe("unban", () => {
-  it("clears the ban; a LINE account that isn't banned gets error invalid", async () => {
+  it("clears the ban; a second unban is ok too, a LINE account the room has no row for is gone", async () => {
     const r = await freshRoom();
     const u = await addUser(r);
     const [id] = await addMessages(r, u.id, 1);
@@ -597,10 +603,15 @@ describe("unban", () => {
     expect(await r.rows("SELECT banned FROM subs WHERE sub_hash = ?", u.sub)).toEqual([{ banned: 0 }]);
     // Their hidden messages stay hidden until Bryan restores them.
     expect(await hiddenBy(r, id)).toBe("ban");
-    for (const sub_hash of [u.sub, "sub-nobody", 42]) {
-      admin.send({ type: "unban", sub_hash });
-      expect(await nextError(admin), String(sub_hash)).toEqual({ type: "error", code: "invalid", for: "unban" });
-    }
+    // Bryan's double tap: the account isn't banned, and stays so.
+    admin.send({ type: "unban", sub_hash: u.sub });
+    expect(await take(admin, ofType("ok"))).toEqual({ type: "ok", for: "unban", sub_hash: u.sub });
+    expect(await r.rows("SELECT banned FROM subs WHERE sub_hash = ?", u.sub)).toEqual([{ banned: 0 }]);
+    admin.send({ type: "unban", sub_hash: "sub-nobody" });
+    expect(await nextError(admin)).toEqual({ type: "error", code: "gone", for: "unban" });
+    admin.send({ type: "unban", sub_hash: 42 });
+    expect(await nextError(admin)).toEqual({ type: "error", code: "invalid", for: "unban" });
+    expect(await r.rows("SELECT sub_hash FROM subs WHERE sub_hash = 'sub-nobody'")).toEqual([]);
   });
 });
 
@@ -666,7 +677,7 @@ describe("keep", () => {
     admin.send({ type: "keep", id: hidden });
     expect(await take(admin, ofType("ok"))).toEqual({ type: "ok", for: "keep", id: hidden });
     admin.send({ type: "keep", id: 999_999 });
-    expect(await nextError(admin)).toEqual({ type: "error", code: "invalid", for: "keep" });
+    expect(await nextError(admin)).toEqual({ type: "error", code: "gone", for: "keep" });
     expect((await r.rows("SELECT count(*) AS n FROM holds"))[0].n).toBe(2);
   });
 });

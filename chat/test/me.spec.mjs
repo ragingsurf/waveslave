@@ -423,7 +423,7 @@ describe("share and unshare", () => {
     expect((await take(c, ofType("ok"))).shared_msg).toBeGreaterThan(shared_msg);
   });
 
-  it("refuses a log that isn't the user's, or isn't one (error invalid); a reader gets error auth", async () => {
+  it("refuses a log that isn't the user's (error gone) or an id that isn't one (error invalid); a reader gets error auth", async () => {
     const r = await freshRoom();
     const u = await addUser(r);
     const v = await addUser(r);
@@ -431,9 +431,9 @@ describe("share and unshare", () => {
     for (const type of ["share", "unshare"]) {
       // A socket of its own for each, as four bad frames are as many as one socket may send.
       const c = await join(r, u);
-      for (const session_id of [theirs.id, 999_999, String(theirs.id), undefined]) {
+      for (const [session_id, code] of [[theirs.id, "gone"], [999_999, "gone"], [String(theirs.id), "invalid"], [undefined, "invalid"]]) {
         c.send({ type, session_id });
-        expect(await nextError(c), `${type} ${session_id}`).toEqual({ type: "error", code: "invalid", for: type });
+        expect(await nextError(c), `${type} ${session_id}`).toEqual({ type: "error", code, for: type });
       }
     }
     const reader = await join(r);

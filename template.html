@@ -100,6 +100,8 @@ header{position:relative}
 /* Now */
 .now{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:20px;display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:20px}
 @media (max-width:640px){.now{grid-template-columns:minmax(0,1fr)}}
+/* Surfer reports from the Taiwan chat (web/chat.js draws them): under the facts, the card's full width; hidden until the chat has some to show. */
+#nowReports{grid-column:1/-1}#nowReports[hidden]{display:none}
 .hero-num{font-family:var(--display);font-weight:800;font-stretch:120%;font-size:clamp(64px,16vw,104px);line-height:.85;letter-spacing:-.02em}
 .hero-num small{font-size:.35em;font-weight:600;margin-left:4px;color:var(--muted)}
 .hero-sub{font-size:16px;margin-top:8px}
@@ -493,6 +495,7 @@ html{overscroll-behavior-y:none}
       <div class="rating-pill" id="nowRating"></div>
     </div>
     <div class="facts" id="nowFacts"></div>
+    <div id="nowReports" hidden></div>
   </section>
 
 
@@ -629,7 +632,7 @@ function applyLang(){ const L = isZh() || isJa() ? LANG : "en"; document.documen
     e.setAttribute(a, L!=="en" && e.getAttribute(`data-${L}-${a}`) || e.getAttribute("data-"+k)); });
   document.querySelectorAll("#lang button").forEach(b => b.setAttribute("aria-pressed", b.dataset.l===LANG));
   document.getElementById("langName").textContent = {en: "EN", zh: "中文", ja: "日本語"}[LANG]; }
-function setLang(l){ if(l===LANG) return; LANG=l; try{ localStorage.setItem("waveslave-lang", l); }catch(e){} applyLang(); boot(CUR); WS.relang(); }
+function setLang(l){ if(l===LANG) return; LANG=l; try{ localStorage.setItem("waveslave-lang", l); }catch(e){} applyLang(); boot(CUR); WS.relang(); window.CHAT&&CHAT.relang(); }
 // The language menu under the button in the corner: open or shut.
 function langOpen(on){ document.getElementById("langWrap").classList.toggle("open", on); document.getElementById("langBtn").setAttribute("aria-expanded", on); }
 // World mode shows every country; Taiwan mode, the default, only Taiwan's spots, in the forecast and on the map. The W in the logo switches
@@ -1192,7 +1195,8 @@ const WS = (() => {
   let seen = "", rsz = 0;
   if (window.ResizeObserver) new ResizeObserver(() => { const box = document.getElementById("wsBox"), k = box.clientWidth + "x" + box.clientHeight;
     if (!FS || !built || document.getElementById("viewWs").hidden || k === seen || rsz) return; rsz = requestAnimationFrame(() => { rsz = 0; seen = box.clientWidth + "x" + box.clientHeight; size(); drawBase(); }); }).observe(document.getElementById("wsBox"));
-  document.addEventListener("keydown", e => { if (e.key !== "Escape") return; const w = document.getElementById("wsCtry"); if (w.classList.contains("open")) w.classList.remove("open"); else if (FS) setView("fc"); });
+  // Escape is the chat room's own while it's open (html.chat-open), so it doesn't close the map behind it.
+  document.addEventListener("keydown", e => { if (e.key !== "Escape" || document.documentElement.classList.contains("chat-open")) return; const w = document.getElementById("wsCtry"); if (w.classList.contains("open")) w.classList.remove("open"); else if (FS) setView("fc"); });
   function screenH() { const so = screen.orientation && screen.orientation.type, land = so ? so.startsWith("landscape") : Math.abs(window.orientation || 0) === 90 || innerWidth > innerHeight;
     const sw = screen.width || innerWidth, sh = screen.height || innerHeight, dev = land ? Math.min(sw, sh) : Math.max(sw, sh), vv = window.visualViewport ? visualViewport.height : innerHeight;
     return { land, h: Math.min(vv, innerHeight, dev) }; }
@@ -2191,6 +2195,9 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
     : (zh ? "離岸風（氣象署預報）" : ja ? "オフショア（台湾気象署予報）" : "Offshore wind (CWA forecast)");
   // Live cams list only the viewed country's spots, and the panel hides in a country with no cam yet rather than show a column of "No cam found yet".
   document.querySelector("section.spots").hidden = !ids.some(id => (ALL.spots[id].cams||[]).length);
+  // The Taiwan chat (web/chat.js) shows for a Taiwan spot, in Taiwan mode and in World mode alike: its button keys off the class "tw",
+  // and the spot's surfer reports go under "Right now".
+  document.documentElement.classList.toggle("tw", spotCountry(SPOT)==="tw"); window.CHAT&&CHAT.spot(SPOT);
   document.getElementById("spotList").innerHTML = ids.map(id => { const s=ALL.spots[id];
     return `<li${id===SPOT?' aria-current="true"':""}><b>${SPT(s,"name")}</b><span class="links">${(s.cams||[]).length ? s.cams.map((c,i)=>`<a href="${c[1]}" target="_blank" rel="noopener">${camName(s,i)}</a>`).join("") : `<span class="where">${zh?"還沒找到攝影機":ja?"カメラはまだ見つかっていません":"No cam found yet"}</span>`}</span></li>`; }).join("");
   document.querySelectorAll("a[data-spot]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); if(a.dataset.spot===SPOT) return;
@@ -2225,7 +2232,7 @@ if(VIEW!=="fc") setView(VIEW, true);
   (document.fonts?document.fonts.ready:Promise.resolve()).then(place); })();
 
 // ---- pull to refresh (touch): drag down from the top of the Forecast page, release past the line to reload.
-// Not on the map, where a drag down is a pan (it used to reload the page and flash the Forecast page on the way).
+// Not on the map, where a drag down is a pan (it used to reload the page and flash the Forecast page on the way), nor under the chat room (html.chat-open).
 // The sign follows the finger once per frame with a springy pull that slows as it nears the bottom, and the text only changes when it crosses the line.
 (() => {
   const el=document.createElement("div"); el.className="ptr"; el.setAttribute("aria-hidden","true"); el.textContent=T("PULL ▼"); document.body.append(el);
@@ -2234,7 +2241,7 @@ if(VIEW!=="fc") setView(VIEW, true);
   const draw=()=>{ raf=0; d=want; el.style.transform=pos(d); el.style.opacity=Math.min(1,d/GO).toFixed(3);
     const g=d>=GO; if(g!==go){ go=g; el.textContent = T(g ? "LET GO ▲" : "PULL ▼"); } };
   const set=v=>{ want=v; if(!raf) raf=requestAnimationFrame(draw); };
-  addEventListener("touchstart",e=>{ y0 = (VIEW==="fc" && scrollY<=0 && e.touches.length===1) ? e.touches[0].clientY : null; el.style.transition=""; },{passive:true});
+  addEventListener("touchstart",e=>{ y0 = (VIEW==="fc" && scrollY<=0 && e.touches.length===1 && !document.documentElement.classList.contains("chat-open")) ? e.touches[0].clientY : null; el.style.transition=""; },{passive:true});
   addEventListener("touchmove",e=>{ if(y0===null) return; const dy=e.touches[0].clientY-y0;
     if(dy<=0||scrollY>0){ set(0); return; } set(MAX*(1-Math.exp(-dy/(MAX*1.2)))); },{passive:true});
   const end=()=>{ if(y0===null) return; y0=null; cancelAnimationFrame(raf); raf=0;
@@ -2326,3 +2333,5 @@ if(VIEW!=="fc") setView(VIEW, true);
   Promise.race([font, new Promise(r => setTimeout(r, 700))]).then(start);
 })();
 </script>
+<!-- The Taiwan chat: its report strip, button and room (web/chat.js, next to this page). The page runs the same without it. -->
+<script src="chat.js" defer></script>

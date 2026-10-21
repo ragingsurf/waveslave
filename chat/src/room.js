@@ -1158,16 +1158,20 @@ export class Room extends DurableObject {
   //
   // Bryan's Delete on anyone else's message hides it instead ("admin"): it goes from every screen but his, and stays in
   // his hidden list, where he can restore it or keep it as evidence, until the daily clean-up takes it with the rest.
+  // One that is hidden already (by flags, a ban or an earlier Delete) is left as it is, with nothing said: it keeps the
+  // reason it was hidden for, which his hidden list shows, and nobody is told about it a second time.
   onDelete(ws, user, frame) {
     if (!isId(frame.id)) return "invalid";
     const refused = this.canWrite(user, "delete");
     if (refused) return refused;
     if (user.role === "admin") {
-      const hidden = this.all(
-        `UPDATE messages SET hidden_by = 'admin' WHERE id = ? AND uid IS NOT ? RETURNING ${MSG_COLS}`,
-        frame.id, user.id,
-      );
-      if (hidden.length > 0) {
+      const theirs = this.one("SELECT hidden_by FROM messages WHERE id = ? AND uid IS NOT ?", frame.id, user.id);
+      if (theirs) {
+        if (theirs.hidden_by !== null) return;
+        const hidden = this.all(
+          `UPDATE messages SET hidden_by = 'admin' WHERE id = ? AND hidden_by IS NULL RETURNING ${MSG_COLS}`,
+          frame.id,
+        );
         this.announceHidden(hidden, "admin");
         return;
       }

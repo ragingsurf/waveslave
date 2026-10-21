@@ -745,6 +745,34 @@ describe("delete by Bryan", () => {
     expect(await nextError(c)).toEqual({ type: "error", code: "invalid", for: "delete" });
     expect(await hiddenBy(r, orphan)).toBe("admin");
   });
+
+  it("leaves a message that is already hidden as it is: it keeps why (flags, ban), and nobody is told again", async () => {
+    const r = await freshRoom();
+    const u = await addUser(r);
+    const flagger = await addFlagger(r);
+    const bryan = await addUser(r, { role: "admin" });
+    const [byFlags] = await addMessages(r, u.id, 1, { hidden_by: "flags" });
+    const [byBan] = await addMessages(r, u.id, 1, { hidden_by: "ban" });
+    const [byAdmin] = await addMessages(r, u.id, 1, { hidden_by: "admin" });
+    await r.inRoom((room) => room.sql.exec("INSERT INTO flags (msg_id, sub_hash, reason, ts) VALUES (?, ?, 'spam', ?)", byFlags, flagger.sub, T));
+    const reader = await join(r);
+    const admin = await join(r, bryan);
+    // A double tap too: the second Delete on each finds it hidden already.
+    for (const id of [byFlags, byBan, byAdmin, byFlags, byBan]) admin.send({ type: "delete", id });
+    await synced(admin);
+    await settle();
+    expect(await r.rows("SELECT id, hidden_by FROM messages WHERE uid = ? ORDER BY id", u.id)).toEqual([
+      { id: byFlags, hidden_by: "flags" },
+      { id: byBan, hidden_by: "ban" },
+      { id: byAdmin, hidden_by: "admin" },
+    ]);
+    expect([all(reader, "update"), all(admin, "update"), all(admin, "msg"), all(admin, "error")]).toEqual([[], [], [], []]);
+    expect(admin.closed).toBeNull();
+    // So his hidden list still says why each one went.
+    admin.send({ type: "hidden_list" });
+    const list = await take(admin, ofType("hidden"));
+    expect(list.messages.map((m) => [m.id, m.hidden, m.flags])).toEqual([[byAdmin, "admin", {}], [byBan, "ban", {}], [byFlags, "flags", { spam: 1 }]]);
+  });
 });
 
 describe("hibernation", () => {

@@ -337,12 +337,20 @@ export class Room extends DurableObject {
 
   // ---- Requests from the Worker ------------------------------------------------------------------------------
 
-  // Every call from the Worker comes here. Each one counts as a request against the free plan's daily limit and
-  // makes sure the alarm is set. There are no routes yet.
-  async fetch() {
+  // Every call from the Worker comes here (the front Worker's header lists the routes). Each one counts as a request
+  // against the free plan's daily limit and makes sure the alarm is set. Only /r/reports is here so far.
+  async fetch(request) {
     this.usage("req");
     await this.ensureAlarm();
-    return Response.json({ error: "not found" }, { status: 404 });
+    const url = new URL(request.url);
+    switch (`${request.method} ${url.pathname}`) {
+      case "GET /r/reports": {
+        const answer = this.reportsFor(url.searchParams.get("spot"), this.now());
+        return answer ? Response.json(answer) : Response.json({ error: "spot" }, { status: 400 });
+      }
+      default:
+        return Response.json({ error: "not found" }, { status: 404 });
+    }
   }
 
   // ---- Alarm -------------------------------------------------------------------------------------------------

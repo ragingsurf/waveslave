@@ -622,7 +622,7 @@ const CHECKS = {
     const page = await open({ spot: "donghe", saved: MID, world: false });
     const shown = () => page.evaluate(() => ({ world: WORLD, cls: document.documentElement.classList.contains("world"), kept: localStorage.getItem("waveslave-world"),
       row: document.getElementById("ctry").getClientRects().length > 0, slot: document.getElementById("ctrySlot").offsetHeight,
-      picker: document.getElementById("picker").getBoundingClientRect().top - document.querySelector(".tabrow").getBoundingClientRect().bottom, scroll: scrollY, btns: document.getElementById("wsCtry").offsetParent ? document.querySelectorAll("#wsCtry button").length : 0,
+      picker: document.getElementById("picker").getBoundingClientRect().top - document.querySelector(".tabs").getBoundingClientRect().bottom, scroll: scrollY, btns: document.getElementById("wsCtry").offsetParent ? document.querySelectorAll("#wsCtry button").length : 0,
       want: document.querySelectorAll("#ctry button").length, cur: CUR, cc: spotCountry(CUR), MC: window.__ws.view().MC }));
     let a = await shown();
     if (a.world || a.cls) throw new Error("the page opened in World mode, want Taiwan mode");

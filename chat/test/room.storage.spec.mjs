@@ -666,6 +666,9 @@ describe("retention, run by the alarm at 19:00 UTC", () => {
         room.sql.exec("INSERT INTO subs (sub_hash, banned, deleted_at) VALUES (?, ?, ?)", sub, banned, deletedAt);
       }
       room.sql.exec("INSERT INTO meta (key, value) VALUES ('next_retention', ?)", T);
+      // The stale account was Bryan's, and it and the kept one each tried a wrong /admin code.
+      room.sql.exec("INSERT INTO meta (key, value) VALUES ('admin_uid', 'gone')");
+      room.sql.exec("INSERT INTO meta (key, value) VALUES ('admin_claims', ?)", JSON.stringify({ total: 3, by: { "sub-gone": 2, "sub-kept": 1 } }));
       await room.ensureAlarm();
       return ids;
     });
@@ -734,6 +737,12 @@ describe("retention, run by the alarm at 19:00 UTC", () => {
       for (const table of ["messages", "likes", "sessions"]) {
         expect(value(room, `SELECT count(*) FROM ${table} WHERE uid = 'gone'`), table).toBe(0);
       }
+    }));
+
+  it("forgets a stale account in meta as DELETE /me does: admin_uid goes, and so does its count of wrong /admin codes", () =>
+    check((room) => {
+      expect(has(room, "SELECT value FROM meta WHERE key = 'admin_uid'")).toBe(false);
+      expect(JSON.parse(value(room, "SELECT value FROM meta WHERE key = 'admin_claims'"))).toEqual({ total: 3, by: { "sub-kept": 1 } });
     }));
 
   it("deletes the rows of deleted, unbanned LINE accounts after 30 days, and keeps bans", () =>

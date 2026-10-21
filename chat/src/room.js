@@ -1223,13 +1223,19 @@ export class Room extends DurableObject {
   }
 
   // nick {nick}: a new nickname (see nickFor()), at most once a week. The old one is held for 30 days for this LINE
-  // account, so nobody else can take it and pass as them. Each of the user's sockets gets me with the new name.
+  // account, so nobody else can take it and pass as them. Each of the user's sockets gets me with the new name. The
+  // name they already have (exactly: a change of case is a change) changes nothing and doesn't use up the week: this
+  // socket gets me as it is.
   onNick(ws, user, frame) {
     const refused = this.canWrite(user, "nick");
     if (refused) return refused;
     const now = this.now();
     const nick = this.nickFor(frame.nick, user.sub_hash, user.id, now);
     if (nick.code) return nick.code.startsWith("blocked:") ? nick.code : `nick:${nick.code}`;
+    if (nick.nick === user.nick) {
+      this.send(ws, this.meFrame(user.nick, user.role));
+      return;
+    }
     this.ctx.storage.transactionSync(() => {
       this.all("UPDATE users SET nick = ?, nick_key = ?, nick_changed = ? WHERE id = ?", nick.nick, nick.key, now, user.id);
       if (nick.key !== user.nick_key) {
@@ -1731,12 +1737,7 @@ export class Room extends DurableObject {
       this.all("DELETE FROM limits WHERE key > ? AND key < ?", `${sub}:`, `${sub};`);
       this.all("DELETE FROM limits WHERE key > 'held:' AND key < 'held;' AND substr(key, ?) = ?", -(sub.length + 1), `:${sub}`);
       this.all("DELETE FROM handoffs WHERE sub_hash = ?", sub);
-      if (this.getMeta("admin_uid") === user.id) this.all("DELETE FROM meta WHERE key = 'admin_uid'");
-      const claims = JSON.parse(this.getMeta("admin_claims") ?? "null");
-      if (claims?.by && Object.hasOwn(claims.by, sub)) {
-        delete claims.by[sub];
-        this.setMeta("admin_claims", JSON.stringify(claims));
-      }
+      this.forgetAdmin(user.id, sub);
       this.all(
         "INSERT INTO subs (sub_hash, deleted_at) VALUES (?, ?) ON CONFLICT (sub_hash) DO UPDATE SET deleted_at = excluded.deleted_at",
         sub, now,
@@ -1744,6 +1745,18 @@ export class Room extends DurableObject {
       this.all("DELETE FROM users WHERE id = ?", user.id);
       return { gone, liked };
     });
+  }
+
+  // An account that goes (DELETE /me, or 24 months unseen): if it is Bryan's, meta admin_uid goes, so he can claim the
+  // role again from a new account; and its count of wrong /admin codes goes from meta admin_claims, which then no
+  // longer names its LINE account (the total stays, so the 10 in all still count them).
+  forgetAdmin(uid, sub) {
+    if (this.getMeta("admin_uid") === uid) this.all("DELETE FROM meta WHERE key = 'admin_uid'");
+    const claims = JSON.parse(this.getMeta("admin_claims") ?? "null");
+    if (claims?.by && Object.hasOwn(claims.by, sub)) {
+      delete claims.by[sub];
+      this.setMeta("admin_claims", JSON.stringify(claims));
+    }
   }
 
   // ---- Session cards: a log from the diary, shared to the room for tips ----------------------------------------
@@ -1961,7 +1974,8 @@ export class Room extends DurableObject {
   }
 
   // Deletes the accounts last seen before `cutoff`: their private logs go, their LINE account's row is marked
-  // deleted (it goes 30 days later unless banned), and no message keeps their user id. Their text messages,
+  // deleted (it goes 30 days later unless banned), no message keeps their user id, and meta forgets them as
+  // DELETE /me does (forgetAdmin()), so a stale admin_uid can't lock Bryan out of the role. Their text messages,
   // session cards and likes went long before (texts after 30 days, and a like needs a recent sign-in), and the
   // earlier steps already took them off their reports.
   deleteStaleAccounts(cutoff, now) {
@@ -1975,6 +1989,7 @@ export class Room extends DurableObject {
            ON CONFLICT (sub_hash) DO UPDATE SET deleted_at = excluded.deleted_at`,
           sub_hash, now,
         );
+        this.forgetAdmin(id, sub_hash);
         this.all("DELETE FROM users WHERE id = ?", id);
       }
       if (stale.length < BATCH) return;

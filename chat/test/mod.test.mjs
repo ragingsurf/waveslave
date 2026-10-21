@@ -221,6 +221,12 @@ test("blocked: surf talk that mentions a line or an at-sign is not a LINE ID", (
   assert.equal(rule("airline.me/x"), "link"); // a real link, but not a LINE one
 });
 
+test("blocked: one of the chat's spots after an at-sign is not a LINE ID, but a longer name is", () => {
+  for (const text of ["Pumping @jinshan", "@fulong this morning", "@hualien", "@Wushi, then home", "@JIALESHUI!", "@su-ao tomorrow",
+    "@suao.", "dawn @donghe and @nanwan", "@hualian"]) assert.equal(rule(text), null, text);
+  for (const text of ["@jinshan88", "@fulong.surf", "@fulong_surf", "@nanwan-kids", "@donghe2", "my id @surfer88"]) assert.equal(rule(text), "line", text);
+});
+
 test("blocked: Telegram", () => {
   assert.equal(rule("t.me/x"), "telegram");
   assert.equal(rule("telegram.me/x"), "telegram");
@@ -311,6 +317,23 @@ test("blocked: Taiwan phone numbers, however they are spaced or spelled", () => 
   assert.equal(rule("+886-912-345-678"), "phone");
   assert.equal(rule("886912345678"), "phone");
   assert.equal(rule("call me on 0912\u{200b}345\u{200b}678 ok"), "phone");
+  assert.equal(rule("0912_345_678"), "phone");
+  assert.equal(rule("(0912)345678"), "phone");
+  assert.equal(rule("（０９１２）３４５６７８"), "phone");
+  assert.equal(rule("+886(9)12345678"), "phone");
+  assert.equal(rule("0912|345|678"), "phone");
+});
+
+test("blocked: commas, 、 and colons are not phone separators, on purpose", () => {
+  // They list hours and heights, and write times; the cost is that a number split by them passes.
+  assert.equal(rule("09, 10, 11, 12, 13"), null);
+  assert.equal(rule("09、10、11、12、13點都可以"), null);
+  assert.equal(rule("Hs 0.9, 0.8 0.9 1.0 1.2 m"), null);
+  assert.equal(rule("tide (0.9) 1.1 (1.3) 1.6 2.0"), null);
+  assert.equal(rule("0912，345，678"), null);
+  assert.equal(rule("0912、345、678"), null);
+  assert.equal(rule("0912,345,678"), null);
+  assert.equal(rule("0912:345:678"), null);
 });
 
 test("blocked: numbers that are not phone numbers", () => {

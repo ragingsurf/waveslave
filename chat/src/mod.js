@@ -138,9 +138,16 @@ const LINE_URL = /(?<![a-z0-9-])(?:line\.me|lin\.ee|line\.naver\.jp)(?![a-z0-9])
 
 // LINE IDs are written "@abc123": four or more letters, digits, dots, dashes or underscores with at least
 // one letter. Surf talk uses the at sign too, as in "1.2 m @ 9 s", "dawn patrol @6am" or "3ft@12s", so a
-// time or a measurement after it is not an ID, and neither is a word glued to it ("m@9s"). Messages never
-// use "@name" to reply (there is a reply button), so a plain ASCII "@name" is read as a LINE ID.
-const LINE_ID = /(?<![a-z0-9])@(?!\d{1,4}(?:am|pm|sec|kts?|hrs?|ft|cm|km|s|m|h)(?![a-z0-9]))(?=[0-9._-]*[a-z])[a-z0-9][a-z0-9._-]{3,}/u;
+// time or a measurement after it is not an ID, and neither is a word glued to it ("m@9s"), nor one of the
+// chat's spots, by its id or a common spelling ("Pumping @jinshan", "@su-ao this morning"): the name on its
+// own, so "@jinshan88" or "@fulong.surf" still is one. Messages never use "@name" to reply (there is a
+// reply button), so any other plain ASCII "@name" is read as a LINE ID.
+const AT_SPOT = [...SPOTS, "su-ao", "hualian", "wushih", "fulung", "dongho", "chialeshui"].join("|");
+const LINE_ID = new RegExp(
+  "(?<![a-z0-9])@(?!\\d{1,4}(?:am|pm|sec|kts?|hrs?|ft|cm|km|s|m|h)(?![a-z0-9]))" +
+  `(?!(?:${AT_SPOT})(?![a-z0-9_-]|\\.[a-z0-9]))` +
+  "(?=[0-9._-]*[a-z])[a-z0-9][a-z0-9._-]{3,}",
+  "u");
 
 // Telegram invite addresses.
 const TELEGRAM = /(?<![a-z0-9-])(?:(?:t\.me|telegram\.(?:me|org|dog))(?![a-z0-9])|tg:\/\/)/u;
@@ -161,16 +168,19 @@ const LINK = new RegExp(
   "u");
 
 // Taiwan mobile numbers: 09xxxxxxxx, or +886 9xxxxxxxx (also 886, 00886, and a leftover 0 after 886), with any spaces,
-// dashes, dots, "・" or slashes between the digits (SEP). Its edges are read on the text as typed: the character just
-// before its first digit and the one just after its last must not be digits. So "0912 345 678 2 boards" is a phone
-// number followed by a 2, while "20260912345678" is one long number. The cost: a run of spaced numbers that starts with
-// 09 and has ten digits or more ("09 10 12 14 16 18") reads as a phone number with more after it, as a number hidden
-// that way would. A dot between digits counts as a separator, except the point of a decimal such as a wave height: one
-// digit, a dot and one or two digits, standing alone (not part of a chain of dots like "0.9.1.2"). Without that, "swell
-// 0.9 1.1 1.3 1.6 2.0" would read "0911131620". A phone number written as a list of decimals ("0.9 1.2 3.4 5.6 7.8")
-// looks the same as a list of heights, so it passes too: this chat talks about wave heights far more than anyone would
-// spell a number that way.
-const SEP = "[\\s\\-.・/]*";
+// dashes, dots, "・", slashes, underscores, brackets or bars between the digits (SEP): "(0912)345678", "+886(9)12345678",
+// "0912_345_678", "0912|345|678" (full-width brackets are plain ones by now). Commas, "、" and colons are not: they
+// list hours and heights ("09, 10, 11, 12, 13") and write times, and a decimal point becomes a comma below so that a
+// list of heights stays apart. So "0912，345，678" and "0912、345、678" pass, a cost taken on purpose. Its edges are
+// read on the text as typed: the character just before its first digit and the one just after its last must not be
+// digits. So "0912 345 678 2 boards" is a phone number followed by a 2, while "20260912345678" is one long number. The
+// cost: a run of spaced numbers that starts with 09 and has ten digits or more ("09 10 12 14 16 18") reads as a phone
+// number with more after it, as a number hidden that way would. A dot between digits counts as a separator, except
+// the point of a decimal such as a wave height: one digit, a dot and one or two digits, standing alone (not part of a
+// chain of dots like "0.9.1.2"). Without that, "swell 0.9 1.1 1.3 1.6 2.0" would read "0911131620". A phone number
+// written as a list of decimals ("0.9 1.2 3.4 5.6 7.8") looks the same as a list of heights, so it passes too: this
+// chat talks about wave heights far more than anyone would spell a number that way.
+const SEP = "[\\s\\-.・/_()|]*";
 const DECIMAL = /(?<![\d.])\d\.\d{1,2}(?!\d|\.\d)/gu;
 const PHONE = new RegExp(`(?<!\\d)(?:0|(?:\\+|0${SEP}0${SEP})?8${SEP}8${SEP}6(?:${SEP}0)?)${SEP}9(?:${SEP}\\d){8}(?!\\d)`, "u");
 

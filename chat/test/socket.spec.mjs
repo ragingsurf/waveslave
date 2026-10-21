@@ -782,6 +782,25 @@ describe("nick", () => {
     await take(c, (f) => f?.type === "me" && f.nick === "Second_Change");
   });
 
+  it("saving the nickname you already have changes nothing and doesn't use up the week; a change of case does", async () => {
+    const r = await freshRoom(T);
+    const a = await addUser(r, { nick: "Kai_Same" });
+    const one = await join(r, a);
+    const two = await join(r, a);
+    for (const c of [one, two]) await take(c, ofType("me")); // hello's
+    for (const nick of ["Kai_Same", "  Kai_Same  ", "Ｋａｉ＿Ｓａｍｅ"]) {
+      one.send({ type: "nick", nick });
+      expect(await take(one, ofType("me")), nick).toEqual({ type: "me", nick: "Kai_Same", role: "user" });
+    }
+    await settle();
+    expect(all(two, "me")).toHaveLength(1);
+    expect(await r.rows("SELECT nick, nick_changed FROM users WHERE id = ?", a.id)).toEqual([{ nick: "Kai_Same", nick_changed: null }]);
+    expect(await r.rows("SELECT key FROM limits")).toEqual([]);
+    one.send({ type: "nick", nick: "kai_same" });
+    expect(await take(two, (f) => f?.type === "me" && f.nick === "kai_same")).toEqual({ type: "me", nick: "kai_same", role: "user" });
+    expect(await r.rows("SELECT nick, nick_changed FROM users WHERE id = ?", a.id)).toEqual([{ nick: "kai_same", nick_changed: T }]);
+  });
+
   it("a freed nickname can't be taken by another account for 30 days, though its owner can take it back", async () => {
     const r = await freshRoom(T);
     const a = await addUser(r, { nick: "Mika" });

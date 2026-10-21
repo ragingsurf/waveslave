@@ -3,7 +3,7 @@
 // docs/superpowers/specs/2026-10-21-taiwan-chat-design.md, "Moderation" and "Validation".
 //
 //   normalise(text)           -> {stored, check}   the text to keep, and a copy to run the filters on
-//   blocked(check, list)      -> null | {rule}     the hard-block filters
+//   blocked(check, list)      -> null | {rule}     the hard-block filters (give it the check copy)
 //   checkNick(nick)           -> {ok, nick, key} | {ok: false, code}
 //   validReport / validSnap / validSession         the shape checks the room applies to every write
 
@@ -33,11 +33,23 @@ export const SNAP_KEYS = Object.freeze({
 
 // ---- normalise -----------------------------------------------------------------------------------
 
-// Every default-ignorable character: soft hyphen, zero-width spaces and joiners, the direction marks
-// and overrides (U+200E, U+200F, U+202A-U+202E, U+2066-U+2069), the word joiner, the byte-order mark,
-// variation selectors, tag characters, the Hangul fillers and the rest of that Unicode class. They are
-// invisible, so they can hide a banned word or flip the order of text around a nickname.
-const IGNORABLE = /\p{Default_Ignorable_Code_Point}/gu;
+// Every character that draws nothing, or that is only there to break up text. They can hide a banned word
+// ("lin<control>.ee"), flip the order of text around a nickname, or push a message out of shape, and a
+// spammer's own WebSocket client can send any of them even though the page's text box cannot.
+//   - the default-ignorable ones: soft hyphen, zero-width spaces and joiners, the direction marks and
+//     overrides (U+200E, U+200F, U+202A-U+202E, U+2066-U+2069), the word joiner, the byte-order mark,
+//     variation selectors, tag characters, the Hangul fillers and the rest of that Unicode class;
+//   - every control character: C0, DEL and C1 (tab and the line breaks are turned into a gap first, see BREAKS);
+//   - every other format character (U+FFF9-U+FFFB interlinear marks, the Arabic number signs, ...), private
+//     use, lone surrogates and noncharacters;
+//   - U+FFFC, the object replacement character: a symbol by category, but it draws nothing or an empty box.
+const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Cc}\p{Cf}\p{Co}\p{Cs}\p{Noncharacter_Code_Point}\u{FFFC}]/gu;
+
+// Tab, the line breaks (CR, LF, VT, FF, NEL) and the line and paragraph separators (U+2028, U+2029). The
+// characters above are simply gone from the page, but these show as a gap between words (in normal page
+// flow a tab or a line break collapses to one space). So they become one space in the stored text and a
+// "\n" in the checking copy, which is read both ways. See normalise().
+const BREAKS = /[\t\n\v\f\r\u{0085}\u{2028}\u{2029}]+/gu;
 
 // Accent and combining marks (the plain combining blocks; Japanese voiced marks are not in them).
 const COMBINING = /[\u{0300}-\u{036f}\u{1ab0}-\u{1aff}\u{1dc0}-\u{1dff}\u{20d0}-\u{20ff}\u{fe20}-\u{fe2f}]/gu;
@@ -83,16 +95,24 @@ const FOLD = new Map(Object.entries(OTHER_FOLDS));
 for (const [latin, look] of Object.entries(LOOKALIKES)) for (const ch of look) FOLD.set(ch, latin);
 
 // Returns the text to store and a copy to run the filters on (the check copy is never shown or kept).
-//   stored: NFKC (which also turns full-width and styled letters into plain ones), then the invisible
-//           characters removed. Case and everything else is kept as typed.
+//   stored: NFKC (which also turns full-width and styled letters into plain ones), then every invisible
+//           character removed. A tab or line break (a run of them) becomes one space instead, so the words
+//           either side of it do not run together and the text stays on one line. Case and everything else
+//           is kept as typed.
 //   check:  stored, accents dropped, then each character folded to lower case or to its plain look-alike
-//           (Cyrillic, Greek and similar letters to Latin, Chinese numerals to digits).
+//           (Cyrillic, Greek and similar letters to Latin, Chinese numerals to digits). The one difference
+//           from stored: where the message had a tab or line break the check copy has a "\n", not a space.
+//           Removing it would glue the words either side of it together ("hello<newline>line.me" would read
+//           "helloline.me", and "buy<newline>vape" would lose its word edge), and a space would let
+//           "li<tab>ne.me" through. So blocked() reads each "\n" both ways. Give blocked() this copy, not the
+//           stored text.
 // The look-alike table is applied before lower-casing within the same pass, because a capital and a small
 // letter can look like different Latin letters.
 export function normalise(text) {
-  const stored = String(text ?? "").normalize("NFKC").replace(IGNORABLE, "").normalize("NFKC");
+  const parts = String(text ?? "").normalize("NFKC").split(BREAKS).map((part) => part.replace(INVISIBLE, "").normalize("NFKC"));
+  const stored = parts.join(" ");
   let check = "";
-  for (const ch of stored.normalize("NFD").replace(COMBINING, "").normalize("NFC")) {
+  for (const ch of parts.join("\n").normalize("NFD").replace(COMBINING, "").normalize("NFC")) {
     check += FOLD.get(ch) ?? ch.toLowerCase();
   }
   return { stored, check };
@@ -187,14 +207,11 @@ function compile(list) {
   return c;
 }
 
-// Runs the hard-block filters on a check copy (from normalise) against the lists in blocklist.json.
-// Returns null if the text may be posted, or {rule}: line, telegram, short, link, phone, scam, vape or
-// slur. The first rule that matches is reported, in that order, so "lin.ee/abc" is a LINE invite and not
-// just a link. Sites in the list's allowHosts may be linked. Casual swearing (幹, 靠北) is allowed on
-// purpose (Bryan, Oct 21): 幹嘛 and 樹幹 pass, and so does a bare 幹.
-export function blocked(check, list) {
-  const text = String(check ?? "");
-  if (!text) return null;
+// The rules, in the order they are tried and reported.
+const RULE_ORDER = ["line", "telegram", "short", "link", "phone", "scam", "vape", "slur"];
+
+// Runs the hard-block filters on one reading of a check copy (the rules are tried in RULE_ORDER).
+function blockedReading(text, list) {
   const c = compile(list);
   const hit = (res, s) => res.some((re) => re.test(s));
 
@@ -214,6 +231,25 @@ export function blocked(check, list) {
   return null;
 }
 
+// Runs the hard-block filters on a check copy (from normalise) against the lists in blocklist.json.
+// Returns null if the text may be posted, or {rule}: line, telegram, short, link, phone, scam, vape or
+// slur. The first rule that matches is reported, in that order, so "lin.ee/abc" is a LINE invite and not
+// just a link. Sites in the list's allowHosts may be linked. Casual swearing (幹, 靠北) is allowed on
+// purpose (Bryan, Oct 21): 幹嘛 and 樹幹 pass, and so does a bare 幹.
+// A "\n" in the check copy stands for a tab or line break in the message (see normalise). It is read both
+// ways, as nothing and as a space, and the message is blocked if either reading is. If both are, the rule
+// that comes first in RULE_ORDER is reported, so "hello<tab>t.me/x" is Telegram (the space reading), not a
+// link (the glued reading, "hellot.me/x").
+export function blocked(check, list) {
+  const text = String(check ?? "");
+  if (!text) return null;
+  if (!text.includes("\n")) return blockedReading(text, list);
+  const glued = blockedReading(text.replace(/\n+/g, ""), list);
+  const spaced = blockedReading(text.replace(/\n+/g, " "), list);
+  if (!glued || !spaced) return glued ?? spaced;
+  return RULE_ORDER.indexOf(spaced.rule) < RULE_ORDER.indexOf(glued.rule) ? spaced : glued;
+}
+
 // ---- checkNick -----------------------------------------------------------------------------------
 
 // Words nobody may have in a nickname, so no one can pass as Bryan or as the staff. They are checked
@@ -228,10 +264,12 @@ const NICK_CHARS = /^[\p{L}\p{N}_.-]+(?: [\p{L}\p{N}_.-]+)*$/u;
 // show and key is the folded form with the spaces taken out, which must be unique across users. Or
 // {ok: false, code} with code "length", "chars" or "reserved". Leading and trailing spaces are dropped.
 export function checkNick(nick) {
-  const shown = normalise(typeof nick === "string" ? nick : "").stored.trim();
+  const n = normalise(typeof nick === "string" ? nick : "");
+  const shown = n.stored.trim();
   const length = [...shown].length;
   if (length < 2 || length > 20) return { ok: false, code: "length" };
-  if (!NICK_CHARS.test(shown)) return { ok: false, code: "chars" };
+  // A tab or line break inside the name (one at either end is trimmed away, like a space) is not a letter.
+  if (!NICK_CHARS.test(shown) || n.check.trim().includes("\n")) return { ok: false, code: "chars" };
   const key = normalise(shown).check.replace(/ /g, "");
   if (RESERVED.some((word) => key.includes(word))) return { ok: false, code: "reserved" };
   return { ok: true, nick: shown, key };

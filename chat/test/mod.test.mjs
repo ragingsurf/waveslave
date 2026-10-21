@@ -63,6 +63,66 @@ test("normalise: variation selectors and tag characters are removed", () => {
   assert.equal(normalise("a\u{e0041}b").stored, "ab");
 });
 
+test("normalise: control characters are removed from both copies", () => {
+  const n = normalise("lin\u0001.ee");
+  assert.equal(n.stored, "lin.ee");
+  assert.equal(n.check, "lin.ee");
+  assert.deepEqual(normalise("0912\u007f345678"), { stored: "0912345678", check: "0912345678" });
+  // every C0 and C1 control that is not a tab or a line break, and DEL
+  const controls = [];
+  for (let cp = 0; cp <= 0x9f; cp++) if (cp <= 0x1f || cp >= 0x7f) controls.push(cp);
+  for (const cp of controls) {
+    if ([0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x85].includes(cp)) continue;
+    const got = normalise("a" + String.fromCodePoint(cp) + "b");
+    assert.deepEqual(got, { stored: "ab", check: "ab" }, "U+" + cp.toString(16));
+  }
+});
+
+test("normalise: U+FFFC and the interlinear annotation marks are removed from both copies", () => {
+  for (const ch of ["\u{fffc}", "\u{fff9}", "\u{fffa}", "\u{fffb}"]) {
+    assert.deepEqual(normalise("line" + ch + ".me"), { stored: "line.me", check: "line.me" }, "U+" + ch.codePointAt(0).toString(16));
+  }
+});
+
+test("normalise: private-use characters, lone surrogates and noncharacters are removed", () => {
+  for (const ch of ["\u{e000}", "\u{f8ff}", "\u{f0000}", "\u{10fffd}", "\ud800", "\udfff", "\u{fdd0}", "\u{ffff}", "\u{1fffe}"]) {
+    assert.deepEqual(normalise("a" + ch + "b"), { stored: "ab", check: "ab" }, "U+" + ch.codePointAt(0).toString(16));
+  }
+});
+
+test("normalise: text that joins up once the invisible characters are gone is still in NFKC form", () => {
+  assert.equal(normalise("e\u{200d}\u{0301}").stored, "\u{e9}"); // e, a zero-width joiner, an acute accent
+  assert.equal(normalise("e\u{200d}\u{0301}").check, "e");
+  assert.equal(normalise("\u{1112}\u{3164}\u{1161}").stored, "\u{d558}"); // Hangul jamo around a filler become one syllable
+});
+
+test("normalise: a tab or line break becomes one space in the stored text and a newline in the checking copy", () => {
+  assert.deepEqual(normalise("Good waves\r\n\tCrowded"), { stored: "Good waves Crowded", check: "good waves\ncrowded" });
+  assert.deepEqual(normalise("a\u{85}b\u{2028}c\u{2029}d\u000be\u000cf"), { stored: "a b c d e f", check: "a\nb\nc\nd\ne\nf" });
+  assert.deepEqual(normalise("li\tne.me"), { stored: "li ne.me", check: "li\nne.me" });
+  assert.deepEqual(normalise("\n\nhi\t"), { stored: " hi ", check: "\nhi\n" }); // callers trim
+});
+
+test("normalise: no invisible character of any kind survives, and normalising twice changes nothing", () => {
+  // Every code point there is, between two letters. The stored text must come back with nothing between
+  // them (or one space, for a break), and the checking copy likewise ("\n" for a break).
+  const invisible = /[\p{Default_Ignorable_Code_Point}\p{Cc}\p{Cf}\p{Co}\p{Cs}\p{Noncharacter_Code_Point}\u{fffc}\u{2028}\u{2029}]/u;
+  const isBreak = /[\t\n\v\f\r\u{85}\u{2028}\u{2029}]/u;
+  let removed = 0;
+  for (let cp = 0; cp <= 0x10ffff; cp++) {
+    const ch = String.fromCodePoint(cp);
+    const n = normalise("a" + ch + "b");
+    if (invisible.test(ch)) {
+      removed++;
+      const want = isBreak.test(ch) ? { stored: "a b", check: "a\nb" } : { stored: "ab", check: "ab" };
+      if (n.stored !== want.stored || n.check !== want.check) assert.fail("U+" + cp.toString(16) + " came back as " + JSON.stringify(n));
+    }
+    if (invisible.test(n.stored) || invisible.test(n.check.replaceAll("\n", ""))) assert.fail("U+" + cp.toString(16) + " left an invisible character");
+    if (normalise(n.stored).stored !== n.stored) assert.fail("U+" + cp.toString(16) + " is not stable");
+  }
+  assert.ok(removed > 100000, "the sweep covered " + removed + " invisible code points");
+});
+
 test("normalise: styled letters fold to plain ones", () => {
   assert.ok(normalise("𝐥𝐢𝐧𝐞.𝐦𝐞").check.includes("line.me"));
   assert.ok(normalise("\u{2113}ine.me").check.includes("line.me"));
@@ -274,10 +334,62 @@ test("blocked: list entries are matched after the same normalising as messages",
   assert.equal(rule("投資一對一", custom), "scam");
 });
 
+test("blocked: a control character or an object-replacement mark cannot hide a banned word", () => {
+  assert.equal(rule("lin\u0001.ee/abc"), "line");
+  assert.equal(rule("line\u{fffc}.me"), "line");
+  assert.equal(rule("line\u{fff9}.me"), "line");
+  assert.equal(rule("line\u{fffa}.me"), "line");
+  assert.equal(rule("line\u{fffb}.me"), "line");
+  assert.equal(rule("l\u007fine.me"), "line");
+  assert.equal(rule("l\u0090ine.me"), "line");
+  assert.equal(rule("t\u0085.me/x"), "telegram");
+  assert.equal(rule("t\u0002.me/x"), "telegram");
+  assert.equal(rule("bit\u0003.ly/x"), "short");
+  assert.equal(rule("example\u0004.com"), "link");
+  assert.equal(rule("0912\u007f345678"), "phone");
+  assert.equal(rule("0912\u0001-345\u0001-678"), "phone");
+  assert.equal(rule("飆\u0001股"), "scam");
+  assert.equal(rule("電\u{fffc}子煙"), "vape");
+  assert.equal(rule("nig\u0001ger"), "slur");
+  assert.equal(rule("\u{e000}加\u{e001}賴\u{e002} abc123"), "line");
+});
+
+test("blocked: a tab or line break does not hide a banned word", () => {
+  assert.equal(rule("li\tne.me"), "line");
+  assert.equal(rule("li\nne.me"), "line");
+  assert.equal(rule("li\r\nne.me"), "line");
+  assert.equal(rule("t\n.me/x"), "telegram");
+  assert.equal(rule("0912\n345\n678"), "phone");
+  assert.equal(rule("0912\t345\t678"), "phone");
+  assert.equal(rule("飆\r\n股"), "scam");
+  assert.equal(rule("電\n子煙"), "vape");
+  assert.equal(rule("line\u{2028}.me"), "line");
+});
+
+test("blocked: a tab or line break is still the edge of a word", () => {
+  // Read as nothing, these would glue to the word before and lose their edge ("helloline.me", "buyvape").
+  assert.equal(rule("hello\nline.me"), "line");
+  assert.equal(rule("hello\tline.me"), "line");
+  assert.equal(rule("buy\nvape"), "vape");
+  assert.equal(rule("you\r\nnigger"), "slur");
+  assert.equal(rule("add me\nline id surf88"), "line");
+  assert.equal(rule("my id\n@surfer88"), "line");
+  // Both readings hit here (a link when glued, Telegram when spaced): the earlier rule is reported.
+  assert.equal(rule("hello\tt.me/x"), "telegram");
+  assert.equal(rule("hello\nline.me/ti/x"), "line");
+});
+
+test("blocked: ordinary text with tabs and line breaks passes", () => {
+  assert.equal(rule("Clean peaks\nGood tide\r\n\tFew people"), null);
+  assert.equal(rule("Chest high\nat 7:30,\n1.2 m @ 9 s"), null);
+  assert.equal(rule("今天金山浪不錯\n早上六點到"), null);
+  assert.equal(rule("\n\n  \t "), null);
+});
+
 // ---- checkNick -------------------------------------------------------------------------------
 
 test("checkNick: reserved words are refused, however they are dressed up", () => {
-  for (const nick of ["Bryan", "ＢＲＹＡＮ", "Bry\u{0430}n", "Br\u{200b}yan", "WaveSlave官方", "管理员", "教練Leo",
+  for (const nick of ["Br\u0001yan", "Br\u{fffc}yan", "Br\u007fyan", "Bryan", "ＢＲＹＡＮ", "Bry\u{0430}n", "Br\u{200b}yan", "WaveSlave官方", "管理员", "教練Leo",
     "bryan", "B r y a n", "Admin", "xAdminx", "Coach Kai", "Staff", "Mod_88", "管理員", "教练", "站長", "官方小幫手"]) {
     assert.deepEqual(checkNick(nick), { ok: false, code: "reserved" }, nick);
   }
@@ -299,6 +411,8 @@ test("checkNick: only letters, digits, _ . - and single inner spaces", () => {
   assert.deepEqual(checkNick("a<b"), { ok: false, code: "chars" });
   assert.deepEqual(checkNick("a  b"), { ok: false, code: "chars" });
   assert.deepEqual(checkNick("a\tb"), { ok: false, code: "chars" });
+  assert.deepEqual(checkNick("a\nb"), { ok: false, code: "chars" });
+  assert.deepEqual(checkNick("Mary\r\nJane"), { ok: false, code: "chars" });
   assert.deepEqual(checkNick("Leo😀"), { ok: false, code: "chars" });
   assert.deepEqual(checkNick("Leo!"), { ok: false, code: "chars" });
   assert.deepEqual(checkNick("Leo@home"), { ok: false, code: "chars" });
@@ -307,6 +421,8 @@ test("checkNick: only letters, digits, _ . - and single inner spaces", () => {
 });
 
 test("checkNick: good nicknames come back normalised with a key", () => {
+  assert.deepEqual(checkNick("Le\u0001o"), { ok: true, nick: "Leo", key: "leo" }); // a hidden control is dropped
+  assert.deepEqual(checkNick("\nLeo\r\n"), { ok: true, nick: "Leo", key: "leo" }); // a break at either end is trimmed
   assert.deepEqual(checkNick("阿凱"), { ok: true, nick: "阿凱", key: "阿凱" });
   assert.deepEqual(checkNick("Leo_88"), { ok: true, nick: "Leo_88", key: "leo_88" });
   assert.deepEqual(checkNick("  Mary Jane "), { ok: true, nick: "Mary Jane", key: "maryjane" });
@@ -481,6 +597,7 @@ test("validSession: a missing note is empty, and the note is stored in its clean
   const { note, ...noNote } = goodSession();
   assert.equal(validSession(noNote, NOW).note, "");
   assert.equal(validSession({ ...goodSession(), note: "  nice\u{200b} waves \u{202e} " }, NOW).note, "nice waves");
+  assert.equal(validSession({ ...goodSession(), note: "Kept\u0001 nosediving\non\ttakeoff\u{fffc}" }, NOW).note, "Kept nosediving on takeoff");
 });
 
 test("validSession: spot and board must be known codes", () => {

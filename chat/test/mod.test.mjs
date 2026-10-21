@@ -447,7 +447,8 @@ test("blocked: ordinary text with tabs and line breaks passes", () => {
 
 test("checkNick: reserved words are refused, however they are dressed up", () => {
   for (const nick of ["Br\u0001yan", "Br\u{fffc}yan", "Br\u007fyan", "Bryan", "ＢＲＹＡＮ", "Bry\u{0430}n", "Br\u{200b}yan", "WaveSlave官方", "管理员", "教練Leo",
-    "bryan", "B r y a n", "Admin", "xAdminx", "Coach Kai", "Staff", "Mod_88", "管理員", "教练", "站長", "官方小幫手"]) {
+    "bryan", "B r y a n", "Admin", "xAdminx", "Coach Kai", "Staff", "Mod_88", "管理員", "教练", "站長", "官方小幫手",
+    "Br.yan", "Bry_an", "B-r-y-a-n", "B.r_y-a n", "Ad.min", "St_aff", "Wave-Slave", "Co.ach", "管_理"]) {
     assert.deepEqual(checkNick(nick), { ok: false, code: "reserved" }, nick);
   }
 });
@@ -481,7 +482,8 @@ test("checkNick: good nicknames come back normalised with a key", () => {
   assert.deepEqual(checkNick("Le\u0001o"), { ok: true, nick: "Leo", key: "leo" }); // a hidden control is dropped
   assert.deepEqual(checkNick("\nLeo\r\n"), { ok: true, nick: "Leo", key: "leo" }); // a break at either end is trimmed
   assert.deepEqual(checkNick("阿凱"), { ok: true, nick: "阿凱", key: "阿凱" });
-  assert.deepEqual(checkNick("Leo_88"), { ok: true, nick: "Leo_88", key: "leo_88" });
+  assert.deepEqual(checkNick("Leo_88"), { ok: true, nick: "Leo_88", key: "leo88" });
+  assert.deepEqual(checkNick("John.D-2"), { ok: true, nick: "John.D-2", key: "johnd2" });
   assert.deepEqual(checkNick("  Mary Jane "), { ok: true, nick: "Mary Jane", key: "maryjane" });
   assert.deepEqual(checkNick("ＬＥＯ"), { ok: true, nick: "LEO", key: "leo" });
 });
@@ -494,6 +496,26 @@ test("checkNick: look-alikes share one key", () => {
   assert.equal(checkNick("L e o").key, key);
   assert.equal(checkNick("Le\u{200b}o").key, key);
   assert.notEqual(checkNick("Leon").key, key);
+});
+
+test("checkNick: _ . and - don't make a new name", () => {
+  // They are allowed in a nickname, but "Le.o" is still Leo to anyone reading it, so the key leaves them out.
+  const key = checkNick("Leo").key;
+  for (const nick of ["Le.o", "L_eo", "L-e-o", "Leo.", "_Leo_", "L.e_o-"]) assert.equal(checkNick(nick).key, key, nick);
+  assert.equal(checkNick("Leo_88").key, checkNick("Leo88").key);
+});
+
+test("checkNick: a nickname needs a letter or a digit", () => {
+  for (const nick of ["..", "__", "-.-", "_ _", "._-_."]) assert.deepEqual(checkNick(nick), { ok: false, code: "chars" }, nick);
+  assert.equal(checkNick("_a").ok, true);
+  assert.equal(checkNick("-7-").ok, true);
+});
+
+test("checkNick: Chinese numerals and digits share a key, since the names read the same", () => {
+  // A conscious choice (see checkNick): 阿三 and 阿3 are both "A-san" read aloud, so the second would pass as the first.
+  assert.equal(checkNick("阿三").key, checkNick("阿3").key);
+  assert.equal(checkNick("Leo一").key, checkNick("Leo1").key);
+  assert.equal(checkNick("阿三").nick, "阿三"); // shown as typed
 });
 
 // ---- validSnap / validReport ------------------------------------------------------------------

@@ -277,16 +277,24 @@ export function blocked(check, list) {
 // ---- checkNick -----------------------------------------------------------------------------------
 
 // Words nobody may have in a nickname, so no one can pass as Bryan or as the staff. They are checked
-// against the folded key, so styled letters, look-alikes, hidden characters and spaces do not help.
+// against the folded key, so styled letters, look-alikes, hidden characters, spaces and _ . - do not help.
 const RESERVED = ["bryan", "admin", "waveslave", "coach", "mod", "staff", "官方", "管理", "管理员", "管理員", "教練", "教练", "站長"]
   .map((w) => normalise(w).check);
 
 // Letters, digits and _ . - with single spaces between words.
 const NICK_CHARS = /^[\p{L}\p{N}_.-]+(?: [\p{L}\p{N}_.-]+)*$/u;
 
+// What the key leaves out: the spaces and the punctuation a nickname may have. "Br.yan", "Bry_an" and
+// "B-r-y-a-n" read as Bryan, and "Le.o" as Leo, so they must count as those names.
+const KEY_DROPS = /[ _.-]/g;
+
 // A nickname is 2 to 20 characters after normalising. Returns {ok: true, nick, key} where nick is what to
-// show and key is the folded form with the spaces taken out, which must be unique across users. Or
-// {ok: false, code} with code "length", "chars" or "reserved". Leading and trailing spaces are dropped.
+// show and key is the folded form with the spaces, "_", "." and "-" taken out, which must be unique across
+// users. Or {ok: false, code} with code "length", "chars" (including a name with no letter or digit, whose
+// key would be empty) or "reserved". Leading and trailing spaces are dropped.
+// The key is built from the check copy, which also turns Chinese numerals into digits, so 阿三 and 阿3 (or
+// Leo一 and Leo1) are one name: read aloud they are the same, and the second would pass as the first. The one
+// who comes second is told the name is taken.
 export function checkNick(nick) {
   const n = normalise(typeof nick === "string" ? nick : "");
   const shown = n.stored.trim();
@@ -294,7 +302,8 @@ export function checkNick(nick) {
   if (length < 2 || length > 20) return { ok: false, code: "length" };
   // A tab or line break inside the name (one at either end is trimmed away, like a space) is not a letter.
   if (!NICK_CHARS.test(shown) || n.check.trim().includes("\n")) return { ok: false, code: "chars" };
-  const key = normalise(shown).check.replace(/ /g, "");
+  const key = normalise(shown).check.replace(KEY_DROPS, "");
+  if (key === "") return { ok: false, code: "chars" };
   if (RESERVED.some((word) => key.includes(word))) return { ok: false, code: "reserved" };
   return { ok: true, nick: shown, key };
 }

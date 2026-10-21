@@ -374,7 +374,7 @@ function limitsFor(user, kind, spot, now) {
 
 // A freed nickname's hold, kept in limits until it runs out: "held:<nick_key>:<sub_hash of the account that had it>".
 // A nickname key has no ":" or ";" (checkNick allows only letters, digits, spaces, "_", "." and "-", and the key drops
-// the spaces), so every hold on one name sorts between "held:<key>:" and "held:<key>;".
+// all but the letters and digits), so every hold on one name sorts between "held:<key>:" and "held:<key>;".
 const heldKey = (nickKey, sub) => `held:${nickKey}:${sub}`;
 
 export class Room extends DurableObject {

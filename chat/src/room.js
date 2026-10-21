@@ -18,11 +18,14 @@
 //   onAdmin                    Bryan's claim to the admin role (step 7)
 //   onBan ... onHiddenList     Bryan's tools (step 5), plus his Delete in onDelete
 //   where                      GET /admin/where: which Cloudflare data centre the room lives in
+//   mySessions ... deleteAccount   the /me routes: the surf diary, the user's own data, and deleting the account
+//   shareSession, onShare      a log from the diary as a session card in the room, and out of it again (onUnshare)
+//   rest()                     the free-plan guard: past 90% of a daily limit the chat rests until 00:00 UTC
 //
 // Times are epoch milliseconds. The Worker calls the room as https://room/<route> with a JSON body.
 import { DurableObject } from "cloudflare:workers";
 import { hmacB64u, pin6, randomB64u, readToken, sameText, sha256b64u, signToken, subHash } from "./auth.js";
-import { blocked, checkNick, normalise, REASONS, SPOTS, validReport } from "./mod.js";
+import { blocked, checkNick, normalise, REASONS, SPOTS, validReport, validSession } from "./mod.js";
 import BLOCKLIST from "../blocklist.json";
 
 const SECOND = 1000;
@@ -78,9 +81,10 @@ const TEXT_MAX = 500; // characters in a text message
 // Close codes. 1008 and 1009 are the standard ones; the 44xx ones are the chat's own, for chat.js to read.
 const CLOSE_BAD = 1008; // five bad frames
 const CLOSE_TOO_BIG = 1009; // a frame over 4 KB
-const CLOSE_SIGNED_OUT = 4401; // the account signed out everywhere: its tokens no longer work
+const CLOSE_SIGNED_OUT = 4401; // the account signed out everywhere, or was deleted: its tokens no longer work
 const CLOSE_BANNED = 4403; // Bryan banned the account: "This LINE account can't post here"
 const CLOSE_UPDATE = 4426; // the app speaks a protocol version the room no longer takes, so it must reload
+const CLOSE_RESTING = 4429; // the chat is resting (rest()): "Chat is resting until 08:00"
 
 // What a socket's attachment holds (it lives with the socket, through hibernation): uid, tv and role once it has said
 // hello with a good token, and null for a reader; v, its protocol version, once it has said hello; bad, the bad frames
@@ -93,6 +97,7 @@ const NEW_SOCKET = Object.freeze({ uid: null, tv: null, role: null, v: null, bad
 const READS = { hello: "onHello", older: "onOlder" };
 const WRITES = {
   say: "onSay", report: "onReport", like: "onLike", delete: "onDelete", nick: "onNick", flag: "onFlag", admin: "onAdmin",
+  share: "onShare", unshare: "onUnshare",
 };
 const ADMIN_TOOLS = {
   ban: "onBan", unban: "onUnban", restore: "onRestore", keep: "onKeep", lock: "onLock", unlock: "onUnlock",
@@ -111,9 +116,20 @@ const LIKE_LIMIT = { rule: "like:10m", max: 30, ms: 10 * MINUTE };
 const FLAG_LIMIT = { rule: "flag:1d", max: 20, ms: DAY };
 const NICK_EVERY = 7 * DAY; // one nickname change a week, counted from users.nick_changed
 const NICK_HELD = 30 * DAY; // how long a freed nickname is kept for the account that had it
+const SESSION_LIMIT = { rule: "session:1d", max: 20, ms: DAY }; // private logs: 20 a day...
+const SESSIONS_MAX = 1000; // ...and 1,000 in all, counted from sessions
+const SHARE_LIMIT = { rule: "share:1d", max: 5, ms: DAY }; // shared session cards: 5 a day
 
 // The writes a locked room (meta "locked" = 1) stops: the ones that post to the room. Bryan still can.
-const POSTS = new Set(["say", "report"]);
+const POSTS = new Set(["say", "report", "share"]);
+
+// The free plan's daily limits (spec "Free-plan budget", checked 2026-10-21): Durable Object requests, and SQL rows read
+// and written. The Worker's own limit is also 100,000 requests a day, and nearly every Worker request is a room
+// request too, so the room's count stands for both. Past 90% of any of them the chat rests (rest()) until the counts
+// start again at 00:00 UTC. The counts are approximate (see usage()), and the tenth left over covers that, and the
+// alarm's daily clean-up, which still runs.
+const DAILY_LIMITS = Object.freeze({ req: 100_000, read: 5_000_000, write: 100_000 });
+const REST_AT = 0.9;
 
 // The report button (spec "Moderation", step 4). A flag counts only from an account at least 24 hours old with a
 // post, that isn't banned and has fewer than 2 flags Bryan has rejected; 3 counted flags hide a message. A sexual or
@@ -140,6 +156,11 @@ const COLO = /^colo=[A-Z]{3}$/;
 
 // A message's columns as the room reads them to send it out (toPublic()).
 const MSG_COLS = "id, ts, uid, kind, spot, body, reply_to, likes";
+
+// DELETE /me/sessions/<id> reaches the room as this path and the log's id. The id is written as the room writes it:
+// a whole number from 1 up, with no leading zero.
+const SESSION_PATH = "/r/me/sessions/";
+const SESSION_ID = /^[1-9]\d{0,15}$/;
 
 // Every table in the spec, including the ones that later parts of the room first write to.
 const SCHEMA_V1 = [
@@ -284,6 +305,14 @@ async function readJson(request) {
   }
 }
 
+// A /me route's answer to a write canWrite() refused: 401 auth, 403 banned or locked, 429 slow:<seconds>.
+function refuseWrite(code) {
+  if (code === "auth") return refuse(401, code);
+  return refuse(code.startsWith("slow:") ? 429 : 403, code);
+}
+
+const resting = () => Response.json({ resting: true }, { status: 503 });
+
 // Two short codes of a fixed length (a pin, a hash), compared in time that doesn't depend on where they differ.
 // Synchronous, unlike auth.js's sameText, so handoffFor() can read a handoff and write to it with no await between.
 function sameCode(a, b) {
@@ -334,6 +363,10 @@ function limitsFor(user, kind, spot, now) {
       return [LIKE_LIMIT];
     case "flag":
       return [FLAG_LIMIT];
+    case "session":
+      return [SESSION_LIMIT];
+    case "share":
+      return [SHARE_LIMIT];
     default:
       return [];
   }
@@ -539,16 +572,39 @@ export class Room extends DurableObject {
     this.used.write += cursor.rowsWritten;
   }
 
+  // ---- Resting (spec "Free-plan budget") ---------------------------------------------------------------------
+
+  // The guard that keeps the chat inside the free plan. It says whether the chat is resting: today's counts are past
+  // 90% of one of the daily limits (DAILY_LIMITS). If so, it closes every open socket with 4429, which chat.js shows
+  // as "Chat is resting until 08:00" (the counts start again at 00:00 UTC, 08:00 in Taiwan), and fetch() answers 503
+  // {resting: true}. fetch() and every frame ask this before anything else, once they have counted themselves; the
+  // alarm asks before its tick (it counts itself at its end).
+  rest() {
+    const used = this.usage("req", 0);
+    if (!Object.entries(DAILY_LIMITS).some(([kind, limit]) => used[kind] > limit * REST_AT)) return false;
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        if (ws.readyState === WebSocket.OPEN) ws.close(CLOSE_RESTING, "resting");
+      } catch {
+        // It closed in the meantime.
+      }
+    }
+    return true;
+  }
+
   // ---- Requests from the Worker ------------------------------------------------------------------------------
 
   // Every call from the Worker comes here (the front Worker's header lists the routes). Each one counts as a request
   // against the free plan's daily limit and makes sure the alarm is set. /r/logins, /r/logins/take and /r/handoffs
-  // are the Worker's own steps of a LINE sign-in; the rest carry the app's request.
+  // are the Worker's own steps of a LINE sign-in; the rest carry the app's request. While the chat rests, every one of
+  // them is answered 503 {resting: true}, and a new socket is closed at once with 4429 (restingSocket()).
   async fetch(request) {
     this.usage("req");
     await this.ensureAlarm();
     const url = new URL(request.url);
-    switch (`${request.method} ${url.pathname}`) {
+    const route = `${request.method} ${url.pathname}`;
+    if (this.rest()) return route === "GET /r/ws" ? this.restingSocket(request) : resting();
+    switch (route) {
       case "GET /r/reports": {
         const answer = this.reportsFor(url.searchParams.get("spot"), this.now());
         return answer ? Response.json(answer) : Response.json({ error: "spot" }, { status: 400 });
@@ -567,10 +623,21 @@ export class Room extends DurableObject {
         return this.openSocket(request);
       case "POST /r/me/signout":
         return this.signOut(request);
+      case "GET /r/me/sessions":
+        return this.mySessions(request);
+      case "POST /r/me/sessions":
+        return this.logSession(request);
+      case "GET /r/me/export":
+        return this.exportMine(request);
+      case "DELETE /r/me":
+        return this.deleteAccount(request);
       case "GET /r/where":
         return this.where(request);
       default:
-        return Response.json({ error: "not found" }, { status: 404 });
+        if (request.method === "DELETE" && url.pathname.startsWith(SESSION_PATH)) {
+          return this.deleteSession(request, url.pathname.slice(SESSION_PATH.length));
+        }
+        return refuse(404, "not found");
     }
   }
 
@@ -826,7 +893,8 @@ export class Room extends DurableObject {
   //   locked     the room is locked (meta "locked" = 1); only posting stops (POSTS), and never for Bryan
   //   slow:<s>   over a rate limit, with the seconds until the write would go through
   // Kinds: say, report (with its spot), like, delete, nick, flag and admin (a claim), and the name of each of Bryan's
-  // tools. A null answer also counts the write against its limits, so the caller asks last, once nothing else can
+  // tools; from the diary, session (a private log), share and unshare (a log's card in the room), and account (deleting
+  // it). A null answer also counts the write against its limits, so the caller asks last, once nothing else can
   // refuse it. A nickname change is limited by users.nick_changed, which the change itself sets, so for "nick" this
   // only checks.
   canWrite(user, kind, spot = null) {
@@ -869,6 +937,7 @@ export class Room extends DurableObject {
   //   say {text, spot?, reply_to?}         a text message
   //   report {spot, size, cond, crowd, snap?}
   //   like {id}, delete {id}, nick {nick}
+  //   share {session_id}, unshare {session_id}   one of the user's logs as a session card in the room, or out of it
   //   flag {id, reason}                    the report button; reason is spam, harass, sexual, child or other
   //   admin {code}                         Bryan's claim: chat.js sends any text that starts with a slash this way
   //   "ping"                               plain text, answered "pong" by the runtime without waking the room
@@ -885,6 +954,7 @@ export class Room extends DurableObject {
   //   error {code, for?}                   auth, banned, locked, slow:<s>, blocked:<rule>, invalid, update, size,
   //                                        nick:<length|chars|reserved|taken>, or admin (a claim refused); "for" is
   //                                        the frame's type
+  //   ok {for: "share", session_id, shared_msg} | {for: "unshare", session_id}   to the socket that asked
   // To Bryan's sockets only:
   //   msg {msg} with msg.hidden            a message just hidden, with why ("flags", "ban" or "admin"), where everyone
   //                                        else gets update {id, hidden: true}
@@ -893,7 +963,8 @@ export class Room extends DurableObject {
   // Messages are always the public frame (toPublic()), so no user id or LINE data goes out; only Bryan's sockets learn
   // why a message was hidden, and the LINE account code (sub_hash) that unban takes. A socket that sends five bad
   // frames (invalid ones, or writes before signing in) is closed with 1008, and a frame over 4 KB closes it with
-  // 1009. Each address may hold 5 sockets.
+  // 1009. Each address may hold 5 sockets. The room's own close codes: 4401 signed out everywhere (or the account is
+  // deleted), 4403 banned, 4426 reload for the new chat, and 4429 resting.
 
   // GET /ws, once the Worker has checked the Origin: a new socket, unless the visitor's address already holds 5. The
   // address is kept only as a tag on its sockets, and only as its HMAC under SUB_PEPPER, so the room never holds an IP
@@ -914,10 +985,23 @@ export class Room extends DurableObject {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  // Every frame from a socket but "ping". Each one is a room request against the free plan's daily limit.
+  // GET /ws while the chat rests: the socket is accepted only to be closed at once with 4429. A refused upgrade would
+  // look to chat.js like any other failure ("Chat is offline · Retry"); the close code says "Chat is resting until
+  // 08:00". It is never one of the room's sockets, so it takes no place and isn't counted online.
+  restingSocket(request) {
+    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") return refuse(426, "upgrade");
+    const [client, server] = Object.values(new WebSocketPair());
+    server.accept();
+    server.close(CLOSE_RESTING, "resting");
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  // Every frame from a socket but "ping". Each one is a room request against the free plan's daily limit. While the
+  // chat rests, a frame isn't answered: the socket is closed with 4429, with every other open one (rest()).
   async webSocketMessage(ws, message) {
     this.usage("req");
     await this.ensureAlarm();
+    if (this.rest()) return;
     if (frameBytes(message) > FRAME_MAX) {
       this.send(ws, errorFrame("size"));
       ws.close(CLOSE_TOO_BIG, "frame too big");
@@ -1061,9 +1145,9 @@ export class Room extends DurableObject {
     this.broadcast({ type: "update", id: frame.id, likes });
   }
 
-  // delete {id}: a user deletes a message of their own (the owner check is in the WHERE), and its likes go with it.
-  // Every socket is told, so it goes from every screen. Replies keep their reply_to: the app shows "Message deleted"
-  // for a parent it doesn't have.
+  // delete {id}: a user deletes a message of their own (removeOwn()), and its likes go with it; a session card's log
+  // is unshared. Every socket is told, so it goes from every screen. Replies keep their reply_to: the app shows
+  // "Message deleted" for a parent it doesn't have.
   //
   // Bryan's Delete on anyone else's message hides it instead ("admin"): it goes from every screen but his, and stays in
   // his hidden list, where he can restore it or keep it as evidence, until the daily clean-up takes it with the rest.
@@ -1081,14 +1165,28 @@ export class Room extends DurableObject {
         return;
       }
     }
-    const gone = this.ctx.storage.transactionSync(() => {
-      const row = this.one("DELETE FROM messages WHERE id = ? AND uid = ? RETURNING spot", frame.id, user.id);
-      if (row) this.all("DELETE FROM likes WHERE msg_id = ?", frame.id);
-      return row;
-    });
+    const gone = this.ctx.storage.transactionSync(() => this.removeOwn(frame.id, user.id));
     if (!gone) return "invalid";
-    this.messagesChanged(gone.spot);
-    this.broadcast({ type: "update", id: frame.id, deleted: true });
+    this.announceDeleted([gone]);
+  }
+
+  // Deletes message id if uid posted it, with the likes on it, and unshares the log it was the card of, if it was one
+  // (the owner check is in the WHERE). Runs inside the caller's transaction. Returns the message's {id, spot, kind}, or
+  // null when uid has no such message.
+  removeOwn(id, uid) {
+    const row = this.one("DELETE FROM messages WHERE id = ? AND uid = ? RETURNING id, spot, kind", id, uid);
+    if (!row) return null;
+    this.all("DELETE FROM likes WHERE msg_id = ?", id);
+    if (row.kind === "session") this.all("UPDATE sessions SET shared_msg = NULL WHERE uid = ? AND shared_msg = ?", uid, id);
+    return row;
+  }
+
+  // Tells everyone that messages ({id, spot} each) are gone, once that is stored: update {id, deleted: true} for each,
+  // oldest first. The spot cards and the CHAT button's dot follow (messagesChanged()).
+  announceDeleted(rows) {
+    if (rows.length === 0) return;
+    this.messagesChanged(rows.length === 1 ? rows[0].spot : undefined);
+    for (const { id } of [...rows].sort((a, b) => a.id - b.id)) this.broadcast({ type: "update", id, deleted: true });
   }
 
   // nick {nick}: a new nickname (see nickFor()), at most once a week. The old one is held for 30 days for this LINE
@@ -1399,13 +1497,22 @@ export class Room extends DurableObject {
 
   // Stores a new message from `user` and sends it to every socket as msg.
   post(user, kind, spot, body, replyTo = null) {
-    const row = this.one(
-      `INSERT INTO messages (ts, uid, kind, spot, body, reply_to) VALUES (?, ?, ?, ?, ?, ?)
-       RETURNING id, ts, uid, kind, spot, body, reply_to, likes`,
+    this.announce(this.addMessage(user, kind, spot, body, replyTo));
+  }
+
+  // Stores a new message from `user`, inside the caller's transaction when there is one, and returns its row as
+  // MSG_COLS reads it, for announce().
+  addMessage(user, kind, spot, body, replyTo = null) {
+    return this.one(
+      `INSERT INTO messages (ts, uid, kind, spot, body, reply_to) VALUES (?, ?, ?, ?, ?, ?) RETURNING ${MSG_COLS}`,
       this.now(), user.id, kind, spot, JSON.stringify(body), replyTo,
     );
-    // spot is null for a message with no tag, which drops no spot's reports.
-    this.messagesChanged(spot);
+  }
+
+  // Sends a message just stored to every socket as msg. The spot cards and the CHAT button's dot follow; spot is null
+  // for a message with no tag, which drops no spot's reports.
+  announce(row) {
+    this.messagesChanged(row.spot);
     this.broadcast({ type: "msg", msg: this.toPublic([row])[0] });
   }
 
@@ -1423,6 +1530,216 @@ export class Room extends DurableObject {
     for (const ws of this.ctx.getWebSockets()) {
       if (ws.readyState === WebSocket.OPEN && ws.deserializeAttachment()?.uid === uid) this.send(ws, frame);
     }
+  }
+
+  // ---- The user's own routes (/me) -----------------------------------------------------------------------------
+  //
+  // Each takes the session token as "Authorization: Bearer <token>" (userFromToken()) and answers JSON. A refusal is
+  // {error} with one of:
+  //   auth       401  no token, or one that doesn't check out: expired, signed out everywhere, banned or deleted
+  //   invalid    400  POST /me/sessions with a body that isn't a log the room takes (mod.js validSession; share, when
+  //                   given, is true or false)
+  //   slow:<s>   429  past the 20 logs a day, with the seconds until the next one goes
+  //   full       429  1,000 logs kept already: one has to be deleted first
+  //   not found  404  DELETE /me/sessions/<id> for a log that isn't this user's
+  //
+  //   GET    /me/sessions       mySessions()
+  //   POST   /me/sessions       logSession()
+  //   DELETE /me/sessions/<id>  deleteSession()
+  //   GET    /me/export         exportMine()
+  //   DELETE /me                deleteAccount()
+  //   POST   /me/signout        signOut(), with the sign-in above
+
+  // GET /me/sessions: the user's logs, newest first (sessionsOf()).
+  async mySessions(request) {
+    const user = await this.userFromToken(bearer(request));
+    if (!user) return refuse(401, "auth");
+    return Response.json(this.sessionsOf(user.id));
+  }
+
+  // The logs of uid, newest first, each {id, spot, start, end, stars, board, note, cond, shared}: cond is the
+  // conditions snapshot or null ("No conditions recorded"), and shared says whether its card is in the room.
+  sessionsOf(uid) {
+    return this.all(
+      "SELECT id, spot, start, end, stars, board, note, cond, shared_msg FROM sessions WHERE uid = ? ORDER BY start DESC, id DESC",
+      uid,
+    ).map(({ cond, shared_msg, ...log }) => ({ ...log, cond: cond === null ? null : JSON.parse(cond), shared: shared_msg !== null }));
+  }
+
+  // POST /me/sessions {spot, start, end, stars, board, note?, cond?, share?}: a new log in the diary, private unless
+  // share is true. It answers {id}; with share, {id, shared_msg} once its card is in the room (shareSession()), or
+  // {id, error} when the card can't go: the log is kept either way, private, and can be shared later. 20 logs a day,
+  // and 1,000 in all.
+  async logSession(request) {
+    const user = await this.userFromToken(bearer(request));
+    if (!user) return refuse(401, "auth");
+    const body = await readJson(request);
+    const log = validSession(body, this.now());
+    if (!log || (body.share !== undefined && typeof body.share !== "boolean")) return refuse(400, "invalid");
+    const kept = this.one(`SELECT count(*) AS n FROM (SELECT 1 FROM sessions WHERE uid = ? LIMIT ${SESSIONS_MAX})`, user.id).n;
+    if (kept >= SESSIONS_MAX) return refuse(429, "full");
+    const refused = this.canWrite(user, "session");
+    if (refused) return refuseWrite(refused);
+    const row = this.one(
+      `INSERT INTO sessions (uid, spot, start, end, stars, board, note, cond) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      user.id, log.spot, log.start, log.end, log.stars, log.board, log.note, log.cond === null ? null : JSON.stringify(log.cond),
+    );
+    if (!body.share) return Response.json({ id: row.id });
+    return Response.json({ id: row.id, ...this.shareSession(user, row) });
+  }
+
+  // DELETE /me/sessions/<id>: deletes one of the user's logs. A shared one's card goes from the room too, and every
+  // socket is told. {ok: true}, or 404 for a log that isn't the user's.
+  async deleteSession(request, idText) {
+    const user = await this.userFromToken(bearer(request));
+    if (!user) return refuse(401, "auth");
+    const id = SESSION_ID.test(idText) ? Number(idText) : null;
+    const refused = this.canWrite(user, "delete");
+    if (refused) return refuseWrite(refused);
+    const gone = this.ctx.storage.transactionSync(() => {
+      const log = isId(id) ? this.one("DELETE FROM sessions WHERE id = ? AND uid = ? RETURNING shared_msg", id, user.id) : null;
+      if (!log) return null;
+      return { card: log.shared_msg === null ? null : this.removeOwn(log.shared_msg, user.id) };
+    });
+    if (!gone) return refuse(404, "not found");
+    if (gone.card) this.announceDeleted([gone.card]);
+    return Response.json({ ok: true });
+  }
+
+  // GET /me/export ("Download my data"): what the room keeps about the user, as {nick, created, messages, reports,
+  // sessions}. messages are their text messages and session cards, and reports their reports, each {id, ts, kind,
+  // spot, body, reply_to, likes, hidden}, oldest first; hidden ones are there too, marked, without why. sessions are
+  // their logs as GET /me/sessions gives them. A report over 30 days old no longer says who posted it (retention), so
+  // it isn't theirs any more. No user id or LINE account code is in it.
+  async exportMine(request) {
+    const user = await this.userFromToken(bearer(request));
+    if (!user) return refuse(401, "auth");
+    const posted = this.all(
+      "SELECT id, ts, kind, spot, body, reply_to, likes, hidden_by FROM messages WHERE uid = ? ORDER BY ts, id",
+      user.id,
+    ).map(({ body, hidden_by, ...msg }) => ({ ...msg, body: JSON.parse(body), hidden: hidden_by !== null }));
+    return Response.json({
+      nick: user.nick,
+      created: user.created,
+      messages: posted.filter((msg) => msg.kind !== "report"),
+      reports: posted.filter((msg) => msg.kind === "report"),
+      sessions: this.sessionsOf(user.id),
+    });
+  }
+
+  // DELETE /me ("Delete my account"; spec "Deleting an account"): everything of the account goes, in one transaction
+  // (forgetAccount()). Then every open screen is told: their text messages and session cards go (update {id, deleted:
+  // true}), and each message they liked has its new count (update {id, likes}). Their sockets close with 4401, as on
+  // signing out everywhere. A locked room doesn't stop it (canWrite()). {ok: true}.
+  async deleteAccount(request) {
+    const user = await this.userFromToken(bearer(request));
+    if (!user) return refuse(401, "auth");
+    const refused = this.canWrite(user, "account");
+    if (refused) return refuseWrite(refused);
+    const { gone, liked } = this.forgetAccount(user, this.now());
+    this.closeUser(user.id, CLOSE_SIGNED_OUT);
+    this.announceDeleted(gone);
+    for (const { id, likes } of liked) this.broadcast({ type: "update", id, likes });
+    return Response.json({ ok: true });
+  }
+
+  // The transaction of DELETE /me, for `user` (as account() gives it), at `now`:
+  //   - their text messages and session cards go, with the likes on them;
+  //   - their reports stay, without their user id, and show as "a surfer";
+  //   - their likes go, and the counts of the messages they liked come down;
+  //   - their flags go, and nothing they helped hide comes back;
+  //   - their logs go, and so do their LINE account's rate-limit counts and held nicknames, and any sign-in of theirs
+  //     still waiting to be redeemed (with LINE's raw sub);
+  //   - if it is Bryan's account, meta admin_uid goes, so he can claim the role again from a new account;
+  //   - their LINE account's row in subs stays, marked deleted: a ban on it stays, and an unbanned one goes after 30
+  //     days (retention);
+  //   - and the account itself goes.
+  // Bryan's copies in holds stay, whatever else is deleted (spec "Moderation", step 5). Nothing else in the room keeps
+  // their user id. Returns what the open screens must be told: gone, the messages deleted ({id, spot}), and liked,
+  // the messages whose like counts changed ({id, likes}), each oldest first.
+  forgetAccount(user, now) {
+    const sub = user.sub_hash;
+    return this.ctx.storage.transactionSync(() => {
+      const gone = this.all("DELETE FROM messages WHERE uid = ? AND kind IN ('text', 'session') RETURNING id, spot", user.id);
+      this.all("DELETE FROM likes WHERE msg_id IN (SELECT value FROM json_each(?))", JSON.stringify(gone.map((msg) => msg.id)));
+      this.all("UPDATE messages SET uid = NULL WHERE uid = ? AND kind = 'report'", user.id);
+      const unliked = this.all("DELETE FROM likes WHERE uid = ? RETURNING msg_id", user.id).map((like) => like.msg_id);
+      const liked = this.all(
+        "UPDATE messages SET likes = likes - 1 WHERE id IN (SELECT value FROM json_each(?)) RETURNING id, likes",
+        JSON.stringify(unliked),
+      ).sort((a, b) => a.id - b.id);
+      this.all("DELETE FROM flags WHERE sub_hash = ?", sub);
+      this.all("DELETE FROM sessions WHERE uid = ?", user.id);
+      // Their counts are keyed "<sub_hash>:<rule>", and their held nicknames "held:<nick_key>:<sub_hash>" (heldKey()).
+      this.all("DELETE FROM limits WHERE key > ? AND key < ?", `${sub}:`, `${sub};`);
+      this.all("DELETE FROM limits WHERE key > 'held:' AND key < 'held;' AND substr(key, ?) = ?", -(sub.length + 1), `:${sub}`);
+      this.all("DELETE FROM handoffs WHERE sub_hash = ?", sub);
+      if (this.getMeta("admin_uid") === user.id) this.all("DELETE FROM meta WHERE key = 'admin_uid'");
+      this.all(
+        "INSERT INTO subs (sub_hash, deleted_at) VALUES (?, ?) ON CONFLICT (sub_hash) DO UPDATE SET deleted_at = excluded.deleted_at",
+        sub, now,
+      );
+      this.all("DELETE FROM users WHERE id = ?", user.id);
+      return { gone, liked };
+    });
+  }
+
+  // ---- Session cards: a log from the diary, shared to the room for tips ----------------------------------------
+
+  // Posts one of the user's logs (a sessions row) as a session card, for the share frame and POST /me/sessions {share:
+  // true}. The note goes through the same filters as a message. Returns {shared_msg}, the card's message id, or
+  // {error}: blocked:<rule> for a note the filters stop, or what canWrite() says (locked; slow:<s> past 5 a day). A log
+  // whose card is still in the room keeps it, and nothing new is posted. The card's body is {start, end, stars, board,
+  // note, cond}, and its spot the log's, so the spot's filter shows it (spec "The room").
+  shareSession(user, log) {
+    if (log.shared_msg !== null && this.one("SELECT 1 FROM messages WHERE id = ?", log.shared_msg)) {
+      return { shared_msg: log.shared_msg };
+    }
+    const hit = blocked(normalise(log.note).check, BLOCKLIST);
+    if (hit) return { error: `blocked:${hit.rule}` };
+    const refused = this.canWrite(user, "share");
+    if (refused) return { error: refused };
+    const { start, end, stars, board, note } = log;
+    const body = { start, end, stars, board, note, cond: log.cond === null ? null : JSON.parse(log.cond) };
+    const card = this.ctx.storage.transactionSync(() => {
+      const row = this.addMessage(user, "session", log.spot, body);
+      this.all("UPDATE sessions SET shared_msg = ? WHERE id = ?", row.id, log.id);
+      return row;
+    });
+    this.announce(card);
+    return { shared_msg: card.id };
+  }
+
+  // One of uid's logs, as its sessions row, or null.
+  ownSession(id, uid) {
+    return isId(id) ? this.one("SELECT * FROM sessions WHERE id = ? AND uid = ?", id, uid) : null;
+  }
+
+  // share {session_id}: shareSession(). The socket gets ok {for: "share", session_id, shared_msg}, and everyone the card
+  // as msg.
+  onShare(ws, user, frame) {
+    const log = this.ownSession(frame.session_id, user.id);
+    if (!log) return "invalid";
+    const shared = this.shareSession(user, log);
+    if (shared.error) return shared.error;
+    this.send(ws, { type: "ok", for: "share", session_id: log.id, shared_msg: shared.shared_msg });
+  }
+
+  // unshare {session_id}: the log's card goes from the room (every socket gets update {id, deleted: true}), and the log
+  // stays, private. ok {for: "unshare", session_id}, also for a log that wasn't shared.
+  onUnshare(ws, user, frame) {
+    const log = this.ownSession(frame.session_id, user.id);
+    if (!log) return "invalid";
+    const refused = this.canWrite(user, "unshare");
+    if (refused) return refused;
+    if (log.shared_msg !== null) {
+      const card = this.ctx.storage.transactionSync(() => {
+        this.all("UPDATE sessions SET shared_msg = NULL WHERE id = ?", log.id);
+        return this.removeOwn(log.shared_msg, user.id);
+      });
+      if (card) this.announceDeleted([card]);
+    }
+    this.send(ws, { type: "ok", for: "unshare", session_id: log.id });
   }
 
   // ---- Alarm -------------------------------------------------------------------------------------------------
@@ -1468,8 +1785,9 @@ export class Room extends DurableObject {
   }
 
   // The one alarm. Retention runs once it's past next_retention, then the keepalive tick goes out while sockets
-  // are open. Whatever happened before, the alarm is counted as a request, the usage counts are saved and the next
-  // alarm is set: the next retention or tick, or sooner when a handoff still waiting runs out before them.
+  // are open, or, while the chat rests, the sockets are closed instead (rest()). Whatever happened before, the alarm
+  // is counted as a request, the usage counts are saved and the next alarm is set: the next retention or tick, or
+  // sooner when a handoff still waiting runs out before them.
   async alarm() {
     const now = this.now();
     let handoffsDue = Infinity;
@@ -1483,7 +1801,7 @@ export class Room extends DurableObject {
         this.dropExpiredLogins(now);
       }
       handoffsDue = this.handoffsDue();
-      this.tick();
+      if (!this.rest()) this.tick();
     } finally {
       try {
         // Counted last, so the save covers the rows the alarm itself read and wrote. usage() may have saved

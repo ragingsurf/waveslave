@@ -800,4 +800,31 @@ describe("the sign-in routes when the room can't answer", () => {
       expect(res.headers.get("Cache-Control"), path).toBe("no-store");
     }
   });
+
+  it("send it back with #e=resting too when the room answers {resting: true}, at each of its three steps", async () => {
+    const who = person();
+    const nonce = randomB64u(32);
+    mockLine(async () => Response.json({ id_token: await idToken(goodClaims(who, nonce)) }));
+    // What the room answers at each step when it isn't resting.
+    const steps = {
+      "/r/logins": () => Response.json({ state: "s", nonce, code_challenge: "c" }),
+      "/r/logins/take": () => Response.json({ nonce, pkce_verifier: "pv", h: "h" }),
+      "/r/handoffs": () => Response.json({ code: "c", pin: "123456" }),
+    };
+    const start = `/auth/line/start?h=${await sha256b64u("x")}`;
+    const callback = "/auth/line/callback?code=c&state=s";
+    for (const [restingAt, path] of [["/r/logins", start], ["/r/logins/take", callback], ["/r/handoffs", callback]]) {
+      const ROOM = {
+        getByName: () => ({
+          async fetch(request) {
+            const at = new URL(request.url).pathname;
+            return at === restingAt ? Response.json({ resting: true }, { status: 503 }) : steps[at]();
+          },
+        }),
+      };
+      const res = await worker.fetch(new Request(BASE + path), { ...dead, ROOM }, ctx);
+      expect(res.status, restingAt).toBe(302);
+      expect(res.headers.get("Location"), restingAt).toBe(`${env.APP_URL}?chat#e=resting`);
+    }
+  });
 });

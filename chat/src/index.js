@@ -26,7 +26,7 @@
 // Both always send the browser on: to LINE, or back to APP_URL?chat with the outcome in the fragment, either
 // #c=<code>&p=<pin> or #e=<what went wrong>: LINE's own error code (access_denied, say), "line" for one that doesn't
 // look like a code, "start" (a bad h), "state" (an unknown, used or stale sign-in), "token" (LINE's answer didn't
-// check out), "banned", or "resting" (the room couldn't answer).
+// check out), "banned", or "resting" (the room couldn't answer, or is resting near the free plan's daily limits).
 export { Room } from "./room.js";
 import { verifyLineIdToken } from "./auth.js";
 import { SPOTS } from "./mod.js";
@@ -110,7 +110,8 @@ function forward(request, target, wholeRequest) {
 }
 
 // A JSON POST from the Worker itself to the room, for the sign-in steps: {status, data}, or null when the room can't
-// answer.
+// answer, or answers {resting: true} (it rests near the free plan's daily limits). Either way the browser goes back
+// to the app with #e=resting.
 async function roomJson(env, path, payload) {
   const answer = await askRoom(env, () =>
     new Request(`https://room${path}`, {
@@ -120,7 +121,8 @@ async function roomJson(env, path, payload) {
     }),
   );
   if (!answer) return null;
-  return { status: answer.status, data: await answer.json().catch(() => ({})) };
+  const data = (await answer.json().catch(() => null)) ?? {};
+  return data.resting === true ? null : { status: answer.status, data };
 }
 
 // The answer to a request, before the CORS and cache headers (finish() adds those).

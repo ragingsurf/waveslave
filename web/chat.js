@@ -333,7 +333,7 @@ const DEAD_MS = 100e3;                                // no frame for this long 
 const PONG_MS = 10e3;                                 // back in the foreground, the "ping" must get an answer this soon
 const AWAY_MS = 5 * 60e3;                             // in the background this long and the socket closes, until the page is back
 const BACKOFF = [1e3, 2e3, 4e3, 8e3, 16e3, 30e3];     // waits between tries while the backend can't be reached
-const KEEP_MSGS = 600;                                // messages kept in memory while the room stays open; the oldest go past this
+const KEEP_MSGS = 600;                                // messages kept while the room stays open and is read at its newest
 const FRAME_MAX = 4096;                               // bytes in a frame; the room closes a socket that sends a bigger one
 const LANGS = [["en", "English", "en"], ["zh", "中文", "zh-Hant-TW"], ["ja", "日本語", "ja"]];
 
@@ -353,7 +353,7 @@ const R = {
   online: null, state: "idle", filter: "all", replyTo: null, pending: null, hidden: null, locked: null, fresh: false,
   sheet: null, pop: null, opener: null, noteT: 0, agesT: 0, longAt: 0,
 };
-const sock = { ws: null, ready: false, tries: 0, retryT: 0, deadT: 0, pongT: 0, awayT: 0,
+const sock = { ws: null, ready: false, tries: 0, retryT: 0, deadT: 0, pongT: 0, awayT: 0, held: 0,
   // One frame to the room, as JSON. Only once the room has answered hello, so a write never goes before the sign-in it needs.
   send(frame) { const ws = sock.ws; if (!ws || ws.readyState !== 1 || !sock.ready) return false;
     const text = JSON.stringify(frame); if (new TextEncoder().encode(text).length > FRAME_MAX) return false;
@@ -401,6 +401,9 @@ function validBody(kind, b) {
 function connect() {
   stopSocket();
   if (R.state !== "offline") setState("connecting");
+  // The newest message held as this socket starts, before it brings anything: a msg can reach it ahead of its history (the room sends
+  // to every open socket), and the history's gap test must not count that one as held.
+  sock.held = Math.max(0, ...R.msgs.keys());
   let ws; try { ws = new WebSocket(WS_URL); } catch (e) { return lost(1006); }
   sock.ws = ws;
   ws.onopen = guard(() => { if (ws !== sock.ws) return; alive(ws); const token = load(KEYS.token);
@@ -452,12 +455,14 @@ const ON = {
   // The last 100 messages after hello, or a page of 50 older ones (before_id). After hello it is the truth from its oldest message on:
   // a message held from before a drop that isn't in it was deleted or hidden meanwhile. Those held from before its oldest stay only when
   // they meet it. More than 100 posted while the room was shut or the socket down leaves a gap between them that nothing would fill, so
-  // then they all go and scrolling up loads them again, a page at a time.
+  // then they all go and scrolling up loads them again, a page at a time. How full a page is, and where it starts, are the room's own
+  // (every message it sent with an id), not what's left once clean() has dropped any this file can't draw.
   history(f) {
-    const list = (Array.isArray(f.messages) ? f.messages : []).map(clean).filter(m => m && (!m.hidden || isAdmin()));
+    const sent = Array.isArray(f.messages) ? f.messages : [], list = sent.map(clean).filter(m => m && (!m.hidden || isAdmin()));
+    const sentIds = sent.map(m => m && m.id).filter(id => Number.isSafeInteger(id) && id > 0);
     if (f.before_id == null) {
-      const ids = new Set(list.map(m => m.id)), low = list.length ? Math.min(...ids) : Infinity, whole = list.length < PAGE_N;
-      const gap = !whole && Math.max(0, ...R.msgs.keys()) < low - 1;
+      const ids = new Set(list.map(m => m.id)), low = sentIds.length ? Math.min(...sentIds) : Infinity, whole = sent.length < PAGE_N;
+      const gap = !whole && sock.held < low - 1;
       if (gap) { R.msgs.clear(); R.gone.clear(); }
       const heldOlder = [...R.msgs.keys()].some(id => id < low);
       for (const id of [...R.msgs.keys()]) if ((whole || id >= low) && !ids.has(id)) { R.msgs.delete(id); R.gone.add(id); }
@@ -470,8 +475,8 @@ const ON = {
     } else {
       R.older = false;
       for (const m of list) if (!R.msgs.has(m.id)) R.msgs.set(m.id, m);
-      if (list.length < OLDER_N) R.start = true;
-      settle(); render();
+      if (sent.length < OLDER_N) R.start = true;
+      settle({ older: true }); render();
     }
     markSeen();
   },
@@ -545,12 +550,15 @@ function gone(about, f) {
 }
 // A message that isn't there any more leaves the list, as a delete would take it.
 function dropMsg(id) { if (!R.msgs.delete(id)) return; R.gone.add(id); if (R.replyTo === id) { R.replyTo = null; drawReply(); } render(); }
-// After merging: the oldest id held, and at most KEEP_MSGS messages (a room left open for days drops its oldest).
-function settle() {
+// After merging: the oldest id held, and at most KEEP_MSGS messages, so a room left open for days drops its oldest. Only while it is
+// read at its newest, though: a page of older messages scrolled up to is never cut (o.older), or "Load older messages" would ask for
+// the same page for ever, and nothing goes from under someone reading far up. The cut comes once they are back at the newest.
+function settle(o = {}) {
   const ids = [...R.msgs.keys()].sort((a, b) => a - b);
-  if (ids.length > KEEP_MSGS) { for (const id of ids.slice(0, ids.length - KEEP_MSGS)) R.msgs.delete(id); ids.splice(0, ids.length - KEEP_MSGS); R.start = false; }
+  if (ids.length > KEEP_MSGS && !o.older && atEnd()) { for (const id of ids.slice(0, ids.length - KEEP_MSGS)) R.msgs.delete(id); ids.splice(0, ids.length - KEEP_MSGS); R.start = false; }
   R.oldest = ids.length ? ids[0] : 0;
 }
+const atEnd = () => { if (!R.built) return true; const l = R.el.list; return l.scrollHeight - l.scrollTop - l.clientHeight < 80; };
 // The messages seen: the CHAT button's dot stays off for them.
 function markSeen() {
   if (!R.open || document.visibilityState === "hidden") return;

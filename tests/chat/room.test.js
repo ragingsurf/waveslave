@@ -123,8 +123,32 @@ const dragDown = async (page, [x, y], dy) => { const s = await page.context().ne
   await s.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
   for (let i = 1; i <= 12; i++) { await s.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y + dy*i/12 }] }); await page.waitForTimeout(16); }
   return s; };
+const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
+// The room shows exactly the messages a..b, once each and in order.
+const showsRange = async (page, a, b, what) => { const got = (await articles(page)).map(x => x.id);
+  if (!eq(got, range(a, b))) throw new Error(`${what}: the room shows ${got.length} messages (${got.slice(0, 3)} … ${got.slice(-3)}), want ${a}..${b} once each`); };
+// Up to the top until the room has nothing older (the older button goes once a short page comes back), at most max pages; asks is what
+// the stand-in was asked for, for the error.
+const scrollToFirst = async (page, asks, max = 12) => { for (let i = 0; i <= max; i++) {
+  if (await page.evaluate(() => document.querySelector(".chatroom .cr-older").hidden)) return;
+  if (i === max) break;
+  const had = (await articles(page)).length;
+  await page.evaluate(() => { document.querySelector(".chatroom .cr-list").scrollTop = 0; });
+  await page.waitForFunction(had => document.querySelectorAll(".chatroom .cr-msgs article").length !== had || document.querySelector(".chatroom .cr-older").hidden, had, { timeout: 5e3 })
+    .catch(() => { throw new Error(`scrolled to the top with ${had} messages and nothing loaded (asked ${asks})`); });
+  await wait(150);
+} throw new Error(`${max} pages and the room still had older ones`); };
 // A stand-in room's text message "M<id>", posted id seconds after an hour ago.
 const standIn = (id, more = {}) => ({ id, ts: Date.now() - 3600e3 + id * 1e3, nick: "Kai", role: null, kind: "text", spot: null, body: { text: `M${id}` }, reply_to: null, likes: 0, ...more });
+// A stand-in room that answers hello with history (the last 100 of all, after the frames first(n) gives for the n-th socket) and older
+// with the 50 before. It records each socket (n, cur) and each older asked for (asks).
+function pagedRoom(all, first = () => []) {
+  const r = { n: 0, cur: null, asks: [], ws: route => { r.n++; r.cur = route; const n = r.n;
+    route.onMessage(m => { const f = JSON.parse(m);
+      if (f.type === "hello") { for (const x of first(n)) route.send(JSON.stringify(x)); route.send(JSON.stringify({ type: "history", messages: all.slice(-100) })); }
+      if (f.type === "older") { r.asks.push(f.before_id); route.send(JSON.stringify({ type: "history", before_id: f.before_id, messages: all.filter(x => x.id < f.before_id).slice(-50) })); } }); } };
+  return r;
+}
 // The room's note line says t, within 10 s.
 const notes = (page, t) => page.waitForFunction(t => document.querySelector(".chatroom .cr-note").textContent === t, t, { timeout: 10e3 })
   .catch(async () => { throw new Error(`the note says ${JSON.stringify(await page.evaluate(() => document.querySelector(".chatroom .cr-note").textContent))}, want ${JSON.stringify(t)}`); });
@@ -398,23 +422,12 @@ const CHECKS = {
       route.onMessage(m => { const f = JSON.parse(m);
         if (f.type === "hello") route.send(JSON.stringify({ type: "history", messages: all.slice(-100) }));
         if (f.type === "older") { asks.push(f.before_id); route.send(JSON.stringify({ type: "history", before_id: f.before_id, messages: all.filter(x => x.id < f.before_id).slice(-50) })); } }); } });
-    const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
-    const ids = async () => (await articles(page)).map(a => a.id);
     const quote = async id => (await articles(page)).find(a => a.id === id)?.quote;
-    const shows = async (a, b, what) => { const got = await ids();
-      if (!eq(got, range(a, b))) throw new Error(`${what}: the room shows ${got.length} messages (${got.slice(0, 3)} … ${got.slice(-3)}), want ${a}..${b} once each`); };
+    const shows = (a, b, what) => showsRange(page, a, b, what);
     const live = (sockets, last) => page.waitForFunction(([s, last]) => document.querySelector(".chatroom .cr-status").hidden
       && document.querySelector(".chatroom .cr-msgs article:last-child")?.dataset.id === String(last), [sockets, last], { timeout: 10e3 })
       .then(() => { if (n !== sockets) throw new Error(`${n} sockets, want ${sockets}`); });
-    // Up to the top until the room has nothing older: the older button goes once a short page comes back.
-    const scrollUp = async () => { for (let i = 0; i < 12; i++) {
-      if (await page.evaluate(() => document.querySelector(".chatroom .cr-older").hidden)) return;
-      const had = (await ids()).length;
-      await page.evaluate(() => { document.querySelector(".chatroom .cr-list").scrollTop = 0; });
-      await page.waitForFunction(had => document.querySelectorAll(".chatroom .cr-msgs article").length !== had || document.querySelector(".chatroom .cr-older").hidden, had, { timeout: 5e3 })
-        .catch(() => { throw new Error(`scrolled to the top with ${had} messages and nothing loaded (asked ${asks})`); });
-      await wait(150);
-    } throw new Error("12 pages and the room still had older ones"); };
+    const scrollUp = () => scrollToFirst(page, asks);
 
     await openRoom(page); await shows(1, 60, "a small room");
     if (!(await page.evaluate(() => document.querySelector(".chatroom .cr-older").hidden))) throw new Error("a room of 60 offers older messages");
@@ -558,6 +571,50 @@ const CHECKS = {
       await bryan.waitForFunction(t => document.querySelector("#chatSheetTitle").textContent === t && !document.querySelector(".chatroom .cr-sheet").textContent.includes("Poster7"), `Unban (${start.banned})`, { timeout: 5e3 });
       if (start.banned === 0 && await bryan.textContent(".chatroom .cr-sheet-b") !== "No one is banned") throw new Error("the empty Unban list doesn't say so");
     } finally { await asBryan({ type: "unlock" }).catch(() => {}); }
+  },
+  // A room left open long enough to hold 600 messages (KEEP_MSGS) still pages up to its first: an older page is never cut as it arrives.
+  // Back at the newest, a new message cuts the oldest, to 600, and scrolling up loads them again. A stand-in room of 680.
+  async olderPastCap(open) {
+    const all = range(1, 680).map(id => standIn(id)), room = pagedRoom(all), page = await open({ ws: room.ws });
+    await openRoom(page);
+    await scrollToFirst(page, room.asks, 14); await showsRange(page, 1, 680, "scrolled up to the first message");
+    if (!eq(room.asks, range(0, 11).map(k => 581 - 50 * k))) throw new Error(`asked for the pages before ${room.asks}`);
+    await page.evaluate(() => { const l = document.querySelector(".chatroom .cr-list"); l.scrollTop = l.scrollHeight; }); await wait(200);
+    all.push(standIn(681)); room.cur.send(JSON.stringify({ type: "msg", msg: all.at(-1) }));
+    await page.waitForFunction(() => document.querySelector(".chatroom .cr-msgs article:last-child")?.dataset.id === "681", null, { timeout: 5e3 });
+    await showsRange(page, 82, 681, "a new message at the newest");
+    room.asks.length = 0; await page.evaluate(() => { document.querySelector(".chatroom .cr-list").scrollTop = 0; });
+    await page.waitForFunction(() => document.querySelectorAll(".chatroom .cr-msgs article").length === 650, null, { timeout: 5e3 })
+      .catch(() => { throw new Error(`scrolled up after the cut, asked ${room.asks}, and nothing loaded`); });
+    await showsRange(page, 32, 681, "scrolled up after the cut");
+    if (!eq(room.asks, [82])) throw new Error(`after the cut asked for the pages before ${room.asks}`);
+  },
+  // How full a page is, and where it starts, are the room's own, not what's left once a message this page can't draw is dropped. A
+  // stand-in room of 160 with two of those (ids 30 and 100, a kind it doesn't know): the history after hello still offers older ones,
+  // every page loads down to the first, and back after a drop it keeps them all.
+  async uncleanMessage(open) {
+    const all = range(1, 160).map(id => standIn(id, id === 30 || id === 100 ? { kind: "poll" } : {})), room = pagedRoom(all), page = await open({ ws: room.ws });
+    const want = (a, b) => range(a, b).filter(id => id !== 30 && id !== 100), ids = async () => (await articles(page)).map(a => a.id);
+    await openRoom(page);
+    if (!eq(await ids(), want(61, 160))) throw new Error(`the room opened on ${(await ids()).length} messages`);
+    if (await page.evaluate(() => document.querySelector(".chatroom .cr-older").hidden)) throw new Error("a full history with one message it can't draw offers nothing older");
+    await scrollToFirst(page, room.asks);
+    if (!eq(await ids(), want(1, 160)) || !eq(room.asks, [61, 11])) throw new Error(`scrolled up: ${(await ids()).length} messages, asked for the pages before ${room.asks}`);
+    all.push(standIn(161)); room.cur.close({ code: 1001, reason: "gone" });
+    await page.waitForFunction(() => document.querySelector(".chatroom .cr-msgs article:last-child")?.dataset.id === "161" && document.querySelector(".chatroom .cr-status").hidden, null, { timeout: 10e3 });
+    const got = await ids();
+    if (room.n !== 2 || !eq(got, want(1, 161))) throw new Error(`back after a drop (${room.n} sockets) the room shows ${got.length} messages (${got.slice(0, 3)} … ${got.slice(-3)}), want 159`);
+  },
+  // A message can reach a new socket ahead of its history (the room sends to every open socket). Held 101..200, the socket drops, 151
+  // are posted meanwhile, and the new socket gets message 351 and then the history 252..351: a gap all the same, so the room shows just
+  // 252..351, never 101..200 with nothing between them and 252.
+  async msgBeforeHistory(open) {
+    const all = range(1, 200).map(id => standIn(id)), room = pagedRoom(all, n => n > 1 ? [{ type: "msg", msg: all.at(-1) }] : []), page = await open({ ws: room.ws });
+    await openRoom(page); await showsRange(page, 101, 200, "opened");
+    for (const id of range(201, 351)) all.push(standIn(id));
+    room.cur.close({ code: 1001, reason: "gone" });
+    await page.waitForFunction(() => document.querySelector(".chatroom .cr-msgs article:last-child")?.dataset.id === "351" && document.querySelector(".chatroom .cr-status").hidden, null, { timeout: 10e3 });
+    await showsRange(page, 252, 351, "back after a drop, with a message ahead of the history");
   },
   // Share and Unshare in My sessions wait for the room with a flag of their own. One the room never answers (the socket dropped) gives
   // the row back after 10 s, saying it didn't go through; a refused share's why goes on its own row, not on one whose Delete is on its

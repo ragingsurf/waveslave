@@ -614,7 +614,7 @@ const CHECKS = {
     if (!(await at()).card) throw new Error("a tap on Jinshan's tag opened no forecast card"); await reopen("Taiwan, Jinshan's card left open");
     await tapAt(page, await page.evaluate(() => { const v = window.__ws.view(); return [v.W*0.1, v.H*0.42]; })); await settle(page); // open sea west of Taiwan
     if (!(await at()).pin) throw new Error("a tap on open sea at Taiwan's home view dropped no pin"); await reopen("Taiwan, a pin left dropped");
-    await reopen("Hawaii, picked on Forecast", () => { setWorld(true); switchCountry("hi"); });
+    await reopen("Hawaii, picked on Forecast", () => { sessionStorage.setItem("waveslave-unlock", window.__lockHash); setWorld(true); switchCountry("hi"); }); // leaving World mode forgot the code
     await zoomOut(page); await reopen("Hawaii, left zoomed all the way out");
   },
   // Taiwan mode, the page's default: no country row and no country buttons over the map, and zoomed out no other country's spot to tap (a
@@ -644,12 +644,18 @@ const CHECKS = {
     // under Forecast / Map and the spot picker moves down by that and the row's height; Taiwan mode closes it again, leaving no gap.
     await page.click("#wsFs"); await settle(page); const at = (await shown()).picker;
     if (Math.abs(at - 8) > 0.5) throw new Error(`in Taiwan mode the spot picker is ${at}px under Forecast / Map, want 8px (no gap kept for the countries)`);
+    // Leaving World mode forgot the code (Bryan, Oct 21: ask often), so the W asks for it again, and Esc backs out still in Taiwan mode.
+    await page.click("header .brand .w"); await page.waitForSelector("#wsPin"); a = await shown();
+    if (a.world || a.row) throw new Error("after World mode was switched off, a tap on the W turned it straight back on, want the PIN box first");
+    await page.keyboard.press("Escape"); await page.waitForFunction(() => !document.getElementById("wsPin")); await settle(page);
+    const unlock = () => page.evaluate(() => sessionStorage.setItem("waveslave-unlock", window.__lockHash)); await unlock();
     for (const want of [true, false]) { await page.click("header .brand .w"); await settle(page); a = await shown();
       if (a.world !== want || a.row !== want) throw new Error(`a tap on the W left WORLD ${a.world} and the country row ${a.row ? "showing" : "hidden"}, want ${want ? "World mode" : "Taiwan mode"}`);
       const pick = want ? at + 10 + a.slot : at;
       if (Math.abs(a.picker - pick) > 0.5) throw new Error(`after a tap on the W the spot picker is ${a.picker}px under Forecast / Map, want ${pick} (scrollY ${a.scroll})`); }
     // The row scrolled to its far end comes back, after Taiwan mode, at its start: Taiwan in sight.
-    const left = await page.evaluate(async () => { const r = document.getElementById("ctry"); await setWorld(true); r.scrollLeft = r.scrollWidth; await setWorld(false); await setWorld(true); return r.scrollLeft; });
+    const left = await page.evaluate(async () => { const r = document.getElementById("ctry"), u = () => sessionStorage.setItem("waveslave-unlock", window.__lockHash);
+      u(); await setWorld(true); r.scrollLeft = r.scrollWidth; await setWorld(false); u(); await setWorld(true); return r.scrollLeft; });
     if (left !== 0) throw new Error(`back in World mode the country row is scrolled ${left}px along, want 0 (Taiwan in sight)`);
   },
   // A link to another country's spot opens it in World mode, kept for next time; in Taiwan mode the last spot open in another country is

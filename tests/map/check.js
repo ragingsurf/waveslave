@@ -51,6 +51,8 @@ const VUG = /\bvu: \{"/.test(fs.readFileSync(file, "utf8"));
 const BJG = /\bbj: \{"/.test(fs.readFileSync(file, "utf8"));
 // A site build (web/head.html on top) opens on the passcode screen; each fresh context starts unlocked with the page's own code hash.
 const LOCK = (fs.readFileSync(file, "utf8").match(/\bH="([0-9a-f]{64})"/) || [])[1];
+// The Taiwan chat's script, served for the page's chat.js in the chatOff check (tests/chat/shell.test.js has the rest of its checks).
+const CHAT_JS = (() => { try { return fs.readFileSync(path.join(__dirname, "..", "..", "web", "chat.js"), "utf8"); } catch (e) { return null; } })();
 
 class Skip extends Error {}
 const skip = why => { throw new Skip(why); };
@@ -716,6 +718,25 @@ const CHECKS = {
     }
     if (fails.length) throw new Error(fails.join(" | "));
   },
+  // The Taiwan chat (the real web/chat.js) leaves the page as it was until it's switched on, and when its backend is down. On Donghe's
+  // Forecast view in Taiwan mode: with CHAT_URL empty there's no page error (step() fails on one), no CHAT button and the report strip
+  // stays hidden; switched on with the backend unreachable (only the page and chat.js load here), the strip stays hidden and the page
+  // still draws.
+  async chatOff(open) {
+    if (!CHAT_JS) skip("no web/chat.js");
+    const at = { spot: "donghe", world: false, store: { "waveslave-view": "fc" } };
+    let page = await open({ ...at, chat: {} });
+    if (!await page.evaluate(() => !!document.getElementById("nowReports"))) skip("the page has no chat mount (#nowReports): build it from this branch's template");
+    const off = await page.evaluate(() => ({ fab: !!document.querySelector(".chatfab"), strip: !document.getElementById("nowReports").hidden }));
+    if (off.fab || off.strip) throw new Error(`with CHAT_URL empty the CHAT button is ${off.fab ? "there" : "gone"} and the strip ${off.strip ? "shows" : "is hidden"}`);
+    page = await open({ ...at, chat: { url: "https://chat.invalid" } });
+    if (!await page.evaluate(() => !!document.querySelector(".chatfab"))) throw new Error("switched on, the chat has no CHAT button (so it never ran)");
+    await page.waitForTimeout(800); await settle(page);
+    const down = await page.evaluate(() => ({ strip: !document.getElementById("nowReports").hidden, h: document.getElementById("nowH1").textContent,
+      facts: document.querySelectorAll("#nowFacts .fact").length, days: document.querySelectorAll("#days .day").length, chart: document.querySelectorAll("#chart path").length }));
+    if (down.strip) throw new Error("with the backend unreachable the report strip shows");
+    if (down.h === "–" || !down.facts || !down.days || !down.chart) throw new Error(`with the backend unreachable the page didn't draw: ${JSON.stringify(down)}`);
+  },
   // A pin dropped east of 180° asks Open-Meteo for a longitude in -180..180: 200°E goes out as -160.
   async pinRequestWraps(open) {
     const page = await open({ spot: "donghe", saved: MID }); await zoomOut(page);
@@ -732,13 +753,18 @@ const CHECKS = {
   fs.mkdirSync(outdir, { recursive: true });
   const browser = await chromium.launch(); let bad = false, ctxs = [], errs = [];
   // A fresh context for every page, so saved views and storage never carry over; the page itself is the only request let through.
-  async function open({ spot, saved, hook = true, size, world = true, store = null }) {
+  // chat: serve the real web/chat.js for the page's chat.js (cut off like everything else otherwise), switched on (window.__chatUrl and
+  // __chatContact) when it gives a url.
+  async function open({ spot, saved, hook = true, size, world = true, store = null, chat = null }) {
     const ctx = await browser.newContext({ viewport: size || (land ? { width: 844, height: 390 } : { width: 390, height: 844 }), deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block" });
     ctxs.push(ctx);
-    await ctx.route("**/*", r => r.request().url().split("#")[0] === PAGE ? r.continue() : r.abort());
-    await ctx.addInitScript(([saved, now, lock, world, store]) => { Date.now = () => now; try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", "ws"); localStorage.setItem("waveslave-lang", "en");
+    await ctx.route("**/*", r => { const u = r.request().url();
+      if (chat && u.startsWith("file:") && u.split(/[?#]/)[0].endsWith("/chat.js")) return r.fulfill({ contentType: "text/javascript", body: CHAT_JS });
+      return u.split("#")[0] === PAGE ? r.continue() : r.abort(); });
+    await ctx.addInitScript(([saved, now, lock, world, store, chat]) => { Date.now = () => now; try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", "ws"); localStorage.setItem("waveslave-lang", "en");
       if (world) localStorage.setItem("waveslave-world", "1"); for (const k in store || {}) localStorage.setItem(k, store[k]);
-      if (lock) sessionStorage.setItem("waveslave-unlock", lock); if (saved) localStorage.setItem(saved.key, JSON.stringify(saved.view)); } catch (e) {} }, [saved, NOW, LOCK, world, store]);
+      if (lock) sessionStorage.setItem("waveslave-unlock", lock); if (saved) localStorage.setItem(saved.key, JSON.stringify(saved.view)); } catch (e) {}
+      if (chat && chat.url) { window.__chatUrl = chat.url; window.__chatContact = { name: "Test Operator", email: "chat@example.com" }; } }, [saved, NOW, LOCK, world, store, chat]);
     const page = await ctx.newPage(); page.on("pageerror", e => errs.push(String(e)));
     await page.goto(PAGE + "#" + spot, { waitUntil: "load" });
     await page.waitForFunction(() => (document.getElementById("wsTime") || {}).textContent); // the map has drawn once

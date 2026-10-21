@@ -63,7 +63,7 @@ const CHECKS = {
     if (!l.fab || l.word !== "CHAT" || l.count !== "3 online" || !l.dot) throw new Error(`the button is ${l.fab ? "shown" : "hidden"}, reads ${l.word} / ${l.count}, dot ${l.dot}`);
     const dots = await page.evaluate(() => { const s = document.getElementById("nowReports"), c = v => { const p = document.createElement("i"); p.style.background = `var(${v})`; s.append(p); const k = getComputedStyle(p).backgroundColor; p.remove(); return k; };
       return { got: [...s.querySelectorAll(".rp-chip .rp-dot")].map(d => getComputedStyle(d).backgroundColor), want: [c("--good"), c("--fair")], red: c("--bad") }; });
-    if (!eq(dots.got, dots.want) || dots.want[0] === dots.want[1]) throw new Error(`the dots are ${dots.got.join(", ")}, want ${dots.want.join(", ")} (Clean green, OK amber)`);
+    if (!eq(dots.got, dots.want) || dots.want[0] === dots.want[1] || dots.want.includes(dots.red)) throw new Error(`the dots are ${dots.got.join(", ")}, want ${dots.want.join(", ")} (Clean green, OK amber, neither the red ${dots.red})`);
     const tagged = await page.evaluate(() => document.querySelectorAll("#nowReports [data-zh], #nowReports [data-ja], .chatfab[data-zh], .chatfab [data-zh], .chatfab[data-ja], .chatfab [data-ja]").length);
     if (tagged) throw new Error(`${tagged} chat elements carry data-zh or data-ja`);
     // The strip sits under the facts, the card's full width.
@@ -74,13 +74,16 @@ const CHECKS = {
     const seen = await look(await open({ store: { "waveslave-chat-seen": "9" } }).then(async p => { await p.waitForFunction(() => !document.getElementById("nowReports").hidden); return p; }));
     if (seen.dot || seen.count !== "3 online") throw new Error(`with waveslave-chat-seen 9 the dot is ${seen.dot ? "lit" : "off"} and the count ${seen.count}`);
   },
-  // "Post a report" opens the room with the report form preset to the spot, and the button opens the room.
+  // "Post a report" opens the room with the report form preset to the spot, and the button opens the room. The room covers the page
+  // (tests/chat/room.test.js), so Escape shuts it between the two.
   async openHooks(open) {
     const page = await open({ spot: "jinshan" });
     await page.waitForFunction(() => !document.getElementById("nowReports").hidden);
     await page.click("#nowReports .rp-post");
     let got = await page.evaluate(() => window.CHAT._opened.slice());
     if (got.length !== 1 || got[0].sheet !== "report" || got[0].spot !== "jinshan") throw new Error(`"Post a report" asked the room for ${JSON.stringify(got)}, want one {sheet: "report", spot: "jinshan"}`);
+    if (!(await page.evaluate(() => document.documentElement.classList.contains("chat-open")))) throw new Error(`"Post a report" didn't open the room`);
+    await page.keyboard.press("Escape"); await settle(page);
     await page.click(".chatfab");
     got = await page.evaluate(() => window.CHAT._opened.slice());
     if (got.length !== 2 || got[1].sheet != null || got[1].spot != null) throw new Error(`the CHAT button asked the room for ${JSON.stringify(got[1])}, want no sheet and no spot`);
@@ -105,7 +108,7 @@ const CHECKS = {
     await wait(300); if (!eq(page.asked, want)) throw new Error(`after the spot switches the page asked ${JSON.stringify(page.asked)}, want ${JSON.stringify(want)}`);
     await page.evaluate(() => setLang("zh")); await settle(page); await wait(300);
     const zh = await look(page);
-    if (zh.label !== "浪友回報 · 4 小時內" || zh.word !== "聊天" || !/5/.test(zh.count || "") || zh.count === "5 online") throw new Error(`in 中文 the strip reads ${zh.label} and the button ${zh.word} / ${zh.count}`);
+    if (zh.label !== "浪友回報 · 4 小時內" || zh.word !== "聊天" || zh.count !== "5 人線上") throw new Error(`in 中文 the strip reads ${zh.label} and the button ${zh.word} / ${zh.count}`);
     await page.evaluate(() => setView("ws", true)); await settle(page); await wait(300);
     if ((await look(page)).fab) throw new Error("the CHAT button shows on the map");
     await page.evaluate(() => setView("fc", true)); await settle(page); await wait(300);
@@ -146,6 +149,10 @@ const CHECKS = {
     await page.waitForFunction(() => !document.getElementById("nowReports").hidden);
     const l = await look(page), tags = await page.evaluate(() => document.querySelectorAll("#nowReports img, #nowReports b b, .chatfab img, .chatfab b b").length);
     if (!eq(l.chips, [["Knee · Choppy", "Empty · 20 min ago"]])) throw new Error(`the chips read ${JSON.stringify(l.chips)}`);
+    // Choppy (and Blown out) is the red dot.
+    const red = await page.evaluate(() => { const s = document.getElementById("nowReports"), p = document.createElement("i"); p.style.background = "var(--bad)"; s.append(p);
+      const want = getComputedStyle(p).backgroundColor; p.remove(); return { got: getComputedStyle(s.querySelector(".rp-chip .rp-dot")).backgroundColor, want }; });
+    if (red.got !== red.want) throw new Error(`the Choppy dot is ${red.got}, want ${red.want} (--bad)`);
     if (l.count || l.dot || tags || page.dialogs.length) throw new Error(`the button says ${l.count}, dot ${l.dot}, ${tags} stray elements, ${page.dialogs.length} dialogs`);
   },
   // Coming back to the page asks for the reports again only once a minute has gone by.
@@ -177,16 +184,19 @@ const CHECKS = {
     const s = await page.evaluate(() => ({ search: location.search, hash: location.hash, opened: window.CHAT._opened, VIEW, fc: !document.getElementById("viewFc").hidden, ws: !document.getElementById("viewWs").hidden }));
     if (s.search !== "" || s.hash !== "#jinshan") throw new Error(`the address is ${s.search}${s.hash}, want #jinshan`);
     if (s.opened.length !== 1 || s.opened[0].view !== "fc" || !s.opened[0].forecast) throw new Error(`the room was asked ${JSON.stringify(s.opened)}, want once with the Forecast view up`);
+    if (!eq(Object.keys(s.opened[0]).sort(), ["forecast", "view"])) throw new Error(`?chat asked the room for ${JSON.stringify(s.opened[0])}, want no sheet, spot or sign-in`);
     if (s.VIEW !== "fc" || !s.fc || s.ws) throw new Error(`after ?chat VIEW is ${s.VIEW}, the forecast ${s.fc ? "shown" : "hidden"} and the map ${s.ws ? "shown" : "hidden"}`);
   },
   // Back from LINE (?chat#c=...&p=... or #e=...): the fragment is gone from the address at once, the page goes back to the spot saved
   // before leaving (sessionStorage waveslave-chat-return), and the room is asked to open.
   async loginReturn(open) {
-    for (const frag of ["c=abc123&p=482913", "e=access_denied"]) {
+    const want = { "c=abc123&p=482913": { code: "abc123", pin: "482913" }, "e=access_denied": { error: "access_denied" } };
+    for (const frag of Object.keys(want)) {
       const page = await open({ spot: frag, query: "?chat", session: { "waveslave-chat-return": "wushi" }, store: { "waveslave-spot": "donghe", "waveslave-spot-tw": "donghe" } });
-      const s = await page.evaluate(() => ({ href: location.href, hash: location.hash, cur: CUR, opened: window.CHAT._opened.length, ret: sessionStorage.getItem("waveslave-chat-return") }));
+      const s = await page.evaluate(() => ({ href: location.href, hash: location.hash, cur: CUR, opened: window.CHAT._opened, ret: sessionStorage.getItem("waveslave-chat-return") }));
       if (/[?&#](c|e|p)=|\?chat/.test(s.href) || s.hash !== "#wushi" || s.cur !== "wushi") throw new Error(`#${frag}: the address is ${s.href} on ${s.cur}, want #wushi`);
-      if (s.opened !== 1 || s.ret !== null) throw new Error(`#${frag}: the room was asked ${s.opened} times and waveslave-chat-return holds ${s.ret}`);
+      if (s.opened.length !== 1 || s.ret !== null) throw new Error(`#${frag}: the room was asked ${s.opened.length} times and waveslave-chat-return holds ${s.ret}`);
+      if (!eq(s.opened[0].signin, want[frag])) throw new Error(`#${frag}: the room got the sign-in ${JSON.stringify(s.opened[0].signin)}, want ${JSON.stringify(want[frag])}`);
     }
   },
   // template.html's guards: while html.chat-open is set, Escape doesn't close the full-screen map and a pull from the top doesn't start a refresh.

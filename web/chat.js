@@ -1,8 +1,8 @@
 // The Taiwan chat on the page (docs/superpowers/specs/2026-10-21-taiwan-chat-design.md, "What you see" and "Front end"): the surfer
-// reports on the "Right now" card, the floating CHAT button, and the way into the room. Taiwan only, one room for all of it, free, and
-// people answer each other (Bryan, Oct 21).
+// reports on the "Right now" card, the floating CHAT button, and the room. Taiwan only, one room for all of it, free, and people answer
+// each other (Bryan, Oct 21).
 // One classic script, loaded with defer after the page's own scripts. It declares no global names: it reads the page's ALL, LANG, CUR,
-// VIEW, SPT, countrySpots, switchSpot and setView by bare name, and gives the page only window.CHAT = {spot, relang}, which template.html
+// VIEW, SPT, T, countrySpots, switchSpot and setView by bare name, and gives the page only window.CHAT = {spot, relang}, which template.html
 // calls from boot() (a spot is shown) and setLang() (the language changed). It brings its own <style>, so its look ships with it.
 // - It never throws into the page: each way in is wrapped, and while CHAT_URL or CONTACT is empty it does nothing at all, so the page
 //   works exactly as it does without it.
@@ -11,23 +11,25 @@
 (() => { "use strict"; try {
 
 // Where the backend runs: https://waveslave-chat.<subdomain>.workers.dev, filled in by a small PR once Bryan's Cloudflare and LINE setup is
-// done. Until then the chat shows nothing, so this can go live first (Bryan, Oct 21). Tests set window.__chatUrl.
-const CHAT_URL = window.__chatUrl || "";
+// done. Until then the chat shows nothing, so this can go live first (Bryan, Oct 21). Tests set window.__chatUrl. Only a string counts, so
+// an element that happens to be called __chatUrl (an id in the page makes one) can't switch the chat on or point it somewhere.
+const CHAT_URL = typeof window.__chatUrl === "string" ? window.__chatUrl : "";
 // Who runs the chat, for the privacy note, takedown requests and questions. Bryan sends the name and email; the chat stays switched off
 // until both are here. Tests set window.__chatContact.
 const CONTACT = window.__chatContact || { name: "", email: "" };
 const PAGE = typeof ALL === "object" && !!ALL && typeof LANG === "string" && typeof CUR === "string" && typeof VIEW === "string" && typeof SPT === "function"
   && typeof countrySpots === "function" && typeof switchSpot === "function" && typeof setView === "function";
-if (!CHAT_URL || !CONTACT || !CONTACT.name || !CONTACT.email || !PAGE) return;
-const BASE = String(CHAT_URL).replace(/\/+$/, "");
+if (!/^https?:\/\/./i.test(CHAT_URL) || !CONTACT || typeof CONTACT.name !== "string" || typeof CONTACT.email !== "string" || !CONTACT.name || !CONTACT.email || !PAGE) return;
+const BASE = CHAT_URL.replace(/\/+$/, "");
 // Tests only: window.__chatTest makes CHAT note each time the room is asked to open (CHAT._opened) and hand over the strings (CHAT._strings).
 const TEST = window.__chatTest ? [] : null;
 
 // What chat.js keeps on this device: the session token and the sign-in's verifier, the newest message seen (for the button's dot) and the
 // room's filter; and, for the length of a sign-in, the spot to come back to (sessionStorage).
 const KEYS = { token: "waveslave-chat-token", v: "waveslave-chat-v", seen: "waveslave-chat-seen", filter: "waveslave-chat-filter", ret: "waveslave-chat-return" };
-// The report codes, as the backend checks them (chat/src/mod.js), in the order the form offers them.
-const CODES = { size: ["flat", "knee", "waist", "chest", "head", "overhead"], cond: ["clean", "ok", "choppy", "blown"], crowd: ["empty", "few", "busy", "packed"] };
+// The report and board codes, as the backend checks them (chat/src/mod.js), in the order the forms offer them.
+const CODES = { size: ["flat", "knee", "waist", "chest", "head", "overhead"], cond: ["clean", "ok", "choppy", "blown"], crowd: ["empty", "few", "busy", "packed"],
+  board: ["short", "fish", "minimal", "long", "softtop"], reason: ["spam", "harass", "sexual", "child", "other"] };
 
 // ---- Strings: every word the chat shows, in English, 中文 (Taiwan) and 日本語. Spot names come from the page (SPT(spot, "name")).
 const STR = {
@@ -41,21 +43,29 @@ const STR = {
     rulesHead: "House rules",
     rules: ["Be kind and help each other surf better.", "No ads or selling.", "No LINE IDs, phone numbers or links.",
       "No posting other people's plates, addresses or personal details.", "13 and up. If you're under 18, your parent or guardian agrees."],
-    msgDeleted: "Message deleted", replyingTo: nick => `replying to ${nick}`,
-    surfReport: "Surf report", sessionLog: "Session log", forecastSaid: (fc, buoy, at) => `Forecast said ${fc} · buoy ${buoy} at ${at}`,
-    conditionsThen: "Conditions then", noConditions: "No conditions recorded",
+    rulesShort: "Help each other surf better. Be kind, no ads, no LINE IDs.",
+    older: "Load older messages", noMsgs: "No messages here yet",
+    msgDeleted: "Message deleted", earlier: "an earlier message", replyingTo: nick => `replying to ${nick}`,
+    surfReport: "Surf report", sessionLog: "Session log",
+    forecastSaid: (fc, buoy, at) => [fc && `Forecast said ${fc}`, buoy && `buoy ${buoy}`].filter(Boolean).join(" · ") + (at ? ` at ${at}` : ""),
+    conditionsThen: "Conditions then", noConditions: "No conditions recorded", tide: "tide", buoy: "buoy",
     report: "+ Report", log: "📓 Log", say: "Say something…", send: "Send",
-    lineLogin: "Log in with LINE",
+    lineLogin: "Log in with LINE", signInFirst: "Log in with LINE to post",
     // First sign-in
     welcome: "Welcome to the Taiwan chat", nickname: "Nickname", join: "Join",
     consent: "I'm 13 or older (under 18 with a parent's or guardian's OK), and I accept the house rules and the privacy note.",
     publicNote: "Your nickname, spot and time are public on reports and shared sessions.",
     // The message menu and the main menu
-    reply: "Reply", like: "👍", flag: "Report", del: "Delete", ban: "Ban", restore: "Restore", keep: "Keep as evidence",
+    msgMenu: "Message menu", reply: "Reply", like: "👍", flag: "Report", del: "Delete", ban: "Ban", restore: "Restore", keep: "Keep as evidence",
     reasons: { spam: "Spam or ads", harass: "Harassment", sexual: "Sexual content", child: "Child safety", other: "Something else" },
+    flagged: "Thanks, it's reported.", tapAgain: "tap again to confirm", done: "Done",
     menu: "Menu", mySessions: "My sessions", changeNick: "Change nickname (once a week)", download: "Download my data",
     signOutAll: "Sign out everywhere", deleteAccount: "Delete my account", lockRoom: "Lock the room", unlockRoom: "Unlock the room",
-    hiddenMsgs: n => `Hidden messages (${n})`, unban: "Unban",
+    hiddenMsgs: n => `Hidden messages (${n})`, unban: "Unban", adminOn: "Admin tools are on", adminNo: "That command isn't available",
+    hiddenWhy: { flags: "Hidden by reports", ban: "Hidden by a ban", admin: "Hidden by you" }, noHidden: "No hidden messages", noBanned: "No one is banned",
+    nickErr: { length: "2–20 characters", chars: "Only letters, digits, spaces and _ - .", reserved: "That name is reserved", taken: "That nickname is taken",
+      blocked: "That nickname isn't allowed" },
+    nickWait: d => `Once a week: you can change it again in ${d} ${d === 1 ? "day" : "days"}`,
     // Post a report
     postTitle: "Post a report", postSub: "What's it like right now? Takes 5 seconds.", spotHead: "Spot", sizeHead: "Size", condHead: "Conditions", crowdHead: "Crowd",
     size: { flat: "Flat", knee: "Knee", waist: "Waist", chest: "Chest", head: "Head", overhead: "Overhead" },
@@ -73,7 +83,9 @@ const STR = {
     // When something goes wrong
     offline: "Chat is offline", retry: "Retry", resting: "Chat is resting until 08:00", loginFailed: "Couldn't sign in with LINE, try again",
     banned: "This LINE account can't post here", slowDown: s => `Slow down a little · try again in ${s} s`, reloadNew: "Reload for the new chat",
-    locked: "The room is locked. You can still read.",
+    locked: "The room is locked. You can still read.", failed: "That didn't go through. Try again.",
+    blocked: { link: "Links can't be posted here. Edit it and send again.", line: "LINE IDs and invites can't be posted here. Edit it and send again.",
+      phone: "Phone numbers can't be posted here. Edit it and send again.", other: "That can't be posted here. Edit it and send again." },
     pinShown: code => `Signed in with LINE. Go back to the WaveSlave app and enter this code: ${code}`, pinBox: "Enter the code from the LINE sign-in",
     // The privacy note (Taiwan's Personal Data Protection Act, Article 8): short at first sign-in, in full behind More.
     privacyHead: "Privacy note", contactHead: "Contact",
@@ -90,24 +102,32 @@ const STR = {
   zh: {
     reportsHead: "浪友回報 · 4 小時內", postReport: "＋ 回報浪況", noReports: "4 小時內還沒有回報",
     justNow: "剛剛", minAgo: n => `${n} 分鐘前`, hAgo: n => `${n} 小時前`,
-    chat: "聊天", online: n => `${n} 人在線`, openChat: "打開台灣浪友聊天室", newMsgs: "有新訊息",
+    chat: "聊天", online: n => `${n} 人線上`, openChat: "打開台灣浪友聊天室", newMsgs: "有新訊息",
     roomTitle: "TAIWAN CHAT", roomName: "台灣浪友", close: "關閉", all: "全部", more: "更多", badge: "WaveSlave", aSurfer: "一位浪友",
     rulesHead: "版規",
     rules: ["友善待人，互相幫忙，一起衝得更好。", "禁止廣告或推銷。", "禁止留 LINE ID、電話號碼或連結。",
       "禁止公開他人的車牌、地址或個人資料。", "年滿 13 歲才能使用；未滿 18 歲須經父母或監護人同意。"],
-    msgDeleted: "訊息已刪除", replyingTo: nick => `回覆 ${nick}`,
-    surfReport: "浪況回報", sessionLog: "衝浪日誌", forecastSaid: (fc, buoy, at) => `預報 ${fc} · 浮標 ${buoy}（${at}）`,
-    conditionsThen: "當時海況", noConditions: "沒有記錄到海況",
+    rulesShort: "互相幫忙，一起衝得更好。友善交流，不打廣告、不留 LINE ID。",
+    older: "載入更早的訊息", noMsgs: "這裡還沒有訊息",
+    msgDeleted: "訊息已刪除", earlier: "較早的訊息", replyingTo: nick => `回覆 ${nick}`,
+    surfReport: "浪況回報", sessionLog: "衝浪日誌",
+    forecastSaid: (fc, buoy, at) => [fc && `預報 ${fc}`, buoy && `浮標 ${buoy}`].filter(Boolean).join(" · ") + (at ? `（${at}）` : ""),
+    conditionsThen: "當時海況", noConditions: "沒有記錄到海況", tide: "潮位", buoy: "浮標",
     report: "＋ 回報", log: "📓 日誌", say: "說點什麼…", send: "送出",
-    lineLogin: "使用LINE帳號登入",
+    lineLogin: "使用LINE帳號登入", signInFirst: "用 LINE 登入後就能發言",
     welcome: "歡迎來到台灣浪友聊天室", nickname: "暱稱", join: "加入",
     consent: "我已年滿 13 歲（未滿 18 歲已取得父母或監護人同意），並接受版規與隱私權說明。",
     publicNote: "你的暱稱、浪點與時間會公開顯示在回報與分享的日誌上。",
-    reply: "回覆", like: "👍", flag: "檢舉", del: "刪除", ban: "停權", restore: "恢復", keep: "保留為證據",
+    msgMenu: "訊息選單", reply: "回覆", like: "👍", flag: "檢舉", del: "刪除", ban: "停權", restore: "恢復", keep: "保留為證據",
     reasons: { spam: "垃圾訊息或廣告", harass: "騷擾", sexual: "色情內容", child: "危害兒少", other: "其他" },
+    flagged: "已檢舉，謝謝你。", tapAgain: "再按一次確認", done: "完成",
     menu: "選單", mySessions: "我的日誌", changeNick: "更改暱稱（每週一次）", download: "下載我的資料",
     signOutAll: "登出所有裝置", deleteAccount: "刪除我的帳號", lockRoom: "鎖定聊天室", unlockRoom: "解除鎖定",
-    hiddenMsgs: n => `被隱藏的訊息（${n}）`, unban: "解除停權",
+    hiddenMsgs: n => `被隱藏的訊息（${n}）`, unban: "解除停權", adminOn: "管理工具已開啟", adminNo: "無法使用這個指令",
+    hiddenWhy: { flags: "因檢舉而隱藏", ban: "因停權而隱藏", admin: "由你隱藏" }, noHidden: "沒有被隱藏的訊息", noBanned: "沒有被停權的帳號",
+    nickErr: { length: "暱稱需 2–20 個字", chars: "只能用文字、數字、空格和 _ - .", reserved: "這個暱稱保留給站方", taken: "這個暱稱已經有人用了",
+      blocked: "這個暱稱不能使用" },
+    nickWait: d => `每週只能改一次，${d} 天後可以再改`,
     postTitle: "回報浪況", postSub: "現在浪況如何？只要 5 秒。", spotHead: "浪點", sizeHead: "浪高", condHead: "海況", crowdHead: "人潮",
     size: { flat: "平", knee: "膝", waist: "腰", chest: "胸", head: "頭", overhead: "過頭" },
     sizeHigh: { flat: "平", knee: "膝浪", waist: "腰浪", chest: "胸浪", head: "頭浪", overhead: "過頭浪" },
@@ -122,7 +142,9 @@ const STR = {
     shareLog: "分享", unshareLog: "取消分享", noSessions: "還沒有日誌",
     offline: "聊天室離線", retry: "重試", resting: "聊天室休息中，08:00 恢復", loginFailed: "無法用 LINE 登入，請再試一次",
     banned: "這個 LINE 帳號無法在這裡發言", slowDown: s => `慢一點 · ${s} 秒後再試`, reloadNew: "請重新整理以使用新版聊天室",
-    locked: "聊天室已鎖定，仍可閱讀。",
+    locked: "聊天室已鎖定，仍可閱讀。", failed: "沒有送出，請再試一次。",
+    blocked: { link: "這裡不能貼連結，修改後再送出。", line: "這裡不能留 LINE ID 或邀請，修改後再送出。", phone: "這裡不能留電話號碼，修改後再送出。",
+      other: "這段內容不能在這裡發表，修改後再送出。" },
     pinShown: code => `已使用 LINE 登入。請回到 WaveSlave App，輸入這組代碼：${code}`, pinBox: "輸入 LINE 登入後顯示的代碼",
     privacyHead: "隱私權說明", contactHead: "聯絡我們",
     privacyShort: "要發言，聊天室會保存你的暱稱、由 LINE ID 單向產生的代碼，以及你發表的內容。資料由 Cloudflare 存放在台灣以外的伺服器，登入由 LINE（LY Corp）處理。發言內容是公開的。完整的隱私權說明在「更多」裡。",
@@ -143,19 +165,27 @@ const STR = {
     rulesHead: "ルール",
     rules: ["親切に。みんなで上達を助け合いましょう。", "広告・販売は禁止です。", "LINE ID・電話番号・リンクの投稿は禁止です。",
       "他人のナンバープレート・住所・個人情報の投稿は禁止です。", "13歳以上が対象です。18歳未満の方は保護者の同意が必要です。"],
-    msgDeleted: "メッセージは削除されました", replyingTo: nick => `${nick}への返信`,
-    surfReport: "波情報", sessionLog: "セッション記録", forecastSaid: (fc, buoy, at) => `予報 ${fc} · ブイ ${buoy}（${at}）`,
-    conditionsThen: "当時のコンディション", noConditions: "コンディションの記録なし",
+    rulesShort: "みんなで上達を助け合おう。親切に、広告とLINE IDは禁止。",
+    older: "以前のメッセージを読み込む", noMsgs: "ここにはまだメッセージがありません",
+    msgDeleted: "メッセージは削除されました", earlier: "以前のメッセージ", replyingTo: nick => `${nick}への返信`,
+    surfReport: "波情報", sessionLog: "セッション記録",
+    forecastSaid: (fc, buoy, at) => [fc && `予報 ${fc}`, buoy && `ブイ ${buoy}`].filter(Boolean).join(" · ") + (at ? `（${at}）` : ""),
+    conditionsThen: "当時のコンディション", noConditions: "コンディションの記録なし", tide: "潮位", buoy: "ブイ",
     report: "＋ 報告", log: "📓 記録", say: "メッセージを入力…", send: "送信",
-    lineLogin: "LINEでログイン",
+    lineLogin: "LINEでログイン", signInFirst: "投稿するにはLINEでログインしてください",
     welcome: "台湾チャットへようこそ", nickname: "ニックネーム", join: "参加する",
-    consent: "13歳以上です（18歳未満の場合は保護者の同意を得ています）。ルールとプライバシーについてに同意します。",
+    consent: "13歳以上です（18歳未満の場合は保護者の同意を得ています）。ルールと「プライバシーについて」に同意します。",
     publicNote: "ニックネーム・ポイント・時間は、報告と共有したセッションで公開されます。",
-    reply: "返信", like: "👍", flag: "通報", del: "削除", ban: "利用停止", restore: "復元", keep: "証拠として保存",
+    msgMenu: "メッセージメニュー", reply: "返信", like: "👍", flag: "通報", del: "削除", ban: "利用停止", restore: "復元", keep: "証拠として保存",
     reasons: { spam: "スパム・広告", harass: "嫌がらせ", sexual: "性的な内容", child: "子どもの安全", other: "その他" },
+    flagged: "通報しました。ありがとうございます。", tapAgain: "もう一度タップで確定", done: "完了",
     menu: "メニュー", mySessions: "マイセッション", changeNick: "ニックネーム変更（週1回）", download: "データをダウンロード",
     signOutAll: "すべての端末でログアウト", deleteAccount: "アカウントを削除", lockRoom: "ルームをロック", unlockRoom: "ロックを解除",
-    hiddenMsgs: n => `非表示のメッセージ（${n}）`, unban: "利用停止を解除",
+    hiddenMsgs: n => `非表示のメッセージ（${n}）`, unban: "利用停止を解除", adminOn: "管理ツールがオンになりました", adminNo: "このコマンドは使えません",
+    hiddenWhy: { flags: "通報で非表示", ban: "利用停止で非表示", admin: "あなたが非表示にしました" }, noHidden: "非表示のメッセージはありません", noBanned: "利用停止中のアカウントはありません",
+    nickErr: { length: "2〜20文字で入力してください", chars: "文字・数字・スペース・_ - . のみ使えます", reserved: "このニックネームは予約されています",
+      taken: "このニックネームは使われています", blocked: "このニックネームは使えません" },
+    nickWait: d => `変更は週1回です。あと${d}日で変更できます`,
     postTitle: "波情報を投稿", postSub: "今の波はどう？5秒で完了。", spotHead: "ポイント", sizeHead: "サイズ", condHead: "コンディション", crowdHead: "混雑",
     size: { flat: "フラット", knee: "ひざ", waist: "腰", chest: "胸", head: "頭", overhead: "頭オーバー" },
     sizeHigh: { flat: "フラット", knee: "ひざサイズ", waist: "腰サイズ", chest: "胸サイズ", head: "頭サイズ", overhead: "頭オーバー" },
@@ -170,7 +200,9 @@ const STR = {
     shareLog: "共有", unshareLog: "共有をやめる", noSessions: "まだ記録はありません",
     offline: "チャットに接続できません", retry: "再試行", resting: "チャットは08:00まで休止中です", loginFailed: "LINEでログインできませんでした。もう一度お試しください",
     banned: "このLINEアカウントでは投稿できません", slowDown: s => `少しペースを落としてください · ${s}秒後に再試行`, reloadNew: "新しいチャットを使うには再読み込みしてください",
-    locked: "ルームはロック中です。閲覧はできます。",
+    locked: "ルームはロック中です。閲覧はできます。", failed: "送信できませんでした。もう一度お試しください。",
+    blocked: { link: "リンクは投稿できません。直してから送ってください。", line: "LINE IDや招待は投稿できません。直してから送ってください。",
+      phone: "電話番号は投稿できません。直してから送ってください。", other: "この内容は投稿できません。直してから送ってください。" },
     pinShown: code => `LINEでログインしました。WaveSlaveアプリに戻って、このコードを入力してください：${code}`, pinBox: "LINEログイン後に表示されたコードを入力",
     privacyHead: "プライバシーについて", contactHead: "お問い合わせ",
     privacyShort: "投稿するには、ニックネーム、LINE IDから一方向に作ったコード、投稿内容をチャットに保存します。データはCloudflareが台湾国外に保存し、ログインはLINE（LY Corp）が扱います。投稿は公開されます。プライバシーについての全文は「詳しく」にあります。",
@@ -199,7 +231,7 @@ function save(key, value, session) { try { const s = session ? sessionStorage : 
 // A new element: attributes go in with setAttribute, children as nodes or as text (append makes a text node of a string), never as HTML.
 function el(tag, attrs, ...kids) { const e = document.createElement(tag);
   for (const k in attrs || {}) if (attrs[k] != null) e.setAttribute(k, attrs[k]);
-  for (const c of kids) if (c != null) e.append(c);
+  for (const c of kids.flat(Infinity)) if (c != null) e.append(c);
   return e; }
 
 // One call to the backend: api("/reports?spot=jinshan"), or api("/me/sessions", {method: "POST", body, token}). The body goes as JSON and
@@ -223,7 +255,8 @@ let shown = null;                   // the spot the page shows (the last CHAT.sp
 let data = null;                    // {spot, reports} for it; null while asking, away from Taiwan, or when the backend can't be reached
 let online = null, lastId = 0;      // from the newest answer; online is null when there's none to show
 let asked = 0, askedAt = -Infinity; // the number of the newest question, so an answer for a spot left behind is dropped, and when it went
-const inTaiwan = id => countrySpots("tw").includes(id);
+const TW = () => countrySpots("tw");
+const inTaiwan = id => TW().includes(id);
 const count = v => typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : null;
 const isReport = r => !!r && Number.isFinite(r.ts) && CODES.size.includes(r.size) && CODES.cond.includes(r.cond) && CODES.crowd.includes(r.crowd);
 const seen = () => count(+load(KEYS.seen)) || 0;
@@ -264,9 +297,538 @@ function drawFab() { const lit = lastId > seen(), n = online == null ? null : S(
 
 const draw = guard(() => { drawStrip(); drawFab(); });
 
-// ---- The room: full screen above everything, the full-screen map included. o.sheet ("report" or "log") opens that form over it, preset
-// to o.spot; o.signin is a sign-in back from LINE ({code, pin} or {error}) to finish. It isn't built yet, so nothing opens.
-function openRoom(o) {}
+// ---- The room: full screen above everything, the full-screen map included, with the room's socket behind it.
+//   openRoom({sheet, spot, signin, privacy})  opens it, with a sheet over it when asked: the report or log form preset to a spot, a
+//                                              sign-in back from LINE to finish, or the house rules and privacy note (?chat=privacy)
+//   closeRoom()                                the ✕ or Escape; the socket closes with it
+//   sock.send(frame)                           one frame to the room; false when the socket isn't open and greeted
+//   openSheet(name, build) / closeSheet()      a bottom sheet over the room; build(state) gives {title, body} and runs again on relang()
+//   HOOK                                       what the LINE sign-in and the report and log sheets plug into the room
+// The socket frames are chat/src/room.js's ("The socket"): hello, older, say, like, flag, delete, nick, admin and Bryan's tools go out;
+// me, history, msg, update, online, tick, error, ok and hidden come back.
+const PROTO = 1;                                      // the socket protocol this file speaks (room.js PROTO)
+const WS_URL = BASE.replace(/^http/i, "ws") + "/ws";
+const PAGE_N = 100, OLDER_N = 50;                     // the room opens with the last 100 messages, and gives older ones 50 at a time
+const DEAD_MS = 100e3;                                // no frame for this long (the room ticks every 45 s) and the socket is dead
+const PONG_MS = 10e3;                                 // back in the foreground, the "ping" must get an answer this soon
+const AWAY_MS = 5 * 60e3;                             // in the background this long and the socket closes, until the page is back
+const BACKOFF = [1e3, 2e3, 4e3, 8e3, 16e3, 30e3];     // waits between tries while the backend can't be reached
+const KEEP_MSGS = 600;                                // messages kept in memory while the room stays open; the oldest go past this
+const FRAME_MAX = 4096;                               // bytes in a frame; the room closes a socket that sends a bigger one
+const LANGS = [["en", "English", "en"], ["zh", "中文", "zh-Hant-TW"], ["ja", "日本語", "ja"]];
+
+// What the sign-in and the report and log sheets add: login() starts LINE's sign-in, signin(s) finishes one back from LINE, sheet(name,
+// spot) opens the report or log form, menu lists the main menu's items for signed-in people ({label(), act()}), and ok and error take
+// the room's answers to their frames by the frame's type (an error handler returns false to leave it to the room's own words).
+const HOOK = { login: null, signin: null, sheet: null, menu: [], ok: {}, error: {} };
+
+const R = {
+  built: false, open: false, el: {},
+  msgs: new Map(),    // id -> message, as the room sends it (cleaned); history and msg merge into it by id, so nothing shows twice
+  gone: new Set(),    // ids deleted or hidden while we watched, for "Message deleted" on a reply to one
+  nodes: new Map(),   // id -> its <article>, kept while it draws the same
+  oldest: 0, start: false, older: false, // the oldest id held, whether the room has nothing older, and whether a page of older is on its way
+  me: null,           // {nick, role} once the socket is signed in
+  online: null, state: "idle", filter: "all", replyTo: null, pending: null, hidden: null, locked: null, fresh: false,
+  sheet: null, pop: null, opener: null, noteT: 0, agesT: 0, longAt: 0,
+};
+const sock = { ws: null, ready: false, tries: 0, retryT: 0, deadT: 0, pongT: 0, awayT: 0,
+  // One frame to the room, as JSON. Only once the room has answered hello, so a write never goes before the sign-in it needs.
+  send(frame) { const ws = sock.ws; if (!ws || ws.readyState !== 1 || !sock.ready) return false;
+    const text = JSON.stringify(frame); if (new TextEncoder().encode(text).length > FRAME_MAX) return false;
+    try { ws.send(text); return true; } catch (e) { return false; } },
+};
+const isSpot = id => typeof id === "string" && inTaiwan(id);
+const signedIn = () => !!load(KEYS.token);
+const isAdmin = () => !!R.me && R.me.role === "admin";
+// Nicknames are unique, so a message with ours is ours (the room checks again on delete).
+const isMine = m => !!R.me && m.nick != null && m.nick === R.me.nick;
+const spotName = id => SPT(ALL.spots[id], "name");
+// "Jinshan 金山" in English, as on the cards in the mockups; the page's own name in 中文 and 日本語.
+const spotFull = id => { const s = ALL.spots[id]; return LANG === "en" ? [s.name, (s.zh || {}).name].filter(Boolean).join(" ") : spotName(id); };
+const fin = v => typeof v === "number" && Number.isFinite(v) ? v : null;
+const CMP = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+const compass = d => { const k = CMP[Math.round(((d % 360) + 360) % 360 / 22.5) % 16]; return typeof T === "function" ? T(k) : k; };
+// A time on the Taipei clock (spots carry tz = 8), and its day against today's there: Today, Yesterday, The day before, or 10/19.
+const TZ = 8 * 3600e3, DAY = 864e5;
+const hm = ms => new Date(ms + TZ).toISOString().slice(11, 16);
+function dayOf(ms) { const d = Math.floor((Date.now() + TZ) / DAY) - Math.floor((ms + TZ) / DAY), t = new Date(ms + TZ);
+  return d === 0 ? S("today") : d === 1 ? S("yesterday") : d === 2 ? S("dayBefore") : `${t.getUTCMonth() + 1}/${t.getUTCDate()}`; }
+
+// A message from the room as this file keeps it, or null for one it can't draw. Every field is checked here; the body's text goes in
+// later as text.
+function clean(m) {
+  if (!m || typeof m !== "object" || !Number.isSafeInteger(m.id) || m.id < 1 || fin(m.ts) == null || !validBody(m.kind, m.body)) return null;
+  if (m.kind !== "text" && !isSpot(m.spot)) return null; // a report or a session card is always about a spot
+  return { id: m.id, ts: m.ts, nick: typeof m.nick === "string" ? m.nick : null, role: m.role === "admin" ? "admin" : null, kind: m.kind,
+    spot: isSpot(m.spot) ? m.spot : null, body: m.body, reply_to: Number.isSafeInteger(m.reply_to) && m.reply_to > 0 ? m.reply_to : null,
+    likes: count(m.likes) || 0, hidden: typeof m.hidden === "string" ? m.hidden : null };
+}
+function validBody(kind, b) {
+  if (!b || typeof b !== "object") return false;
+  if (kind === "text") return typeof b.text === "string";
+  if (kind === "report") return CODES.size.includes(b.size) && CODES.cond.includes(b.cond) && CODES.crowd.includes(b.crowd) && (b.snap == null || typeof b.snap === "object");
+  if (kind === "session") return fin(b.start) != null && fin(b.end) != null && Number.isInteger(b.stars) && b.stars >= 1 && b.stars <= 5
+    && CODES.board.includes(b.board) && (b.note == null || typeof b.note === "string") && (b.cond == null || typeof b.cond === "object");
+  return false;
+}
+
+// ---- The socket. It opens with the room and closes with it. A drop tries again after 1 s, then longer, up to 30 s; 100 s without a
+// frame counts as a drop; back in the foreground it sends "ping" (the room answers "pong" without waking); after 5 minutes in the
+// background it closes until the page is back. The room's own close codes: 4401 the account signed out everywhere or was deleted,
+// 4403 banned, 4426 this page is too old, 4429 the chat is resting until 00:00 UTC (08:00 in Taiwan).
+function connect() {
+  stopSocket();
+  if (R.state !== "offline") setState("connecting");
+  let ws; try { ws = new WebSocket(WS_URL); } catch (e) { return lost(1006); }
+  sock.ws = ws;
+  ws.onopen = guard(() => { if (ws !== sock.ws) return; alive(ws); const token = load(KEYS.token);
+    ws.send(JSON.stringify(token ? { type: "hello", v: PROTO, token } : { type: "hello", v: PROTO })); });
+  ws.onmessage = guard(e => { if (ws !== sock.ws) return; alive(ws); if (typeof e.data === "string" && e.data !== "pong") onFrame(e.data); });
+  ws.onclose = guard(e => { if (ws !== sock.ws) return; sock.ws = null; lost(e.code); });
+}
+function stopSocket() { const ws = sock.ws; sock.ws = null; sock.ready = false; R.older = false;
+  for (const t of ["retryT", "deadT", "pongT"]) clearTimeout(sock[t]);
+  if (ws) { ws.onopen = ws.onmessage = ws.onclose = null; try { ws.close(1000); } catch (e) {} } }
+// Any frame says the socket lives: the 100 s start again.
+function alive(ws) { clearTimeout(sock.deadT); clearTimeout(sock.pongT); sock.deadT = setTimeout(guard(() => { if (ws === sock.ws) connect(); }), DEAD_MS); }
+function retry(ms) { clearTimeout(sock.retryT); sock.retryT = setTimeout(guard(() => { if (R.open) connect(); }), ms); }
+// The socket closed, or never opened.
+function lost(code) {
+  sock.ready = false; R.older = false; clearTimeout(sock.deadT); clearTimeout(sock.pongT); restorePending();
+  if (!R.open) return;
+  if (code === 4429) { setState("resting"); const now = Date.now(); return retry(Math.ceil((now + 1) / DAY) * DAY - now + Math.random() * 60e3); }
+  if (code === 4426) return setState("update");
+  if (code === 4401 || code === 4403) { if (code === 4403) note(S("banned"), true); signOutQuietly(); sock.tries = 0; return connect(); }
+  setState("offline"); retry(BACKOFF[Math.min(sock.tries++, BACKOFF.length - 1)]);
+}
+// Is the socket still there? Asked on coming back to the foreground and after the network comes back. A socket that doesn't answer
+// within 10 s is replaced.
+function check() {
+  const ws = sock.ws;
+  if (ws && ws.readyState === 1 && sock.ready) { try { ws.send("ping"); } catch (e) {} clearTimeout(sock.pongT); sock.pongT = setTimeout(guard(() => { if (ws === sock.ws) connect(); }), PONG_MS); }
+  else if (R.state !== "update" && (!ws || ws.readyState > 1)) { sock.tries = 0; connect(); }
+}
+function setState(s) { R.state = s; if (R.built) drawStatus(); }
+
+function onFrame(text) {
+  let f; try { f = JSON.parse(text); } catch (e) { return; }
+  const on = f && typeof f === "object" ? own(ON, f.type) : null;
+  if (typeof on === "function") on(f);
+}
+const ON = {
+  // Who this socket is signed in as: after hello, after a nickname change, and after Bryan's claim.
+  me(f) {
+    if (typeof f.nick !== "string") return;
+    const was = R.me; R.me = { nick: f.nick, role: f.role === "admin" ? "admin" : "user" };
+    if (was && was.nick !== f.nick) for (const m of R.msgs.values()) if (m.nick === was.nick) m.nick = f.nick;
+    if (R.sheet && R.sheet.name === "nick" && R.sheet.state.sent) { closeSheet(); note(`${S("changeNick")} · ${S("done")}`); }
+    if (was && was.role !== "admin" && R.me.role === "admin") { note(S("adminOn")); sock.send({ type: "hidden_list" }); }
+    drawAll();
+  },
+  // The last 100 messages after hello, or a page of 50 older ones (before_id). After hello it is the truth from its oldest message on:
+  // a message held from before a drop that isn't in it was deleted or hidden meanwhile.
+  history(f) {
+    const list = (Array.isArray(f.messages) ? f.messages : []).map(clean).filter(m => m && (!m.hidden || isAdmin()));
+    if (f.before_id == null) {
+      const ids = new Set(list.map(m => m.id)), low = list.length ? Math.min(...ids) : Infinity, whole = list.length < PAGE_N;
+      const heldOlder = [...R.msgs.keys()].some(id => id < low);
+      for (const id of [...R.msgs.keys()]) if ((whole || id >= low) && !ids.has(id)) { R.msgs.delete(id); R.gone.add(id); }
+      R.start = whole || (R.start && heldOlder);
+      for (const m of list) R.msgs.set(m.id, m);
+      const first = R.fresh; R.fresh = false; sock.ready = true; sock.tries = 0; setState("live");
+      if (isAdmin()) sock.send({ type: "hidden_list" });
+      settle(); render({ toEnd: first });
+    } else {
+      R.older = false;
+      for (const m of list) if (!R.msgs.has(m.id)) R.msgs.set(m.id, m);
+      if (list.length < OLDER_N) R.start = true;
+      settle(); render();
+    }
+    markSeen();
+  },
+  // A new message, or one Bryan restored (and, on his sockets only, one just hidden, marked with why).
+  msg(f) {
+    const m = clean(f.msg); if (!m || (m.hidden && !isAdmin())) return;
+    R.msgs.set(m.id, m); R.gone.delete(m.id);
+    const mine = isMine(m); if (mine && m.kind === "text") R.pending = null;
+    settle(); render({ toEnd: mine }); markSeen();
+  },
+  // Likes changed, or a message went (deleted, or hidden for everyone but Bryan).
+  update(f) {
+    const id = f.id, m = Number.isSafeInteger(id) ? R.msgs.get(id) : null;
+    if (f.deleted === true || f.hidden === true) { R.msgs.delete(id); R.gone.add(id); if (R.replyTo === id) { R.replyTo = null; drawReply(); } }
+    else if (m && count(f.likes) != null) m.likes = count(f.likes);
+    else return;
+    render();
+  },
+  online(f) { const n = count(f.online); if (n != null) { R.online = n; drawHead(); } },
+  tick(f) { ON.online(f); },
+  error(f) {
+    const code = typeof f.code === "string" ? f.code : "invalid", about = typeof f.for === "string" ? f.for : "";
+    const hook = own(HOOK.error, about); if (typeof hook === "function" && hook(code) !== false) return;
+    if (about === "hello") { if (code === "banned") note(S("banned"), true); if (code === "auth" || code === "banned") signOutQuietly(); return; }
+    if (about === "older") { R.older = false; const s = slowFor(code); if (s) setTimeout(guard(() => { if (R.built && R.el.list.scrollTop < 60) olderPage(); }), s * 1e3); return; }
+    if (about === "nick" && R.sheet && R.sheet.name === "nick") { R.sheet.state.sent = false; R.sheet.state.err = nickWhy(code); return drawSheet(); }
+    if (about === "say") restorePending();
+    if (about === "admin") return note(S("adminNo"), true);
+    if (code === "auth") { signOutQuietly(); sock.tries = 0; return connect(); }
+    note(why(code), true);
+  },
+  // One of Bryan's tools did its work (or a log was shared, which the sheets take).
+  ok(f) {
+    const about = typeof f.for === "string" ? f.for : "", hook = own(HOOK.ok, about);
+    if (typeof hook === "function") return hook(f);
+    const label = own({ lock: "lockRoom", unlock: "unlockRoom", ban: "ban", unban: "unban", restore: "restore", keep: "keep" }, about);
+    if (!label) return;
+    if (about === "lock" || about === "unlock") R.locked = about === "lock";
+    if (about === "unban" || about === "restore" || about === "ban") sock.send({ type: "hidden_list" });
+    note(`${S(label)} · ${S("done")}`);
+  },
+  // Bryan's hidden list: how many are hidden, the newest 100 with why, and the banned LINE accounts (each with the code unban takes).
+  hidden(f) {
+    if (!isAdmin()) return;
+    R.hidden = { count: count(f.count) || 0, messages: (Array.isArray(f.messages) ? f.messages : []).map(m => { const c = clean(m); return c && { ...c, flags: m.flags && typeof m.flags === "object" ? m.flags : {} }; }).filter(Boolean),
+      banned: (Array.isArray(f.banned) ? f.banned : []).filter(b => b && typeof b.sub_hash === "string").map(b => ({ sub_hash: b.sub_hash, nick: typeof b.nick === "string" ? b.nick : null })) };
+    if (R.sheet && (R.sheet.name === "hidden" || R.sheet.name === "unban")) drawSheet();
+    const item = R.pop && R.pop.main && R.pop.box.querySelector('[data-k="hidden"]'); if (item) item.textContent = S("hiddenMsgs", R.hidden.count);
+  },
+};
+// After merging: the oldest id held, and at most KEEP_MSGS messages (a room left open for days drops its oldest).
+function settle() {
+  const ids = [...R.msgs.keys()].sort((a, b) => a - b);
+  if (ids.length > KEEP_MSGS) { for (const id of ids.slice(0, ids.length - KEEP_MSGS)) R.msgs.delete(id); ids.splice(0, ids.length - KEEP_MSGS); R.start = false; }
+  R.oldest = ids.length ? ids[0] : 0;
+}
+// The messages seen: the CHAT button's dot stays off for them.
+function markSeen() {
+  if (!R.open || document.visibilityState === "hidden") return;
+  const top = Math.max(0, ...R.msgs.keys());
+  if (top > seen()) save(KEYS.seen, top);
+  if (top > lastId) lastId = top;
+}
+const slowFor = code => { const m = /^slow:(\d+)$/.exec(code); return m ? Math.max(1, +m[1]) : 0; };
+// What to say about a refused write.
+function why(code) {
+  if (code.startsWith("blocked:")) { const r = code.slice(8); return own(S("blocked"), r === "short" || r === "telegram" ? "link" : r) || S("blocked").other; }
+  const s = slowFor(code); if (s) return S("slowDown", s);
+  return code === "locked" ? S("locked") : code === "banned" ? S("banned") : code === "update" ? S("reloadNew") : S("failed");
+}
+function nickWhy(code) {
+  if (code.startsWith("blocked:")) return S("nickErr").blocked;
+  const s = slowFor(code); if (s) return S("nickWait", Math.ceil(s / 86400));
+  return own(S("nickErr"), code.replace(/^nick:/, "")) || S("failed");
+}
+// The token stopped working (signed out everywhere, deleted, banned): it goes, and the bar shows the LINE button again.
+function signOutQuietly() { save(KEYS.token, null); R.me = null; R.replyTo = null; R.pending = null; if (R.built) drawAll(); }
+// A text that never made it (refused, or the socket dropped first) goes back in the box, unless something new is being typed there.
+function restorePending() { const p = R.pending; R.pending = null; if (!p || !R.built) return;
+  if (!R.el.input.value) R.el.input.value = p.text;
+  if (p.reply && R.msgs.has(p.reply)) R.replyTo = p.reply;
+  drawReply(); drawSend(); }
+
+// ---- Building the room (mockup 2). Built once, on first open; relang() redraws its words in place, so the box keeps what's typed.
+function build() {
+  if (R.built) return;
+  const E = R.el, btn = (cls, label, text, act) => { const b = el("button", { type: "button", class: cls, "aria-label": label }, text); b.addEventListener("click", guard(act)); return b; };
+  E.title = el("h2", { class: "cr-title", id: "chatRoomTitle" });
+  E.sub = el("span", { class: "cr-sub" });
+  E.menuBtn = btn("cr-ic cr-menu", null, "☰", () => openMain());
+  E.menuBtn.setAttribute("aria-haspopup", "menu"); E.menuBtn.setAttribute("aria-expanded", "false");
+  E.x = btn("cr-ic cr-x", null, "✕", () => closeRoom());
+  E.filters = el("div", { class: "cr-filters", role: "group" });
+  for (const id of ["all", ...TW()]) { const b = btn(null, null, "", () => pickFilter(id)); b.dataset.f = id; E.filters.append(b); }
+  E.status = el("div", { class: "cr-status", role: "status" });
+  E.pinText = el("span"); E.pinMore = btn("cr-link", null, "", () => openSheet("more", moreSheet));
+  E.pin = el("div", { class: "cr-pin" }, el("p", null, "📌 ", E.pinText, " ", E.pinMore));
+  E.olderBtn = btn("cr-older", null, "", () => olderPage());
+  E.msgs = el("div", { class: "cr-msgs", role: "log", "aria-live": "polite" });
+  E.empty = el("p", { class: "cr-empty" });
+  E.list = el("div", { class: "cr-list" }, E.pin, E.olderBtn, E.msgs, E.empty);
+  E.replyText = el("span", { dir: "auto" });
+  E.reply = el("div", { class: "cr-reply" }, el("span", null, "↳ "), E.replyText, btn("cr-ic cr-unreply", null, "✕", () => { R.replyTo = null; drawReply(); E.input.focus(); }));
+  E.note = el("p", { class: "cr-note", role: "status" });
+  E.rep = btn("cr-pill cr-rep", null, "", () => HOOK.sheet && HOOK.sheet("report", R.filter !== "all" ? R.filter : isSpot(shown) ? shown : null));
+  E.log = btn("cr-pill", null, "", () => HOOK.sheet && HOOK.sheet("log", R.filter !== "all" ? R.filter : isSpot(shown) ? shown : null));
+  E.input = el("input", { class: "cr-in", type: "text", maxlength: "500", dir: "auto", enterkeyhint: "send", autocomplete: "off" });
+  E.send = btn("cr-pill cr-send", null, "", () => sendText());
+  E.barIn = el("div", { class: "cr-bar" }, E.rep, E.log, E.input, E.send);
+  E.lineWord = el("span", { class: "cr-line-w" });
+  E.line = btn("cr-line", null, [lineIcon(), el("i", { class: "cr-line-sep", "aria-hidden": "true" }), E.lineWord], () => HOOK.login && HOOK.login());
+  E.barOut = el("div", { class: "cr-bar" }, E.line);
+  E.foot = el("div", { class: "cr-foot" }, E.reply, E.note, E.barIn, E.barOut);
+  E.sheetTitle = el("h2", { id: "chatSheetTitle" }); E.sheetX = btn("cr-ic cr-x", null, "✕", () => closeSheet());
+  E.sheetBody = el("div", { class: "cr-sheet-b" });
+  E.sheet = el("div", { class: "cr-sheet", role: "dialog", "aria-modal": "true", "aria-labelledby": "chatSheetTitle", tabindex: "-1" }, el("div", { class: "cr-sheet-hd" }, E.sheetTitle, E.sheetX), E.sheetBody);
+  E.shade = el("div", { class: "cr-shade", hidden: "" }, E.sheet);
+  E.shade.addEventListener("click", guard(e => { if (e.target === E.shade) closeSheet(); }));
+  E.room = el("div", { class: "chatroom", role: "dialog", "aria-modal": "true", "aria-labelledby": "chatRoomTitle", tabindex: "-1", hidden: "" },
+    el("div", { class: "cr-hd" }, E.title, E.sub, E.menuBtn, E.x), E.filters, E.status, E.list, E.foot, E.shade);
+  E.input.addEventListener("keydown", guard(e => { if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); sendText(); } }));
+  E.input.addEventListener("input", guard(() => { drawSend(); if (E.note.classList.contains("err")) clearNote(); }));
+  E.list.addEventListener("scroll", guard(() => { if (E.list.scrollTop < 60) olderPage(); }), { passive: true });
+  E.msgs.addEventListener("click", guard(e => { const b = e.target.closest(".cm-more"); if (b) openMsgMenu(+b.closest("article").dataset.id, b); }));
+  // Long-press opens a message's menu too: a finger held still for half a second, or the browser's own context menu (a right-click, or
+  // Android's long-press).
+  let press = null; const unpress = () => { if (press) clearTimeout(press.t); press = null; };
+  E.msgs.addEventListener("touchstart", guard(e => { unpress(); const a = e.target.closest("article.cm");
+    if (!a || e.touches.length !== 1 || e.target.closest("button, a")) return;
+    const t = e.touches[0]; press = { x: t.clientX, y: t.clientY, t: setTimeout(guard(() => { press = null; R.longAt = Date.now(); openMsgMenu(+a.dataset.id); }), 550) }; }), { passive: true });
+  E.msgs.addEventListener("touchmove", guard(e => { const t = e.touches[0]; if (press && t && Math.hypot(t.clientX - press.x, t.clientY - press.y) > 10) unpress(); }), { passive: true });
+  for (const t of ["touchend", "touchcancel"]) E.msgs.addEventListener(t, unpress, { passive: true });
+  E.msgs.addEventListener("contextmenu", guard(e => { const a = e.target.closest("article.cm"); if (!a) return; e.preventDefault(); if (Date.now() - R.longAt > 800) openMsgMenu(+a.dataset.id); }));
+  E.room.addEventListener("pointerdown", guard(e => { if (R.pop && !R.pop.box.contains(e.target) && !R.pop.anchor.contains(e.target)) closePop(); }));
+  document.body.append(E.room);
+  R.filter = own(Object.fromEntries(["all", ...TW()].map(id => [id, 1])), load(KEYS.filter)) ? load(KEYS.filter) : "all";
+  R.built = true;
+}
+// LINE's own icon for its button: the white speech bubble with "LINE" in green (LINE's button guidelines).
+function lineIcon() { const ns = "http://www.w3.org/2000/svg", svg = document.createElementNS(ns, "svg"), p = document.createElementNS(ns, "path"), t = document.createElementNS(ns, "text");
+  svg.setAttribute("viewBox", "0 0 40 40"); svg.setAttribute("class", "cr-line-ico"); svg.setAttribute("aria-hidden", "true");
+  p.setAttribute("fill", "#fff"); p.setAttribute("d", "M20 6.5C11.4 6.5 4.5 12.2 4.5 19.2c0 6.3 5.5 11.5 13 12.5.5.1 1.2.3 1.4.8.2.4.1 1.1 0 1.5l-.2 1.3c-.1.4-.3 1.5 1.3.8s8.8-5.2 12-8.9c2.2-2.4 3.3-4.9 3.3-7.5 0-7-6.9-12.7-15.4-12.7z");
+  t.setAttribute("x", "20"); t.setAttribute("y", "22.6"); t.setAttribute("text-anchor", "middle"); t.setAttribute("fill", "#06C755");
+  t.setAttribute("font-size", "8.2"); t.setAttribute("font-weight", "800"); t.setAttribute("font-family", "Arial, Helvetica, sans-serif"); t.textContent = "LINE";
+  svg.append(p, t); return svg; }
+
+// ---- Drawing. Each part redraws from the state; drawAll() is relang().
+function drawAll() { if (!R.built) return; closePop(); drawHead(); drawFilters(); drawStatus(); drawBar(); drawReply(); render(); drawSheet(); }
+function drawHead() { const E = R.el;
+  E.title.textContent = S("roomTitle"); E.sub.textContent = [S("roomName"), R.online == null ? null : S("online", R.online)].filter(Boolean).join(" · ");
+  E.menuBtn.setAttribute("aria-label", S("menu")); E.x.setAttribute("aria-label", S("close"));
+  E.filters.setAttribute("aria-label", S("spotHead"));
+  E.pinText.textContent = S("rulesShort"); E.pinMore.textContent = S("more"); E.olderBtn.textContent = S("older"); E.empty.textContent = S("noMsgs"); }
+function drawFilters() { for (const b of R.el.filters.children) { const id = b.dataset.f; b.textContent = id === "all" ? S("all") : spotName(id); b.setAttribute("aria-pressed", String(R.filter === id)); } }
+// "Chat is offline · Retry", "Chat is resting until 08:00" or "Reload for the new chat"; nothing while it works.
+function drawStatus() { const s = R.el.status; s.textContent = "";
+  if (R.state === "offline") { const b = el("button", { type: "button", class: "cr-link" }, S("retry")); b.addEventListener("click", guard(() => { sock.tries = 0; connect(); })); s.append(el("span", null, S("offline")), " · ", b); }
+  else if (R.state === "resting") s.append(S("resting"));
+  else if (R.state === "update") { const b = el("button", { type: "button", class: "cr-link" }, S("reloadNew")); b.addEventListener("click", guard(() => location.reload())); s.append(b); }
+  s.hidden = !s.firstChild; }
+// Signed in: + Report, 📓 Log and the message box. Signed out: one LINE button in LINE's own style (its green, its icon, its words).
+function drawBar() { const E = R.el, on = signedIn();
+  E.barIn.hidden = !on; E.barOut.hidden = on; E.menuBtn.hidden = false;
+  E.rep.textContent = S("report"); E.log.textContent = S("log"); E.send.textContent = S("send");
+  E.input.setAttribute("placeholder", S("say")); E.input.setAttribute("aria-label", S("say")); E.lineWord.textContent = S("lineLogin"); drawSend(); }
+const drawSend = () => { if (R.built) R.el.send.hidden = !R.el.input.value.trim(); };
+function drawReply() { const E = R.el, p = R.replyTo && R.msgs.get(R.replyTo);
+  E.reply.hidden = !p; if (p) E.replyText.textContent = S("replyingTo", p.nick ?? S("aSurfer")); E.reply.lastChild.setAttribute("aria-label", S("close")); }
+// A line above the bar: what happened to the last thing sent. Errors stay until the box changes; the rest go after 5 s.
+function note(text, err) { if (!R.built) return; const n = R.el.note; clearTimeout(R.noteT);
+  n.textContent = text; n.classList.toggle("err", !!err); n.hidden = false; if (!err) R.noteT = setTimeout(guard(clearNote), 5e3); }
+function clearNote() { clearTimeout(R.noteT); R.el.note.hidden = true; R.el.note.textContent = ""; }
+
+// The messages for the filter, oldest first, drawn into the list. Articles that draw the same are kept, so a focused ⋯ stays focused,
+// and the reading place holds: the list stays at the bottom when it was there, or else keeps the top message where it was.
+function render(o = {}) {
+  if (!R.built) return;
+  const list = R.el.list, box = R.el.msgs, end = o.toEnd || list.scrollHeight - list.scrollTop - list.clientHeight < 80, anchor = end ? null : topMessage();
+  const want = [...R.msgs.values()].filter(m => R.filter === "all" || m.spot === R.filter).sort((a, b) => a.id - b.id), keep = new Set(want.map(m => m.id));
+  for (const [id, n] of R.nodes) if (!keep.has(id)) { n.remove(); R.nodes.delete(id); }
+  let at = box.firstElementChild;
+  for (const m of want) {
+    const sig = JSON.stringify([LANG, m, parentOf(m), isMine(m), isAdmin()]);
+    let n = R.nodes.get(m.id);
+    if (n && n._sig !== sig) { const k = msgEl(m); n.replaceWith(k); n = k; R.nodes.set(m.id, n); if (at && !at.isConnected) at = n; }
+    if (!n) { n = msgEl(m); R.nodes.set(m.id, n); box.insertBefore(n, at); }
+    n._sig = sig; at = n.nextElementSibling;
+  }
+  R.el.olderBtn.hidden = R.start || !R.msgs.size;
+  R.el.empty.hidden = !!want.length || R.state !== "live";
+  if (end) list.scrollTop = list.scrollHeight;
+  else if (anchor) { const n = R.nodes.get(anchor.id); if (n) list.scrollTop += n.getBoundingClientRect().top - list.getBoundingClientRect().top - anchor.off; }
+}
+// The first message showing under the pinned rules, and how far it is from the list's top.
+function topMessage() { const top = R.el.list.getBoundingClientRect().top + R.el.pin.offsetHeight;
+  for (const n of R.el.msgs.children) { const r = n.getBoundingClientRect(); if (r.bottom > top) return { id: +n.dataset.id, off: r.top - R.el.list.getBoundingClientRect().top }; }
+  return null; }
+// What a reply shows of the message it answers: the message itself while held, "Message deleted" when it went while we watched or should
+// be among those held, or "an earlier message" when it is older than everything loaded.
+function parentOf(m) { if (!m.reply_to) return null; const p = R.msgs.get(m.reply_to);
+  return p ? { nick: p.nick, text: excerpt(p) } : R.gone.has(m.reply_to) || R.start || m.reply_to >= R.oldest ? "gone" : "earlier"; }
+const excerpt = m => m.kind === "text" ? [...m.body.text].slice(0, 120).join("") : m.kind === "report" ? `${S("surfReport")} · ${spotName(m.spot)}` : `${S("sessionLog")} · ${spotName(m.spot)}`;
+
+// One message: the nickname, Bryan's badge where it applies, the spot tag and the age, the ⋯ menu; the quote it replies to; the text or
+// card; the 👍 count. User text goes in with dir="auto" and is isolated (CSS), so an RTL override can't turn the line around it.
+function msgEl(m) {
+  const head = el("div", { class: "cm-hd" }, el("b", { class: "cm-nick", dir: "auto" }, m.nick ?? S("aSurfer")),
+    m.role === "admin" ? el("span", { class: "cm-badge" }, S("badge")) : null,
+    el("span", { class: "cm-meta" }, m.spot ? `${spotName(m.spot)} · ` : null, el("time", { "data-ts": String(m.ts), datetime: new Date(m.ts).toISOString() }, ago(m.ts))),
+    el("button", { type: "button", class: "cm-more", "aria-label": S("msgMenu"), "aria-haspopup": "menu", "aria-expanded": "false" }, "⋯"));
+  const a = el("article", { class: "cm" + (m.hidden ? " cm-hidden" : "") + (isMine(m) ? " cm-mine" : ""), "data-id": String(m.id) }, head);
+  if (m.hidden) a.append(el("p", { class: "cm-why" }, own(S("hiddenWhy"), m.hidden) || S("hiddenWhy").admin));
+  const p = parentOf(m);
+  if (p) a.append(el("p", { class: "cm-quote" }, "↳ ", typeof p === "object" ? [el("b", { dir: "auto" }, p.nick ?? S("aSurfer")), " ", el("span", { dir: "auto" }, p.text)] : S(p === "gone" ? "msgDeleted" : "earlier")));
+  a.append(m.kind === "text" ? el("p", { class: "cm-text", dir: "auto" }, m.body.text) : m.kind === "report" ? reportCard(m) : sessionCard(m));
+  if (m.likes > 0) a.append(el("p", { class: "cm-foot" }, `👍 ${m.likes}`));
+  return a;
+}
+// "Surf report · Jinshan 金山 / Chest high · Clean · Few people / Forecast said 1.1 m @ 9 s, NE 6 kt · buoy 1.0 m at 07:00".
+function reportCard(m) { const b = m.body, s = b.snap || {}, fc = [waves(s), wind(s)].filter(Boolean).join(", "), buoy = fin(s.bhs) == null ? null : `${s.bhs.toFixed(1)} m`;
+  const at = [s.hs_t, s.ws_t, s.bhs_t].find(t => typeof t === "string" && /T\d\d:\d\d/.test(t));
+  return el("div", { class: "cm-card" }, el("div", { class: "cm-cap" }, `${S("surfReport")} · ${spotFull(m.spot)}`),
+    el("div", { class: "cm-big" }, [L("sizeHigh", b.size), L("cond", b.cond), L("crowdChip", b.crowd)].join(" · ")),
+    fc || buoy ? el("div", { class: "cm-sub" }, S("forecastSaid", fc, buoy, at ? at.slice(11, 16) : null)) : null); }
+// "Session log · Wushi 烏石 · Today 07:00–08:30 / ★★☆☆☆ “Kept nosediving on takeoff” / Conditions then: 0.9 m @ 7 s, NE 9 kt · Mini-mal".
+function sessionCard(m) { const b = m.body, c = b.cond && typeof b.cond === "object" ? b.cond : null;
+  const cond = c && [[waves(c), wind(c)].filter(Boolean).join(", "), fin(c.tide) == null ? null : `${S("tide")} ${Math.round(c.tide * 100)} cm`, fin(c.bhs) == null ? null : `${S("buoy")} ${c.bhs.toFixed(1)} m`].filter(Boolean).join(" · ");
+  return el("div", { class: "cm-card" }, el("div", { class: "cm-cap" }, `${S("sessionLog")} · ${spotFull(m.spot)} · ${dayOf(b.start)} ${hm(b.start)}–${hm(b.end)}`),
+    el("div", { class: "cm-big" }, el("span", { class: "cm-stars", role: "img", "aria-label": `${b.stars}/5` }, "★".repeat(b.stars) + "☆".repeat(5 - b.stars)),
+      b.note ? [" ", el("span", { dir: "auto" }, `“${b.note}”`)] : null),
+    el("div", { class: "cm-sub" }, `${cond ? `${S("conditionsThen")}: ${cond}` : S("noConditions")} · ${L("board", b.board)}`)); }
+const waves = s => fin(s.hs) == null ? null : `${s.hs.toFixed(1)} m` + (fin(s.tp) == null ? "" : ` @ ${Math.round(s.tp)} s`);
+const wind = s => fin(s.ws) == null ? null : (fin(s.wd) == null ? "" : compass(s.wd) + " ") + `${Math.round(s.ws)} kt`;
+// Every minute the ages move on, in place.
+function tickAges() { for (const t of R.el.msgs.querySelectorAll("time[data-ts]")) t.textContent = ago(+t.dataset.ts); }
+
+// ---- Filters, older pages, sending.
+function pickFilter(id) { R.filter = id; save(KEYS.filter, id); drawFilters(); render({ toEnd: true }); }
+// One page of 50 older messages, when the list reaches its top (or "Load older messages" is tapped). The room allows one a second.
+function olderPage() { if (!R.start && !R.older && sock.ready && R.oldest > 0) R.older = sock.send({ type: "older", before_id: R.oldest }); }
+// The message box: text goes as say, tagged with the filter showing (All means no tag; a reply takes its parent's tag in the room).
+// Anything starting with a slash goes as admin, never as say, and isn't kept for a retry: it may be Bryan's code.
+function sendText() {
+  const box = R.el.input, text = box.value.trim(); if (!text) return;
+  if (!signedIn()) return needSignIn();
+  const admin = /^[/／]/.test(text), f = admin ? { type: "admin", code: text } : { type: "say", text, ...(R.replyTo ? { reply_to: R.replyTo } : R.filter !== "all" ? { spot: R.filter } : {}) };
+  if (!sock.send(f)) return note(R.state === "resting" ? S("resting") : S("offline"), true);
+  box.value = ""; clearNote(); drawSend();
+  if (!admin) { R.pending = { text, reply: R.replyTo }; R.replyTo = null; drawReply(); }
+}
+// A write from the menus; a reader is asked to sign in first.
+function write(frame) { if (!signedIn()) { needSignIn(); return false; } const ok = sock.send(frame); if (!ok) note(S("offline"), true); return ok; }
+function needSignIn() { note(S("signInFirst")); if (R.built && !R.el.barOut.hidden) { R.el.line.focus(); R.el.line.classList.remove("cr-pulse"); void R.el.line.offsetWidth; R.el.line.classList.add("cr-pulse"); } }
+
+// ---- Menus: a small popup list (role menu) by its button, opened by tap, long-press or keyboard. Arrows move, Escape and Tab close it,
+// and focus goes back to its button. An item marked confirm asks for a second tap.
+function openPop(anchor, items, label, main) {
+  closePop(); if (!anchor || !anchor.isConnected) return;
+  const box = el("div", { class: "cr-pop", role: "menu", "aria-label": label });
+  for (const it of items) {
+    const b = el("button", { type: "button", role: it.check == null ? "menuitem" : "menuitemradio", class: it.danger ? "danger" : null, lang: it.lang || null, "data-k": it.key || null,
+      "aria-checked": it.check == null ? null : String(it.check), tabindex: "-1" }, it.label);
+    b.addEventListener("click", guard(e => { e.stopPropagation();
+      if (it.confirm && !b._armed) { b._armed = true; b.textContent = `${it.label} · ${S("tapAgain")}`; return; }
+      closePop(!it.keep); it.act(); }));
+    box.append(b);
+  }
+  box.addEventListener("keydown", guard(e => { const bs = [...box.querySelectorAll("button")], i = bs.indexOf(document.activeElement);
+    const go = k => { e.preventDefault(); bs[(k + bs.length) % bs.length].focus(); };
+    if (e.key === "ArrowDown") go(i + 1); else if (e.key === "ArrowUp") go(i - 1); else if (e.key === "Home") go(0); else if (e.key === "End") go(bs.length - 1);
+    else if (e.key === "Tab") { e.preventDefault(); closePop(true); } }));
+  R.el.room.append(box); R.pop = { box, anchor, main: !!main }; anchor.setAttribute("aria-expanded", "true");
+  const a = anchor.getBoundingClientRect(), w = box.offsetWidth, h = box.offsetHeight, vw = innerWidth, vh = innerHeight;
+  box.style.left = Math.max(8, Math.min(vw - w - 8, a.right - w)) + "px";
+  box.style.top = (a.bottom + 6 + h < vh - 8 ? a.bottom + 6 : Math.max(8, a.top - 6 - h)) + "px";
+  const first = box.querySelector("button"); if (first) first.focus();
+}
+function closePop(refocus) { const p = R.pop; if (!p) return; R.pop = null; p.box.remove(); p.anchor.setAttribute("aria-expanded", "false"); if (refocus && p.anchor.isConnected) p.anchor.focus(); }
+// A message's menu: Reply, 👍 and Report; Delete on your own; Bryan also gets Delete, Ban, Restore (on a hidden one) and Keep as evidence.
+function openMsgMenu(id, anchor) {
+  const m = R.msgs.get(id), n = R.nodes.get(id); if (!m || !n) return;
+  const mine = isMine(m), admin = isAdmin(), it = [];
+  if (!m.hidden) it.push({ label: S("reply"), act: () => { if (!signedIn()) return needSignIn(); R.replyTo = m.id; drawReply(); R.el.input.focus(); } },
+    { label: S("like"), act: () => write({ type: "like", id: m.id }) });
+  if (!mine && !m.hidden && m.role !== "admin") it.push({ label: S("flag"), keep: true, act: () => signedIn() ? flagMenu(m) : needSignIn() });
+  if (mine || admin) it.push({ label: S("del"), danger: true, confirm: true, act: () => write({ type: "delete", id: m.id }) });
+  if (admin && !mine && m.role !== "admin") it.push({ label: S("ban"), danger: true, confirm: true, act: () => write({ type: "ban", msg_id: m.id }) });
+  if (admin && m.hidden) it.push({ label: S("restore"), act: () => write({ type: "restore", id: m.id }) });
+  if (admin) it.push({ label: S("keep"), act: () => write({ type: "keep", id: m.id }) });
+  openPop(anchor || n.querySelector(".cm-more"), it, S("msgMenu"));
+}
+// Report: why, then it goes. The room says nothing back, so nobody learns whether a flag counted.
+function flagMenu(m) { const n = R.nodes.get(m.id);
+  openPop(n && n.querySelector(".cm-more"), CODES.reason.map(r => ({ label: L("reasons", r), act: () => { if (write({ type: "flag", id: m.id, reason: r })) note(S("flagged")); } })), S("flag")); }
+// The main menu: the language (the page's own buttons do the switch), then for a signed-in person Change nickname and what the
+// sign-in adds (My sessions, Download my data, Sign out everywhere, Delete my account); Bryan also gets Lock, Unlock, Hidden messages
+// with how many wait for him, and Unban.
+function openMain() {
+  const it = LANGS.map(([l, name, tag]) => ({ label: name, lang: tag, check: LANG === l, act: () => pickLang(l) }));
+  if (signedIn() && R.me) it.push({ label: S("changeNick"), act: () => openSheet("nick", nickSheet) });
+  if (signedIn()) for (const h of HOOK.menu) it.push({ label: h.label(), act: h.act });
+  if (isAdmin()) it.push({ label: S("lockRoom"), check: R.locked === true, act: () => write({ type: "lock" }) }, { label: S("unlockRoom"), check: R.locked === false, act: () => write({ type: "unlock" }) },
+    { label: S("hiddenMsgs", R.hidden ? R.hidden.count : "…"), key: "hidden", act: () => openSheet("hidden", hiddenSheet) }, { label: S("unban"), act: () => openSheet("unban", unbanSheet) });
+  openPop(R.el.menuBtn, it, S("menu"), true);
+  if (isAdmin()) sock.send({ type: "hidden_list" });
+}
+function pickLang(l) { const b = document.querySelector(`#lang button[data-l="${l}"]`); if (b) b.click(); else if (typeof setLang === "function") setLang(l); }
+
+// ---- Sheets over the room (mockups 3 to 5): a title in the LED face and a body built by build(state). A sheet keeps its state, so
+// relang() can build it again in the new language with what was typed or picked.
+function openSheet(name, buildIt) { closePop(); R.sheet = { name, build: buildIt, state: {}, back: document.activeElement }; drawSheet(); const f = R.el.sheet.querySelector("input, button:not(.cr-x)"); (f || R.el.sheet).focus(); }
+function drawSheet() { const s = R.sheet, E = R.el; if (!R.built) return; E.shade.hidden = !s; if (!s) return;
+  const { title, body } = s.build(s.state); E.sheetTitle.textContent = title; E.sheetBody.replaceChildren(...[body].flat(Infinity).filter(Boolean)); E.sheetX.setAttribute("aria-label", S("close")); }
+function closeSheet() { const s = R.sheet; if (!s) return; R.sheet = null; R.el.shade.hidden = true; R.el.sheetBody.replaceChildren();
+  if (s.back && s.back.isConnected && s.back.getClientRects().length) s.back.focus(); else R.el.room.focus(); }
+// More: the house rules in full, the privacy note in full, and who to contact.
+function moreSheet() {
+  const mail = el("a", { href: "mailto:" + CONTACT.email }, CONTACT.email);
+  return { title: S("rulesHead"), body: [el("ol", { class: "cr-rules" }, S("rules").map(r => el("li", null, r))),
+    el("h3", null, S("privacyHead")), S("privacy", CONTACT).map(([h, p]) => [el("h4", null, h), el("p", null, p)]),
+    el("h3", null, S("contactHead")), el("p", null, CONTACT.name, el("br"), mail)] };
+}
+// Change nickname, once a week: the room says when the next change is due.
+function nickSheet(st) {
+  const box = el("input", { class: "cr-in cr-field", type: "text", maxlength: "20", dir: "auto", autocomplete: "off", "aria-label": S("nickname") });
+  box.value = st.value ?? (R.me ? R.me.nick : "");
+  box.addEventListener("input", guard(() => { st.value = box.value; }));
+  const go = el("button", { type: "button", class: "cr-pill cr-go" }, S("save"));
+  const submit = guard(() => { const nick = box.value.trim(); if (!nick || st.sent) return; st.value = box.value; st.err = null;
+    if (sock.send({ type: "nick", nick })) st.sent = true; else st.err = S("offline"); drawSheet(); });
+  go.addEventListener("click", submit); box.addEventListener("keydown", guard(e => { if (e.key === "Enter" && !e.isComposing) submit(); }));
+  return { title: S("changeNick"), body: [el("label", { class: "cr-lab" }, S("nickname")), box, st.err ? el("p", { class: "cr-err", role: "alert" }, st.err) : null, el("div", { class: "cr-go-row" }, go)] };
+}
+// Bryan's hidden messages, newest first, each with why and what it was flagged for, and Restore or Keep as evidence.
+function hiddenSheet() { const h = R.hidden;
+  const rows = h ? h.messages.map(m => { const flags = CODES.reason.filter(r => count(own(m.flags, r))).map(r => `${L("reasons", r)} ${count(m.flags[r])}`).join(" · ");
+    const act = (label, type) => { const b = el("button", { type: "button", class: "cr-pill" }, S(label)); b.addEventListener("click", guard(() => write({ type, id: m.id }))); return b; };
+    return el("div", { class: "cr-row" }, el("p", null, el("b", { dir: "auto" }, m.nick ?? S("aSurfer")), ` · ${own(S("hiddenWhy"), m.hidden) || ""}${flags ? " · " + flags : ""}`),
+      el("p", { class: "cr-row-t", dir: "auto" }, excerpt(m)), el("div", { class: "cr-go-row" }, act("restore", "restore"), act("keep", "keep"))); }) : [];
+  return { title: S("hiddenMsgs", h ? h.count : "…"), body: rows.length ? rows : el("p", null, h ? S("noHidden") : "…") }; }
+// Bryan's Unban: the banned LINE accounts, by the nickname they had.
+function unbanSheet() { const h = R.hidden;
+  const rows = h ? h.banned.map(b => { const go = el("button", { type: "button", class: "cr-pill" }, S("unban")); go.addEventListener("click", guard(() => write({ type: "unban", sub_hash: b.sub_hash })));
+    return el("div", { class: "cr-row cr-row-1" }, el("b", { dir: "auto" }, b.nick ?? S("aSurfer")), go); }) : [];
+  return { title: S("unban"), body: rows.length ? rows : el("p", null, h ? S("noBanned") : "…") }; }
+
+// ---- Opening and closing. Escape closes the menu, then the sheet, then the room; Tab stays inside whichever is on top.
+function openRoom(o = {}) {
+  build();
+  if (!R.open) {
+    R.open = true; R.opener = document.activeElement; R.el.room.hidden = false; document.documentElement.classList.add("chat-open");
+    R.fresh = true; sock.tries = 0; connect(); clearInterval(R.agesT); R.agesT = setInterval(guard(tickAges), 30e3);
+    drawAll(); render({ toEnd: true }); R.el.room.focus({ preventScroll: true });
+  }
+  if (o.privacy) openSheet("more", moreSheet);
+  if (o.signin && HOOK.signin) HOOK.signin(o.signin);
+  if (o.sheet && HOOK.sheet) HOOK.sheet(o.sheet, isSpot(o.spot) ? o.spot : null);
+}
+function closeRoom() {
+  if (!R.open) return;
+  markSeen(); R.open = false; stopSocket(); clearTimeout(sock.awayT); clearInterval(R.agesT); closePop(); closeSheet();
+  R.el.room.hidden = true; document.documentElement.classList.remove("chat-open"); setState("idle"); drawFab();
+  const back = R.opener; R.opener = null; if (back && back.isConnected && back.getClientRects().length) back.focus();
+}
+addEventListener("keydown", guard(e => {
+  if (!R.open) return;
+  if (e.key === "Escape" && !e.isComposing) { e.preventDefault(); e.stopImmediatePropagation(); if (R.pop) closePop(true); else if (R.sheet) closeSheet(); else closeRoom(); return; }
+  if (e.key !== "Tab" || R.pop) return;
+  const layer = R.sheet ? R.el.sheet : R.el.room, all = [...layer.querySelectorAll("button, input, a[href], textarea, select")].filter(x => !x.disabled && x.getClientRects().length);
+  if (!all.length) return;
+  const i = all.indexOf(document.activeElement);
+  if (e.shiftKey && i <= 0) { e.preventDefault(); all[all.length - 1].focus(); } else if (!e.shiftKey && (i === -1 || i === all.length - 1)) { e.preventDefault(); all[0].focus(); }
+}), true);
+// Back in the foreground: is the socket still there? In the background for 5 minutes: it closes until the page is back. The network
+// going away drops it at once ("Chat is offline · Retry"); the network coming back, or changing, opens a new one, since the old one rarely
+// survives a change of network and the browser can take minutes to notice.
+document.addEventListener("visibilitychange", guard(() => {
+  if (!R.open) return;
+  clearTimeout(sock.awayT);
+  if (document.visibilityState === "hidden") sock.awayT = setTimeout(guard(() => { if (document.visibilityState === "hidden" && R.open) { stopSocket(); setState("away"); } }), AWAY_MS);
+  else { check(); markSeen(); }
+}));
+addEventListener("offline", guard(() => { if (R.open && sock.ws) { stopSocket(); lost(1006); } }));
+addEventListener("online", guard(() => { if (R.open && R.state !== "update") { sock.tries = 0; connect(); } }));
+
 // Every way into the room: the CHAT button, "Post a report" and a ?chat link. A link can land on the Map view; the room opens over the
 // Forecast view, so closing it shows the forecast.
 function enter(o) {
@@ -282,7 +844,10 @@ function enter(o) {
 //   header change never moves it. In 中文 and 日本語 its word takes the body font, as "Pick your day" does (VT323 has no CJK).
 // - .thru lets touches through it while a finger drags the day picker or the day chart (see below).
 // - html.tw .wrap: in Taiwan the page ends 84 px lower, so the button never covers the end of the credits.
-// - .chatroom: the room covers everything, the full-screen map included.
+// - .chatroom: the room covers everything, the full-screen map included, and the page behind it doesn't scroll. Its title, its ✕ and
+//   the picked filter are in the page's LED amber (--led-amb, darker in the light theme); + Report is the strip's amber pill.
+// - Nicknames and message text are isolated from the line around them, and break anywhere when they have to, so no message can push the
+//   room sideways or turn the name and age around.
 const CSS = `
 #nowReports{display:grid;gap:9px;padding-top:16px;border-top:1px dashed var(--line)}
 #nowReports .rp-hd{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
@@ -307,14 +872,97 @@ html:not([lang="en"]) .chatfab b{font:700 16px/1 var(--body);letter-spacing:.04e
 .chatfab-n{font:600 12.5px/1 var(--body);color:#fff3dc;white-space:nowrap}
 .chatfab-dot{flex:none;width:9px;height:9px;border-radius:50%;background:#ff3d7f;box-shadow:0 0 8px #ff3d7f}
 html.tw .wrap{padding-bottom:calc(84px + env(safe-area-inset-bottom))}
-.chatroom{position:fixed;inset:0;z-index:110}
+html.chat-open,html.chat-open body{overflow:hidden}
+.chatroom{position:fixed;inset:0;z-index:110;display:flex;flex-direction:column;background:var(--bg);color:var(--ink);font:15px/1.45 var(--body);overscroll-behavior:contain;outline:none;-webkit-text-size-adjust:100%}
+.chatroom[hidden],.chatroom [hidden]{display:none!important}
+.chatroom button{font-family:var(--body);-webkit-tap-highlight-color:transparent}
+.chatroom>.cr-hd,.chatroom>.cr-filters,.chatroom>.cr-status,.chatroom>.cr-list,.chatroom>.cr-foot{width:100%;max-width:760px;margin-inline:auto}
+.cr-hd{flex:none;display:flex;align-items:center;gap:10px;padding:calc(12px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 12px calc(16px + env(safe-area-inset-left));border-bottom:1px solid var(--line)}
+.cr-title{margin:0;flex:none;font:400 31px/1 VT323,var(--mono);letter-spacing:.07em;color:var(--led-amb);text-shadow:0 0 calc(10px*var(--led-glow)) rgba(255,170,40,.65);white-space:nowrap}
+.cr-sub{flex:1;min-width:0;padding-top:5px;font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cr-ic{flex:none;width:36px;height:36px;padding:0;display:grid;place-items:center;border-radius:50%;border:1.5px solid var(--line);background:none;color:var(--muted);font-size:16px;line-height:1;cursor:pointer}
+.cr-x{border-color:var(--led-amb);color:var(--led-amb);font-weight:700}
+.cr-filters{flex:none;display:flex;gap:8px;padding:10px 16px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid var(--line)}
+.cr-filters::-webkit-scrollbar{display:none}
+.cr-filters button{flex:none;padding:4px 13px;border-radius:99px;border:1px solid var(--line);background:none;color:var(--muted);font-size:13px;font-weight:500;line-height:1.35;white-space:nowrap;cursor:pointer}
+.cr-filters button[aria-pressed="true"]{border:1.5px solid var(--led-amb);padding:3.5px 12.5px;color:var(--led-amb)}
+.cr-status{flex:none;padding:8px 16px;text-align:center;font-size:13.5px;background:var(--panel);border-bottom:1px solid var(--line)}
+.cr-link{padding:0;border:0;background:none;color:var(--led-amb);font:inherit;font-weight:600;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.cr-list{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;overflow-anchor:none;padding:0 16px 10px}
+.cr-pin{position:sticky;top:0;z-index:1;margin:0 -16px 4px;padding:10px 16px 6px;background:var(--bg)}
+.cr-pin p{margin:0;padding:9px 13px;border-radius:14px;background:var(--panel);font-size:13px;line-height:1.45;color:var(--muted)}
+.cr-older{display:block;margin:4px auto 8px;padding:5px 14px;border-radius:99px;border:1px solid var(--line);background:none;color:var(--muted);font-size:12.5px;cursor:pointer}
+.cr-empty{margin:28px 0;text-align:center;font-size:13.5px;color:var(--muted)}
+.cm{padding:7px 0;min-width:0;-webkit-touch-callout:none}
+.cm-hd{display:flex;align-items:baseline;gap:8px;min-width:0;direction:ltr}
+.cm-nick{min-width:0;font-size:14px;font-weight:700;unicode-bidi:isolate;overflow-wrap:anywhere}
+.cm-badge{flex:none;align-self:center;padding:1px 7px;border-radius:99px;background:#ffb347;color:#140e05;font-size:11px;font-weight:700;line-height:1.5;letter-spacing:.02em}
+.cm-meta{flex:none;font-size:12px;color:var(--muted);white-space:nowrap;unicode-bidi:isolate}
+.cm-more{flex:none;margin-left:auto;align-self:center;width:30px;height:24px;padding:0;border:0;border-radius:8px;background:none;color:var(--muted);font-size:17px;line-height:1;cursor:pointer}
+.cm-more[aria-expanded="true"],.cm-more:hover{background:var(--panel)}
+.cm-text{margin:2px 0 0;font-size:15px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;unicode-bidi:isolate}
+.cm-quote{margin:2px 0 0;font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cm-quote b,.cm-quote span{unicode-bidi:isolate}
+.cm-card{margin-top:5px;padding:10px 13px 11px;border:1px solid var(--line);border-radius:14px;background:var(--panel);min-width:0}
+.cm-cap{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);overflow-wrap:anywhere}
+.cm-big{margin-top:3px;font-size:16px;font-weight:600;line-height:1.3;overflow-wrap:anywhere;unicode-bidi:isolate}
+.cm-big span{unicode-bidi:isolate}
+.cm-sub{margin-top:4px;font-size:12.5px;line-height:1.4;color:var(--muted);overflow-wrap:anywhere}
+.cm-foot{margin:2px 0 0;font-size:12.5px;color:var(--muted)}
+.cm-why{margin:2px 0 0;font-size:12px;font-weight:600;color:var(--bad)}
+.cm-hidden>:not(.cm-hd):not(.cm-why){opacity:.55}
+.cr-foot{flex:none;padding:10px calc(16px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));border-top:1px solid var(--line);background:var(--bg)}
+.cr-reply{display:flex;align-items:center;gap:6px;margin:0 0 8px;font-size:13px;color:var(--muted);min-width:0}
+.cr-reply span:nth-child(2){flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;unicode-bidi:isolate}
+.cr-reply .cr-ic{width:26px;height:26px;font-size:12px}
+.cr-note{margin:0 0 8px;font-size:13px;line-height:1.4;color:var(--ink)}
+.cr-note.err{color:var(--bad)}
+.cr-bar{display:flex;align-items:center;gap:8px;min-width:0}
+.cr-pill{flex:none;height:38px;padding:0 14px;border-radius:99px;border:1.5px solid var(--line);background:none;color:var(--ink);font-size:13.5px;font-weight:600;line-height:1;white-space:nowrap;cursor:pointer}
+.cr-rep{border-color:#ffb347;background:#0a0f12;color:#ffb347;text-shadow:0 0 6px rgba(255,140,0,.45)}
+.cr-send{border-color:var(--led-amb);color:var(--led-amb)}
+.cr-in{flex:1;min-width:0;height:42px;padding:0 16px;border-radius:99px;border:1.5px solid var(--line);background:var(--panel);color:var(--ink);font:15px var(--body);outline-offset:1px}
+.cr-in::placeholder{color:var(--muted)}
+.cr-line{flex:1;display:flex;align-items:center;height:46px;padding:0;border:0;border-radius:10px;background:#06C755;color:#fff;font-size:15px;font-weight:700;cursor:pointer}
+.cr-line:hover{background:#05b34c}.cr-line:active{background:#048b3b}
+.cr-line-ico{flex:none;width:30px;height:30px;margin:0 8px 0 10px}
+.cr-line-sep{flex:none;align-self:stretch;width:1px;margin:8px 0;background:rgba(0,0,0,.12)}
+.cr-line-w{flex:1;padding:0 12px;text-align:center}
+.cr-pulse{animation:crpulse .9s 2}
+@keyframes crpulse{50%{box-shadow:0 0 0 5px rgba(6,199,85,.35)}}
+.cr-pop{position:fixed;z-index:5;min-width:184px;max-width:270px;padding:6px;border-radius:14px;border:1px solid var(--line);background:var(--panel);box-shadow:0 12px 32px rgba(0,0,0,.35)}
+.cr-pop button{display:block;width:100%;padding:9px 12px;border:0;border-radius:9px;background:none;color:var(--ink);font-size:14.5px;font-weight:500;text-align:left;cursor:pointer}
+.cr-pop button:hover,.cr-pop button:focus{background:var(--line);outline:none}
+.cr-pop button:focus-visible{outline:2px solid var(--led-amb);outline-offset:-2px}
+.cr-pop [aria-checked="true"]::after{content:"  ✓";color:var(--led-amb)}
+.cr-pop .danger{color:var(--bad)}
+.cr-shade{position:absolute;inset:0;z-index:4;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.5)}
+.cr-sheet{width:100%;max-width:760px;max-height:88%;overflow-y:auto;overscroll-behavior:contain;padding:20px calc(16px + env(safe-area-inset-right)) calc(18px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));border-radius:24px 24px 0 0;border:1px solid var(--line);border-bottom:0;background:var(--panel);outline:none}
+.cr-sheet-hd{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.cr-sheet-hd h2{flex:1;margin:0;font:400 31px/1 VT323,var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--led-amb);text-shadow:0 0 calc(10px*var(--led-glow)) rgba(255,170,40,.65)}
+html:not([lang="en"]) .cr-sheet-hd h2{font:700 21px/1.25 var(--body);letter-spacing:.02em}
+.cr-sheet-b{font-size:14px;line-height:1.5}
+.cr-sheet-b h3{margin:16px 0 4px;font-size:15px}
+.cr-sheet-b h4{margin:10px 0 1px;font-size:13px;color:var(--muted);font-weight:600}
+.cr-sheet-b p{margin:0 0 6px;overflow-wrap:anywhere}
+.cr-sheet-b a{color:var(--sea)}
+.cr-rules{margin:0;padding-left:20px}
+.cr-lab{display:block;margin-bottom:6px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.cr-field{width:100%;flex:none;background:var(--bg)}
+.cr-err{margin:8px 0 0;color:var(--bad);font-size:13px}
+.cr-go-row{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+.cr-go{border:0;background:#ffb347;color:#140e05;padding:0 22px}
+.cr-row{padding:10px 0;border-top:1px solid var(--line)}
+.cr-row-1{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.cr-row-t{color:var(--muted)}
+.cr-row .cr-go-row{margin-top:6px}
 `;
 
 // ---- The page's hooks (template.html). boot() calls spot() for each spot it shows, which is also on every language change and every
 // return from the map, so the spot already shown is left alone; setLang() calls relang() to redraw in the new language, asking nothing.
 window.CHAT = {
   spot: guard(id => { if (id === shown) return; shown = id; data = null; if (inTaiwan(id)) ask(id); else asked++; draw(); }),
-  relang: guard(() => draw()),
+  relang: guard(() => { draw(); drawAll(); }),
 };
 if (TEST) Object.assign(window.CHAT, { _opened: TEST, _strings: STR });
 
@@ -327,16 +975,18 @@ for (const t of ["touchend", "touchcancel"]) addEventListener(t, guard(e => { if
 document.addEventListener("visibilitychange", guard(() => {
   if (document.visibilityState === "visible" && shown && inTaiwan(shown) && Date.now() - askedAt >= 60e3) ask(shown); }));
 
-// ---- Start-up. A sign-in back from LINE (?chat#c=<code>&p=<pin>, or ?chat#e=<error>) and ?chat come out of the address at once, so the
-// code never stays in it or in the history. boot() ran before this script loaded, so the spot already up is drawn here. Back from LINE,
-// the page goes back to the spot it was on when it left; then the room opens.
+// ---- Start-up. A sign-in back from LINE (?chat#c=<code>&p=<pin>, or ?chat#e=<error>), ?chat and ?chat=privacy (the credits' Privacy
+// link) come out of the address at once, so the code never stays in it or in the history. boot() ran before this script loaded, so the
+// spot already up is drawn here. Back from LINE, the page goes back to the spot it was on when it left; then the room opens. The credits'
+// chat line (#chatCredits) shows now that the chat is on.
 const q = new URLSearchParams(location.search), f = new URLSearchParams(location.hash.slice(1));
 const signin = f.has("e") ? { error: f.get("e") } : f.has("c") ? { code: f.get("c"), pin: f.get("p") } : null, opening = q.has("chat") || !!signin;
 if (opening) { try { history.replaceState(null, "", location.pathname + "#" + CUR); } catch (e) { location.hash = CUR; } }
 document.head.append(el("style", null, CSS));
 document.body.append(fab);
-if (signin) { const back = load(KEYS.ret, true); save(KEYS.ret, null, true); if (back && ALL.spots[back] && back !== CUR) switchSpot(back); }
+const credits = document.getElementById("chatCredits"); if (credits) credits.hidden = false;
+if (signin) { const back = load(KEYS.ret, true); save(KEYS.ret, null, true); if (back && own(ALL.spots, back) && inTaiwan(back) && back !== CUR) switchSpot(back); }
 window.CHAT.spot(CUR);
-if (opening) enter(signin ? { signin } : {});
+if (opening) enter(signin ? { signin } : q.get("chat") === "privacy" ? { privacy: true } : {});
 
 } catch (e) { try { console.warn("chat:", e); } catch (e2) {} } })();

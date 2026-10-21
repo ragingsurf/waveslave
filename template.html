@@ -81,17 +81,19 @@ html.world .brand .w::after{opacity:1}
 html.igniting header .brand .w::after{animation:flickOn .9s both}
 html.dousing header .brand .w::after{animation:flickOff .4s both}
 .where{color:var(--muted);font-size:13px}
-/* Language (Bryan, Oct 21): one small button pinned to the top right corner, naming the page's language; a tap drops down English, 中文 and
-   日本語 to switch to, the current one lit. The page already follows the phone's language, so most visitors never need it. */
+/* The top right corner (Bryan, Oct 21): the language button, and under it how fresh the data is, both right-aligned beside the logo.
+   Language: one small button naming the page's language; a tap drops down English, 中文 and 日本語 to switch to, the current one lit.
+   The page already follows the phone's language, so most visitors never need it. */
 header{position:relative}
-.langwrap{position:absolute;top:0;right:0;z-index:20}
+.hdtools{position:absolute;top:0;right:0;z-index:20;display:flex;flex-direction:column;align-items:flex-end;gap:12px}
+.langwrap{position:relative}
 .langbtn{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:99px;background:var(--panel);border:1px solid var(--line);color:var(--muted);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP","Microsoft JhengHei",sans-serif;white-space:nowrap;cursor:pointer}
 .lang{position:absolute;top:calc(100% + 6px);right:0;display:flex;flex-direction:column;gap:2px;min-width:128px;padding:6px;border-radius:14px;background:var(--panel);border:1px solid var(--line);box-shadow:0 14px 34px rgba(0,0,0,.45);transition:opacity .16s,transform .16s,visibility .16s}
 .langwrap:not(.open) .lang{visibility:hidden;opacity:0;transform:translateY(-4px);pointer-events:none}
 .lang button{border:0;background:none;color:var(--ink);font:600 14px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP","Microsoft JhengHei",sans-serif;text-align:left;padding:9px 12px;border-radius:99px;cursor:pointer;position:relative;z-index:1;transition:color .36s,text-shadow .36s}
 .lang button[aria-pressed="true"]{color:#ffb347;text-shadow:0 0 6px rgba(255,140,0,.7)}
-/* How fresh the data is (Bryan, Oct 21): a quiet line at the end of the Forecast / Map row, "Updated 18:44" by a green light, with the age
-   once the data is an hour old; past 12 hours the day too, all in amber. */
+/* How fresh the data is (Bryan, Oct 21): a quiet line under the language button, "Updated 18:44" by a green light; from an hour old the
+   age instead, "Updated 3 h ago", short enough to sit beside the logo on a small phone; past 12 hours in amber. */
 .fresh{font-size:12px;color:var(--muted);white-space:nowrap}
 .fresh::before{content:"";display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;background:var(--good);box-shadow:0 0 6px var(--good);vertical-align:1px}
 .fresh.stale{color:var(--fair)}
@@ -258,9 +260,6 @@ svg text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
    Forecast / Map. The space above the countries is their slot's own margin, not a gap, so it opens and closes with the slot (setWorld). */
 .ctl{display:grid;grid-template-columns:minmax(0,1fr)}
 .ctl .picker{margin-top:8px}
-/* Forecast / Map with the freshness line at the far end of its row; where both don't fit (a long line, when the data is old), the line drops
-   under the switch. */
-.tabrow{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 10px}
 /* The country row's slot: it clips the row while it opens and closes. */
 .ctryslot{overflow:hidden;margin-top:10px}
 .ctry{position:relative;display:flex;width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none;overscroll-behavior-x:contain;gap:2px;padding:3px;margin:0;border-radius:99px;background:var(--panel);border:1px solid var(--line)}
@@ -476,11 +475,13 @@ html{overscroll-behavior-y:none}
     <div class="brandbox">
       <h1 class="brand" aria-label="WaveSlave"><span class="w">W</span>aveSlave</h1>
     </div>
+    <div class="hdtools">
     <div class="langwrap" id="langWrap"><button class="langbtn" id="langBtn" aria-haspopup="true" aria-expanded="false" aria-controls="lang" aria-label="Language / 語言 / 言語"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 2.6 15.4 0 18M12 3c-2.6 2.6-2.6 15.4 0 18"/></svg><span id="langName">EN</span></button>
     <div class="lang" id="lang" role="group" aria-label="Language / 語言 / 言語"><button data-l="en" aria-pressed="true" lang="en">English</button><button data-l="zh" aria-pressed="false" lang="zh-Hant-TW">中文</button><button data-l="ja" aria-pressed="false" lang="ja">日本語</button></div></div>
+    <span class="fresh" id="fresh">Data snapshot</span></div>
   </header>
   <div class="ctl">
-    <div class="tabrow"><nav class="tabs" role="tablist" aria-label="View"><button role="tab" data-v="fc" aria-selected="true" data-zh="預報" data-ja="予報">Forecast</button><button role="tab" data-v="ws" aria-selected="false" data-zh="地圖" data-ja="地図">Map</button></nav><span class="fresh" id="fresh">Data snapshot</span></div>
+    <nav class="tabs" role="tablist" aria-label="View"><button role="tab" data-v="fc" aria-selected="true" data-zh="預報" data-ja="予報">Forecast</button><button role="tab" data-v="ws" aria-selected="false" data-zh="地圖" data-ja="地図">Map</button></nav>
     <div class="ctryslot" id="ctrySlot"><div class="ctry" id="ctry" role="group" aria-label="Country"><button data-c="tw" data-zh="台灣" data-ja="台湾">Taiwan</button><button data-c="jp" data-zh="日本" data-ja="日本">Japan</button><button data-c="kr" data-zh="韓國" data-ja="韓国">Korea</button><button data-c="hk" data-zh="香港" data-ja="香港">Hong Kong</button><button data-c="hn" data-zh="海南" data-ja="海南島">Hainan</button><button data-c="vn" data-zh="越南" data-ja="ベトナム">Vietnam</button><button data-c="ph" data-zh="菲律賓" data-ja="フィリピン">Philippines</button><button data-c="id" data-zh="印尼" data-ja="インドネシア">Indonesia</button><button data-c="pg" data-zh="巴布亞紐幾內亞" data-ja="パプアニューギニア">Papua New Guinea</button><button data-c="ca" data-zh="加州" data-ja="カリフォルニア">California</button><button data-c="bj" data-zh="下加州" data-ja="バハ・カリフォルニア">Baja</button><button data-c="hi" data-zh="夏威夷" data-ja="ハワイ">Hawaii</button><button data-c="au" data-zh="澳洲" data-ja="オーストラリア">Australia</button><button data-c="nz" data-zh="紐西蘭" data-ja="ニュージーランド">New Zealand</button><button data-c="vu" data-zh="萬那杜" data-ja="バヌアツ">Vanuatu</button><button data-c="pi" data-zh="南太平洋" data-ja="南太平洋">South Pacific</button><button data-c="mi" data-zh="密克羅尼西亞" data-ja="ミクロネシア">Micronesia</button><button data-c="nw" data-zh="太平洋西北" data-ja="太平洋岸北西部">Pacific NW</button><button data-c="ak" data-zh="阿拉斯加" data-ja="アラスカ">Alaska</button></div></div>
     <nav class="picker" id="picker" aria-label="Choose a spot" data-zh-aria-label="選擇浪點" data-ja-aria-label="ポイントを選ぶ"></nav>
   </div>
@@ -1786,14 +1787,14 @@ hours.forEach(x => { x.w = windAt(x.t); const b = x.t<=nowMs ? bObs.get(x.t) : n
 const hourByT = new Map(hours.map(x=>[x.t,x]));
 const isDay = (t,key) => { const s=DATA.sun[key]; if(!s) return true; const hm=hhmm(t); return hm>=s.first && hm<=s.last; };
 
-// ---- freshness: "Updated 18:44"; from an hour old it adds the age, and past 12 hours the day too, in amber (stale).
+// ---- freshness: "Updated 18:44"; from an hour old the age instead, "Updated 3 h ago", in amber past 12 hours (stale).
 const updated = Date.parse(DATA.updated);
 (() => { const el=document.getElementById("fresh"); const ageH=(nowMs-updated)/36e5, stale=ageH>12;
-  const when = ageH<1 ? "" : " · "+(isZh() ? (ageH<48 ? Math.round(ageH)+" 小時前" : Math.round(ageH/24)+" 天前")
+  const ago = isZh() ? (ageH<48 ? Math.round(ageH)+" 小時前" : Math.round(ageH/24)+" 天前")
     : isJa() ? (ageH<48 ? Math.round(ageH)+" 時間前" : Math.round(ageH/24)+" 日前")
-    : ageH<48 ? Math.round(ageH)+" h ago" : Math.round(ageH/24)+" days ago");
-  const at = (stale ? dayName(dayKey(updated),todayKey).replace(/^(Today|Tomorrow|Yesterday)$/,m=>m.toLowerCase())+" " : "")+hhmm(updated);
-  el.textContent = isZh() ? "更新於 "+at+when : isJa() ? at+" 更新"+when : "Updated "+at+when;
+    : ageH<48 ? Math.round(ageH)+" h ago" : Math.round(ageH/24)+" days ago";
+  el.textContent = ageH<1 ? (isZh() ? "更新於 "+hhmm(updated) : isJa() ? hhmm(updated)+" 更新" : "Updated "+hhmm(updated))
+    : isZh() ? ago+"更新" : isJa() ? ago+"に更新" : "Updated "+ago;
   el.classList.toggle("stale", stale); })();
 
 // A surfboard standing in a w x h box, nose at the top. Shape numbers are in board widths (x, -.5 to .5) and lengths (y, 0 nose to 1 tail):

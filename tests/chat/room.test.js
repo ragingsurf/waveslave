@@ -212,12 +212,14 @@ const CHECKS = {
     if ((await articles(page)).length !== want.length) throw new Error("All doesn't show everything again");
   },
   // Text from the network goes in as text: a message "<img src=x onerror=alert(1)>" posted from a second, signed-in page shows as those
-  // characters on both pages, and neither gets an img or a dialog. The seeded nickname, message and conditions value with HTML in them
-  // draw no img either.
+  // characters on both pages, and neither gets an img or a dialog; a screen reader on the other page hears it as those characters too.
+  // The seeded nickname, message and conditions value with HTML in them draw no img either.
   async escaping(open) {
     const reader = await open({}), poster = await open({ as: "p1" }), x = "<img src=x onerror=alert(1)>";
     await openRoom(reader); await openRoom(poster);
     await say(poster, x); await textArticle(reader, x);
+    const heard = await reader.evaluate(() => document.querySelector(".chatroom .cr-sr")?.textContent ?? null);
+    if (heard !== `Poster1: ${x}`) throw new Error(`a screen reader hears ${JSON.stringify(heard)} of the new message`);
     for (const p of [reader, poster]) {
       const n = await p.evaluate(() => document.querySelectorAll(".chatroom img, .chatroom b b, .chatroom script").length);
       if (n || p.dialogs.length) throw new Error(`${n} stray elements and ${p.dialogs.length} dialogs (${p.dialogs.join(", ")})`);
@@ -309,7 +311,8 @@ const CHECKS = {
   },
   // Review Focus 5: with text typed in the box and the room scrolled up, switching to 中文 from the room's menu redraws the words and keeps
   // the text and the place in the list. An open sheet stays open through a switch, in the new language. The menu offers the languages
-  // the page shows a button for: English and 中文, since 日本語 is off on the site (#92).
+  // the page shows a button for: English and 中文, since 日本語 is off on the site (#92). The list is drawn whole for a switch, so it isn't
+  // read out (aria-live off), and the line a screen reader hears for new messages says nothing new.
   async language(open) {
     const page = await open({ as: "p5" }); await openRoom(page);
     const draft = "draft 草稿 🏄"; await page.fill(".chatroom .cr-in", draft);
@@ -317,13 +320,16 @@ const CHECKS = {
     await page.waitForTimeout(200);
     const place = () => page.evaluate(() => { const l = document.querySelector(".chatroom .cr-list"), top = l.getBoundingClientRect().top + document.querySelector(".chatroom .cr-pin").offsetHeight;
       const a = [...l.querySelectorAll("article")].find(a => a.getBoundingClientRect().bottom > top); return { id: a.dataset.id, y: Math.round(a.getBoundingClientRect().top), top: l.scrollTop }; });
-    const was = await place();
+    const was = await place(), aloud = () => page.evaluate(() => ({ live: document.querySelector(".chatroom .cr-msgs").getAttribute("aria-live"), heard: document.querySelector(".chatroom .cr-sr")?.textContent ?? null }));
+    const heard = await aloud();
     await page.click(".chatroom .cr-menu");
     const langs = await page.evaluate(() => ({ items: [...document.querySelectorAll(".chatroom .cr-pop [role=menuitemradio]")].map(b => b.textContent), ja: document.querySelector('#lang button[data-l="ja"]')?.hidden }));
     if (langs.ja !== true) throw new Error("the page shows its 日本語 button (the check itself is off)");
     if (!eq(langs.items, ["English", "中文"])) throw new Error(`the menu offers ${JSON.stringify(langs.items)}, want English and 中文 as the page does`);
     await page.click('.chatroom .cr-pop [lang="zh-Hant-TW"]');
     await page.waitForFunction(() => document.querySelector('.chatroom .cr-filters [data-f="all"]').textContent === "全部");
+    const now0 = await aloud();
+    if (now0.live !== "off" || heard.heard !== "" || now0.heard !== "") throw new Error(`for a switch the list is read out (${JSON.stringify(heard)} before, ${JSON.stringify(now0)} after)`);
     const now = await place(), s = await page.evaluate(() => ({ value: document.querySelector(".chatroom .cr-in").value, ph: document.querySelector(".chatroom .cr-in").placeholder,
       sub: document.querySelector(".chatroom .cr-sub").textContent, pin: document.querySelector(".chatroom .cr-pin").textContent, open: document.documentElement.classList.contains("chat-open"),
       metas: [...document.querySelectorAll(".chatroom .cm-meta")].map(m => m.textContent).join("|") }));
@@ -360,8 +366,9 @@ const CHECKS = {
     await errSays("Once a week: you can change it again in 7 days").catch(async () => { throw new Error(`a second change: ${JSON.stringify(await sheet())}`); });
   },
   // The ⋯ button opens Reply, 👍 and Report on someone else's message, by keyboard too: Enter opens it on the first item, the arrows move,
-  // Escape shuts it and goes back to ⋯ with the room still open. Reply quotes the parent; your own message's menu has Delete, and once
-  // it's deleted the reply shows "Message deleted" on the other page, like the seeded reply to a deleted message.
+  // Escape shuts it and goes back to ⋯ with the room still open, and ⋯ keeps the focus when the 👍 that went from there redraws the
+  // message. Reply quotes the parent; your own message's menu has Delete, and once it's deleted the reply shows "Message deleted" on the
+  // other page, like the seeded reply to a deleted message.
   async messageMenu(open) {
     const a = await open({ as: "p3" }), b = await open({ as: "p4" });
     await openRoom(a); await openRoom(b);
@@ -379,7 +386,8 @@ const CHECKS = {
     if (!/^article \d+ cm-more$/.test(await focused(b))) throw new Error(`after Escape the focus is on ${await focused(b)}`);
     // 👍 by keyboard: Enter, ArrowDown, Enter; everyone sees the count.
     await b.keyboard.press("Enter"); await b.keyboard.press("ArrowDown"); await b.keyboard.press("Enter");
-    await a.waitForFunction(id => /👍 1/.test(document.querySelector(`.chatroom article[data-id="${id}"] .cm-foot`)?.textContent || ""), tips);
+    for (const p of [a, b]) await p.waitForFunction(id => /👍 1/.test(document.querySelector(`.chatroom article[data-id="${id}"] .cm-foot`)?.textContent || ""), tips);
+    if (await focused(b) !== `article ${tips} cm-more`) throw new Error(`once the 👍 is in, the focus is on ${JSON.stringify((await focused(b) || "").slice(0, 60))}`);
     // A reply to a live message, then its parent deleted by its own poster.
     await say(a, "Parent to delete"); await textArticle(b, "Parent to delete");
     const parent = await idOf(b, "Parent to delete");

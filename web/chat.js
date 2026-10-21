@@ -489,7 +489,7 @@ const ON = {
     R.msgs.set(m.id, m); R.gone.delete(m.id);
     // Only the echo of a text still waiting takes it off the list: another of ours (sent earlier, or on another screen) doesn't.
     const mine = isMine(m), p = mine && m.kind === "text" ? R.pending.findIndex(x => x.sent === m.body.text) : -1; if (p >= 0) R.pending.splice(p, 1);
-    settle(); render({ toEnd: mine }); markSeen();
+    settle(); render({ toEnd: mine }); markSeen(); if (!mine) announce(m);
     if (HOOK.msg) HOOK.msg(m, mine);
   },
   // Likes changed, or a message went (deleted, or hidden for everyone but Bryan).
@@ -607,7 +607,10 @@ function build() {
   E.pinText = el("span"); E.pinMore = btn("cr-link", null, "", () => openSheet("more", moreSheet));
   E.pin = el("div", { class: "cr-pin" }, el("p", null, "📌 ", E.pinText, " ", E.pinMore));
   E.olderBtn = btn("cr-older", null, "", () => olderPage());
-  E.msgs = el("div", { class: "cr-msgs", role: "log", "aria-live": "polite" });
+  // The list itself isn't read out as it changes: it is drawn whole for each history and each language switch. A screen reader hears
+  // each new message from someone else through E.heard instead (announce()).
+  E.msgs = el("div", { class: "cr-msgs", role: "log", "aria-live": "off" });
+  E.heard = el("p", { class: "cr-sr", "aria-live": "polite" });
   E.empty = el("p", { class: "cr-empty" });
   E.list = el("div", { class: "cr-list" }, E.pin, E.olderBtn, E.msgs, E.empty);
   E.replyText = el("span", { dir: "auto" });
@@ -628,7 +631,7 @@ function build() {
   E.pinIn.addEventListener("keydown", guard(e => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); pinEntered(); } }));
   E.pinIn.addEventListener("input", guard(() => { if (R.pinErr) { R.pinErr = null; drawBar(); } }));
   E.pinBox = el("div", { class: "cr-pinbox" }, E.pinLab, el("div", { class: "cr-bar" }, E.pinIn, E.pinGo), E.pinErr);
-  E.foot = el("div", { class: "cr-foot" }, E.reply, E.note, E.barIn, E.pinBox, E.barOut);
+  E.foot = el("div", { class: "cr-foot" }, E.heard, E.reply, E.note, E.barIn, E.pinBox, E.barOut);
   E.sheetTitle = el("h2", { id: "chatSheetTitle" }); E.sheetX = btn("cr-ic cr-x", null, "✕", () => closeSheet());
   E.sheetBody = el("div", { class: "cr-sheet-b" });
   E.sheet = el("div", { class: "cr-sheet", role: "dialog", "aria-modal": "true", "aria-labelledby": "chatSheetTitle", tabindex: "-1" }, el("div", { class: "cr-sheet-hd" }, E.sheetTitle, E.sheetX), E.sheetBody);
@@ -692,8 +695,9 @@ function note(text, err) { if (!R.built) return; const n = R.el.note; clearTimeo
   n.textContent = text; n.classList.toggle("err", !!err); n.hidden = false; if (!err) R.noteT = setTimeout(guard(clearNote), 5e3); }
 function clearNote() { clearTimeout(R.noteT); R.el.note.hidden = true; R.el.note.textContent = ""; }
 
-// The messages for the filter, oldest first, drawn into the list. Articles that draw the same are kept, so a focused ⋯ stays focused,
-// and the reading place holds: the list stays at the bottom when it was there, or else keeps the top message where it was.
+// The messages for the filter, oldest first, drawn into the list. Articles that draw the same are kept, and one drawn again takes the
+// focus with it when it had it, so a focused ⋯ stays focused. The reading place holds: the list stays at the bottom when it was there,
+// or else keeps the top message where it was.
 function render(o = {}) {
   if (!R.built) return;
   const list = R.el.list, box = R.el.msgs, end = o.toEnd || list.scrollHeight - list.scrollTop - list.clientHeight < 80, anchor = end ? null : topMessage();
@@ -703,7 +707,8 @@ function render(o = {}) {
   for (const m of want) {
     const sig = JSON.stringify([LANG, m, parentOf(m), isMine(m), isAdmin()]);
     let n = R.nodes.get(m.id);
-    if (n && n._sig !== sig) { const k = msgEl(m); n.replaceWith(k); n = k; R.nodes.set(m.id, n); if (at && !at.isConnected) at = n; }
+    if (n && n._sig !== sig) { const k = msgEl(m), had = n.contains(document.activeElement); n.replaceWith(k); if (had) k.querySelector(".cm-more").focus({ preventScroll: true });
+      n = k; R.nodes.set(m.id, n); if (at && !at.isConnected) at = n; }
     if (!n) { n = msgEl(m); R.nodes.set(m.id, n); box.insertBefore(n, at); }
     n._sig = sig; at = n.nextElementSibling;
   }
@@ -754,6 +759,8 @@ function condLine(c) { if (!c || typeof c !== "object") return null;
   return [[waves(c), wind(c)].filter(Boolean).join(", "), fin(c.tide) == null ? null : `${S("tide")} ${Math.round(c.tide * 100)} cm`, fin(c.bhs) == null ? null : `${S("buoy")} ${c.bhs.toFixed(1)} m`].filter(Boolean).join(" · ") || null; }
 const waves = s => fin(s.hs) == null ? null : `${s.hs.toFixed(1)} m` + (fin(s.tp) == null ? "" : ` @ ${Math.round(s.tp)} s`);
 const wind = s => fin(s.ws) == null ? null : (fin(s.wd) == null ? "" : compass(s.wd) + " ") + `${Math.round(s.ws)} kt`;
+// A new message from someone else, read out once by a screen reader: "Kai: Any tips?", for the messages the filter shows.
+function announce(m) { if (R.built && (R.filter === "all" || m.spot === R.filter)) R.el.heard.textContent = `${m.nick ?? S("aSurfer")}: ${excerpt(m)}`; }
 // Every minute the ages move on, in place.
 function tickAges() { for (const t of R.el.msgs.querySelectorAll("time[data-ts]")) t.textContent = ago(+t.dataset.ts); }
 
@@ -1431,6 +1438,7 @@ html:not([lang="en"]) .cr-sheet-hd h2{font:700 21px/1.25 var(--body);letter-spac
 .cr-sheet-b .cr-pin-code{margin:18px 0 6px;font:400 56px/1 VT323,var(--mono);letter-spacing:.2em;text-align:center;color:var(--led-amb);text-shadow:0 0 calc(10px*var(--led-glow)) rgba(255,170,40,.65)}
 .cr-pinbox{margin:0 0 10px}
 .cr-pin-in{letter-spacing:.2em}
+.cr-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 `;
 
 // ---- The page's hooks (template.html). boot() calls spot() for each spot it shows, which is also on every language change and every

@@ -1336,6 +1336,7 @@ export class Room extends DurableObject {
   //   - An ADMIN_CODE under 32 characters, or none, switches claiming off.
   //   - 3 wrong codes stop that LINE account claiming, and 10 in all stop everyone, until ADMIN_CODE is changed: the
   //     counts are kept with a digest of the code they were tried against, and a new code starts them again.
+  //     Deleting the account takes its own count away, not its part of the total (forgetAccount()).
   //   - Any other slash command ("/shrug") is not a claim, so people who type those can't use up the 10.
   //   - A claim refused for any of these reasons is not counted.
   // Each of these refusals is error admin, whatever the reason, and none is a bad frame. A banned account gets banned.
@@ -1673,6 +1674,8 @@ export class Room extends DurableObject {
   //   - their logs go, and so do their LINE account's rate-limit counts and held nicknames, and any sign-in of theirs
   //     still waiting to be redeemed (with LINE's raw sub);
   //   - if it is Bryan's account, meta admin_uid goes, so he can claim the role again from a new account;
+  //   - their count of wrong /admin codes goes from meta admin_claims, which then no longer names their LINE account;
+  //     the total stays, so the 10 in all still count them;
   //   - their LINE account's row in subs stays, marked deleted: a ban on it stays, and an unbanned one goes after 30
   //     days (retention);
   //   - and the account itself goes.
@@ -1697,6 +1700,11 @@ export class Room extends DurableObject {
       this.all("DELETE FROM limits WHERE key > 'held:' AND key < 'held;' AND substr(key, ?) = ?", -(sub.length + 1), `:${sub}`);
       this.all("DELETE FROM handoffs WHERE sub_hash = ?", sub);
       if (this.getMeta("admin_uid") === user.id) this.all("DELETE FROM meta WHERE key = 'admin_uid'");
+      const claims = JSON.parse(this.getMeta("admin_claims") ?? "null");
+      if (claims?.by && Object.hasOwn(claims.by, sub)) {
+        delete claims.by[sub];
+        this.setMeta("admin_claims", JSON.stringify(claims));
+      }
       this.all(
         "INSERT INTO subs (sub_hash, deleted_at) VALUES (?, ?) ON CONFLICT (sub_hash) DO UPDATE SET deleted_at = excluded.deleted_at",
         sub, now,

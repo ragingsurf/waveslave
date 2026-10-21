@@ -535,6 +535,11 @@ describe("DELETE /me", () => {
     cv.send({ type: "like", id: text });
     cv.send({ type: "like", id: card });
     cb.send({ type: "like", id: vText });
+    // Each of them once tried a wrong /admin code.
+    for (const c of [cu, cv]) {
+      c.send({ type: "admin", code: "/admin not-the-code" });
+      expect(await nextError(c)).toEqual({ type: "error", for: "admin", code: "admin" });
+    }
     for (const c of [cu, cv, cb]) await synced(c);
     const heldV = `held:vold:${v.sub}`;
     await r.inRoom((room) => {
@@ -549,7 +554,9 @@ describe("DELETE /me", () => {
       room.sql.exec("INSERT INTO holds (msg_id, body, uid, sub_hash, reason, ts) VALUES (?, '{}', ?, ?, 'keep', ?)", hiddenText, u.id, u.sub, T - MIN);
     });
     expect(await holding(r, u.id)).toEqual(["holds.uid", "likes.uid", "messages.uid", "sessions.uid", "users.id"]);
-    expect(await holding(r, u.sub)).toEqual(["flags.sub_hash", "handoffs.sub_hash", "holds.sub_hash", "limits.key", "subs.sub_hash", "users.sub_hash"]);
+    expect(await holding(r, u.sub)).toEqual([
+      "flags.sub_hash", "handoffs.sub_hash", "holds.sub_hash", "limits.key", "meta.value", "subs.sub_hash", "users.sub_hash",
+    ]);
     await settle();
     const seen = reader.frames.length;
 
@@ -580,6 +587,9 @@ describe("DELETE /me", () => {
     expect(await r.rows("SELECT uid FROM sessions")).toEqual([{ uid: v.id }]);
     expect(await r.rows("SELECT count(*) AS n FROM handoffs")).toEqual([{ n: 0 }]);
     expect(await r.rows("SELECT key FROM limits WHERE key = ?", heldV)).toEqual([{ key: heldV }]);
+    // Their wrong /admin code no longer names them, but it still counts towards the 10 in all.
+    const claims = JSON.parse(await metaOf(r, "admin_claims"));
+    expect([claims.total, claims.by]).toEqual([2, { [v.sub]: 1 }]);
     // Only the LINE account's row, marked deleted, and Bryan's copy are left.
     expect(await r.rows("SELECT * FROM subs WHERE sub_hash = ?", u.sub)).toEqual([{ sub_hash: u.sub, banned: 0, deleted_at: T }]);
     expect(await r.rows("SELECT msg_id, uid, sub_hash, reason FROM holds")).toEqual([{ msg_id: hiddenText, uid: u.id, sub_hash: u.sub, reason: "keep" }]);

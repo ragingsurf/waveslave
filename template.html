@@ -1,6 +1,6 @@
 <title>WaveSlave</title>
 <script>/* Language before first paint: the saved pick, else the browser's (zh → 中文). 日本語 is switched off for now, so a saved ja reads as English. */try{var l=localStorage.getItem("waveslave-lang")||(/^zh/i.test(navigator.language)?"zh":"en");document.documentElement.lang=l==="zh"?"zh-Hant-TW":"en";}catch(e){}</script>
-<script>/* World mode (the secret switch, the W in the logo) before first paint, so Taiwan mode never flashes up the country row. */try{if(localStorage.getItem("waveslave-world")==="1")document.documentElement.classList.add("world")}catch(e){}</script>
+<script>/* World mode (the secret switch, the W in the logo) before first paint, so Taiwan mode never flashes up the country row. Behind the World passcode (web/head.html) it waits for the code on each visit. */try{if(localStorage.getItem("waveslave-world")==="1"&&(!window.__worldLock||wsUnlocked()))document.documentElement.classList.add("world")}catch(e){}</script>
 <style>/* Opening animation cover: dark from the first paint until the intro takes over; it lifts by itself after 6 s if the intro never runs. */
 html.intro-on::after{content:"";position:fixed;inset:0;z-index:9997;background:#07050f;animation:introSafe 0s 6s forwards}@keyframes introSafe{to{visibility:hidden}}</style>
 <script>/* Opening animation once per visit, never for reduced motion, and not behind the passcode screen (it plays after the unlock reload). */try{if(!document.documentElement.classList.contains("locked")&&!sessionStorage.getItem("waveslave-intro")&&!matchMedia("(prefers-reduced-motion: reduce)").matches)document.documentElement.classList.add("intro-on")}catch(e){}</script>
@@ -649,10 +649,13 @@ function langOpen(on){ document.getElementById("langWrap").classList.toggle("ope
 // World mode shows every country; Taiwan mode, the default, only Taiwan's spots, in the forecast and on the map. The W in the logo switches
 // (setWorld), remembered on this device; the class "world" on the page was set from it before first paint.
 let WORLD = document.documentElement.classList.contains("world");
+// The World passcode (web/head.html): until the code is in for this visit, World mode opens the PIN box first (wsPin) and comes on once it's right.
+const worldLocked = () => !!window.__worldLock && !(window.wsUnlocked && wsUnlocked());
 function keepWorld(on){ WORLD = on; document.documentElement.classList.toggle("world", on); try{ localStorage.setItem("waveslave-world", on ? "1" : "0"); }catch(e){} }
 // Spot comes from the link (#nanwan) or the last one picked on this device; Donghe otherwise. In Taiwan mode the last one is the last Taiwan
 // spot; a link to another country's spot turns World mode on, so it still opens.
-const SPOT0 = (() => { const h=location.hash.slice(1); if(ALL.spots[h]){ if(spotCountry(h)!=="tw" && !WORLD) keepWorld(true); return h; }
+let SPOT_PEND = null;   // a link to another country's spot while World mode waits for the passcode: opened once it's in
+const SPOT0 = (() => { const h=location.hash.slice(1); if(ALL.spots[h]){ if(spotCountry(h)!=="tw" && !WORLD){ if(worldLocked()) SPOT_PEND = h; else { keepWorld(true); return h; } } else return h; }
   try{ for(const k of ["waveslave-spot", "waveslave-spot-tw"]){ const s=localStorage.getItem(k); if(ALL.spots[s] && (WORLD || spotCountry(s)==="tw")) return s; } }catch(e){} return "donghe"; })();
 // Everything spot-specific renders inside boot(), so switching spots redraws in place (no reload, no white flash).
 let CUR = SPOT0;
@@ -661,7 +664,7 @@ function spotCountry(id){ return (ALL.spots[id]||{}).country || "tw"; }
 function viewTz(){ return (ALL.spots[CUR]||{}).tz || 8; }
 const countrySpots = c => (ALL.order || Object.keys(ALL.spots)).filter(id => spotCountry(id)===c);
 // Every country is on the one Pacific map, so changing spot never reloads: a new country moves the map to its home view.
-function switchSpot(id){ if(!ALL.spots[id] || id===CUR) return; if(!WORLD && spotCountry(id)!=="tw") setWorld(true); const was = CUR, other = spotCountry(id)!==spotCountry(was); CUR=id;
+function switchSpot(id){ if(!ALL.spots[id] || id===CUR) return; if(!WORLD && spotCountry(id)!=="tw"){ if(worldLocked()) return wsPin(() => switchSpot(id), () => {}); setWorld(true); } const was = CUR, other = spotCountry(id)!==spotCountry(was); CUR=id;
   try{ localStorage.setItem("waveslave-spot", id); localStorage.setItem("waveslave-spot-"+spotCountry(id), id); }catch(e){}
   try{ history.replaceState(null, "", "#"+id); }catch(e){ location.hash=id; }
   // Australia's home is the current spot's coast, and any move inside Australia recentres on it. The South Pacific's, Micronesia's, Papua
@@ -677,7 +680,7 @@ function switchCountry(c){ if(c===spotCountry(CUR)) return; let id; try{ id=loca
 // the row closes and the page goes back to Taiwan. With reduced motion it just switches. A tap mid-flicker turns it straight back (gen drops
 // the old one).
 let worldGen = 0;
-async function setWorld(on){ if(on===WORLD) return; const gen = ++worldGen, root = document.documentElement, ctry = document.getElementById("ctry"),
+async function setWorld(on){ if(on===WORLD) return; if(on && worldLocked()) return wsPin(() => setWorld(true), () => {}); const gen = ++worldGen, root = document.documentElement, ctry = document.getElementById("ctry"),
     slot = document.getElementById("ctrySlot"), flick = !matchMedia("(prefers-reduced-motion: reduce)").matches && !!document.getAnimations;
   // Until the countries' flicker ends; never longer than 1.5 s.
   const settled = () => Promise.race([Promise.all(document.getAnimations().filter(a => a.effect && a.effect.target instanceof Element && a.effect.target.parentNode===ctry).map(a => a.finished.catch(() => {}))),
@@ -2232,6 +2235,7 @@ document.querySelector("header .brand .w").addEventListener("click", () => setWo
 for(const [box, sel] of [["#lang", 'button[aria-pressed="true"]'], ["#ctry", 'button[aria-pressed="true"]'], [".tabs", 'button[aria-selected="true"]'], ["#picker", "a[aria-current]"],
   ["#days", '.day[aria-pressed="true"]'], ["#wsLayers", 'button[data-o][aria-pressed="true"]'], ["#wsCtry", 'button[aria-pressed="true"]']]) glider(document.querySelector(box), sel);
 boot(SPOT0);
+if(SPOT_PEND) switchSpot(SPOT_PEND);   // the other country's spot the link asked for, behind the World passcode
 if(VIEW!=="fc") setView(VIEW, true);
 
 // ---- Wave of the week title: water spray blasting off the end of the letters (placed once the font has loaded).

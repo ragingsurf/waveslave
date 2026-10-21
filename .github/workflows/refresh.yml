@@ -8,6 +8,8 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    # The chat backend deploys by itself (chat.yml), so a commit that only touches chat/ doesn't rebuild the site.
+    paths-ignore: ["chat/**"]
 
 permissions:
   contents: write   # logstore.sh keeps the forecast-vs-buoy log on the data branch

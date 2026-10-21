@@ -13,7 +13,7 @@
 // Playwright wherever node finds it (npm install playwright), else the copy this container keeps.
 const { chromium } = (() => { try { return require("playwright"); } catch (e) { return require("/opt/node22/lib/node_modules/playwright"); } })();
 const fs = require("fs"), path = require("path"), crypto = require("crypto"), { spawnSync } = require("child_process");
-const { SECRETS, wait, start } = require("./servers.js");
+const net = require("net"), { SECRETS, wait, start } = require("./servers.js");
 
 const [file] = process.argv.slice(2);
 if (!file) { console.error("usage: node tests/chat/room.test.js <page.html>"); process.exit(2); }
@@ -138,6 +138,9 @@ const scrollToFirst = async (page, asks, max = 12) => { for (let i = 0; i <= max
     .catch(() => { throw new Error(`scrolled to the top with ${had} messages and nothing loaded (asked ${asks})`); });
   await wait(150);
 } throw new Error(`${max} pages and the room still had older ones`); };
+// The page goes to the background ("hidden") or comes back ("visible").
+const visibility = (page, v) => page.evaluate(v => { for (const [k, x] of [["visibilityState", v], ["hidden", v === "hidden"]]) Object.defineProperty(document, k, { configurable: true, get: () => x });
+  document.dispatchEvent(new Event("visibilitychange")); }, v);
 // A stand-in room's text message "M<id>", posted id seconds after an hour ago.
 const standIn = (id, more = {}) => ({ id, ts: Date.now() - 3600e3 + id * 1e3, nick: "Kai", role: null, kind: "text", spot: null, body: { text: `M${id}` }, reply_to: null, likes: 0, ...more });
 // A stand-in room that answers hello with history (the last 100 of all, after the frames first(n) gives for the n-th socket) and older
@@ -265,8 +268,7 @@ const CHECKS = {
       route.onMessage(m => { if (m === "ping") { pings.push(n); if (!mute) route.send("pong"); return; }
         if (JSON.parse(m).type === "hello") route.send(JSON.stringify({ type: "history", messages: [{ id: 1, ts: Date.now() - 60e3, nick: "Kai", role: null, kind: "text", spot: null, body: { text: "Hi" }, reply_to: null, likes: 0 }] })); }); } });
     await openRoom(page);
-    const vis = v => page.evaluate(v => { for (const [k, x] of [["visibilityState", v], ["hidden", v === "hidden"]]) Object.defineProperty(document, k, { configurable: true, get: () => x });
-      document.dispatchEvent(new Event("visibilitychange")); }, v);
+    const vis = v => visibility(page, v);
     const until = async (f, what) => { for (let i = 0; i < 50 && !f(); i++) await wait(100); if (!f()) throw new Error(what); };
     await vis("hidden"); await vis("visible");
     await until(() => pings.length === 1, `coming back sent ${pings.length} pings`);
@@ -671,14 +673,38 @@ const CHECKS = {
     const top = await page.evaluate(() => document.querySelector(".chatroom .cr-sheet-b > .cr-fine")?.textContent ?? null);
     if (top !== "That's gone already" || !eq(shares, [1, 3, 1])) throw new Error(`with the log gone the sheet says ${JSON.stringify(top)} (shares sent: ${shares})`);
   },
+  // A socket that never opens (a black-holed network, a captive portal) counts as dropped after 12 s: "Chat is offline · Retry", and a
+  // new try a second later, not after the browser's own minute or two. Back in the foreground, one still trying to open starts again at
+  // once. The chat's address here is a server that takes connections and never answers.
+  async connectTimeout(open) {
+    const conns = []; let gets = 0;
+    const hole = net.createServer(c => { conns.push(c); c.on("error", () => {}); c.on("data", d => { if (/^GET \/ws/.test(String(d))) gets++; }); });
+    await new Promise(r => hole.listen(0, "127.0.0.1", r));
+    try {
+      const page = await open({ clock: true, url: `http://127.0.0.1:${hole.address().port}` });
+      const until = async (f, what) => { for (let i = 0; i < 50 && !f(); i++) await wait(100); if (!f()) throw new Error(what()); };
+      const status = () => page.evaluate(() => document.querySelector(".chatroom .cr-status").textContent);
+      await page.click(".chatfab");
+      await until(() => gets === 1, () => `opening the room tried ${gets} sockets`);
+      await page.clock.fastForward(11e3); await wait(300);
+      if (await status() !== "" || gets !== 1) throw new Error(`11 s in, the room says ${JSON.stringify(await status())} after ${gets} tries`);
+      await page.clock.fastForward(1.5e3);
+      await page.waitForFunction(() => document.querySelector(".chatroom .cr-status").textContent === "Chat is offline · Retry", null, { timeout: 3e3 })
+        .catch(async () => { throw new Error(`12.5 s without an open socket the room says ${JSON.stringify(await status())}`); });
+      await page.clock.fastForward(1.1e3);
+      await until(() => gets === 2, () => `a second after giving up on it the page has tried ${gets} sockets, want 2`);
+      await visibility(page, "hidden"); await visibility(page, "visible");
+      await until(() => gets === 3, () => `back in the foreground with a socket still opening the page has tried ${gets} sockets, want 3`);
+    } finally { for (const c of conns) c.destroy(); await new Promise(r => hole.close(r)); }
+  },
 };
 
 (async () => {
   let browser, bad = false, ctxs = [], errs = [];
   // A fresh context for every page: the page and the backend load, everything else is cut off. as: a seeded account to sign in as;
-  // clock: the page's timers under Playwright's clock; ws: a stand-in for the room's socket. page.sockets lists the sockets it opened,
-  // page.dialogs any alert.
-  async function open({ as = null, spot = "jinshan", query = "", clock = false, ws = null }) {
+  // clock: the page's timers under Playwright's clock; ws: a stand-in for the room's socket; url: the chat's address in place of the
+  // backend's (only its socket goes there). page.sockets lists the sockets it opened, page.dialogs any alert.
+  async function open({ as = null, spot = "jinshan", query = "", clock = false, ws = null, url = null }) {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block" });
     ctxs.push(ctx);
     await ctx.route("**/*", r => { const u = r.request().url(); return u.startsWith(ORIGIN() + "/") || u.startsWith(CHAT() + "/") ? r.continue() : r.abort(); });
@@ -687,7 +713,7 @@ const CHECKS = {
       try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", "fc"); localStorage.setItem("waveslave-lang", "en"); localStorage.setItem("waveslave-world", "0");
         if (o.token && !sessionStorage.getItem("signed")) { localStorage.setItem("waveslave-chat-token", o.token); sessionStorage.setItem("signed", "1"); }
         if (lock) sessionStorage.setItem("waveslave-unlock", lock); } catch (e) {}
-      window.__chatUrl = o.url; window.__chatContact = o.contact; }, [{ token: as ? token("u-" + as) : null, url: CHAT(), contact: CONTACT }, LOCK]);
+      window.__chatUrl = o.url; window.__chatContact = o.contact; }, [{ token: as ? token("u-" + as) : null, url: url || CHAT(), contact: CONTACT }, LOCK]);
     const page = await ctx.newPage(); page.sockets = []; page.dialogs = [];
     if (ws) await page.routeWebSocket(/\/ws$/, ws);
     page.on("websocket", s => page.sockets.push(s)); page.on("pageerror", e => errs.push(String(e)));

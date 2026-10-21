@@ -330,6 +330,7 @@ const PROTO = 1;                                      // the socket protocol thi
 const WS_URL = BASE.replace(/^http/i, "ws") + "/ws";
 const PAGE_N = 100, OLDER_N = 50;                     // the room opens with the last 100 messages, and gives older ones 50 at a time
 const DEAD_MS = 100e3;                                // no frame for this long (the room ticks every 45 s) and the socket is dead
+const OPEN_MS = 12e3;                                 // a socket not open by then (a black-holed network, a captive portal) is lost
 const PONG_MS = 10e3;                                 // back in the foreground, the "ping" must get an answer this soon
 const AWAY_MS = 5 * 60e3;                             // in the background this long and the socket closes, until the page is back
 const BACKOFF = [1e3, 2e3, 4e3, 8e3, 16e3, 30e3];     // waits between tries while the backend can't be reached
@@ -353,7 +354,7 @@ const R = {
   online: null, state: "idle", filter: "all", replyTo: null, pending: [], hidden: null, locked: null, fresh: false,
   sheet: null, pop: null, opener: null, noteT: 0, agesT: 0, longAt: 0,
 };
-const sock = { ws: null, ready: false, tries: 0, retryT: 0, deadT: 0, pongT: 0, awayT: 0, held: 0,
+const sock = { ws: null, ready: false, tries: 0, retryT: 0, openT: 0, deadT: 0, pongT: 0, awayT: 0, held: 0,
   // One frame to the room, as JSON. Only once the room has answered hello, so a write never goes before the sign-in it needs.
   send(frame) { const ws = sock.ws; if (!ws || ws.readyState !== 1 || !sock.ready) return false;
     const text = JSON.stringify(frame); if (new TextEncoder().encode(text).length > FRAME_MAX) return false;
@@ -394,10 +395,11 @@ function validBody(kind, b) {
   return false;
 }
 
-// ---- The socket. It opens with the room and closes with it. A drop tries again after 1 s, then longer, up to 30 s; 100 s without a
-// frame counts as a drop; back in the foreground it sends "ping" (the room answers "pong" without waking); after 5 minutes in the
-// background it closes until the page is back. The room's own close codes: 4401 the account signed out everywhere or was deleted,
-// 4403 banned, 4426 this page is too old, 4429 the chat is resting until 00:00 UTC (08:00 in Taiwan).
+// ---- The socket. It opens with the room and closes with it. A drop tries again after 1 s, then longer, up to 30 s; a socket not open
+// after 12 s, or 100 s without a frame, counts as a drop; back in the foreground it sends "ping" (the room answers "pong" without
+// waking), or starts again if the socket is still trying to open; after 5 minutes in the background it closes until the page is back.
+// The room's own close codes: 4401 the account signed out everywhere or was deleted, 4403 banned, 4426 this page is too old, 4429 the
+// chat is resting until 00:00 UTC (08:00 in Taiwan).
 function connect() {
   stopSocket();
   if (R.state !== "offline") setState("connecting");
@@ -406,32 +408,33 @@ function connect() {
   sock.held = Math.max(0, ...R.msgs.keys());
   let ws; try { ws = new WebSocket(WS_URL); } catch (e) { return lost(1006); }
   sock.ws = ws;
-  ws.onopen = guard(() => { if (ws !== sock.ws) return; alive(ws); const token = load(KEYS.token);
+  sock.openT = setTimeout(guard(() => { if (ws === sock.ws && ws.readyState === 0) { stopSocket(); lost(1006); } }), OPEN_MS);
+  ws.onopen = guard(() => { if (ws !== sock.ws) return; clearTimeout(sock.openT); alive(ws); const token = load(KEYS.token);
     ws.send(JSON.stringify(token ? { type: "hello", v: PROTO, token } : { type: "hello", v: PROTO })); });
   ws.onmessage = guard(e => { if (ws !== sock.ws) return; alive(ws); if (typeof e.data === "string" && e.data !== "pong") onFrame(e.data); });
   ws.onclose = guard(e => { if (ws !== sock.ws) return; sock.ws = null; lost(e.code); });
 }
 function stopSocket() { const ws = sock.ws; sock.ws = null; sock.ready = false; R.older = false;
-  for (const t of ["retryT", "deadT", "pongT"]) clearTimeout(sock[t]);
+  for (const t of ["retryT", "openT", "deadT", "pongT"]) clearTimeout(sock[t]);
   if (ws) { ws.onopen = ws.onmessage = ws.onclose = null; try { ws.close(1000); } catch (e) {} } }
 // Any frame says the socket lives: the 100 s start again.
 function alive(ws) { clearTimeout(sock.deadT); clearTimeout(sock.pongT); sock.deadT = setTimeout(guard(() => { if (ws === sock.ws) connect(); }), DEAD_MS); }
 function retry(ms) { clearTimeout(sock.retryT); sock.retryT = setTimeout(guard(() => { if (R.open) connect(); }), ms); }
 // The socket closed, or never opened.
 function lost(code) {
-  sock.ready = false; R.older = false; clearTimeout(sock.deadT); clearTimeout(sock.pongT); restorePending(true);
+  sock.ready = false; R.older = false; clearTimeout(sock.openT); clearTimeout(sock.deadT); clearTimeout(sock.pongT); restorePending(true);
   if (!R.open) return;
   if (code === 4429) { setState("resting"); const now = Date.now(); return retry(Math.ceil((now + 1) / DAY) * DAY - now + Math.random() * 60e3); }
   if (code === 4426) return setState("update");
   if (code === 4401 || code === 4403) { if (code === 4403) note(S("banned"), true); signOutQuietly(); sock.tries = 0; return connect(); }
   setState("offline"); retry(BACKOFF[Math.min(sock.tries++, BACKOFF.length - 1)]);
 }
-// Is the socket still there? Asked on coming back to the foreground and after the network comes back. A socket that doesn't answer
-// within 10 s is replaced.
+// Is the socket still there? Asked on coming back to the foreground. An open socket that doesn't answer "ping" within 10 s is replaced;
+// one still trying to open is stale (the network may have changed while the page was away), so a new one starts at once.
 function check() {
   const ws = sock.ws;
-  if (ws && ws.readyState === 1 && sock.ready) { try { ws.send("ping"); } catch (e) {} clearTimeout(sock.pongT); sock.pongT = setTimeout(guard(() => { if (ws === sock.ws) connect(); }), PONG_MS); }
-  else if (R.state !== "update" && (!ws || ws.readyState > 1)) { sock.tries = 0; connect(); }
+  if (ws && ws.readyState === 1) { try { ws.send("ping"); } catch (e) {} clearTimeout(sock.pongT); sock.pongT = setTimeout(guard(() => { if (ws === sock.ws) connect(); }), PONG_MS); }
+  else if (R.state !== "update") { sock.tries = 0; connect(); }
 }
 function setState(s) { R.state = s; if (R.built) drawStatus(); }
 

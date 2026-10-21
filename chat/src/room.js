@@ -11,13 +11,18 @@
 //   startLogin ... signup      the LINE sign-in's rows: logins, handoffs, users and subs (spec "Login")
 //   userFromToken(token)       the signed-in user a session token stands for, or null
 //   closeUser(uid, code)       closes every socket signed in as that user
+//   signOut                    POST /me/signout: every token of the user stops working, and their sockets close
+//   canWrite(user, kind)       the one gate for every write, from the socket and from /me: sign-in, ban, lock, limits
+//   openSocket, webSocket*     the socket and its frames (spec "Socket protocol"; the frames are listed there below)
 //
 // Times are epoch milliseconds. The Worker calls the room as https://room/<route> with a JSON body.
 import { DurableObject } from "cloudflare:workers";
-import { pin6, randomB64u, readToken, sha256b64u, signToken, subHash } from "./auth.js";
-import { checkNick, SPOTS } from "./mod.js";
+import { hmacB64u, pin6, randomB64u, readToken, sha256b64u, signToken, subHash } from "./auth.js";
+import { blocked, checkNick, normalise, SPOTS, validReport } from "./mod.js";
+import BLOCKLIST from "../blocklist.json";
 
-const MINUTE = 60_000;
+const SECOND = 1000;
+const MINUTE = 60 * SECOND;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
@@ -56,6 +61,46 @@ const CODE = /^[A-Za-z0-9_-]{22}$/; // the handoff code: 128 bits as base64url
 const PIN = /^\d{6}$/;
 const LINE_SUB_MAX = 100; // LINE writes a sub as "U" and 32 hex digits
 const LINE_NAME_MAX = 50; // characters of the LINE name kept in a handoff, only to prefill the nickname box
+
+// The socket (spec "Socket protocol").
+const PROTO = 1; // the protocol version this room speaks; chat.js sends its own in hello
+const PROTO_OLDEST = Math.max(1, PROTO - 1); // the room takes the current version and the one before it
+const FRAME_MAX = 4096; // bytes of UTF-8 in one frame; a bigger one closes the socket
+const BAD_FRAMES = 5; // bad frames that close a socket
+const SOCKETS_PER_IP = 5;
+const OLDER_PAGE = 50; // messages in each page of older ones
+const OLDER_EVERY = SECOND; // one page of older messages a second per socket
+const TEXT_MAX = 500; // characters in a text message
+// Close codes. 1008 and 1009 are the standard ones; the 44xx ones are the chat's own, for chat.js to read.
+const CLOSE_BAD = 1008; // five bad frames
+const CLOSE_TOO_BIG = 1009; // a frame over 4 KB
+const CLOSE_SIGNED_OUT = 4401; // the account signed out everywhere: its tokens no longer work
+const CLOSE_UPDATE = 4426; // the app speaks a protocol version the room no longer takes, so it must reload
+
+// What a socket's attachment holds (it lives with the socket, through hibernation): uid, tv and role once it has said
+// hello with a good token, and null for a reader; v, its protocol version, once it has said hello; bad, the bad frames
+// it has sent; and olderAt, when it last got a page of older messages.
+const NEW_SOCKET = Object.freeze({ uid: null, tv: null, role: null, v: null, bad: 0, olderAt: 0 });
+
+// The frames a socket may send, and the method that answers each. Reading needs no sign-in (Bryan, Oct 21: sign in
+// with LINE to post), so hello and older work for everyone; the writes need a socket that said hello signed in.
+const READS = { hello: "onHello", older: "onOlder" };
+const WRITES = { say: "onSay", report: "onReport", like: "onLike", delete: "onDelete", nick: "onNick" };
+
+// The rate limits (spec "Moderation", step 3), per LINE account. Each rule lets `max` writes through in a window of
+// `ms` that opens with the first of them. The counts are kept in limits as "<sub_hash>:<rule>", so they outlive an
+// account deleted and made again, and so the room can sleep between writes.
+const SAY_LIMITS = [{ rule: "say:5s", max: 1, ms: 5 * SECOND }, { rule: "say:10m", max: 20, ms: 10 * MINUTE }];
+const NEW_ACCOUNT = DAY; // accounts younger than this may also post only...
+const NEW_SAY_LIMIT = { rule: "say:1h", max: 10, ms: HOUR }; // ...10 messages an hour
+const REPORT_LIMIT = { rule: "report:1d", max: 6, ms: DAY }; // plus one per spot every 2 hours, "report:<spot>"
+const REPORT_SPOT_EVERY = 2 * HOUR;
+const LIKE_LIMIT = { rule: "like:10m", max: 30, ms: 10 * MINUTE };
+const NICK_EVERY = 7 * DAY; // one nickname change a week, counted from users.nick_changed
+const NICK_HELD = 30 * DAY; // how long a freed nickname is kept for the account that had it
+
+// The writes a locked room (meta "locked" = 1) stops: the ones that post to the room. Bryan still can.
+const POSTS = new Set(["say", "report"]);
 
 // Every table in the spec, including the ones that later parts of the room first write to.
 const SCHEMA_V1 = [
@@ -203,6 +248,55 @@ function sameCode(a, b) {
   return diff === 0;
 }
 
+// The token in an "Authorization: Bearer <token>" header, or null.
+const bearer = (request) => /^Bearer (\S+)$/.exec(request.headers.get("Authorization") ?? "")?.[1] ?? null;
+
+const isId = (x) => Number.isSafeInteger(x) && x > 0;
+
+// The size of a frame in bytes. A string's UTF-8 is never shorter than its UTF-16 length, so only a short string has
+// to be encoded to be measured.
+function frameBytes(message) {
+  if (typeof message !== "string") return message.byteLength;
+  return message.length > FRAME_MAX ? message.length : new TextEncoder().encode(message).byteLength;
+}
+
+// A frame as the room reads it: a JSON object with a string type. null for anything else, a binary frame included.
+function readFrame(message) {
+  if (typeof message !== "string") return null;
+  try {
+    const frame = JSON.parse(message);
+    return frame !== null && typeof frame === "object" && !Array.isArray(frame) && typeof frame.type === "string" ? frame : null;
+  } catch {
+    return null;
+  }
+}
+
+// error {code}, with the type of the frame it answers when that is one the room knows, so chat.js can show it in the
+// right place (the message box, the report sheet, the nickname box).
+const errorFrame = (code, about) => ({ type: "error", code, ...(about ? { for: about } : {}) });
+
+// slow:<seconds>, the wait rounded up to a whole second.
+const slowFor = (ms) => `slow:${Math.ceil(ms / SECOND)}`;
+
+// The limits a write of `kind` counts against (see SAY_LIMITS).
+function limitsFor(user, kind, spot, now) {
+  switch (kind) {
+    case "say":
+      return user.created > now - NEW_ACCOUNT ? [...SAY_LIMITS, NEW_SAY_LIMIT] : SAY_LIMITS;
+    case "report":
+      return [REPORT_LIMIT, { rule: `report:${spot}`, max: 1, ms: REPORT_SPOT_EVERY }];
+    case "like":
+      return [LIKE_LIMIT];
+    default:
+      return [];
+  }
+}
+
+// A freed nickname's hold, kept in limits until it runs out: "held:<nick_key>:<sub_hash of the account that had it>".
+// A nickname key has no ":" or ";" (checkNick allows only letters, digits, spaces, "_", "." and "-", and the key drops
+// the spaces), so every hold on one name sorts between "held:<key>:" and "held:<key>;".
+const heldKey = (nickKey, sub) => `held:${nickKey}:${sub}`;
+
 export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -213,6 +307,8 @@ export class Room extends DurableObject {
     this.unsaved = 0; // requests counted since the usage counts were last saved
     this.savedAt = null; // when the usage counts were last saved, by this copy of the room or an earlier one
     this.retentionAt = null; // when retention next runs (meta next_retention), read on first use
+    // chat.js sends "ping" when it comes back to the foreground. The runtime answers it without waking the room.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     ctx.blockConcurrencyWhile(async () => {
       this.migrate();
       this.messagesChanged();
@@ -420,6 +516,10 @@ export class Room extends DurableObject {
         return this.redeem(await readJson(request));
       case "POST /r/signup":
         return this.signup(await readJson(request));
+      case "GET /r/ws":
+        return this.openSocket(request);
+      case "POST /r/me/signout":
+        return this.signOut(request);
       default:
         return Response.json({ error: "not found" }, { status: 404 });
     }
@@ -435,7 +535,8 @@ export class Room extends DurableObject {
   //   pin      403  a wrong pin; the third voids the handoff
   //   banned   403  this LINE account can't sign in here
   //   consent  400  signup without the tick (consent "v1")
-  //   nick     400  with code: checkNick's "length", "chars" or "reserved", or "taken"
+  //   nick     400  with code: checkNick's "length", "chars" or "reserved", "blocked:<rule>" for a name the filters
+  //                 stop, or "taken" (in use, or freed by another account in the last 30 days); see nickFor()
 
   // Step 2: the app's sign-in starts, bound to h = SHA-256(v). The row keeps what the callback needs: state finds it,
   // nonce must come back inside LINE's ID token, and the PKCE verifier proves to LINE that the code came to us. The
@@ -510,10 +611,9 @@ export class Room extends DurableObject {
     const known = this.signInKnown(row);
     if (known) return this.answerKnown(known);
     if (body.consent !== CONSENT_VER) return refuse(400, "consent");
-    const nick = checkNick(body.nick);
-    if (!nick.ok) return refuse(400, "nick", { code: nick.code });
-    if (this.one("SELECT 1 FROM users WHERE nick_key = ?", nick.key)) return refuse(400, "nick", { code: "taken" });
     const now = this.now();
+    const nick = this.nickFor(body.nick, row.sub_hash, null, now);
+    if (nick.code) return refuse(400, "nick", { code: nick.code });
     const user = { id: crypto.randomUUID(), tv: 0 };
     this.ctx.storage.transactionSync(() => {
       // The LINE account's own row, which outlives the account. A ban on it stays; a past deletion no longer applies.
@@ -597,18 +697,53 @@ export class Room extends DurableObject {
     return signToken({ uid: user.id, tv: user.tv, exp: now + SESSION_TTL }, this.env.SESSION_SECRET);
   }
 
-  // The user a session token stands for, as {id, nick, role, tv}, or null: a token that isn't ours or has expired, a
-  // user who is gone or whose LINE account is banned, or a tv that has moved on (signed out everywhere). The socket's
-  // hello and every /me call check this. Two rows read, both by key.
+  // The user a session token stands for, as account() gives it, or null: a token that isn't ours or has expired, a
+  // user who is gone or whose LINE account is banned, or a tv that has moved on (signed out everywhere). Every /me call
+  // checks this, and passes the user to canWrite(). The socket's hello uses signedIn(), which also says which it was.
   async userFromToken(token) {
+    return (await this.signedIn(token)).user ?? null;
+  }
+
+  // {user} for a session token that checks out, or {error}: "banned" for a banned LINE account, "auth" for the rest.
+  async signedIn(token) {
     const claims = await readToken(token, this.env.SESSION_SECRET, this.now());
-    if (!claims) return null;
+    const user = claims ? this.account(claims.uid, claims.tv) : null;
+    if (!user) return { error: "auth" };
+    if (user.banned) return { error: "banned" };
+    return { user };
+  }
+
+  // The account uid as of token version tv: {id, nick, nick_key, role, tv, created, nick_changed, sub_hash, banned},
+  // or null when the user is gone or has signed out everywhere since (tv has moved on). Two rows read, both by key.
+  // Only the room reads this; nothing in it goes out in a public frame.
+  account(uid, tv) {
+    if (typeof uid !== "string") return null;
     const user = this.one(
-      `SELECT u.id, u.nick, u.role, u.tv, s.banned FROM users u LEFT JOIN subs s ON s.sub_hash = u.sub_hash WHERE u.id = ?`,
-      claims.uid,
+      `SELECT u.id, u.nick, u.nick_key, u.role, u.tv, u.created, u.nick_changed, u.sub_hash, s.banned
+       FROM users u LEFT JOIN subs s ON s.sub_hash = u.sub_hash WHERE u.id = ?`,
+      uid,
     );
-    if (!user || user.banned || user.tv !== claims.tv) return null;
-    return { id: user.id, nick: user.nick, role: user.role, tv: user.tv };
+    if (!user || user.tv !== tv) return null;
+    return { ...user, banned: Boolean(user.banned) };
+  }
+
+  // Whether `raw` may be the nickname of LINE account `sub` (user uid, or null for a new account): {nick, key} to
+  // store, or {code}: checkNick's "length", "chars" or "reserved"; "blocked:<rule>" for a name the hard-block filters
+  // stop (a nickname shows on every post, so no phone numbers, links or LINE IDs there either); or "taken" when another
+  // user has it, or another account gave it up less than 30 days ago (spec "Moderation", step 3).
+  nickFor(raw, sub, uid, now) {
+    const nick = checkNick(raw);
+    if (!nick.ok) return { code: nick.code };
+    const hit = blocked(normalise(nick.nick).check, BLOCKLIST);
+    if (hit) return { code: `blocked:${hit.rule}` };
+    const owner = this.one("SELECT id FROM users WHERE nick_key = ?", nick.key);
+    if (owner && owner.id !== uid) return { code: "taken" };
+    const holds = this.all(
+      "SELECT key FROM limits WHERE key > ? AND key < ? AND window_end > ?",
+      `held:${nick.key}:`, `held:${nick.key};`, now,
+    );
+    if (holds.some((hold) => hold.key !== heldKey(nick.key, sub))) return { code: "taken" };
+    return { nick: nick.nick, key: nick.key };
   }
 
   // Closes every socket signed in as uid (its attachment says whose it is) with the close code given: on signing out
@@ -620,6 +755,300 @@ export class Room extends DurableObject {
       } catch {
         // It closed in the meantime.
       }
+    }
+  }
+
+  // POST /me/signout (Authorization: Bearer <token>): signs the user out everywhere. tv goes up, so every token they
+  // hold stops working, and each of their sockets closes with 4401. 401 {error: "auth"} without a good token.
+  async signOut(request) {
+    const user = await this.userFromToken(bearer(request));
+    if (!user) return refuse(401, "auth");
+    this.all("UPDATE users SET tv = tv + 1 WHERE id = ?", user.id);
+    this.closeUser(user.id, CLOSE_SIGNED_OUT);
+    return Response.json({ ok: true });
+  }
+
+  // ---- The gate for writes ---------------------------------------------------------------------------------------
+
+  // The one gate for every write, from the socket and from /me: null when `user` (as account() or userFromToken()
+  // gives it) may make a write of this kind now, or the error code that says why not:
+  //   auth       no user: not signed in, or the account is gone or signed out everywhere
+  //   banned     the LINE account is banned
+  //   locked     the room is locked (meta "locked" = 1); only posting stops (POSTS), and never for Bryan
+  //   slow:<s>   over a rate limit, with the seconds until the write would go through
+  // Kinds: say, report (with its spot), like, delete and nick. A null answer also counts the write against its limits,
+  // so the caller asks last, once nothing else can refuse it. A nickname change is limited by users.nick_changed,
+  // which the change itself sets, so for "nick" this only checks.
+  canWrite(user, kind, spot = null) {
+    if (!user) return "auth";
+    if (user.banned) return "banned";
+    if (POSTS.has(kind) && user.role !== "admin" && this.getMeta("locked") === 1) return "locked";
+    const now = this.now();
+    if (kind === "nick") {
+      const wait = user.nick_changed === null ? 0 : user.nick_changed + NICK_EVERY - now;
+      return wait > 0 ? slowFor(wait) : null;
+    }
+    const limits = limitsFor(user, kind, spot, now).map((limit) => {
+      const key = `${user.sub_hash}:${limit.rule}`;
+      const row = this.one("SELECT n, window_end FROM limits WHERE key = ?", key);
+      return { ...limit, key, open: row !== null && row.window_end > now ? row : null };
+    });
+    const wait = Math.max(0, ...limits.map(({ open, max }) => (open && open.n >= max ? open.window_end - now : 0)));
+    if (wait > 0) return slowFor(wait);
+    for (const { key, ms, open } of limits) {
+      this.all(
+        "INSERT INTO limits (key, n, window_end) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE SET n = excluded.n, window_end = excluded.window_end",
+        key, open ? open.n + 1 : 1, open ? open.window_end : now + ms,
+      );
+    }
+    return null;
+  }
+
+  // ---- The socket (spec "Socket protocol") ---------------------------------------------------------------------
+  //
+  // JSON frames of at most 4 KB, each an object whose "type" is the frame's name. From the app:
+  //   hello {v, token?}                    first, once per socket
+  //   older {before_id}                    a page of 50 older messages
+  //   say {text, spot?, reply_to?}         a text message
+  //   report {spot, size, cond, crowd, snap?}
+  //   like {id}, delete {id}, nick {nick}
+  //   "ping"                               plain text, answered "pong" by the runtime without waking the room
+  // To the app:
+  //   me {nick, role}                      who the socket is signed in as: after hello, and after a nickname change
+  //   history {messages, before_id?}       after hello (the last 100), or the answer to older
+  //   msg {msg}                            a new message, to every socket
+  //   update {id, likes} | {id, deleted: true}
+  //   online {online}                      when a socket says hello or closes
+  //   tick {online}                        every 45 s while any socket is open (alarm())
+  //   error {code, for?}                   auth, banned, locked, slow:<s>, blocked:<rule>, invalid, update, size, or
+  //                                        nick:<length|chars|reserved|taken>; "for" is the frame's type
+  // Messages are always the public frame (toPublic()), so no user id or LINE data goes out. A socket that sends five
+  // bad frames (invalid ones, or writes before signing in) is closed with 1008, and a frame over 4 KB closes it with
+  // 1009. Each address may hold 5 sockets.
+
+  // GET /ws, once the Worker has checked the Origin: a new socket, unless the visitor's address already holds 5. The
+  // address is kept only as a tag on its sockets, and only as its HMAC under SUB_PEPPER, so the room never holds an IP
+  // address. Tags live with the sockets, through hibernation, and never in storage (the spec counts them "in memory
+  // only").
+  async openSocket(request) {
+    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") return refuse(426, "upgrade");
+    const tag = `ip:${await hmacB64u(this.env.SUB_PEPPER, request.headers.get("CF-Connecting-IP") ?? "")}`;
+    // Counted and accepted with no await in between, so two sockets at once can't both take the last place.
+    if (this.ctx.getWebSockets(tag).filter((ws) => ws.readyState === WebSocket.OPEN).length >= SOCKETS_PER_IP) {
+      return refuse(429, "sockets");
+    }
+    const [client, server] = Object.values(new WebSocketPair());
+    this.ctx.acceptWebSocket(server, [tag]);
+    server.serializeAttachment(NEW_SOCKET);
+    // fetch() set the alarm before this socket was open; now the 45 s keepalive starts.
+    await this.ensureAlarm();
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  // Every frame from a socket but "ping". Each one is a room request against the free plan's daily limit.
+  async webSocketMessage(ws, message) {
+    this.usage("req");
+    await this.ensureAlarm();
+    if (frameBytes(message) > FRAME_MAX) {
+      this.send(ws, errorFrame("size"));
+      ws.close(CLOSE_TOO_BIG, "frame too big");
+      return;
+    }
+    const frame = readFrame(message);
+    const type = frame && (Object.hasOwn(READS, frame.type) || Object.hasOwn(WRITES, frame.type)) ? frame.type : null;
+    let code = "invalid";
+    try {
+      if (type) code = await this.onFrame(ws, { ...NEW_SOCKET, ...ws.deserializeAttachment() }, type, frame);
+    } catch (err) {
+      // A fault in the room, not in the frame, so it isn't held against the socket. Only the error's name is logged:
+      // its message could hold what was sent.
+      console.error("chat: a frame failed:", err?.name ?? "error");
+      this.send(ws, errorFrame("invalid", type));
+      return;
+    }
+    if (!code) return;
+    this.send(ws, errorFrame(code, type));
+    // Bad frames: ones the room can't read or that break the protocol, and writes from a socket not signed in. A
+    // token that doesn't check out (hello's auth) isn't one, and neither is a blocked or slowed-down write.
+    if (code === "invalid" || (code === "auth" && type !== "hello")) {
+      const at = { ...NEW_SOCKET, ...ws.deserializeAttachment() };
+      if (at.bad + 1 >= BAD_FRAMES) ws.close(CLOSE_BAD, "bad frames");
+      else ws.serializeAttachment({ ...at, bad: at.bad + 1 });
+    }
+  }
+
+  // A socket closed (the runtime has already answered its close, as the compatibility date asks): everyone left hears
+  // how many are online now.
+  webSocketClose() {
+    this.broadcast({ type: "online", online: this.online() });
+  }
+
+  webSocketError() {
+    this.webSocketClose();
+  }
+
+  // Answers one frame of a known type. at is the socket's attachment. Returns nothing when it is done (it sends its
+  // own answer, if any), or the error code to send back.
+  async onFrame(ws, at, type, frame) {
+    if (Object.hasOwn(READS, type)) return this[READS[type]](ws, at, frame);
+    if (at.uid === null) return "auth";
+    // The account as it is now, not as it was at hello. A ban or a sign-out closes its sockets, but a frame already on
+    // its way is checked against it too.
+    const user = this.account(at.uid, at.tv);
+    if (!user) return "auth";
+    return this[WRITES[type]](ws, user, frame);
+  }
+
+  // hello {v, token?}. A version the room doesn't take gets error update and the socket closes with 4426: the app shows
+  // "Reload for the new chat". A token that checks out signs the socket in, and the app learns who it is (me); one that
+  // doesn't gets error auth (or banned), and the socket reads on. Then the room's last 100 messages (history), and
+  // everyone hears how many are online. One hello per socket: to sign in later, the app opens a new socket.
+  async onHello(ws, at, frame) {
+    if (at.v !== null) return "invalid";
+    if (!Number.isInteger(frame.v) || frame.v < PROTO_OLDEST || frame.v > PROTO) {
+      this.send(ws, errorFrame("update", "hello"));
+      ws.close(CLOSE_UPDATE, "update");
+      return;
+    }
+    // The version first, so a second hello sent meanwhile is refused while the token is checked.
+    ws.serializeAttachment({ ...at, v: frame.v });
+    if (frame.token !== undefined && frame.token !== null) {
+      const found = await this.signedIn(frame.token);
+      if (found.user) {
+        const { id, tv, role, nick } = found.user;
+        ws.serializeAttachment({ ...ws.deserializeAttachment(), uid: id, tv, role });
+        this.send(ws, { type: "me", nick, role });
+      } else {
+        this.send(ws, errorFrame(found.error, "hello"));
+      }
+    }
+    this.send(ws, { type: "history", messages: this.history() });
+    this.broadcast({ type: "online", online: this.online() });
+  }
+
+  // older {before_id}: the 50 visible messages before that id, oldest first, at most one page a second per socket.
+  onOlder(ws, at, frame) {
+    if (!isId(frame.before_id)) return "invalid";
+    const now = this.now();
+    const wait = at.olderAt + OLDER_EVERY - now;
+    if (wait > 0) return slowFor(wait);
+    ws.serializeAttachment({ ...at, olderAt: now });
+    this.send(ws, { type: "history", before_id: frame.before_id, messages: this.history(frame.before_id, OLDER_PAGE) });
+  }
+
+  // say {text, spot?, reply_to?}: a text message of up to 500 characters, as normalise() leaves it, trimmed. It is
+  // tagged with the spot the app's filter showed (none for All), and a reply takes its parent's tag instead, from a
+  // parent that is there to see. A say that starts with a slash is dropped: chat.js sends those as admin frames, so one
+  // that comes as say is not from chat.js. The hard-block filters read the checking copy; a blocked text stays in the
+  // sender's box, and counts against no limit.
+  onSay(ws, user, frame) {
+    if (typeof frame.text !== "string") return "invalid";
+    const { stored, check } = normalise(frame.text);
+    const text = stored.trim();
+    // NFKC has already made a full-width slash a plain one.
+    if (text === "" || [...text].length > TEXT_MAX || text.startsWith("/")) return "invalid";
+    let spot = frame.spot ?? null;
+    if (spot !== null && !SPOTS.includes(spot)) return "invalid";
+    const replyTo = frame.reply_to ?? null;
+    if (replyTo !== null) {
+      const parent = isId(replyTo) ? this.one("SELECT spot FROM messages WHERE id = ? AND hidden_by IS NULL", replyTo) : null;
+      if (!parent) return "invalid";
+      spot = parent.spot;
+    }
+    const hit = blocked(check, BLOCKLIST);
+    if (hit) return `blocked:${hit.rule}`;
+    const refused = this.canWrite(user, "say");
+    if (refused) return refused;
+    this.post(user, "text", spot, { text }, replyTo);
+  }
+
+  // report {spot, size, cond, crowd, snap?}: a tap-only report (mod.js validReport), in the room and on the spot's card
+  // for 4 hours. One per spot every 2 hours, and 6 a day.
+  onReport(ws, user, frame) {
+    const report = validReport(frame);
+    if (!report) return "invalid";
+    const refused = this.canWrite(user, "report", report.spot);
+    if (refused) return refused;
+    const { spot, ...body } = report;
+    this.post(user, "report", spot, body);
+  }
+
+  // like {id}: one 👍 per person, on a message that is there to see. A second like from the same person changes
+  // nothing and says nothing.
+  onLike(ws, user, frame) {
+    if (!isId(frame.id) || !this.one("SELECT 1 FROM messages WHERE id = ? AND hidden_by IS NULL", frame.id)) return "invalid";
+    if (this.one("SELECT 1 FROM likes WHERE msg_id = ? AND uid = ?", frame.id, user.id)) return;
+    const refused = this.canWrite(user, "like");
+    if (refused) return refused;
+    const { likes } = this.ctx.storage.transactionSync(() => {
+      this.all("INSERT INTO likes (msg_id, uid) VALUES (?, ?)", frame.id, user.id);
+      return this.one("UPDATE messages SET likes = likes + 1 WHERE id = ? RETURNING likes", frame.id);
+    });
+    this.broadcast({ type: "update", id: frame.id, likes });
+  }
+
+  // delete {id}: a user deletes a message of their own (the owner check is in the WHERE), and its likes go with it.
+  // Every socket is told, so it goes from every screen. Replies keep their reply_to: the app shows "Message deleted"
+  // for a parent it doesn't have.
+  onDelete(ws, user, frame) {
+    if (!isId(frame.id)) return "invalid";
+    const refused = this.canWrite(user, "delete");
+    if (refused) return refused;
+    const gone = this.ctx.storage.transactionSync(() => {
+      const row = this.one("DELETE FROM messages WHERE id = ? AND uid = ? RETURNING spot", frame.id, user.id);
+      if (row) this.all("DELETE FROM likes WHERE msg_id = ?", frame.id);
+      return row;
+    });
+    if (!gone) return "invalid";
+    this.messagesChanged(gone.spot);
+    this.broadcast({ type: "update", id: frame.id, deleted: true });
+  }
+
+  // nick {nick}: a new nickname (see nickFor()), at most once a week. The old one is held for 30 days for this LINE
+  // account, so nobody else can take it and pass as them. Each of the user's sockets gets me with the new name.
+  onNick(ws, user, frame) {
+    const refused = this.canWrite(user, "nick");
+    if (refused) return refused;
+    const now = this.now();
+    const nick = this.nickFor(frame.nick, user.sub_hash, user.id, now);
+    if (nick.code) return nick.code.startsWith("blocked:") ? nick.code : `nick:${nick.code}`;
+    this.ctx.storage.transactionSync(() => {
+      this.all("UPDATE users SET nick = ?, nick_key = ?, nick_changed = ? WHERE id = ?", nick.nick, nick.key, now, user.id);
+      if (nick.key !== user.nick_key) {
+        this.all(
+          "INSERT INTO limits (key, n, window_end) VALUES (?, 1, ?) ON CONFLICT (key) DO UPDATE SET window_end = excluded.window_end",
+          heldKey(user.nick_key, user.sub_hash), now + NICK_HELD,
+        );
+      }
+    });
+    this.sendToUser(user.id, { type: "me", nick: nick.nick, role: user.role });
+  }
+
+  // Stores a new message from `user` and sends it to every socket as msg.
+  post(user, kind, spot, body, replyTo = null) {
+    const row = this.one(
+      `INSERT INTO messages (ts, uid, kind, spot, body, reply_to) VALUES (?, ?, ?, ?, ?, ?)
+       RETURNING id, ts, uid, kind, spot, body, reply_to, likes`,
+      this.now(), user.id, kind, spot, JSON.stringify(body), replyTo,
+    );
+    // spot is null for a message with no tag, which drops no spot's reports.
+    this.messagesChanged(spot);
+    this.broadcast({ type: "msg", msg: this.toPublic([row])[0] });
+  }
+
+  // Sends one frame to one socket.
+  send(ws, frame) {
+    try {
+      ws.send(JSON.stringify(frame));
+    } catch {
+      // It closed in the meantime.
+    }
+  }
+
+  // Sends one frame to every open socket signed in as uid.
+  sendToUser(uid, frame) {
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState === WebSocket.OPEN && ws.deserializeAttachment()?.uid === uid) this.send(ws, frame);
     }
   }
 
@@ -754,6 +1183,9 @@ export class Room extends DurableObject {
     // Logins and handoffs past their 10 minutes, and holds after 180 days.
     this.dropExpiredLogins(now);
     this.batched(`DELETE FROM holds WHERE rowid IN (SELECT rowid FROM holds WHERE ts < ? LIMIT ${BATCH})`, now - KEEP_HOLDS);
+    // Rate-limit windows that have run out, and nicknames no longer held (canWrite() and nickFor() ignore those), so
+    // limits doesn't keep, for ever, which LINE account once had which nickname.
+    this.batched(`DELETE FROM limits WHERE rowid IN (SELECT rowid FROM limits WHERE window_end <= ? LIMIT ${BATCH})`, now);
     // A deleted LINE account's row after 30 days, unless it is banned (or has signed up again).
     this.batched(
       `DELETE FROM subs WHERE rowid IN (

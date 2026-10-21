@@ -640,6 +640,15 @@ describe("retention, run by the alarm at 19:00 UTC", () => {
       for (const [msg, ts] of [[1, T - 181 * DAY], [2, T - 179 * DAY]]) {
         room.sql.exec("INSERT INTO holds (msg_id, body, uid, sub_hash, reason, ts) VALUES (?, '{}', 'u1', 'sub-u1', 'child', ?)", msg, ts);
       }
+      // Rate-limit windows and held nicknames: two run out (one just now), two still running.
+      for (const [key, end] of [
+        ["sub-u1:say:10m", T - MIN],
+        ["held:kai:sub-u1", T],
+        ["sub-u2:like:10m", T + MIN],
+        ["held:mika:sub-u2", T + DAY],
+      ]) {
+        room.sql.exec("INSERT INTO limits (key, n, window_end) VALUES (?, 1, ?)", key, end);
+      }
       for (const [sub, banned, deletedAt] of [
         ["sub-deleted-31", 0, T - 31 * DAY],
         ["sub-deleted-29", 0, T - 29 * DAY],
@@ -700,6 +709,11 @@ describe("retention, run by the alarm at 19:00 UTC", () => {
       expect(rows(room, "SELECT state FROM logins")).toEqual([{ state: "fresh" }]);
       expect(rows(room, "SELECT code_hash FROM handoffs")).toEqual([{ code_hash: "fresh" }]);
       expect(rows(room, "SELECT msg_id FROM holds")).toEqual([{ msg_id: 2 }]);
+    }));
+
+  it("deletes rate-limit windows that have run out, and nicknames no longer held", () =>
+    check((room) => {
+      expect(rows(room, "SELECT key FROM limits ORDER BY key")).toEqual([{ key: "held:mika:sub-u2" }, { key: "sub-u2:like:10m" }]);
     }));
 
   it("deletes accounts not seen for 730 days, with their logs, and keeps their LINE account's row for 30 days", () =>

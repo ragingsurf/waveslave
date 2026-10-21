@@ -652,10 +652,20 @@ describe("the pin path (login finished in another browser)", () => {
 // ---- userFromToken and closeUser -----------------------------------------------------------------------------
 
 describe("Room.userFromToken(token)", () => {
-  it("gives {id, nick, role, tv} for a good token", async () => {
+  it("gives the user's account row for a good token, with what canWrite needs", async () => {
     const someone = await member();
     const user = await inRoom((room) => room.userFromToken(someone.token));
-    expect(user).toEqual({ id: someone.uid, nick: someone.nick, role: "user", tv: 0 });
+    expect(user).toEqual({
+      id: someone.uid,
+      nick: someone.nick,
+      nick_key: checkNick(someone.nick).key,
+      role: "user",
+      tv: 0,
+      created: expect.any(Number),
+      nick_changed: null,
+      sub_hash: await subHash(someone.sub, env.SUB_PEPPER),
+      banned: false,
+    });
   });
 
   it("gives null once tv has moved on (signed out everywhere)", async () => {

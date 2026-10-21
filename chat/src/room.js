@@ -8,10 +8,14 @@
 //   messagesChanged(spot)      called by every write to messages, so the memory copies follow
 //   usage(kind, n)             approximate daily counts of room requests and SQL rows, for the free-plan guard
 //   ensureAlarm() / alarm()    one alarm for both the daily retention and the 45 s keepalive tick
+//   startLogin ... signup      the LINE sign-in's rows: logins, handoffs, users and subs (spec "Login")
+//   userFromToken(token)       the signed-in user a session token stands for, or null
+//   closeUser(uid, code)       closes every socket signed in as that user
 //
 // Times are epoch milliseconds. The Worker calls the room as https://room/<route> with a JSON body.
 import { DurableObject } from "cloudflare:workers";
-import { SPOTS } from "./mod.js";
+import { pin6, randomB64u, readToken, sha256b64u, signToken, subHash } from "./auth.js";
+import { checkNick, SPOTS } from "./mod.js";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -37,8 +41,21 @@ const KEEP_REPORTS = 365 * DAY;
 const KEEP_FLAGS = 180 * DAY;
 const KEEP_HOLDS = 180 * DAY;
 const LOGIN_TTL = 10 * MINUTE; // logins and handoffs
+const LOGIN_GRACE = 1000; // the alarm comes back this long after a handoff runs out, so it is surely past
 const KEEP_ACCOUNT = 730 * DAY; // accounts not seen for 24 months
 const KEEP_DELETED_SUB = 30 * DAY; // a deleted, unbanned LINE account's row
+
+// Signing in (spec "Login (LINE, web flow)").
+const SESSION_TTL = 180 * DAY; // a session token is good for 180 days
+const PIN_TRIES = 3; // wrong pins that void a handoff
+const CONSENT_VER = "v1"; // the version of the house rules and privacy note a new account agrees to
+const BODY_MAX = 4096; // bytes of JSON the room reads from a request body; the socket's frame limit is the same
+const B64U_32 = /^[A-Za-z0-9_-]{43}$/; // 32 bytes, or a SHA-256, as base64url: h and state
+const VERIFIER = /^[A-Za-z0-9_-]{43,128}$/; // the app's own verifier v: 32 random bytes or more, as base64url
+const CODE = /^[A-Za-z0-9_-]{22}$/; // the handoff code: 128 bits as base64url
+const PIN = /^\d{6}$/;
+const LINE_SUB_MAX = 100; // LINE writes a sub as "U" and 32 hex digits
+const LINE_NAME_MAX = 50; // characters of the LINE name kept in a handoff, only to prefill the nickname box
 
 // Every table in the spec, including the ones that later parts of the room first write to.
 const SCHEMA_V1 = [
@@ -140,6 +157,50 @@ const SCHEMA_V1 = [
 function retentionTimeAfter(t) {
   const today = Math.floor(t / DAY) * DAY + RETENTION_HOUR_UTC * HOUR;
   return today > t ? today : today + DAY;
+}
+
+const isText = (x, shape) => typeof x === "string" && shape.test(x);
+
+const refuse = (status, error, more = {}) => Response.json({ error, ...more }, { status });
+
+// The JSON object in a request body, or null: no body, over 4 KB, not UTF-8 JSON, or not an object. It stops reading
+// at the limit, so a huge body costs the room no more than a small one.
+async function readJson(request) {
+  try {
+    if (!request.body) return null;
+    const reader = request.body.getReader();
+    const chunks = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > BODY_MAX) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(size);
+    let at = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, at);
+      at += chunk.byteLength;
+    }
+    const data = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    return data !== null && typeof data === "object" && !Array.isArray(data) ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+// Two short codes of a fixed length (a pin, a hash), compared in time that doesn't depend on where they differ.
+// Synchronous, unlike auth.js's sameText, so handoffFor() can read a handoff and write to it with no await between.
+function sameCode(a, b) {
+  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }
 
 export class Room extends DurableObject {
@@ -338,7 +399,8 @@ export class Room extends DurableObject {
   // ---- Requests from the Worker ------------------------------------------------------------------------------
 
   // Every call from the Worker comes here (the front Worker's header lists the routes). Each one counts as a request
-  // against the free plan's daily limit and makes sure the alarm is set. Only /r/reports is here so far.
+  // against the free plan's daily limit and makes sure the alarm is set. /r/logins, /r/logins/take and /r/handoffs
+  // are the Worker's own steps of a LINE sign-in; the rest carry the app's request.
   async fetch(request) {
     this.usage("req");
     await this.ensureAlarm();
@@ -348,8 +410,216 @@ export class Room extends DurableObject {
         const answer = this.reportsFor(url.searchParams.get("spot"), this.now());
         return answer ? Response.json(answer) : Response.json({ error: "spot" }, { status: 400 });
       }
+      case "POST /r/logins":
+        return this.startLogin(await readJson(request));
+      case "POST /r/logins/take":
+        return this.takeLogin(await readJson(request));
+      case "POST /r/handoffs":
+        return this.createHandoff(await readJson(request));
+      case "POST /r/redeem":
+        return this.redeem(await readJson(request));
+      case "POST /r/signup":
+        return this.signup(await readJson(request));
       default:
         return Response.json({ error: "not found" }, { status: 404 });
+    }
+  }
+
+  // ---- Signing in (spec "Login (LINE, web flow)") -----------------------------------------------------------
+  //
+  // The Worker talks to LINE; the room keeps the rows. Every answer is JSON, and a refusal is {error} with one of:
+  //   invalid  400  the body isn't the right shape
+  //   state    404  no sign-in has that state, or it is over 10 minutes old
+  //   expired  410  no live handoff for that code or v: never made, over 10 minutes old, used, or voided by 3 wrong pins
+  //   v        403  the code's handoff was made for another verifier (SHA-256(v) isn't its h)
+  //   pin      403  a wrong pin; the third voids the handoff
+  //   banned   403  this LINE account can't sign in here
+  //   consent  400  signup without the tick (consent "v1")
+  //   nick     400  with code: checkNick's "length", "chars" or "reserved", or "taken"
+
+  // Step 2: the app's sign-in starts, bound to h = SHA-256(v). The row keeps what the callback needs: state finds it,
+  // nonce must come back inside LINE's ID token, and the PKCE verifier proves to LINE that the code came to us. The
+  // Worker gets the state, the nonce and the code challenge (SHA-256 of the verifier) for LINE's address.
+  async startLogin(body) {
+    if (!isText(body?.h, B64U_32)) return refuse(400, "invalid");
+    const state = randomB64u(32);
+    const nonce = randomB64u(32);
+    const verifier = randomB64u(32);
+    const challenge = await sha256b64u(verifier);
+    this.all(
+      "INSERT INTO logins (state, nonce, pkce_verifier, h, created) VALUES (?, ?, ?, ?, ?)",
+      state, nonce, verifier, body.h, this.now(),
+    );
+    return Response.json({ state, nonce, code_challenge: challenge });
+  }
+
+  // Step 3.1: LINE's callback brings the state back. Its row is read and deleted in one statement, so a state works
+  // once, and one over 10 minutes old works not at all.
+  takeLogin(body) {
+    const row = typeof body?.state === "string"
+      ? this.one("DELETE FROM logins WHERE state = ? RETURNING nonce, pkce_verifier, h, created", body.state)
+      : null;
+    if (!row || !(this.now() - row.created < LOGIN_TTL)) return refuse(404, "state");
+    return Response.json({ nonce: row.nonce, pkce_verifier: row.pkce_verifier, h: row.h });
+  }
+
+  // Steps 3.4 and 3.5: LINE has said who this is (sub, checked by the Worker). The account code is made here, a banned
+  // account stops here, and otherwise the handoff is stored for 10 minutes: the one row that holds a raw LINE sub. The
+  // app gets the code, which is kept only as its SHA-256, and the pin.
+  async createHandoff(body) {
+    if (!isText(body?.h, B64U_32) || typeof body.sub !== "string" || body.sub === "" || body.sub.length > LINE_SUB_MAX) {
+      return refuse(400, "invalid");
+    }
+    const lineName = typeof body.line_name === "string" ? [...body.line_name].slice(0, LINE_NAME_MAX).join("") : null;
+    const account = await subHash(body.sub, this.env.SUB_PEPPER);
+    const code = randomB64u(16);
+    const codeHash = await sha256b64u(code);
+    const pin = pin6();
+    if (this.isBanned(account)) return refuse(403, "banned");
+    const created = this.now();
+    this.all(
+      `INSERT INTO handoffs (code_hash, h, sub_hash, sub, line_name, pin, created, tries) VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
+      codeHash, body.h, account, body.sub, lineName, pin, created,
+    );
+    // The raw sub must not outlive its 10 minutes, even in a room nobody visits, so the alarm comes back for it.
+    await this.alarmBy(created + LOGIN_TTL + LOGIN_GRACE);
+    return Response.json({ code, pin });
+  }
+
+  // Step 4 (and step 5, by pin): the app comes back with {v, code} or {v, pin}. A known user gets a session token and
+  // the handoff goes. A new person gets {needs_signup, line_name}, and the handoff stays for the signup.
+  async redeem(body) {
+    const proof = await this.proof(body);
+    if (!proof) return refuse(400, "invalid");
+    const found = this.handoffFor(proof);
+    if (found.error) return refuse(found.status, found.error);
+    const known = this.signInKnown(found.row);
+    if (known) return this.answerKnown(known);
+    return Response.json({ needs_signup: true, line_name: found.row.line_name });
+  }
+
+  // Step 6: a new person signs up with the same proof, a nickname and the tick (consent "v1"). The account is made only
+  // then, with when and to which version they agreed. The LINE name only prefilled the nickname box and is not kept,
+  // and the handoff goes, with LINE's raw sub. A LINE account that already has an account is just signed in.
+  async signup(body) {
+    const proof = await this.proof(body);
+    if (!proof) return refuse(400, "invalid");
+    const found = this.handoffFor(proof);
+    if (found.error) return refuse(found.status, found.error);
+    const { row } = found;
+    const known = this.signInKnown(row);
+    if (known) return this.answerKnown(known);
+    if (body.consent !== CONSENT_VER) return refuse(400, "consent");
+    const nick = checkNick(body.nick);
+    if (!nick.ok) return refuse(400, "nick", { code: nick.code });
+    if (this.one("SELECT 1 FROM users WHERE nick_key = ?", nick.key)) return refuse(400, "nick", { code: "taken" });
+    const now = this.now();
+    const user = { id: crypto.randomUUID(), tv: 0 };
+    this.ctx.storage.transactionSync(() => {
+      // The LINE account's own row, which outlives the account. A ban on it stays; a past deletion no longer applies.
+      this.all("INSERT INTO subs (sub_hash) VALUES (?) ON CONFLICT (sub_hash) DO UPDATE SET deleted_at = NULL", row.sub_hash);
+      this.all(
+        `INSERT INTO users (id, sub_hash, nick, nick_key, role, tv, created, last_seen, nick_changed, consent_at, consent_ver)
+         VALUES (?, ?, ?, ?, 'user', 0, ?, ?, NULL, ?, ?)`,
+        user.id, row.sub_hash, nick.nick, nick.key, now, now, now, CONSENT_VER,
+      );
+      this.all("DELETE FROM handoffs WHERE code_hash = ?", row.code_hash);
+    });
+    return Response.json({ token: await this.tokenFor(user, now) });
+  }
+
+  // What a redeem or signup body proves: h = SHA-256(v), plus the code's SHA-256 or the pin (the code wins if both
+  // come). The hashing happens here, before any handoff is read. null for a body with neither, or a field of the
+  // wrong shape.
+  async proof(body) {
+    if (!isText(body?.v, VERIFIER)) return null;
+    const h = await sha256b64u(body.v);
+    if (body.code !== undefined) return isText(body.code, CODE) ? { h, codeHash: await sha256b64u(body.code) } : null;
+    if (body.pin !== undefined) return isText(body.pin, PIN) ? { h, pin: body.pin } : null;
+    return null;
+  }
+
+  // The live handoff a proof opens ({row}), or what to refuse with ({status, error}). Live means under 10 minutes old
+  // and not voided.
+  //   By code: the handoff must have been made for this v. A wrong v leaves it as it is, so the app that does hold v
+  //     can still use the pin (the "login finished in another browser" case).
+  //   By pin: the live handoffs made for this v are checked against it. A wrong pin counts against each of them, and
+  //     the third voids (deletes) them. Nothing here awaits, so no other request runs between reading the count and
+  //     writing it: guesses sent at the same moment still get three tries in all.
+  handoffFor(proof) {
+    const since = this.now() - LOGIN_TTL;
+    if (proof.codeHash) {
+      const row = this.one(
+        "SELECT * FROM handoffs WHERE code_hash = ? AND created > ? AND tries < ?",
+        proof.codeHash, since, PIN_TRIES,
+      );
+      if (!row) return { status: 410, error: "expired" };
+      if (!sameCode(row.h, proof.h)) return { status: 403, error: "v" };
+      return { row };
+    }
+    const live = this.all("SELECT * FROM handoffs WHERE h = ? AND created > ? AND tries < ?", proof.h, since, PIN_TRIES);
+    if (live.length === 0) return { status: 410, error: "expired" };
+    const row = live.find((r) => sameCode(r.pin, proof.pin));
+    if (row) return { row };
+    this.all("UPDATE handoffs SET tries = tries + 1 WHERE h = ? AND created > ? AND tries < ?", proof.h, since, PIN_TRIES);
+    this.all("DELETE FROM handoffs WHERE h = ? AND tries >= ?", proof.h, PIN_TRIES);
+    return { status: 403, error: "pin" };
+  }
+
+  // A handoff that was opened, for an account that is banned or already exists: the handoff goes, and a known user's
+  // last_seen comes up to now (signing in is what keeps an account from the 24-month clean-up). Returns "banned", the
+  // user {id, tv}, or null for a new person, whose handoff stays.
+  signInKnown(row) {
+    if (this.isBanned(row.sub_hash)) {
+      this.all("DELETE FROM handoffs WHERE code_hash = ?", row.code_hash);
+      return "banned";
+    }
+    const user = this.one("SELECT id, tv FROM users WHERE sub_hash = ?", row.sub_hash);
+    if (!user) return null;
+    this.ctx.storage.transactionSync(() => {
+      this.all("DELETE FROM handoffs WHERE code_hash = ?", row.code_hash);
+      this.all("UPDATE users SET last_seen = ? WHERE id = ?", this.now(), user.id);
+    });
+    return user;
+  }
+
+  async answerKnown(known) {
+    if (known === "banned") return refuse(403, "banned");
+    return Response.json({ token: await this.tokenFor(known, this.now()) });
+  }
+
+  isBanned(account) {
+    return Boolean(this.one("SELECT banned FROM subs WHERE sub_hash = ?", account)?.banned);
+  }
+
+  // Step 7: the session token, base64url {uid, tv, exp} signed with SESSION_SECRET, good for 180 days.
+  tokenFor(user, now) {
+    return signToken({ uid: user.id, tv: user.tv, exp: now + SESSION_TTL }, this.env.SESSION_SECRET);
+  }
+
+  // The user a session token stands for, as {id, nick, role, tv}, or null: a token that isn't ours or has expired, a
+  // user who is gone or whose LINE account is banned, or a tv that has moved on (signed out everywhere). The socket's
+  // hello and every /me call check this. Two rows read, both by key.
+  async userFromToken(token) {
+    const claims = await readToken(token, this.env.SESSION_SECRET, this.now());
+    if (!claims) return null;
+    const user = this.one(
+      `SELECT u.id, u.nick, u.role, u.tv, s.banned FROM users u LEFT JOIN subs s ON s.sub_hash = u.sub_hash WHERE u.id = ?`,
+      claims.uid,
+    );
+    if (!user || user.banned || user.tv !== claims.tv) return null;
+    return { id: user.id, nick: user.nick, role: user.role, tv: user.tv };
+  }
+
+  // Closes every socket signed in as uid (its attachment says whose it is) with the close code given: on signing out
+  // everywhere, a ban or an account deletion.
+  closeUser(uid, code) {
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        if (ws.deserializeAttachment()?.uid === uid) ws.close(code);
+      } catch {
+        // It closed in the meantime.
+      }
     }
   }
 
@@ -379,16 +649,28 @@ export class Room extends DurableObject {
   // Every room request calls this. It sets the alarm when none is set, and brings it forward when it is later than
   // needed (a socket has just opened, say). An earlier alarm is kept: alarm() works out the next one itself.
   async ensureAlarm() {
-    const want = this.alarmTime(this.now());
+    await this.alarmBy(this.alarmTime(this.now()));
+  }
+
+  // Makes sure the alarm goes off by `at`: sets it when none is set or the one set is later.
+  async alarmBy(at) {
     const set = await this.ctx.storage.getAlarm();
-    if (set === null || set > want) await this.ctx.storage.setAlarm(want);
+    if (set === null || set > at) await this.ctx.storage.setAlarm(at);
+  }
+
+  // When the oldest handoff left runs out (just after), or Infinity when there is none. One row read at most per
+  // handoff waiting, and the table only holds sign-ins of the last 10 minutes.
+  handoffsDue() {
+    const oldest = this.one("SELECT min(created) AS created FROM handoffs")?.created ?? null;
+    return oldest === null ? Infinity : oldest + LOGIN_TTL + LOGIN_GRACE;
   }
 
   // The one alarm. Retention runs once it's past next_retention, then the keepalive tick goes out while sockets
   // are open. Whatever happened before, the alarm is counted as a request, the usage counts are saved and the next
-  // alarm is set.
+  // alarm is set: the next retention or tick, or sooner when a handoff still waiting runs out before them.
   async alarm() {
     const now = this.now();
+    let handoffsDue = Infinity;
     try {
       if (now >= this.nextRetention()) {
         // The next run is set first, so a run that fails waits until tomorrow instead of retrying in a loop.
@@ -398,6 +680,7 @@ export class Room extends DurableObject {
         // Expired sign-ins go on every alarm, not only at 19:00: a handoff holds a raw LINE ID.
         this.dropExpiredLogins(now);
       }
+      handoffsDue = this.handoffsDue();
       this.tick();
     } finally {
       try {
@@ -406,7 +689,7 @@ export class Room extends DurableObject {
         this.usage("req");
         if (this.unsaved > 0) this.saveUsage();
       } finally {
-        await this.ctx.storage.setAlarm(this.alarmTime(now));
+        await this.ctx.storage.setAlarm(Math.min(this.alarmTime(now), handoffsDue));
       }
     }
   }

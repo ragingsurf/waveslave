@@ -14,8 +14,21 @@
 //   GET  /admin/where         ->  /r/where
 //
 // /reports is open to every page. The rest answer only our own pages, and /auth/..., /me/... and /admin/... are never
-// cached. The LINE sign-in routes (/auth/line/...) come with the login part of the chat.
+// cached.
+//
+// The LINE sign-in (spec "Login (LINE, web flow)", steps 2 and 3) is two page navigations, and the Worker runs it:
+//
+//   GET  /auth/line/start?h=<SHA-256(v)>   the room stores the sign-in (/r/logins), then the browser goes to LINE
+//   GET  /auth/line/callback               LINE sends the browser back here. The room hands over the sign-in
+//                                          (/r/logins/take), the Worker swaps LINE's code for an ID token and checks
+//                                          it, and the room stores the handoff (/r/handoffs).
+//
+// Both always send the browser on: to LINE, or back to APP_URL?chat with the outcome in the fragment, either
+// #c=<code>&p=<pin> or #e=<what went wrong>: LINE's own error code (access_denied, say), "line" for one that doesn't
+// look like a code, "start" (a bad h), "state" (an unknown, used or stale sign-in), "token" (LINE's answer didn't
+// check out), "banned", or "resting" (the room couldn't answer).
 export { Room } from "./room.js";
+import { verifyLineIdToken } from "./auth.js";
 import { SPOTS } from "./mod.js";
 
 // One room for all of Taiwan (Bryan, Oct 21). Every route reaches it through here: only the first call that creates
@@ -26,10 +39,14 @@ const room = (env) => env.ROOM.getByName("taiwan", { locationHint: "apac-ne" });
 //   open     anyone may read the answer, from any page (CORS "*"), and the browser may keep it for a minute
 //   socket   the WebSocket. Only our own pages may open it, because a socket is not covered by CORS
 //   private  only our own pages (the origins in ALLOWED_ORIGINS) may call it, and the answer is never cached
+//   login    a page navigation in the LINE sign-in, run by the Worker itself (`run`): it needs no Origin (a navigation
+//            sends none), takes no CORS headers and is never cached
 // Without `to`, the room path is "/r" plus the public path.
 const ROUTES = [
   { path: "/reports", methods: ["GET"], kind: "open", to: "/r/reports" },
   { path: "/ws", methods: ["GET"], kind: "socket", to: "/r/ws" },
+  { path: "/auth/line/start", methods: ["GET"], kind: "login", run: lineStart },
+  { path: "/auth/line/callback", methods: ["GET"], kind: "login", run: lineCallback },
   { path: "/auth/redeem", methods: ["POST"], kind: "private", to: "/r/redeem" },
   { path: "/auth/signup", methods: ["POST"], kind: "private", to: "/r/signup" },
   { path: "/me/sessions", methods: ["GET", "POST"], kind: "private" },
@@ -67,24 +84,43 @@ function notAllowed(route) {
   return Response.json({ error: "method" }, { status: 405, headers: { Allow: allow.join(", ") } });
 }
 
-// Asks the room, and answers null when it can't: the room is down, overloaded, or threw. The caller then says the chat
-// is resting. Only the error's name is logged. Its message could hold part of the request (a login code, say).
-async function askRoom(env, request, path, search, wholeRequest) {
+// Asks the room with the request build() makes, and answers null when it can't: the room is down, overloaded, or
+// threw. The caller then says the chat is resting. Only the error's name is logged. Its message could hold part of the
+// request (a login code, say).
+async function askRoom(env, build) {
   try {
-    const target = `https://room${path}${search}`;
-    // A WebSocket upgrade keeps all its headers: the handshake needs them, and the room reads the visitor's address
-    // from CF-Connecting-IP. Everything else passes on only the two headers the room reads.
-    const headers = new Headers();
-    for (const name of ["Authorization", "Content-Type"]) {
-      const value = request.headers.get(name);
-      if (value !== null) headers.set(name, value);
-    }
-    const sent = wholeRequest ? new Request(target, request) : new Request(target, { method: request.method, headers, body: request.body });
-    return await room(env).fetch(sent);
+    return await room(env).fetch(build());
   } catch (err) {
     console.error("chat: the room failed:", err?.name ?? "error");
     return null;
   }
+}
+
+// The app's request as the room gets it, at `target`. A WebSocket upgrade keeps all its headers: the handshake needs
+// them, and the room reads the visitor's address from CF-Connecting-IP. Everything else passes on only the two headers
+// the room reads.
+function forward(request, target, wholeRequest) {
+  if (wholeRequest) return new Request(target, request);
+  const headers = new Headers();
+  for (const name of ["Authorization", "Content-Type"]) {
+    const value = request.headers.get(name);
+    if (value !== null) headers.set(name, value);
+  }
+  return new Request(target, { method: request.method, headers, body: request.body });
+}
+
+// A JSON POST from the Worker itself to the room, for the sign-in steps: {status, data}, or null when the room can't
+// answer.
+async function roomJson(env, path, payload) {
+  const answer = await askRoom(env, () =>
+    new Request(`https://room${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  );
+  if (!answer) return null;
+  return { status: answer.status, data: await answer.json().catch(() => ({})) };
 }
 
 // The answer to a request, before the CORS and cache headers (finish() adds those).
@@ -101,6 +137,7 @@ async function handle(route, request, env, url, from) {
   if (route.kind === "socket" && request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
     return Response.json({ error: "upgrade" }, { status: 426 });
   }
+  if (route.kind === "login") return route.run(env, url);
 
   let search = url.search;
   if (route.kind === "open") {
@@ -109,8 +146,116 @@ async function handle(route, request, env, url, from) {
     if (!SPOTS.includes(spot)) return Response.json({ error: "spot" }, { status: 400 });
     search = `?spot=${spot}`;
   }
-  const answer = await askRoom(env, request, route.to ?? `/r${url.pathname}`, search, route.kind === "socket");
+  const target = `https://room${route.to ?? `/r${url.pathname}`}${search}`;
+  const answer = await askRoom(env, () => forward(request, target, route.kind === "socket"));
   return answer ?? resting();
+}
+
+// ---- LINE sign-in --------------------------------------------------------------------------------------------
+
+// h is the app's SHA-256(v) in base64url: 43 characters.
+const H = /^[A-Za-z0-9_-]{43}$/;
+
+// A redirect for the sign-in routes. No referrer goes with it, so neither LINE nor the page learns the address the
+// browser came from (the callback's holds LINE's code).
+const redirect = (to) => new Response(null, { status: 302, headers: { Location: to, "Referrer-Policy": "no-referrer" } });
+
+// Back to the app, always APP_URL, with ?chat so the chat opens, and the outcome in the fragment, which the browser
+// never sends to a server. chat.js reads it and removes it at once.
+function backToApp(env, fragment) {
+  const to = new URL(env.APP_URL);
+  to.search = "chat";
+  to.hash = fragment;
+  return redirect(to.href);
+}
+
+// LINE's own error code goes back as it is when it looks like one, and as "line" when it doesn't.
+const lineError = (code) => (/^[A-Za-z0-9_.-]{1,64}$/.test(code) ? code : "line");
+
+// The callback address registered with LINE: this Worker's own /auth/line/callback.
+const callbackUrl = (url) => `${url.origin}/auth/line/callback`;
+
+// Step 2. The browser goes on to LINE_AUTH_URL with exactly the spec's parameters. Each value is percent-encoded, so
+// the space in the scope is %20, as LINE's own examples write it.
+async function lineStart(env, url) {
+  const h = url.searchParams.get("h") ?? "";
+  if (!H.test(h)) return backToApp(env, "e=start");
+  const started = await roomJson(env, "/r/logins", { h });
+  if (!started) return backToApp(env, "e=resting");
+  if (started.status !== 200) return backToApp(env, "e=start");
+  const query = {
+    response_type: "code",
+    client_id: env.LINE_CHANNEL_ID,
+    redirect_uri: callbackUrl(url),
+    state: started.data.state,
+    scope: "openid profile",
+    nonce: started.data.nonce,
+    code_challenge: started.data.code_challenge,
+    code_challenge_method: "S256",
+  };
+  const encoded = Object.entries(query).map(([key, value]) => `${key}=${encodeURIComponent(value)}`);
+  return redirect(`${env.LINE_AUTH_URL}?${encoded.join("&")}`);
+}
+
+// Step 3. LINE sends the browser back with ?code=&state= on success, or ?error= when the person cancelled or LINE
+// failed.
+async function lineCallback(env, url) {
+  const q = url.searchParams;
+  if (q.has("error")) return backToApp(env, `e=${lineError(q.get("error"))}`);
+  const state = q.get("state");
+  if (!state) return backToApp(env, "e=state");
+  // 3.1: the sign-in this state started, taken out of the room so that it can't be used twice.
+  const login = await roomJson(env, "/r/logins/take", { state });
+  if (!login) return backToApp(env, "e=resting");
+  if (login.status !== 200) return backToApp(env, "e=state");
+  // 3.2 and 3.3: LINE's code for an ID token, and the token's checks (auth.js).
+  const code = q.get("code");
+  const idToken = code ? await lineIdToken(env, code, login.data.pkce_verifier, callbackUrl(url)) : null;
+  const claims = idToken
+    ? await verifyLineIdToken(idToken, {
+        channelId: env.LINE_CHANNEL_ID,
+        secret: env.LINE_CHANNEL_SECRET,
+        nonce: login.data.nonce,
+        nowMs: Date.now(),
+      })
+    : null;
+  if (!claims) return backToApp(env, "e=token");
+  // 3.4 and 3.5: the room makes the account code, stops a banned account, and stores the handoff. The LINE name goes
+  // only into the handoff, to prefill the nickname box.
+  const handoff = await roomJson(env, "/r/handoffs", { h: login.data.h, sub: claims.sub, line_name: claims.name ?? null });
+  if (!handoff) return backToApp(env, "e=resting");
+  if (handoff.data.error === "banned") return backToApp(env, "e=banned");
+  if (handoff.status !== 200) return backToApp(env, "e=token");
+  // 3.6
+  return backToApp(env, `c=${handoff.data.code}&p=${handoff.data.pin}`);
+}
+
+// Swaps LINE's code for its ID token at LINE_TOKEN_URL, or null. LINE's access token in the same answer is never kept.
+// A failure is logged by its kind only, never with what LINE sent back.
+async function lineIdToken(env, code, verifier, redirectUri) {
+  try {
+    const res = await fetch(env.LINE_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: redirectUri,
+        client_id: env.LINE_CHANNEL_ID,
+        client_secret: env.LINE_CHANNEL_SECRET,
+        code_verifier: verifier,
+      }),
+    });
+    if (!res.ok) {
+      console.error("chat: LINE refused the code:", res.status);
+      return null;
+    }
+    const data = await res.json();
+    return typeof data?.id_token === "string" ? data.id_token : null;
+  } catch (err) {
+    console.error("chat: LINE's token exchange failed:", err?.name ?? "error");
+    return null;
+  }
 }
 
 // Adds the CORS and cache headers. The Worker alone decides these, whatever the room put in its answer.

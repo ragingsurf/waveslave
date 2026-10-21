@@ -723,10 +723,15 @@ describe("retention, run by the alarm at 19:00 UTC", () => {
       ]);
     }));
 
-  it("sets the next alarm, and the next run, for 19:00 UTC tomorrow", () =>
+  it("sets the next run for 19:00 UTC tomorrow, and the alarm for it, or sooner for a handoff still waiting", () =>
     check(async (room, state) => {
-      expect(await state.storage.getAlarm()).toBe(T + DAY);
       expect(value(room, "SELECT value FROM meta WHERE key = 'next_retention'")).toBe(T + DAY);
+      // The "fresh" handoff, made 9 minutes before the run, runs out first: the alarm comes back just after that to
+      // delete it (its raw LINE sub must not wait for tomorrow's run). Then it goes back to 19:00, as login.spec.mjs
+      // checks.
+      const alarm = await state.storage.getAlarm();
+      expect(alarm).toBeGreaterThan(T + MIN);
+      expect(alarm).toBeLessThanOrEqual(T + MIN + 2000);
     }));
 });
 

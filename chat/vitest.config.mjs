@@ -18,6 +18,15 @@ export default defineConfig({
         // 1.20260815) refuses any date newer than it knows. So the tests run at that runtime's own date.
         // Deploys still use wrangler.toml's date.
         compatibilityDate: "2026-08-15",
+        // Stand-ins for the Worker secrets, for the tests only. The real ones are never in the repo: the deploy
+        // workflow sets them, and `wrangler dev` reads its own from .dev.vars, which is not committed. ADMIN_CODE
+        // comes with the admin tests.
+        bindings: {
+          LINE_CHANNEL_ID: "1234567890",
+          LINE_CHANNEL_SECRET: "test-only-line-channel-secret",
+          SESSION_SECRET: "test-only-session-secret",
+          SUB_PEPPER: "test-only-sub-pepper",
+        },
       },
     }),
   ],

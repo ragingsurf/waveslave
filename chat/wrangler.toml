@@ -18,7 +18,8 @@ tag = "v1"
 new_sqlite_classes = ["Room"]
 
 # The five secrets (LINE_CHANNEL_ID, LINE_CHANNEL_SECRET, SESSION_SECRET, SUB_PEPPER, ADMIN_CODE) are
-# never listed here. The deploy workflow sets them; tests put them in .dev.vars, which is not committed.
+# never listed here. The deploy workflow sets them; `wrangler dev` reads them from .dev.vars, which is not committed,
+# and the Vitest tests use stand-in values from vitest.config.mjs.
 [vars]
 APP_URL = "https://waveslave.tw/"
 ALLOWED_ORIGINS = "https://waveslave.tw"

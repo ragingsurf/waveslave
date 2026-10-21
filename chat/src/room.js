@@ -105,8 +105,10 @@ const ADMIN_TOOLS = {
 };
 
 // The rate limits (spec "Moderation", step 3), per LINE account. Each rule lets `max` writes through in a window of
-// `ms` that opens with the first of them. The counts are kept in limits as "<sub_hash>:<rule>", so they outlive an
-// account deleted and made again, and so the room can sleep between writes.
+// `ms` that opens with the first of them. The counts are kept in limits as "<sub_hash>:<rule>", so the room can sleep
+// between writes. Deleting the account deletes them with it, as the spec's list of what deletion removes says
+// (forgetAccount()). An account made again starts as a new one, under the new-account limit below, and a ban still
+// holds through subs.
 const SAY_LIMITS = [{ rule: "say:5s", max: 1, ms: 5 * SECOND }, { rule: "say:10m", max: 20, ms: 10 * MINUTE }];
 const NEW_ACCOUNT = DAY; // accounts younger than this may also post only...
 const NEW_SAY_LIMIT = { rule: "say:1h", max: 10, ms: HOUR }; // ...10 messages an hour
@@ -180,8 +182,8 @@ const SCHEMA_V1 = [
     consent_at INTEGER NOT NULL,
     consent_ver TEXT NOT NULL
   )`,
-  // One row per LINE account. It outlives account deletion, so deleting an account doesn't undo a ban or reset
-  // limits. A deleted, unbanned row goes after 30 days.
+  // One row per LINE account. It outlives account deletion, so deleting an account doesn't undo a ban (the limit
+  // counts do go with the account: see SAY_LIMITS). A deleted, unbanned row goes after 30 days.
   `CREATE TABLE subs (
     sub_hash TEXT PRIMARY KEY,
     banned INTEGER NOT NULL DEFAULT 0,
@@ -374,7 +376,7 @@ function limitsFor(user, kind, spot, now) {
 
 // A freed nickname's hold, kept in limits until it runs out: "held:<nick_key>:<sub_hash of the account that had it>".
 // A nickname key has no ":" or ";" (checkNick allows only letters, digits, spaces, "_", "." and "-", and the key drops
-// the spaces), so every hold on one name sorts between "held:<key>:" and "held:<key>;".
+// all but the letters and digits), so every hold on one name sorts between "held:<key>:" and "held:<key>;".
 const heldKey = (nickKey, sub) => `held:${nickKey}:${sub}`;
 
 export class Room extends DurableObject {
@@ -951,20 +953,23 @@ export class Room extends DurableObject {
   //   update {id, likes} | {id, deleted: true} | {id, hidden: true}
   //   online {online}                      when a socket says hello or closes
   //   tick {online}                        every 45 s while any socket is open (alarm())
-  //   error {code, for?}                   auth, banned, locked, slow:<s>, blocked:<rule>, invalid, update, size,
-  //                                        nick:<length|chars|reserved|taken>, or admin (a claim refused); "for" is
-  //                                        the frame's type
+  //   error {code, for?}                   auth, banned, locked, slow:<s>, blocked:<rule>, invalid, gone, update,
+  //                                        size, nick:<length|chars|reserved|taken>, or admin (a claim refused); "for"
+  //                                        is the frame's type. gone answers a frame that is well formed but names
+  //                                        something that isn't there (any more): a message deleted or hidden a
+  //                                        moment ago, a log deleted on another screen, a LINE account with no row
   //   ok {for: "share", session_id, shared_msg} | {for: "unshare", session_id}   to the socket that asked
   // To Bryan's sockets only:
   //   msg {msg} with msg.hidden            a message just hidden, with why ("flags", "ban" or "admin"), where everyone
   //                                        else gets update {id, hidden: true}
-  //   hidden {count, messages, banned}     the answer to hidden_list
+  //   hidden {count, messages, banned, banned_count}   the answer to hidden_list
   //   ok {for, ...}                        one of his tools did its work
   // Messages are always the public frame (toPublic()), so no user id or LINE data goes out; only Bryan's sockets learn
   // why a message was hidden, and the LINE account code (sub_hash) that unban takes. A socket that sends five bad
-  // frames (invalid ones, or writes before signing in) is closed with 1008, and a frame over 4 KB closes it with
-  // 1009. Each address may hold 5 sockets. The room's own close codes: 4401 signed out everywhere (or the account is
-  // deleted), 4403 banned, 4426 reload for the new chat, and 4429 resting.
+  // frames (invalid ones, or writes before signing in) is closed with 1008. gone is not a bad frame: a working app gets
+  // it from ordinary races (a double tap, a like on a message hidden just as it was tapped). A frame over 4 KB closes
+  // it with 1009. Each address may hold 5 sockets. The room's own close codes: 4401 signed out everywhere (or the
+  // account is deleted), 4403 banned, 4426 reload for the new chat, and 4429 resting.
 
   // GET /ws, once the Worker has checked the Origin: a new socket, unless the visitor's address already holds 5. The
   // address is kept only as a tag on its sockets, and only as its HMAC under SUB_PEPPER, so the room never holds an IP
@@ -1023,7 +1028,8 @@ export class Room extends DurableObject {
     if (!code) return;
     this.send(ws, errorFrame(code, type));
     // Bad frames: ones the room can't read or that break the protocol, and writes from a socket not signed in. A
-    // token that doesn't check out (hello's auth) isn't one, and neither is a blocked or slowed-down write.
+    // token that doesn't check out (hello's auth) isn't one, and neither is a blocked or slowed-down write, nor a frame
+    // about something that has gone (gone).
     if (code === "invalid" || (code === "auth" && type !== "hello")) {
       const at = { ...NEW_SOCKET, ...ws.deserializeAttachment() };
       if (at.bad + 1 >= BAD_FRAMES) ws.close(CLOSE_BAD, "bad frames");
@@ -1096,9 +1102,9 @@ export class Room extends DurableObject {
 
   // say {text, spot?, reply_to?}: a text message of up to 500 characters, as normalise() leaves it, trimmed. It is
   // tagged with the spot the app's filter showed (none for All), and a reply takes its parent's tag instead, from a
-  // parent that is there to see. A say that starts with a slash is dropped: chat.js sends those as admin frames, so one
-  // that comes as say is not from chat.js. The hard-block filters read the checking copy; a blocked text stays in the
-  // sender's box, and counts against no limit.
+  // parent that is there to see (gone when it isn't). A say that starts with a slash is dropped: chat.js sends those as
+  // admin frames, so one that comes as say is not from chat.js. The hard-block filters read the checking copy; a
+  // blocked text stays in the sender's box, and counts against no limit.
   onSay(ws, user, frame) {
     if (typeof frame.text !== "string") return "invalid";
     const { stored, check } = normalise(frame.text);
@@ -1109,8 +1115,9 @@ export class Room extends DurableObject {
     if (spot !== null && !SPOTS.includes(spot)) return "invalid";
     const replyTo = frame.reply_to ?? null;
     if (replyTo !== null) {
-      const parent = isId(replyTo) ? this.one("SELECT spot FROM messages WHERE id = ? AND hidden_by IS NULL", replyTo) : null;
-      if (!parent) return "invalid";
+      if (!isId(replyTo)) return "invalid";
+      const parent = this.one("SELECT spot FROM messages WHERE id = ? AND hidden_by IS NULL", replyTo);
+      if (!parent) return "gone";
       spot = parent.spot;
     }
     const hit = blocked(check, BLOCKLIST);
@@ -1131,10 +1138,11 @@ export class Room extends DurableObject {
     this.post(user, "report", spot, body);
   }
 
-  // like {id}: one 👍 per person, on a message that is there to see. A second like from the same person changes
-  // nothing and says nothing.
+  // like {id}: one 👍 per person, on a message that is there to see (gone when it isn't). A second like from the same
+  // person changes nothing and says nothing.
   onLike(ws, user, frame) {
-    if (!isId(frame.id) || !this.one("SELECT 1 FROM messages WHERE id = ? AND hidden_by IS NULL", frame.id)) return "invalid";
+    if (!isId(frame.id)) return "invalid";
+    if (!this.one("SELECT 1 FROM messages WHERE id = ? AND hidden_by IS NULL", frame.id)) return "gone";
     if (this.one("SELECT 1 FROM likes WHERE msg_id = ? AND uid = ?", frame.id, user.id)) return;
     const refused = this.canWrite(user, "like");
     if (refused) return refused;
@@ -1147,26 +1155,31 @@ export class Room extends DurableObject {
 
   // delete {id}: a user deletes a message of their own (removeOwn()), and its likes go with it; a session card's log
   // is unshared. Every socket is told, so it goes from every screen. Replies keep their reply_to: the app shows
-  // "Message deleted" for a parent it doesn't have.
+  // "Message deleted" for a parent it doesn't have. A message that is gone already (a second tap) is gone; someone
+  // else's is invalid.
   //
   // Bryan's Delete on anyone else's message hides it instead ("admin"): it goes from every screen but his, and stays in
   // his hidden list, where he can restore it or keep it as evidence, until the daily clean-up takes it with the rest.
+  // One that is hidden already (by flags, a ban or an earlier Delete) is left as it is, with nothing said: it keeps the
+  // reason it was hidden for, which his hidden list shows, and nobody is told about it a second time.
   onDelete(ws, user, frame) {
     if (!isId(frame.id)) return "invalid";
     const refused = this.canWrite(user, "delete");
     if (refused) return refused;
     if (user.role === "admin") {
-      const hidden = this.all(
-        `UPDATE messages SET hidden_by = 'admin' WHERE id = ? AND uid IS NOT ? RETURNING ${MSG_COLS}`,
-        frame.id, user.id,
-      );
-      if (hidden.length > 0) {
+      const theirs = this.one("SELECT hidden_by FROM messages WHERE id = ? AND uid IS NOT ?", frame.id, user.id);
+      if (theirs) {
+        if (theirs.hidden_by !== null) return;
+        const hidden = this.all(
+          `UPDATE messages SET hidden_by = 'admin' WHERE id = ? AND hidden_by IS NULL RETURNING ${MSG_COLS}`,
+          frame.id,
+        );
         this.announceHidden(hidden, "admin");
         return;
       }
     }
     const gone = this.ctx.storage.transactionSync(() => this.removeOwn(frame.id, user.id));
-    if (!gone) return "invalid";
+    if (!gone) return this.one("SELECT 1 FROM messages WHERE id = ?", frame.id) ? "invalid" : "gone";
     this.announceDeleted([gone]);
   }
 
@@ -1211,11 +1224,11 @@ export class Room extends DurableObject {
 
   // ---- The report button (spec "Moderation", step 4) -------------------------------------------------------------
 
-  // flag {id, reason}, on a message that is there to see. Flags are kept by LINE account (sub_hash), so an account
-  // flags a message once, however often it signs up again. A self-flag, a flag on Bryan's messages and one on a message
-  // he restored are ignored, and nothing is kept. Otherwise the message hides once 3 counted flags reach it, or at once
-  // on a one-flag hide (see FLAGS_TO_HIDE and flagger()). The flagger gets no answer either way, so nobody learns
-  // whether their flag counted. 20 flags a day.
+  // flag {id, reason}, on a message that is there to see (gone when it isn't). Flags are kept by LINE account
+  // (sub_hash), so an account flags a message once, however often it signs up again. A self-flag, a flag on Bryan's
+  // messages and one on a message he restored are ignored, and nothing is kept. Otherwise the message hides once 3
+  // counted flags reach it, or at once on a one-flag hide (see FLAGS_TO_HIDE and flagger()). The flagger gets no answer
+  // either way, so nobody learns whether their flag counted. 20 flags a day.
   onFlag(ws, user, frame) {
     if (!isId(frame.id) || !REASONS.includes(frame.reason)) return "invalid";
     const msg = this.one(
@@ -1223,7 +1236,7 @@ export class Room extends DurableObject {
        WHERE m.id = ? AND m.hidden_by IS NULL`,
       frame.id,
     );
-    if (!msg) return "invalid";
+    if (!msg) return "gone";
     const refused = this.canWrite(user, "flag");
     if (refused) return refused;
     if (msg.uid === user.id || msg.role === "admin" || msg.flag_immune) return;
@@ -1323,6 +1336,7 @@ export class Room extends DurableObject {
   //   - An ADMIN_CODE under 32 characters, or none, switches claiming off.
   //   - 3 wrong codes stop that LINE account claiming, and 10 in all stop everyone, until ADMIN_CODE is changed: the
   //     counts are kept with a digest of the code they were tried against, and a new code starts them again.
+  //     Deleting the account takes its own count away, not its part of the total (forgetAccount()).
   //   - Any other slash command ("/shrug") is not a claim, so people who type those can't use up the 10.
   //   - A claim refused for any of these reasons is not counted.
   // Each of these refusals is error admin, whatever the reason, and none is a bad frame. A banned account gets banned.
@@ -1375,14 +1389,15 @@ export class Room extends DurableObject {
   // account, so they can't sign in or sign up again; tv goes up, so their tokens stop working; their sockets close
   // with 4403; and their flags stop counting (flagger()). Their messages from the last 24 hours are hidden ("ban"),
   // and so is the one the ban was for, whatever its age. Bryan's own account can't be banned. ok carries the account's
-  // sub_hash, which unban takes.
+  // sub_hash, which unban takes. A message that isn't there, or whose author has no account left, is gone.
   onBan(ws, user, frame) {
     if (!isId(frame.msg_id)) return "invalid";
     const target = this.one(
       "SELECT u.id, u.sub_hash, u.role FROM messages m JOIN users u ON u.id = m.uid WHERE m.id = ?",
       frame.msg_id,
     );
-    if (!target || target.role === "admin") return "invalid";
+    if (!target) return "gone";
+    if (target.role === "admin") return "invalid";
     const hidden = this.ctx.storage.transactionSync(() => {
       this.all("INSERT INTO subs (sub_hash, banned) VALUES (?, 1) ON CONFLICT (sub_hash) DO UPDATE SET banned = 1", target.sub_hash);
       this.all("UPDATE users SET tv = tv + 1 WHERE id = ?", target.id);
@@ -1397,17 +1412,18 @@ export class Room extends DurableObject {
   }
 
   // unban {sub_hash}: lifts a LINE account's ban. Its hidden messages stay hidden until Bryan restores them, and its old
-  // tokens stay dead: the person signs in with LINE again.
+  // tokens stay dead: the person signs in with LINE again. An account that isn't banned (a second tap) gets ok too, and
+  // one the room has no row for is gone.
   onUnban(ws, user, frame) {
     if (typeof frame.sub_hash !== "string") return "invalid";
-    const lifted = this.one("UPDATE subs SET banned = 0 WHERE sub_hash = ? AND banned = 1 RETURNING sub_hash", frame.sub_hash);
-    if (!lifted) return "invalid";
+    const lifted = this.one("UPDATE subs SET banned = 0 WHERE sub_hash = ? RETURNING sub_hash", frame.sub_hash);
+    if (!lifted) return "gone";
     this.send(ws, { type: "ok", for: "unban", sub_hash: frame.sub_hash });
   }
 
   // restore {id}: Bryan says a message is fine. Its flags are marked rejected (an account with 2 rejected flags stops
   // counting) and it is made immune, so flags can't hide it again. A hidden one comes back for everyone: each socket
-  // gets it as msg, which chat.js merges by id.
+  // gets it as msg, which chat.js merges by id. One that isn't there (retention or its author took it) is gone.
   onRestore(ws, user, frame) {
     if (!isId(frame.id)) return "invalid";
     const restored = this.ctx.storage.transactionSync(() => {
@@ -1417,7 +1433,7 @@ export class Room extends DurableObject {
       const row = this.one(`UPDATE messages SET hidden_by = NULL, flag_immune = 1 WHERE id = ? RETURNING ${MSG_COLS}`, frame.id);
       return { row, wasHidden: was.hidden_by !== null };
     });
-    if (!restored) return "invalid";
+    if (!restored) return "gone";
     if (restored.wasHidden) {
       this.messagesChanged(restored.row.spot);
       this.broadcast({ type: "msg", msg: this.toPublic([restored.row])[0] });
@@ -1426,11 +1442,11 @@ export class Room extends DurableObject {
   }
 
   // keep {id}: "Keep as evidence". A copy goes to holds for 180 days, whatever happens to the message; keeping it again
-  // keeps no second copy.
+  // keeps no second copy. One that isn't there any more is gone.
   onKeep(ws, user, frame) {
     if (!isId(frame.id)) return "invalid";
     const row = this.one(`SELECT ${MSG_COLS} FROM messages WHERE id = ?`, frame.id);
-    if (!row) return "invalid";
+    if (!row) return "gone";
     if (!this.one("SELECT 1 FROM holds WHERE msg_id = ? AND reason = 'keep'", frame.id)) this.hold(row, "keep", this.now());
     this.send(ws, { type: "ok", for: "keep", id: frame.id });
   }
@@ -1448,11 +1464,13 @@ export class Room extends DurableObject {
     this.send(ws, { type: "ok", for: "unlock" });
   }
 
-  // hidden_list: hidden {count, messages, banned}. messages are the newest 100 hidden messages, newest first, each as
-  // its public frame plus why it was hidden (hidden: "flags", "ban" or "admin") and the reasons it was flagged for
-  // (flags: {spam: 2, child: 1}, from the flags Bryan hasn't rejected). count is how many are hidden in all. banned
-  // lists the banned LINE accounts, up to 100: each one's sub_hash, for unban, and its nickname while it still has an
-  // account (null after).
+  // hidden_list: hidden {count, messages, banned, banned_count}. messages are the newest 100 hidden messages, newest
+  // first, each as its public frame plus why it was hidden (hidden: "flags", "ban" or "admin") and the reasons it was
+  // flagged for (flags: {spam: 2, child: 1}, from the flags Bryan hasn't rejected). count is how many are hidden in all.
+  // banned lists the banned LINE accounts, up to 100, the newest accounts first (by the subs row, made when the
+  // account signed up), so the same ones come back each time: each one's sub_hash, for unban, and its nickname while
+  // it still has an account (null after). banned_count is how many are banned in all, so the Unban menu can say when
+  // there are more than it shows.
   onHiddenList(ws) {
     const rows = this.all(
       `SELECT ${MSG_COLS}, hidden_by FROM messages WHERE hidden_by IS NOT NULL ORDER BY id DESC LIMIT ?`,
@@ -1471,9 +1489,11 @@ export class Room extends DurableObject {
       count: this.one("SELECT count(*) AS n FROM messages WHERE hidden_by IS NOT NULL").n,
       messages: shown.map((msg, k) => ({ ...msg, hidden: rows[k].hidden_by, flags: flags.get(msg.id) })),
       banned: this.all(
-        "SELECT s.sub_hash, u.nick FROM subs s LEFT JOIN users u ON u.sub_hash = s.sub_hash WHERE s.banned = 1 LIMIT ?",
+        `SELECT s.sub_hash, u.nick FROM subs s LEFT JOIN users u ON u.sub_hash = s.sub_hash
+         WHERE s.banned = 1 ORDER BY s.rowid DESC LIMIT ?`,
         PAGE_MAX,
       ),
+      banned_count: this.one("SELECT count(*) AS n FROM subs WHERE banned = 1").n,
     });
   }
 
@@ -1529,6 +1549,13 @@ export class Room extends DurableObject {
   sendToUser(uid, frame) {
     for (const ws of this.ctx.getWebSockets()) {
       if (ws.readyState === WebSocket.OPEN && ws.deserializeAttachment()?.uid === uid) this.send(ws, frame);
+    }
+  }
+
+  // Sends one frame to Bryan's open sockets only (their attachment's role is "admin"), for news of a hidden message.
+  sendToAdmins(frame) {
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState === WebSocket.OPEN && ws.deserializeAttachment()?.role === "admin") this.send(ws, frame);
     }
   }
 
@@ -1632,8 +1659,9 @@ export class Room extends DurableObject {
 
   // DELETE /me ("Delete my account"; spec "Deleting an account"): everything of the account goes, in one transaction
   // (forgetAccount()). Then every open screen is told: their text messages and session cards go (update {id, deleted:
-  // true}), and each message they liked has its new count (update {id, likes}). Their sockets close with 4401, as on
-  // signing out everywhere. A locked room doesn't stop it (canWrite()). {ok: true}.
+  // true}), and each message they liked has its new count (update {id, likes}); for a message hidden since, only
+  // Bryan's screens are told, as only they show it. Their sockets close with 4401, as on signing out everywhere. A
+  // locked room doesn't stop it (canWrite()). {ok: true}.
   async deleteAccount(request) {
     const user = await this.userFromToken(bearer(request));
     if (!user) return refuse(401, "auth");
@@ -1642,7 +1670,10 @@ export class Room extends DurableObject {
     const { gone, liked } = this.forgetAccount(user, this.now());
     this.closeUser(user.id, CLOSE_SIGNED_OUT);
     this.announceDeleted(gone);
-    for (const { id, likes } of liked) this.broadcast({ type: "update", id, likes });
+    for (const { id, likes, hidden_by } of liked) {
+      if (hidden_by === null) this.broadcast({ type: "update", id, likes });
+      else this.sendToAdmins({ type: "update", id, likes });
+    }
     return Response.json({ ok: true });
   }
 
@@ -1654,12 +1685,14 @@ export class Room extends DurableObject {
   //   - their logs go, and so do their LINE account's rate-limit counts and held nicknames, and any sign-in of theirs
   //     still waiting to be redeemed (with LINE's raw sub);
   //   - if it is Bryan's account, meta admin_uid goes, so he can claim the role again from a new account;
+  //   - their count of wrong /admin codes goes from meta admin_claims, which then no longer names their LINE account;
+  //     the total stays, so the 10 in all still count them;
   //   - their LINE account's row in subs stays, marked deleted: a ban on it stays, and an unbanned one goes after 30
   //     days (retention);
   //   - and the account itself goes.
   // Bryan's copies in holds stay, whatever else is deleted (spec "Moderation", step 5). Nothing else in the room keeps
   // their user id. Returns what the open screens must be told: gone, the messages deleted ({id, spot}), and liked,
-  // the messages whose like counts changed ({id, likes}), each oldest first.
+  // the messages whose like counts changed ({id, likes, hidden_by}), each oldest first.
   forgetAccount(user, now) {
     const sub = user.sub_hash;
     return this.ctx.storage.transactionSync(() => {
@@ -1668,7 +1701,7 @@ export class Room extends DurableObject {
       this.all("UPDATE messages SET uid = NULL WHERE uid = ? AND kind = 'report'", user.id);
       const unliked = this.all("DELETE FROM likes WHERE uid = ? RETURNING msg_id", user.id).map((like) => like.msg_id);
       const liked = this.all(
-        "UPDATE messages SET likes = likes - 1 WHERE id IN (SELECT value FROM json_each(?)) RETURNING id, likes",
+        "UPDATE messages SET likes = likes - 1 WHERE id IN (SELECT value FROM json_each(?)) RETURNING id, likes, hidden_by",
         JSON.stringify(unliked),
       ).sort((a, b) => a.id - b.id);
       this.all("DELETE FROM flags WHERE sub_hash = ?", sub);
@@ -1678,6 +1711,11 @@ export class Room extends DurableObject {
       this.all("DELETE FROM limits WHERE key > 'held:' AND key < 'held;' AND substr(key, ?) = ?", -(sub.length + 1), `:${sub}`);
       this.all("DELETE FROM handoffs WHERE sub_hash = ?", sub);
       if (this.getMeta("admin_uid") === user.id) this.all("DELETE FROM meta WHERE key = 'admin_uid'");
+      const claims = JSON.parse(this.getMeta("admin_claims") ?? "null");
+      if (claims?.by && Object.hasOwn(claims.by, sub)) {
+        delete claims.by[sub];
+        this.setMeta("admin_claims", JSON.stringify(claims));
+      }
       this.all(
         "INSERT INTO subs (sub_hash, deleted_at) VALUES (?, ?) ON CONFLICT (sub_hash) DO UPDATE SET deleted_at = excluded.deleted_at",
         sub, now,
@@ -1719,20 +1757,23 @@ export class Room extends DurableObject {
   }
 
   // share {session_id}: shareSession(). The socket gets ok {for: "share", session_id, shared_msg}, and everyone the card
-  // as msg.
+  // as msg. A log that isn't one of the user's (deleted on another screen) is gone.
   onShare(ws, user, frame) {
+    if (!isId(frame.session_id)) return "invalid";
     const log = this.ownSession(frame.session_id, user.id);
-    if (!log) return "invalid";
+    if (!log) return "gone";
     const shared = this.shareSession(user, log);
     if (shared.error) return shared.error;
     this.send(ws, { type: "ok", for: "share", session_id: log.id, shared_msg: shared.shared_msg });
   }
 
   // unshare {session_id}: the log's card goes from the room (every socket gets update {id, deleted: true}), and the log
-  // stays, private. ok {for: "unshare", session_id}, also for a log that wasn't shared.
+  // stays, private. ok {for: "unshare", session_id}, also for a log that wasn't shared; gone for one that isn't the
+  // user's.
   onUnshare(ws, user, frame) {
+    if (!isId(frame.session_id)) return "invalid";
     const log = this.ownSession(frame.session_id, user.id);
-    if (!log) return "invalid";
+    if (!log) return "gone";
     const refused = this.canWrite(user, "unshare");
     if (refused) return refused;
     if (log.shared_msg !== null) {
@@ -1787,23 +1828,24 @@ export class Room extends DurableObject {
     return oldest === null ? Infinity : oldest + LOGIN_TTL + LOGIN_GRACE;
   }
 
-  // The one alarm. Retention runs once it's past next_retention, then the keepalive tick goes out while sockets
-  // are open, or, while the chat rests, the sockets are closed instead (rest()). Whatever happened before, the alarm
-  // is counted as a request, the usage counts are saved and the next alarm is set: the next retention or tick, or
-  // sooner when a handoff still waiting runs out before them.
+  // The one alarm. Expired sign-ins go first, then retention runs once it's past next_retention, then the keepalive
+  // tick goes out while sockets are open, or, while the chat rests, the sockets are closed instead (rest()). Whatever
+  // happened before, the alarm is counted as a request, the usage counts are saved and the next alarm is set: the
+  // next retention or tick, or sooner when a handoff still waiting runs out before them.
   async alarm() {
     const now = this.now();
     let handoffsDue = Infinity;
     try {
+      // Expired sign-ins go on every alarm, not only at 19:00, and before anything that might fail: a handoff holds
+      // a raw LINE ID. The handoffs still waiting are read here too, so a retention run that fails can't leave one
+      // waiting for tomorrow's run.
+      this.dropExpiredLogins(now);
+      handoffsDue = this.handoffsDue();
       if (now >= this.nextRetention()) {
         // The next run is set first, so a run that fails waits until tomorrow instead of retrying in a loop.
         this.setNextRetention(now);
         this.retention(now);
-      } else {
-        // Expired sign-ins go on every alarm, not only at 19:00: a handoff holds a raw LINE ID.
-        this.dropExpiredLogins(now);
       }
-      handoffsDue = this.handoffsDue();
       if (!this.rest()) this.tick();
     } finally {
       try {

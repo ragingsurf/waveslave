@@ -14,77 +14,25 @@ import { evictDurableObject, runInDurableObject, SELF } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { b64u, hmacB64u, randomB64u, sha256b64u, signToken, subHash } from "../src/auth.js";
-import { checkNick } from "../src/mod.js";
+import {
+  DAY, HOUR, MIN, SEC, addMessages, addUser, all, closeClients, connect, hex, insertUser, join, newRoom, nextError, ofType, say,
+  settle, synced, take, until,
+} from "./helpers.mjs";
 
 const BASE = "https://chat.example";
-const SEC = 1000;
-const MIN = 60 * SEC;
-const HOUR = 60 * MIN;
-const DAY = 24 * HOUR;
 // 12:00 UTC on a day years ahead, so no alarm a test sets goes off by itself.
 const T = Date.UTC(2030, 5, 3, 12, 0);
 const TRACE_URL = "https://www.cloudflare.com/cdn-cgi/trace";
 
 const REFUSED = { type: "error", code: "admin", for: "admin" };
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const hex = (n) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, "0")).join("");
-const parse = (text) => {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-};
-
-// Waits until fn() gives something truthy, and returns it.
-async function until(fn, what = "a condition", ms = 3000) {
-  const end = Date.now() + ms;
-  for (;;) {
-    const value = await fn();
-    if (value) return value;
-    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
-    await sleep(5);
-  }
-}
-
 afterEach(() => {
   vi.restoreAllMocks();
 });
-
-// ---- Rooms, accounts and sockets ----------------------------------------------------------------------------------
+afterEach(closeClients);
 
 // A room of its own, with its clock at T until the test moves clock.t.
-async function freshRoom(at = T) {
-  const stub = env.ROOM.getByName(`admin-${crypto.randomUUID()}`, { locationHint: "apac-ne" });
-  const clock = { t: at };
-  await runInDurableObject(stub, (room) => {
-    room.now = () => clock.t;
-  });
-  const inRoom = (fn) => runInDurableObject(stub, fn);
-  const rows = (query, ...binds) => inRoom((room) => room.sql.exec(query, ...binds).toArray());
-  return { stub, clock, inRoom, rows, now: () => clock.t };
-}
-
-// Writes one account into a room's tables (room is the room object, inside runInDurableObject).
-function insertUser(room, user, { age, role, now }) {
-  room.sql.exec("INSERT INTO subs (sub_hash) VALUES (?) ON CONFLICT (sub_hash) DO NOTHING", user.sub);
-  room.sql.exec(
-    `INSERT INTO users (id, sub_hash, nick, nick_key, role, tv, created, last_seen, nick_changed, consent_at, consent_ver)
-     VALUES (?, ?, ?, ?, ?, 0, ?, ?, NULL, ?, 'v1')`,
-    user.id, user.sub, user.nick, checkNick(user.nick).key, role, now - age, now - age, now - age,
-  );
-}
-
-// An account, written straight into the room: `age` old, with `posts` text messages of its own in the room (an hour
-// old), and a session token. user.sub stands for its sub_hash.
-async function addUser(r, { nick = `Surfer_${hex(3)}`, age = 2 * DAY, role = "user", posts = 0, sub = `sub-${hex(8)}` } = {}) {
-  const user = { id: crypto.randomUUID(), sub, nick };
-  await r.inRoom((room) => insertUser(room, user, { age, role, now: r.now() }));
-  if (posts > 0) await addMessages(r, user.id, posts, { ts: r.now() - 2 * HOUR });
-  user.token = await signToken({ uid: user.id, tv: 0, exp: r.now() + 30 * DAY }, env.SESSION_SECRET);
-  return user;
-}
+const freshRoom = (at = T) => newRoom("admin", at);
 
 // An account whose flags count: two days old, with a post.
 const addFlagger = (r, more = {}) => addUser(r, { age: 2 * DAY, posts: 1, ...more });
@@ -92,97 +40,8 @@ const addFlagger = (r, more = {}) => addUser(r, { age: 2 * DAY, posts: 1, ...mor
 // An account whose sexual and child-safety flags hide on their own: a week old, with 5 posts.
 const addTrusted = (r) => addUser(r, { age: 7 * DAY, posts: 5 });
 
-// Messages written straight into the room, oldest first. Returns their ids.
-function addMessages(r, uid, n, { ts = r.now() - HOUR, hidden_by = null, kind = "text", spot = null } = {}) {
-  return r.inRoom((room) => {
-    const ids = [];
-    for (let k = 0; k < n; k++) {
-      ids.push(
-        room.sql
-          .exec(
-            "INSERT INTO messages (ts, uid, kind, spot, body, hidden_by) VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
-            ts + k, uid, kind, spot, JSON.stringify({ text: `seeded ${k}` }), hidden_by,
-          )
-          .one().id,
-      );
-    }
-    room.messagesChanged();
-    return ids;
-  });
-}
-
-const randomIp = () => `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
-
-// Every client socket a test opened; each is closed after its test.
-const clients = [];
-afterEach(() => {
-  for (const c of clients.splice(0)) {
-    try {
-      c.ws.close(1000, "done");
-    } catch {
-      // Closed already.
-    }
-  }
-});
-
-// Wraps an accepted client socket: its frames as they arrive (JSON parsed), send(frame), and closed (the close code
-// once it closes).
-function client(ws) {
-  const c = { ws, frames: [], taken: new Set(), closed: null };
-  ws.accept();
-  ws.addEventListener("message", (e) => {
-    c.frames.push(typeof e.data === "string" ? parse(e.data) : e.data);
-  });
-  ws.addEventListener("close", (e) => {
-    c.closed = e.code;
-  });
-  c.send = (frame) => ws.send(typeof frame === "string" ? frame : JSON.stringify(frame));
-  clients.push(c);
-  return c;
-}
-
-async function connect(stub, ip = randomIp()) {
-  const res = await stub.fetch("https://room/r/ws", { headers: { Upgrade: "websocket", "CF-Connecting-IP": ip } });
-  expect(res.status).toBe(101);
-  return client(res.webSocket);
-}
-
-// Waits for the first frame on c that passes `match` and hasn't been taken yet, and takes it.
-async function take(c, match, ms = 3000) {
-  const end = Date.now() + ms;
-  for (;;) {
-    const i = c.frames.findIndex((f, k) => !c.taken.has(k) && match(f));
-    if (i >= 0) {
-      c.taken.add(i);
-      return c.frames[i];
-    }
-    if (Date.now() > end) throw new Error(`no such frame; got ${JSON.stringify(c.frames).slice(0, 800)}`);
-    await sleep(5);
-  }
-}
-const ofType = (type) => (f) => f?.type === type;
 const msgOf = (id) => (f) => f?.type === "msg" && f.msg.id === id;
-const nextError = (c) => take(c, ofType("error"));
-const all = (c, type) => c.frames.filter(ofType(type));
-// Long enough for any frame on its way to arrive, before a test checks that none did.
-const settle = () => sleep(60);
 
-// A socket that has said hello, as `user` or as a reader, and has its history.
-async function join(r, user = null) {
-  const c = await connect(r.stub);
-  c.send({ type: "hello", v: 1, ...(user ? { token: user.token } : {}) });
-  c.history = await take(c, ofType("history"));
-  return c;
-}
-
-// Waits until the room has handled every frame c has sent so far. The room handles one socket's frames in turn, so
-// once the answer to an older sent now is back (a page, or slow), everything before it is done.
-async function synced(c) {
-  c.send({ type: "older", before_id: 1 });
-  await take(c, (f) => (f?.type === "history" && f.before_id === 1) || (f?.type === "error" && f.for === "older"));
-}
-
-const say = (c, text, more = {}) => c.send({ type: "say", text, ...more });
 const claim = (c, code) => c.send({ type: "admin", code });
 
 // Flags message id from socket c, and waits until the room has handled it (a flag gets no answer).
@@ -308,18 +167,22 @@ describe("flags", () => {
     expect((await r.rows("SELECT count(*) AS n FROM flags"))[0].n).toBe(20);
   });
 
-  it("refuses a flag with a reason that isn't one, or on a message that isn't there or is hidden (error invalid)", async () => {
+  it("refuses a flag with a reason that isn't one (error invalid), or on a message that isn't there or is hidden (error gone)", async () => {
     const r = await freshRoom();
     const author = await addUser(r);
     const [id] = await addMessages(r, author.id, 1);
     const [hidden] = await addMessages(r, author.id, 1, { hidden_by: "ban" });
     const flagger = await addFlagger(r);
-    for (const frame of [{ id, reason: "boring" }, { id }, { id: String(id), reason: "spam" }, { id: 999_999, reason: "spam" }, { id: hidden, reason: "spam" }]) {
-      // A socket each: every one of these is a bad frame, and five close a socket.
-      const c = await join(r, flagger);
+    const c = await join(r, flagger);
+    for (const frame of [{ id, reason: "boring" }, { id }, { id: String(id), reason: "spam" }]) {
       c.send({ type: "flag", ...frame });
       expect(await nextError(c), JSON.stringify(frame)).toEqual({ type: "error", code: "invalid", for: "flag" });
     }
+    for (const frame of [{ id: 999_999, reason: "spam" }, { id: hidden, reason: "spam" }]) {
+      c.send({ type: "flag", ...frame });
+      expect(await nextError(c), JSON.stringify(frame)).toEqual({ type: "error", code: "gone", for: "flag" });
+    }
+    expect(c.closed).toBeNull(); // three bad frames and two gone ones
     expect(await r.rows("SELECT * FROM flags")).toEqual([]);
   });
 
@@ -453,10 +316,12 @@ describe("restore", () => {
     expect(await r.rows("SELECT rejected FROM flags WHERE msg_id = ?", id)).toEqual([{ rejected: 1 }]);
   });
 
-  it("refuses a restore of a message that isn't there (error invalid)", async () => {
+  it("answers a restore of a message that isn't there with error gone, and one of an id that isn't one with invalid", async () => {
     const r = await freshRoom();
     const admin = await join(r, await addUser(r, { role: "admin" }));
     admin.send({ type: "restore", id: 999_999 });
+    expect(await nextError(admin)).toEqual({ type: "error", code: "gone", for: "restore" });
+    admin.send({ type: "restore", id: "1" });
     expect(await nextError(admin)).toEqual({ type: "error", code: "invalid", for: "restore" });
   });
 });
@@ -674,7 +539,7 @@ describe("ban", () => {
     expect(await r.rows("SELECT tv FROM users WHERE id = ?", u.id)).toEqual([{ tv: 1 }]);
     expect(await r.inRoom((room) => room.reportsFor("suao", T).reports)).toEqual([]);
     // Their token no longer signs a socket in.
-    const back = await connect(r.stub);
+    const back = await connect(r);
     back.send({ type: "hello", v: 1, token: u.token });
     expect(await nextError(back)).toEqual({ type: "error", code: "auth", for: "hello" });
   });
@@ -709,15 +574,15 @@ describe("ban", () => {
     expect(await hiddenBy(r, id)).toBe("flags");
   });
 
-  it("can't ban Bryan, or the author of a message that isn't there or has no author left (error invalid)", async () => {
+  it("can't ban Bryan (error invalid), or the author of a message that isn't there or has no author left (error gone)", async () => {
     const r = await freshRoom();
     const bryan = await addUser(r, { role: "admin" });
     const [his] = await addMessages(r, bryan.id, 1);
     const [orphan] = await addMessages(r, null, 1, { kind: "report", spot: "nanwan" });
     const admin = await join(r, bryan);
-    for (const msg_id of [his, orphan, 999_999, String(his)]) {
+    for (const [msg_id, code] of [[his, "invalid"], [orphan, "gone"], [999_999, "gone"], [String(his), "invalid"]]) {
       admin.send({ type: "ban", msg_id });
-      expect(await nextError(admin), String(msg_id)).toEqual({ type: "error", code: "invalid", for: "ban" });
+      expect(await nextError(admin), String(msg_id)).toEqual({ type: "error", code, for: "ban" });
     }
     expect(admin.closed).toBeNull();
     expect(await r.rows("SELECT banned FROM subs WHERE sub_hash = ?", bryan.sub)).toEqual([{ banned: 0 }]);
@@ -726,7 +591,7 @@ describe("ban", () => {
 });
 
 describe("unban", () => {
-  it("clears the ban; a LINE account that isn't banned gets error invalid", async () => {
+  it("clears the ban; a second unban is ok too, a LINE account the room has no row for is gone", async () => {
     const r = await freshRoom();
     const u = await addUser(r);
     const [id] = await addMessages(r, u.id, 1);
@@ -738,10 +603,15 @@ describe("unban", () => {
     expect(await r.rows("SELECT banned FROM subs WHERE sub_hash = ?", u.sub)).toEqual([{ banned: 0 }]);
     // Their hidden messages stay hidden until Bryan restores them.
     expect(await hiddenBy(r, id)).toBe("ban");
-    for (const sub_hash of [u.sub, "sub-nobody", 42]) {
-      admin.send({ type: "unban", sub_hash });
-      expect(await nextError(admin), String(sub_hash)).toEqual({ type: "error", code: "invalid", for: "unban" });
-    }
+    // Bryan's double tap: the account isn't banned, and stays so.
+    admin.send({ type: "unban", sub_hash: u.sub });
+    expect(await take(admin, ofType("ok"))).toEqual({ type: "ok", for: "unban", sub_hash: u.sub });
+    expect(await r.rows("SELECT banned FROM subs WHERE sub_hash = ?", u.sub)).toEqual([{ banned: 0 }]);
+    admin.send({ type: "unban", sub_hash: "sub-nobody" });
+    expect(await nextError(admin)).toEqual({ type: "error", code: "gone", for: "unban" });
+    admin.send({ type: "unban", sub_hash: 42 });
+    expect(await nextError(admin)).toEqual({ type: "error", code: "invalid", for: "unban" });
+    expect(await r.rows("SELECT sub_hash FROM subs WHERE sub_hash = 'sub-nobody'")).toEqual([]);
   });
 });
 
@@ -807,13 +677,13 @@ describe("keep", () => {
     admin.send({ type: "keep", id: hidden });
     expect(await take(admin, ofType("ok"))).toEqual({ type: "ok", for: "keep", id: hidden });
     admin.send({ type: "keep", id: 999_999 });
-    expect(await nextError(admin)).toEqual({ type: "error", code: "invalid", for: "keep" });
+    expect(await nextError(admin)).toEqual({ type: "error", code: "gone", for: "keep" });
     expect((await r.rows("SELECT count(*) AS n FROM holds"))[0].n).toBe(2);
   });
 });
 
 describe("hidden_list", () => {
-  it("-> hidden {count, messages, banned}: each hidden message, newest first, with why it was hidden", async () => {
+  it("-> hidden {count, messages, banned, banned_count}: each hidden message, newest first, with why it was hidden", async () => {
     const r = await freshRoom();
     const a = await addUser(r);
     const b = await addUser(r);
@@ -844,9 +714,31 @@ describe("hidden_list", () => {
         shown(byBan, b, T - 2 * MIN, { hidden: "ban", flags: {} }),
         shown(byFlags, a, T - 3 * MIN, { hidden: "flags", flags: { spam: 2, child: 1 } }),
       ],
-      banned: expect.arrayContaining([{ sub_hash: b.sub, nick: b.nick }, { sub_hash: gone.sub, nick: null }]),
+      // The newest LINE accounts first: gone's account was made after b's.
+      banned: [{ sub_hash: gone.sub, nick: null }, { sub_hash: b.sub, nick: b.nick }],
+      banned_count: 2,
     });
-    expect(list.banned).toHaveLength(2);
+  });
+
+  it("lists the newest 100 banned LINE accounts, always the same ones, and says how many are banned in all", async () => {
+    const r = await freshRoom();
+    const bryan = await addUser(r, { role: "admin" });
+    // 130 banned accounts, made in this order, with sub_hash values that sort the other way round; and some that aren't.
+    const subs = Array.from({ length: 130 }, (_, k) => `sub-${String(999 - k).padStart(4, "0")}`);
+    await r.inRoom((room) => {
+      for (const sub of subs) room.sql.exec("INSERT INTO subs (sub_hash, banned) VALUES (?, 1)", sub);
+      for (let k = 0; k < 5; k++) room.sql.exec("INSERT INTO subs (sub_hash, banned) VALUES (?, 0)", `sub-free-${k}`);
+    });
+    const admin = await join(r, bryan);
+    const lists = [];
+    for (let k = 0; k < 2; k++) {
+      admin.send({ type: "hidden_list" });
+      lists.push(await take(admin, ofType("hidden")));
+    }
+    for (const list of lists) {
+      expect(list.banned_count).toBe(130);
+      expect(list.banned.map((row) => row.sub_hash)).toEqual(subs.slice(30).reverse());
+    }
   });
 });
 
@@ -874,6 +766,34 @@ describe("delete by Bryan", () => {
     c.send({ type: "delete", id: orphan });
     expect(await nextError(c)).toEqual({ type: "error", code: "invalid", for: "delete" });
     expect(await hiddenBy(r, orphan)).toBe("admin");
+  });
+
+  it("leaves a message that is already hidden as it is: it keeps why (flags, ban), and nobody is told again", async () => {
+    const r = await freshRoom();
+    const u = await addUser(r);
+    const flagger = await addFlagger(r);
+    const bryan = await addUser(r, { role: "admin" });
+    const [byFlags] = await addMessages(r, u.id, 1, { hidden_by: "flags" });
+    const [byBan] = await addMessages(r, u.id, 1, { hidden_by: "ban" });
+    const [byAdmin] = await addMessages(r, u.id, 1, { hidden_by: "admin" });
+    await r.inRoom((room) => room.sql.exec("INSERT INTO flags (msg_id, sub_hash, reason, ts) VALUES (?, ?, 'spam', ?)", byFlags, flagger.sub, T));
+    const reader = await join(r);
+    const admin = await join(r, bryan);
+    // A double tap too: the second Delete on each finds it hidden already.
+    for (const id of [byFlags, byBan, byAdmin, byFlags, byBan]) admin.send({ type: "delete", id });
+    await synced(admin);
+    await settle();
+    expect(await r.rows("SELECT id, hidden_by FROM messages WHERE uid = ? ORDER BY id", u.id)).toEqual([
+      { id: byFlags, hidden_by: "flags" },
+      { id: byBan, hidden_by: "ban" },
+      { id: byAdmin, hidden_by: "admin" },
+    ]);
+    expect([all(reader, "update"), all(admin, "update"), all(admin, "msg"), all(admin, "error")]).toEqual([[], [], [], []]);
+    expect(admin.closed).toBeNull();
+    // So his hidden list still says why each one went.
+    admin.send({ type: "hidden_list" });
+    const list = await take(admin, ofType("hidden"));
+    expect(list.messages.map((m) => [m.id, m.hidden, m.flags])).toEqual([[byAdmin, "admin", {}], [byBan, "ban", {}], [byFlags, "flags", { spam: 1 }]]);
   });
 });
 
@@ -1005,7 +925,7 @@ describe("through the Worker, on the taiwan room", () => {
       room.messagesChanged();
       return added;
     });
-    const admin = await connect(taiwan);
+    const admin = await connect({ stub: taiwan });
     admin.send({ type: "hello", v: 1, token: bryan.token });
     await take(admin, ofType("history"));
     expect(Object.keys(await signInWithLine(line)).sort()).toEqual(["c", "p"]);

@@ -84,12 +84,18 @@ const LOOKALIKES = {
   z: "\u{0396}",                                                  // Greek capital Zeta
 };
 
-// Chinese numerals become digits and the ideographic full stop becomes a dot, so a phone number or a
-// link can't be hidden behind them.
+// Chinese numerals become digits, so a phone number can't be hidden behind them. The ideographic full stop
+// is folded in normalise() itself, as it depends on what comes before it.
 const OTHER_FOLDS = {
   "〇": "0", "零": "0", "一": "1", "二": "2", "三": "3", "四": "4", "五": "5", "六": "6", "七": "7", "八": "8", "九": "9",
-  "。": ".",
 };
+
+// The ideographic full stop becomes a dot right after a Latin letter or a digit, so "line。me", "example。com"
+// and "0912。345。678" are read as typed with a dot. After anything else it is left as it is: after a Chinese
+// character it ends a sentence, and "今天浪很好。Net is slow" must not read as the link "今天浪很好.net". A
+// written-out Chinese name with 。 for its dot ("衝浪。tw") passes for the same reason; with a real dot it is a link.
+const IDEO_STOP = "。";
+const DOT_AFTER = /^[a-z0-9]$/;
 
 const FOLD = new Map(Object.entries(OTHER_FOLDS));
 for (const [latin, look] of Object.entries(LOOKALIKES)) for (const ch of look) FOLD.set(ch, latin);
@@ -100,7 +106,8 @@ for (const [latin, look] of Object.entries(LOOKALIKES)) for (const ch of look) F
 //           either side of it do not run together and the text stays on one line. Case and everything else
 //           is kept as typed.
 //   check:  stored, accents dropped, then each character folded to lower case or to its plain look-alike
-//           (Cyrillic, Greek and similar letters to Latin, Chinese numerals to digits). The one difference
+//           (Cyrillic, Greek and similar letters to Latin, Chinese numerals to digits, and 。 to a dot after a
+//           Latin letter or a digit, see IDEO_STOP). The other difference
 //           from stored: where the message had a tab or line break the check copy has a "\n", not a space.
 //           Removing it would glue the words either side of it together ("hello<newline>line.me" would read
 //           "helloline.me", and "buy<newline>vape" would lose its word edge), and a space would let
@@ -112,8 +119,11 @@ export function normalise(text) {
   const parts = String(text ?? "").normalize("NFKC").split(BREAKS).map((part) => part.replace(INVISIBLE, "").normalize("NFKC"));
   const stored = parts.join(" ");
   let check = "";
+  let last = ""; // the last character written to check that isn't a line break, for IDEO_STOP
   for (const ch of parts.join("\n").normalize("NFD").replace(COMBINING, "").normalize("NFC")) {
-    check += FOLD.get(ch) ?? ch.toLowerCase();
+    const out = ch === IDEO_STOP ? (DOT_AFTER.test(last) ? "." : ch) : FOLD.get(ch) ?? ch.toLowerCase();
+    check += out;
+    if (out !== "\n") last = out;
   }
   return { stored, check };
 }
@@ -138,18 +148,32 @@ const TELEGRAM = /(?<![a-z0-9-])(?:(?:t\.me|telegram\.(?:me|org|dog))(?![a-z0-9]
 // Domains caught even with no scheme and no path. Words that are also top-level domains (.top, .fun,
 // .live, .work, .shop, ...) are left out on purpose: a message typed "Good surf.Fun day" would be refused.
 // Those still count as links when they have a path ("scam.top/abc"), a "www." or a scheme.
+// The names before the top-level domain may be in any script (金山浪.com, surf台灣.com), as browsers take
+// them; the top-level domain itself is a Latin one. The end of the domain only has to be clear of Latin
+// letters and digits, so Chinese written straight after it ("金山浪.com看") doesn't hide it.
 const BARE_TLDS = "com|net|org|info|biz|xyz|cc|io|tw|jp|kr|hk|cn|tv|sg|edu|gov";
+const LABEL = "[\\p{L}\\p{N}][\\p{L}\\p{N}-]*\\.";
 const LINK = new RegExp(
-  "[a-z][a-z0-9+.-]*:\\/\\/" +                                                  // any scheme://
-  "|(?<![a-z0-9-])www\\d?\\." +                                                 // www.
-  "|(?<![a-z0-9-])(?:[a-z0-9][a-z0-9-]*\\.)+(?:" + BARE_TLDS + ")(?![a-z0-9-])" + // name.com
-  "|(?<![a-z0-9-])(?:[a-z0-9][a-z0-9-]*\\.)+[a-z]{2,24}\\/\\S",                   // name.anything/path
+  "[a-z][a-z0-9+.-]*:\\/\\/" +                                                    // any scheme://
+  "|(?<![a-z0-9-])www\\d?\\." +                                                   // www.
+  "|(?<![\\p{L}\\p{N}-])(?:" + LABEL + ")+(?:" + BARE_TLDS + ")(?![a-z0-9-])" +   // name.com
+  "|(?<![\\p{L}\\p{N}-])(?:" + LABEL + ")+[a-z]{2,24}\\/\\S",                     // name.anything/path
   "u");
 
 // Taiwan mobile numbers: 09xxxxxxxx, or +886 9xxxxxxxx (also 886, 00886, and a leftover 0 after 886).
-// Spaces, dashes, dots, "・" and slashes between digits are removed before this runs.
+// Spaces, dashes, dots, "・" and slashes between digits are removed before this runs (phoneDigits), except
+// the point of a decimal such as a wave height: one digit, a dot and one or two digits, standing alone
+// (not part of a chain of dots like "0.9.1.2"). Without that, "swell 0.9 1.1 1.3 1.6 2.0" would read
+// "0911131620". A phone number written as a list of decimals ("0.9 1.2 3.4 5.6 7.8") looks the same as a
+// list of heights, so it passes too: this chat talks about wave heights far more than anyone would spell a
+// number that way.
 const BETWEEN_DIGITS = /(?<=\d)[\s\-.・/]+(?=\d)/gu;
+const DECIMAL = /(?<![\d.])\d\.\d{1,2}(?!\d|\.\d)/gu;
 const PHONE = /(?<!\d)(?:0|(?:\+|00)?8860?)9\d{8}(?!\d)/u;
+
+// The text the phone check reads: each decimal point becomes a comma, which is not a separator, and then
+// the separators between digits go.
+const phoneDigits = (text) => text.replace(DECIMAL, (d) => d.replace(".", ",")).replace(BETWEEN_DIGITS, "");
 
 // The lists in blocklist.json, turned into patterns once per list object. Entries go through
 // normalise() as well, so they can be written in any form (capitals, full-width, Chinese numerals).
@@ -223,7 +247,7 @@ function blockedReading(text, list) {
   if (hit(c.short, net)) return { rule: "short" };
   if (LINK.test(net)) return { rule: "link" };
 
-  if (PHONE.test(text.replace(BETWEEN_DIGITS, ""))) return { rule: "phone" };
+  if (PHONE.test(phoneDigits(text))) return { rule: "phone" };
 
   if (hit(c.scam, text)) return { rule: "scam" };
   if (hit(c.vape, text)) return { rule: "vape" };
@@ -240,11 +264,14 @@ function blockedReading(text, list) {
 // ways, as nothing and as a space, and the message is blocked if either reading is. If both are, the rule
 // that comes first in RULE_ORDER is reported, so "hello<tab>t.me/x" is Telegram (the space reading), not a
 // link (the glued reading, "hellot.me/x").
+// A break right after a full stop is read only as a space: it ends a sentence, and glued it would turn
+// "Nice session.<newline>TW forecast" into the link "session.tw". A link split there ("example.<newline>com")
+// shows as "example. com", which passes when typed on one line too.
 export function blocked(check, list) {
   const text = String(check ?? "");
   if (!text) return null;
   if (!text.includes("\n")) return blockedReading(text, list);
-  const glued = blockedReading(text.replace(/\n+/g, ""), list);
+  const glued = blockedReading(text.replace(/\.\n+/g, ". ").replace(/\n+/g, ""), list);
   const spaced = blockedReading(text.replace(/\n+/g, " "), list);
   if (!glued || !spaced) return glued ?? spaced;
   return RULE_ORDER.indexOf(spaced.rule) < RULE_ORDER.indexOf(glued.rule) ? spaced : glued;
@@ -253,16 +280,24 @@ export function blocked(check, list) {
 // ---- checkNick -----------------------------------------------------------------------------------
 
 // Words nobody may have in a nickname, so no one can pass as Bryan or as the staff. They are checked
-// against the folded key, so styled letters, look-alikes, hidden characters and spaces do not help.
+// against the folded key, so styled letters, look-alikes, hidden characters, spaces and _ . - do not help.
 const RESERVED = ["bryan", "admin", "waveslave", "coach", "mod", "staff", "官方", "管理", "管理员", "管理員", "教練", "教练", "站長"]
   .map((w) => normalise(w).check);
 
 // Letters, digits and _ . - with single spaces between words.
 const NICK_CHARS = /^[\p{L}\p{N}_.-]+(?: [\p{L}\p{N}_.-]+)*$/u;
 
+// What the key leaves out: the spaces and the punctuation a nickname may have. "Br.yan", "Bry_an" and
+// "B-r-y-a-n" read as Bryan, and "Le.o" as Leo, so they must count as those names.
+const KEY_DROPS = /[ _.-]/g;
+
 // A nickname is 2 to 20 characters after normalising. Returns {ok: true, nick, key} where nick is what to
-// show and key is the folded form with the spaces taken out, which must be unique across users. Or
-// {ok: false, code} with code "length", "chars" or "reserved". Leading and trailing spaces are dropped.
+// show and key is the folded form with the spaces, "_", "." and "-" taken out, which must be unique across
+// users. Or {ok: false, code} with code "length", "chars" (including a name with no letter or digit, whose
+// key would be empty) or "reserved". Leading and trailing spaces are dropped.
+// The key is built from the check copy, which also turns Chinese numerals into digits, so 阿三 and 阿3 (or
+// Leo一 and Leo1) are one name: read aloud they are the same, and the second would pass as the first. The one
+// who comes second is told the name is taken.
 export function checkNick(nick) {
   const n = normalise(typeof nick === "string" ? nick : "");
   const shown = n.stored.trim();
@@ -270,7 +305,8 @@ export function checkNick(nick) {
   if (length < 2 || length > 20) return { ok: false, code: "length" };
   // A tab or line break inside the name (one at either end is trimmed away, like a space) is not a letter.
   if (!NICK_CHARS.test(shown) || n.check.trim().includes("\n")) return { ok: false, code: "chars" };
-  const key = normalise(shown).check.replace(/ /g, "");
+  const key = normalise(shown).check.replace(KEY_DROPS, "");
+  if (key === "") return { ok: false, code: "chars" };
   if (RESERVED.some((word) => key.includes(word))) return { ok: false, code: "reserved" };
   return { ok: true, nick: shown, key };
 }

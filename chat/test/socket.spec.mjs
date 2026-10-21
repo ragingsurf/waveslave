@@ -7,163 +7,31 @@
 // Each test opens its sockets on a room of its own, straight on the room's /r/ws: the Worker in front only checks the
 // Origin and passes the upgrade on (worker.spec.mjs). One test goes through the Worker to the real "taiwan" room, and
 // closes its socket again. Accounts are written straight into the room's tables, with session tokens signed by the
-// test secret. Tests that move time set the room's clock (room.now) to T and move it with clock.t.
+// test secret. Tests that move time set the room's clock (room.now) to T and move it with clock.t. The room, account
+// and socket helpers are in helpers.mjs, shared with mod-admin.spec.mjs and me.spec.mjs.
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject, SELF } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
 import { randomB64u, sha256b64u, signToken } from "../src/auth.js";
 import { checkNick } from "../src/mod.js";
+import {
+  DAY, HOUR, MIN, SEC, addMessages, addUser, all, client, closeClients, connect, join, newRoom, nextError, ofType, say, settle,
+  take, until,
+} from "./helpers.mjs";
 
 const ORIGIN = "https://waveslave.tw";
 const BASE = "https://chat.example";
-const SEC = 1000;
-const MIN = 60 * SEC;
-const HOUR = 60 * MIN;
-const DAY = 24 * HOUR;
 // 12:00 UTC on a day years ahead, so no alarm a test sets goes off by itself, and the daily run (19:00 UTC) is 7 hours on.
 const T = Date.UTC(2030, 5, 3, 12, 0);
 
 const PUBLIC_KEYS = ["body", "id", "kind", "likes", "nick", "reply_to", "role", "spot", "ts"];
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const hex = (n) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, "0")).join("");
-const parse = (text) => {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-};
-
-// Waits until fn() gives something truthy, and returns it.
-async function until(fn, what = "a condition", ms = 3000) {
-  const end = Date.now() + ms;
-  for (;;) {
-    const value = await fn();
-    if (value) return value;
-    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
-    await sleep(5);
-  }
-}
-
-// ---- Rooms, accounts and sockets ----------------------------------------------------------------------------------
-
 // A room of its own. With `at`, its clock stands at that time until the test moves clock.t.
-async function freshRoom(at) {
-  const stub = env.ROOM.getByName(`socket-${crypto.randomUUID()}`, { locationHint: "apac-ne" });
-  const clock = { t: at };
-  if (at !== undefined) {
-    await runInDurableObject(stub, (room) => {
-      room.now = () => clock.t;
-    });
-  }
-  const inRoom = (fn) => runInDurableObject(stub, fn);
-  const rows = (query, ...binds) => inRoom((room) => room.sql.exec(query, ...binds).toArray());
-  return { stub, clock, inRoom, rows, now: () => clock.t ?? Date.now() };
-}
+const freshRoom = (at) => newRoom("socket", at);
 
-// An account, written straight into the room: `age` old, with a session token for it.
-async function addUser(r, { nick = `Surfer_${hex(3)}`, age = 2 * DAY, role = "user", nickChanged = null } = {}) {
-  const now = r.now();
-  const user = { id: crypto.randomUUID(), sub: `sub-${hex(8)}`, nick };
-  await r.inRoom((room) => {
-    room.sql.exec("INSERT INTO subs (sub_hash) VALUES (?)", user.sub);
-    room.sql.exec(
-      `INSERT INTO users (id, sub_hash, nick, nick_key, role, tv, created, last_seen, nick_changed, consent_at, consent_ver)
-       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'v1')`,
-      user.id, user.sub, nick, checkNick(nick).key, role, now - age, now - age, nickChanged, now - age,
-    );
-  });
-  user.token = await signToken({ uid: user.id, tv: 0, exp: now + 30 * DAY }, env.SESSION_SECRET);
-  return user;
-}
+afterEach(closeClients);
 
-// Messages written straight into the room, oldest first. Returns their ids.
-function addMessages(r, uid, n, { ts = r.now() - HOUR, hidden_by = null } = {}) {
-  return r.inRoom((room) => {
-    const ids = [];
-    for (let k = 0; k < n; k++) {
-      ids.push(
-        room.sql
-          .exec(
-            "INSERT INTO messages (ts, uid, kind, spot, body, hidden_by) VALUES (?, ?, 'text', NULL, ?, ?) RETURNING id",
-            ts + k, uid, JSON.stringify({ text: `seeded ${k}` }), hidden_by,
-          )
-          .one().id,
-      );
-    }
-    room.messagesChanged();
-    return ids;
-  });
-}
-
-const randomIp = () => `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
-
-// Every client socket a test opened; each is closed after its test.
-const clients = [];
-afterEach(() => {
-  for (const c of clients.splice(0)) {
-    try {
-      c.ws.close(1000, "done");
-    } catch {
-      // Closed already.
-    }
-  }
-});
-
-// Wraps an accepted client socket: its frames as they arrive (JSON parsed; anything else as text), send(frame), and
-// closed (the close code once it closes).
-function client(ws) {
-  const c = { status: 101, ws, frames: [], taken: new Set(), closed: null };
-  ws.accept();
-  ws.addEventListener("message", (e) => {
-    c.frames.push(typeof e.data === "string" ? parse(e.data) : e.data);
-  });
-  ws.addEventListener("close", (e) => {
-    c.closed = e.code;
-  });
-  c.send = (frame) => ws.send(typeof frame === "string" ? frame : JSON.stringify(frame));
-  clients.push(c);
-  return c;
-}
-
-// Opens a socket on the room as the Worker passes chat.js's upgrade on, from the address `ip`. A refusal comes back as
-// {status, body}.
-async function connect(r, ip = randomIp()) {
-  const res = await r.stub.fetch("https://room/r/ws", { headers: { Upgrade: "websocket", "CF-Connecting-IP": ip } });
-  if (res.status !== 101) return { status: res.status, body: await res.json() };
-  return client(res.webSocket);
-}
-
-// Waits for the first frame on c that passes `match` and hasn't been taken yet, and takes it.
-async function take(c, match, ms = 3000) {
-  const end = Date.now() + ms;
-  for (;;) {
-    const i = c.frames.findIndex((f, k) => !c.taken.has(k) && match(f));
-    if (i >= 0) {
-      c.taken.add(i);
-      return c.frames[i];
-    }
-    if (Date.now() > end) throw new Error(`no such frame; got ${JSON.stringify(c.frames).slice(0, 800)}`);
-    await sleep(5);
-  }
-}
-const ofType = (type) => (f) => f?.type === type;
 const msgWith = (text) => (f) => f?.type === "msg" && f.msg.body.text === text;
-const nextError = (c) => take(c, ofType("error"));
-const all = (c, type) => c.frames.filter(ofType(type));
-// Long enough for any frame on its way to arrive, before a test checks that none did.
-const settle = () => sleep(60);
-
-// A socket that has said hello, as `user` or as a reader, and has its history.
-async function join(r, user = null, ip) {
-  const c = await connect(r, ip);
-  c.send({ type: "hello", v: 1, ...(user ? { token: user.token } : {}) });
-  c.history = await take(c, ofType("history"));
-  return c;
-}
-
-const say = (c, text, more = {}) => c.send({ type: "say", text, ...more });
 const textCount = (r) => r.rows("SELECT count(*) AS n FROM messages").then(([{ n }]) => n);
 
 // ---- Reading -------------------------------------------------------------------------------------------------------
@@ -347,10 +215,8 @@ describe("say", () => {
       { type: "say", text: "x".repeat(501) },
       { type: "say", text: "hi", spot: "pipeline" },
       { type: "say", text: "hi", spot: 5 },
-      { type: "say", text: "hi", reply_to: 999_999 },
       { type: "say", text: "hi", reply_to: "1" },
       { type: "say", text: "hi", reply_to: 0 },
-      { type: "say", text: "hi", reply_to: hidden },
     ];
     let s;
     for (const [k, frame] of bad.entries()) {
@@ -358,6 +224,11 @@ describe("say", () => {
       if (k % 4 === 0) s = await join(r, a);
       s.send(frame);
       expect(await nextError(s), JSON.stringify(frame).slice(0, 60)).toEqual({ type: "error", code: "invalid", for: "say" });
+    }
+    // A reply to a message that isn't there to see is gone, not invalid.
+    for (const reply_to of [999_999, hidden]) {
+      c.send({ type: "say", text: "hi", reply_to });
+      expect(await nextError(c), String(reply_to)).toEqual({ type: "error", code: "gone", for: "say" });
     }
     expect(await textCount(r)).toBe(2);
   });
@@ -446,6 +317,36 @@ describe("frames", () => {
     c.send("ping");
     await take(c, (f) => f === "pong");
     expect(c.closed).toBeNull();
+  });
+
+  it("doesn't count a frame about a message that has just gone as bad: error gone, and the socket stays open", async () => {
+    const r = await freshRoom(T);
+    const a = await addUser(r);
+    const b = await addUser(r);
+    const ca = await join(r, a);
+    const cb = await join(r, b);
+    say(ca, "Here a moment");
+    const { msg } = await take(cb, ofType("msg"));
+    ca.send({ type: "delete", id: msg.id });
+    await take(cb, (f) => f?.type === "update" && f.deleted);
+    // b's taps were on their way as it went: a like, a reply and a flag, twice over, and a's second tap on Delete.
+    for (let k = 0; k < 2; k++) {
+      cb.send({ type: "like", id: msg.id });
+      cb.send({ type: "say", text: "Nice", reply_to: msg.id });
+      cb.send({ type: "flag", id: msg.id, reason: "spam" });
+    }
+    for (const type of ["like", "say", "flag", "like", "say", "flag"]) {
+      expect(await nextError(cb)).toEqual({ type: "error", code: "gone", for: type });
+    }
+    ca.send({ type: "delete", id: msg.id });
+    expect(await nextError(ca)).toEqual({ type: "error", code: "gone", for: "delete" });
+    cb.send("ping");
+    await take(cb, (f) => f === "pong");
+    expect([ca.closed, cb.closed]).toEqual([null, null]);
+    expect(await r.inRoom((room, state) => state.getWebSockets().map((ws) => ws.deserializeAttachment().bad))).toEqual([0, 0]);
+    // And b can still post.
+    say(cb, "Still here");
+    await take(ca, msgWith("Still here"));
   });
 });
 
@@ -618,15 +519,18 @@ describe("like", () => {
     expect((await r.rows("SELECT count(*) AS n FROM likes"))[0].n).toBe(30);
   });
 
-  it("refuses a like on a message that isn't there, or is hidden (error invalid)", async () => {
+  it("refuses a like on a message that isn't there, or is hidden (error gone), or on an id that isn't one (error invalid)", async () => {
     const r = await freshRoom();
     const a = await addUser(r);
     const [hidden] = await addMessages(r, a.id, 1, { hidden_by: "admin" });
     const c = await join(r, a);
-    for (const id of [999_999, hidden, "1"]) {
+    for (const id of [999_999, hidden]) {
       c.send({ type: "like", id });
-      expect(await nextError(c), String(id)).toEqual({ type: "error", code: "invalid", for: "like" });
+      expect(await nextError(c), String(id)).toEqual({ type: "error", code: "gone", for: "like" });
     }
+    c.send({ type: "like", id: "1" });
+    expect(await nextError(c)).toEqual({ type: "error", code: "invalid", for: "like" });
+    expect(await r.rows("SELECT * FROM likes")).toEqual([]);
   });
 });
 
@@ -658,10 +562,10 @@ describe("delete", () => {
     const cb = await join(r, b);
     say(ca, "Mine");
     const { msg } = await take(cb, ofType("msg"));
-    for (const id of [msg.id, 999_999]) {
-      cb.send({ type: "delete", id });
-      expect(await nextError(cb)).toEqual({ type: "error", code: "invalid", for: "delete" });
-    }
+    cb.send({ type: "delete", id: msg.id });
+    expect(await nextError(cb)).toEqual({ type: "error", code: "invalid", for: "delete" });
+    cb.send({ type: "delete", id: 999_999 });
+    expect(await nextError(cb)).toEqual({ type: "error", code: "gone", for: "delete" });
     await settle();
     expect(all(ca, "update")).toEqual([]);
     expect(await textCount(r)).toBe(1);

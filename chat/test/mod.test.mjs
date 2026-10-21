@@ -157,6 +157,17 @@ test("normalise: Chinese numerals become digits in the checking copy only", () =
 test("normalise: Chinese and full-width full stops become dots in the checking copy", () => {
   assert.equal(normalise("line。me").check, "line.me");
   assert.equal(normalise("line．me").check, "line.me");
+  assert.equal(normalise("0912。345。678").check, "0912.345.678");
+  assert.equal(normalise("〇九一二。三四五").check, "0912.345"); // the numerals are digits by then
+  assert.equal(normalise("line\n。me").check, "line\n.me"); // a line break between them changes nothing
+});
+
+test("normalise: after anything but a Latin letter or a digit, 。 stays the end of a sentence", () => {
+  assert.equal(normalise("今天浪很好。Net").check, "今天浪很好。net");
+  assert.equal(normalise("好。").check, "好。");
+  assert.equal(normalise("。me").check, "。me");
+  assert.equal(normalise("line 。me").check, "line 。me");
+  assert.equal(normalise("今天浪很好。Net").stored, "今天浪很好。Net");
 });
 
 test("normalise: odd input does not throw", () => {
@@ -239,6 +250,30 @@ test("blocked: links", () => {
   assert.equal(rule("kiwi.surf/abc"), "link");
 });
 
+test("blocked: links whose names are in Chinese or mix scripts", () => {
+  assert.equal(rule("金山浪.com"), "link");
+  assert.equal(rule("衝浪.tw"), "link");
+  assert.equal(rule("surf台灣.com"), "link");
+  assert.equal(rule("免費.com/x"), "link");
+  assert.equal(rule("看這裡 衝浪.tw/abc 很讚"), "link");
+  assert.equal(rule("去金山浪.com看"), "link"); // Chinese right after the name
+  assert.equal(rule("衝浪．tw"), "link"); // a full-width dot is a dot
+  assert.equal(rule("台灣surf。com"), "link"); // a Latin letter before the 。 makes it a dot, as in "example。com"
+  assert.equal(rule("サーフィン.jp"), "link");
+});
+
+test("blocked: a Chinese sentence that ends in 。 and goes on in English is not a link", () => {
+  // After a Chinese character, 。 is the end of a sentence, not a dot in a name.
+  assert.equal(rule("今天浪很好。Net is slow"), null);
+  assert.equal(rule("去金山衝浪。TW 的浪最棒"), null);
+  assert.equal(rule("好浪。Info at the shop"), null);
+  assert.equal(rule("今天很乾淨。Com on down"), null);
+  assert.equal(rule("風很大。IO is crowded"), null);
+  assert.equal(rule("衝浪。tw"), null); // the price of reading 。 that way: a Chinese name with 。 for its dot passes
+  assert.equal(rule("今天浪很好。明天也是。"), null);
+  assert.equal(rule("e.g. 浪很好"), null);
+});
+
 test("blocked: ordinary punctuation is not a link", () => {
   assert.equal(rule("Great waves.See you at 7"), null);
   assert.equal(rule("Fun session.It was clean"), null);
@@ -256,6 +291,8 @@ test("blocked: the allowHosts list lets chosen sites through", () => {
   assert.equal(rule("https://waveslave.tw.evil.com/x", withHost), "link");
   assert.equal(rule("https://notwaveslave.tw/x", withHost), "link");
   assert.equal(rule("https://waveslave.tw/ and https://evil.com", withHost), "link");
+  assert.equal(rule("請上waveslave.tw查", withHost), null); // Chinese written straight before it, with no space
+  assert.equal(rule("請上衝浪.tw查", withHost), "link");
   assert.equal(rule("https://waveslave.tw/#jinshan"), "link"); // nothing is allowed by default
 });
 
@@ -283,6 +320,26 @@ test("blocked: numbers that are not phone numbers", () => {
   assert.equal(rule("091234567"), null); // one digit short
   assert.equal(rule("20260912345678"), null); // inside a longer number
   assert.equal(rule("Chest high at 7:30, 1.2 m @ 9 s"), null);
+});
+
+test("blocked: a list of wave heights or periods is not a phone number", () => {
+  // Each height is a decimal of its own, so the list doesn't run together into "0911131620".
+  assert.equal(rule("swell 0.9 1.1 1.3 1.6 2.0 over the weekend"), null);
+  assert.equal(rule("0.9 1.1 1.0 1.2 1.3"), null);
+  assert.equal(rule("Hs 0.9, 0.8 0.9 1.0 1.2 m"), null);
+  assert.equal(rule("0.9-1.2 1.3-1.6 2.0"), null);
+  assert.equal(rule("〇。九 一。一 一。三 一。六 二。〇"), null); // the same, in Chinese numerals and full stops
+  assert.equal(rule("periods 9.5 10.2 11.0 9.8 12.1 s"), null);
+  assert.equal(rule("0.95 1.25 1.30 1.65 2.05"), null); // two decimals
+  assert.equal(rule("swell 0.9 1.1 1.3 1.6 2.0."), null); // at the end of a sentence
+});
+
+test("blocked: a dot after a single digit still joins a phone number when it isn't a decimal", () => {
+  assert.equal(rule("0.9.1.2.3.4.5.6.7.8"), "phone"); // a chain of dots is not one decimal
+  assert.equal(rule("0.912.345.678"), "phone");
+  assert.equal(rule("0.912-345-678"), "phone"); // three digits after the dot
+  assert.equal(rule("0 9 1 2 3 4 5 6 7 8"), "phone");
+  assert.equal(rule("0912.345.678"), "phone");
 });
 
 test("blocked: investment-scam phrases", () => {
@@ -379,6 +436,25 @@ test("blocked: a tab or line break is still the edge of a word", () => {
   assert.equal(rule("hello\nline.me/ti/x"), "line");
 });
 
+test("blocked: a line that ends in a full stop is not glued to the next one", () => {
+  // Read as nothing, the break would make "session.tw", "session.net", "9.com", "clean.io" and "line.me".
+  assert.equal(rule("Nice session.\nTW forecast"), null);
+  assert.equal(rule("Fun session.\nNet is slow"), null);
+  assert.equal(rule("good tide at 9.\nCom on down"), null);
+  assert.equal(rule("Waves are clean.\nIo is crowded"), null);
+  assert.equal(rule("What a line.\nMe and Kai got it"), null);
+  assert.equal(rule("Clean today.\r\n\r\nTV said so"), null);
+  assert.equal(rule("Good waves.\tNet is up"), null);
+  // A break anywhere else is still read both ways, and a link split after its dot is as much a link as
+  // "example. com" typed on one line, which passes too.
+  assert.equal(rule("example.\ncom/abc"), null);
+  assert.equal(rule("exam\nple.com"), "link");
+  assert.equal(rule("example.c\nom"), "link");
+  assert.equal(rule("example\n.com"), "link");
+  assert.equal(rule("lin\ne.me/ti/g/x"), "line");
+  assert.equal(rule("0912.\n345.\n678"), "phone");
+});
+
 test("blocked: ordinary text with tabs and line breaks passes", () => {
   assert.equal(rule("Clean peaks\nGood tide\r\n\tFew people"), null);
   assert.equal(rule("Chest high\nat 7:30,\n1.2 m @ 9 s"), null);
@@ -390,7 +466,8 @@ test("blocked: ordinary text with tabs and line breaks passes", () => {
 
 test("checkNick: reserved words are refused, however they are dressed up", () => {
   for (const nick of ["Br\u0001yan", "Br\u{fffc}yan", "Br\u007fyan", "Bryan", "ＢＲＹＡＮ", "Bry\u{0430}n", "Br\u{200b}yan", "WaveSlave官方", "管理员", "教練Leo",
-    "bryan", "B r y a n", "Admin", "xAdminx", "Coach Kai", "Staff", "Mod_88", "管理員", "教练", "站長", "官方小幫手"]) {
+    "bryan", "B r y a n", "Admin", "xAdminx", "Coach Kai", "Staff", "Mod_88", "管理員", "教练", "站長", "官方小幫手",
+    "Br.yan", "Bry_an", "B-r-y-a-n", "B.r_y-a n", "Ad.min", "St_aff", "Wave-Slave", "Co.ach", "管_理"]) {
     assert.deepEqual(checkNick(nick), { ok: false, code: "reserved" }, nick);
   }
 });
@@ -424,7 +501,8 @@ test("checkNick: good nicknames come back normalised with a key", () => {
   assert.deepEqual(checkNick("Le\u0001o"), { ok: true, nick: "Leo", key: "leo" }); // a hidden control is dropped
   assert.deepEqual(checkNick("\nLeo\r\n"), { ok: true, nick: "Leo", key: "leo" }); // a break at either end is trimmed
   assert.deepEqual(checkNick("阿凱"), { ok: true, nick: "阿凱", key: "阿凱" });
-  assert.deepEqual(checkNick("Leo_88"), { ok: true, nick: "Leo_88", key: "leo_88" });
+  assert.deepEqual(checkNick("Leo_88"), { ok: true, nick: "Leo_88", key: "leo88" });
+  assert.deepEqual(checkNick("John.D-2"), { ok: true, nick: "John.D-2", key: "johnd2" });
   assert.deepEqual(checkNick("  Mary Jane "), { ok: true, nick: "Mary Jane", key: "maryjane" });
   assert.deepEqual(checkNick("ＬＥＯ"), { ok: true, nick: "LEO", key: "leo" });
 });
@@ -437,6 +515,26 @@ test("checkNick: look-alikes share one key", () => {
   assert.equal(checkNick("L e o").key, key);
   assert.equal(checkNick("Le\u{200b}o").key, key);
   assert.notEqual(checkNick("Leon").key, key);
+});
+
+test("checkNick: _ . and - don't make a new name", () => {
+  // They are allowed in a nickname, but "Le.o" is still Leo to anyone reading it, so the key leaves them out.
+  const key = checkNick("Leo").key;
+  for (const nick of ["Le.o", "L_eo", "L-e-o", "Leo.", "_Leo_", "L.e_o-"]) assert.equal(checkNick(nick).key, key, nick);
+  assert.equal(checkNick("Leo_88").key, checkNick("Leo88").key);
+});
+
+test("checkNick: a nickname needs a letter or a digit", () => {
+  for (const nick of ["..", "__", "-.-", "_ _", "._-_."]) assert.deepEqual(checkNick(nick), { ok: false, code: "chars" }, nick);
+  assert.equal(checkNick("_a").ok, true);
+  assert.equal(checkNick("-7-").ok, true);
+});
+
+test("checkNick: Chinese numerals and digits share a key, since the names read the same", () => {
+  // A conscious choice (see checkNick): 阿三 and 阿3 are both "A-san" read aloud, so the second would pass as the first.
+  assert.equal(checkNick("阿三").key, checkNick("阿3").key);
+  assert.equal(checkNick("Leo一").key, checkNick("Leo1").key);
+  assert.equal(checkNick("阿三").nick, "阿三"); // shown as typed
 });
 
 // ---- validSnap / validReport ------------------------------------------------------------------

@@ -6,64 +6,38 @@
 // the rest are skipped. It needs chat/'s node_modules (npm ci in chat/).
 // - `wrangler dev` runs the Worker and the room with test secrets, ALLOWED_ORIGINS and APP_URL set to the page's origin, and
 //   LINE_AUTH_URL and LINE_TOKEN_URL pointing at tests/chat/fake-line.mjs, which approves every sign-in at once for one LINE account.
-//   `python3 -m http.server` serves the page with chat.js next to it, as the site does (as in tests/chat/room.test.js).
+//   `python3 -m http.server` serves the page with chat.js next to it, as the site does (both started by tests/chat/servers.js, as for
+//   tests/chat/room.test.js).
 // - Every page is a phone, 390x844, dpr 2, touch, reduced motion, English, Taiwan mode, the Forecast view, the intro done, in a fresh
 //   context. The chat is switched on the way the tests do it (window.__chatUrl and window.__chatContact). Anything but the page, the
 //   backend and the fake LINE is cut off.
-// - wrangler dev runs the Worker with --compatibility-date 2026-10-13: the workerd that comes with the pinned wrangler knows dates up to
-//   then, and wrangler.toml's 2026-10-21 is only for the deploy.
 // Playwright wherever node finds it (npm install playwright), else the copy this container keeps.
 const { chromium } = (() => { try { return require("playwright"); } catch (e) { return require("/opt/node22/lib/node_modules/playwright"); } })();
-const fs = require("fs"), os = require("os"), path = require("path"), net = require("net"), { spawn } = require("child_process");
+const fs = require("fs"), path = require("path");
+const { SECRETS, wait, start } = require("./servers.js");
 
 const [file] = process.argv.slice(2);
 if (!file) { console.error("usage: node tests/chat/flow.test.js <page.html>"); process.exit(2); }
-const ROOT = path.join(__dirname, "..", ".."), CHAT_DIR = path.join(ROOT, "chat"), HTML = fs.readFileSync(file, "utf8");
+const HTML = fs.readFileSync(file, "utf8");
 const LOCK = (HTML.match(/\bH="([0-9a-f]{64})"/) || [])[1]; // a site build opens on the passcode screen: start unlocked
 const CONTACT = { name: "Test Operator", email: "chat@example.com" };
-const CHANNEL = "1234567890", LINE_SECRET = "test-line-secret";
+const CHANNEL = SECRETS.LINE_CHANNEL_ID, LINE_SECRET = SECRETS.LINE_CHANNEL_SECRET;
 // The spec's words for the sign-up sheet's tick and its line about what's public ("The room", First sign-in).
 const CONSENT = "I'm 13 or older (under 18 with a parent's or guardian's OK), and I accept the house rules and the privacy note.";
 const PUBLIC = "Your nickname, spot and time are public on reports and shared sessions.";
 const NOTE = "Kept nosediving on takeoff", HELLO = "Hello from the flow test", LAST = "One more before I go";
 
-const wait = ms => new Promise(r => setTimeout(r, ms));
-const freePort = () => new Promise((ok, no) => { const s = net.createServer().once("error", no).listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => ok(port)); }); });
 
-// ---- The servers, as in tests/chat/room.test.js, plus the fake LINE.
-let tmp, pagePort, chatPort, wrangler = null, site = null, line = null;
-const ORIGIN = () => `http://127.0.0.1:${pagePort}`, CHAT = () => `http://127.0.0.1:${chatPort}`;
-async function up(url, what) {
-  for (let i = 0; i < 120; i++) { try { const r = await fetch(url); if (r.ok) return; } catch (e) {} await wait(500); }
-  throw new Error(`${what} didn't come up (see ${path.join(tmp, "wrangler.log")})`);
-}
-// Stops a server started with its own process group (wrangler dev runs workerd under it), and waits for it to go.
-async function stop(child) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  const gone = new Promise(r => child.once("exit", r));
-  try { process.kill(-child.pid, "SIGTERM"); } catch (e) {}
-  if (await Promise.race([gone.then(() => true), wait(8000).then(() => false)])) return;
-  try { process.kill(-child.pid, "SIGKILL"); } catch (e) {} await gone;
-}
+// ---- The servers (tests/chat/servers.js), with the fake LINE.
+let srv = null, line = null;
+const ORIGIN = () => srv.origin, CHAT = () => srv.chat;
 async function setUp() {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), "chat-flow-")); [pagePort, chatPort] = [await freePort(), await freePort()];
   const { startFakeLine } = await import(path.join(__dirname, "fake-line.mjs"));
   line = await startFakeLine({ channelId: CHANNEL, secret: LINE_SECRET });
-  const dir = path.join(tmp, "site"); fs.mkdirSync(dir);
-  fs.copyFileSync(file, path.join(dir, "index.html")); fs.copyFileSync(path.join(ROOT, "web", "chat.js"), path.join(dir, "chat.js"));
-  // The test values; the real ones are the deploy's secrets.
-  fs.writeFileSync(path.join(tmp, "dev.env"), [`APP_URL=${ORIGIN()}/`, `ALLOWED_ORIGINS=${ORIGIN()}`, `LINE_AUTH_URL=${line.url}/authorize`, `LINE_TOKEN_URL=${line.url}/token`,
-    `LINE_CHANNEL_ID=${CHANNEL}`, `LINE_CHANNEL_SECRET=${LINE_SECRET}`, "SESSION_SECRET=test-session-secret-0123456789abcdef", "SUB_PEPPER=test-pepper",
-    "ADMIN_CODE=test-admin-code-0123456789abcdefghijklmnop", ""].join("\n"));
-  site = spawn("python3", ["-m", "http.server", String(pagePort), "--bind", "127.0.0.1", "--directory", dir], { detached: true, stdio: "ignore" });
-  await up(`${ORIGIN()}/chat.js`, "the page server");
-  const log = fs.openSync(path.join(tmp, "wrangler.log"), "a");
-  wrangler = spawn(path.join(CHAT_DIR, "node_modules", ".bin", "wrangler"), ["dev", "--ip", "127.0.0.1", "--port", String(chatPort), "--env-file", path.join(tmp, "dev.env"),
-    "--persist-to", path.join(tmp, "state"), "--compatibility-date", "2026-10-13", "--show-interactive-dev-session=false", "--log-level", "warn"],
-    { cwd: CHAT_DIR, detached: true, stdio: ["ignore", log, log], env: { ...process.env, WRANGLER_SEND_METRICS: "false", CI: "1" } });
-  await up(`${CHAT()}/reports?spot=jinshan`, "wrangler dev");
+  srv = await start({ file, name: "flow", line });
+  await srv.startWrangler();
 }
-async function tearDown() { await stop(wrangler); await stop(site); if (line) await line.close(); try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {} }
+async function tearDown() { if (srv) await srv.tearDown(); if (line) await line.close(); }
 
 // ---- Helpers on a page.
 // Waits up to 15 s for fn(arg) in the page to come true, and says what it waited for when it doesn't.

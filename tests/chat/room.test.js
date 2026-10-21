@@ -1,6 +1,6 @@
 // Browser checks of the Taiwan chat's room (web/chat.js) against the real backend (chat/): `wrangler dev` runs the Worker and the room
 // with test secrets and ALLOWED_ORIGINS set to the page's origin, and `python3 -m http.server` serves a built page (tests/map/tool.py)
-// with chat.js next to it, as the site does.
+// with chat.js next to it, as the site does (both started by tests/chat/servers.js).
 // Usage: node tests/chat/room.test.js <page.html>   (ONLY=reading,badge runs just those checks)
 // Prints ok / FAIL for each check, and exits 1 on any FAIL or page error. It needs chat/'s node_modules (npm ci in chat/).
 // - The room is seeded before the checks: wrangler dev starts once to make the room's tables, stops, the test writes accounts and 170-odd
@@ -10,11 +10,10 @@
 // - Every page is a phone, 390x844, dpr 2, touch, reduced motion, English, Taiwan mode, the Forecast view, the intro done. The chat is
 //   switched on the way the tests do it (window.__chatUrl and window.__chatContact). Anything but the page and the backend is cut off.
 // - The room takes 5 sockets from one address, and every page here comes from 127.0.0.1, so each check opens at most 3 pages.
-// - wrangler dev runs the Worker with --compatibility-date 2026-10-13: the workerd that comes with the pinned wrangler knows dates up to
-//   then, and wrangler.toml's 2026-10-21 is only for the deploy.
 // Playwright wherever node finds it (npm install playwright), else the copy this container keeps.
 const { chromium } = (() => { try { return require("playwright"); } catch (e) { return require("/opt/node22/lib/node_modules/playwright"); } })();
-const fs = require("fs"), os = require("os"), path = require("path"), net = require("net"), crypto = require("crypto"), { spawn, spawnSync } = require("child_process");
+const fs = require("fs"), path = require("path"), crypto = require("crypto"), { spawnSync } = require("child_process");
+const { SECRETS, wait, start } = require("./servers.js");
 
 const [file] = process.argv.slice(2);
 if (!file) { console.error("usage: node tests/chat/room.test.js <page.html>"); process.exit(2); }
@@ -22,14 +21,12 @@ const ROOT = path.join(__dirname, "..", ".."), CHAT_DIR = path.join(ROOT, "chat"
 const WS = require(path.join(CHAT_DIR, "node_modules", "ws")); // the socket client the backend's own tooling brings (npm install in chat/)
 const LOCK = (HTML.match(/\bH="([0-9a-f]{64})"/) || [])[1]; // a site build opens on the passcode screen: start unlocked
 const CONTACT = { name: "Test Operator", email: "chat@example.com" };
-const SECRET = "test-session-secret-0123456789abcdef", MIN = 60e3, DAY = 864e5;
+const SECRET = SECRETS.SESSION_SECRET, MIN = 60e3, DAY = 864e5;
 
-const wait = ms => new Promise(r => setTimeout(r, ms));
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const b64u = s => Buffer.from(s).toString("base64url");
 // A session token for a seeded account, as chat/src/auth.js signToken makes one: base64url {uid, tv, exp}, a dot, its HMAC-SHA256.
 const token = uid => { const p = b64u(JSON.stringify({ uid, tv: 0, exp: Date.now() + DAY })); return p + "." + crypto.createHmac("sha256", SECRET).update(p).digest("base64url"); };
-const freePort = () => new Promise((ok, no) => { const s = net.createServer().once("error", no).listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => ok(port)); }); });
 
 // ---- The seeded room. Accounts are 40 days old, so the checks that post only meet the 5 s and 10-minute limits; each posting check
 // posts as its own account.
@@ -82,46 +79,19 @@ with c:
 c.close(); print(json.dumps(ids))
 `;
 
-// ---- The servers.
-let tmp, pagePort, chatPort, wrangler = null, site = null;
-const ORIGIN = () => `http://127.0.0.1:${pagePort}`, CHAT = () => `http://127.0.0.1:${chatPort}`;
-function startWrangler() {
-  const log = fs.openSync(path.join(tmp, "wrangler.log"), "a");
-  wrangler = spawn(path.join(CHAT_DIR, "node_modules", ".bin", "wrangler"), ["dev", "--ip", "127.0.0.1", "--port", String(chatPort), "--env-file", path.join(tmp, "dev.env"),
-    "--persist-to", path.join(tmp, "state"), "--compatibility-date", "2026-10-13", "--show-interactive-dev-session=false", "--log-level", "warn"],
-    { cwd: CHAT_DIR, detached: true, stdio: ["ignore", log, log], env: { ...process.env, WRANGLER_SEND_METRICS: "false", CI: "1" } });
-  return up(`${CHAT()}/reports?spot=jinshan`, "wrangler dev");
-}
-async function up(url, what) {
-  for (let i = 0; i < 120; i++) { try { const r = await fetch(url); if (r.ok) return; } catch (e) {} await wait(500); }
-  throw new Error(`${what} didn't come up (see ${path.join(tmp, "wrangler.log")})`);
-}
-// Stops a server started with its own process group (wrangler dev runs workerd under it), and waits for it to go.
-async function stop(child) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  const gone = new Promise(r => child.once("exit", r));
-  try { process.kill(-child.pid, "SIGTERM"); } catch (e) {}
-  if (await Promise.race([gone.then(() => true), wait(8000).then(() => false)])) return;
-  try { process.kill(-child.pid, "SIGKILL"); } catch (e) {} await gone;
-}
+// ---- The servers (tests/chat/servers.js). wrangler dev starts once to make the room's tables and stops; the seed goes into its SQLite
+// file; then it starts again on it.
+let srv = null;
+const ORIGIN = () => srv.origin, CHAT = () => srv.chat;
 async function setUp() {
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), "chat-room-")); [pagePort, chatPort] = [await freePort(), await freePort()];
-  const dir = path.join(tmp, "site"); fs.mkdirSync(dir);
-  fs.copyFileSync(file, path.join(dir, "index.html")); fs.copyFileSync(path.join(ROOT, "web", "chat.js"), path.join(dir, "chat.js"));
-  // The test values; the real ones are the deploy's secrets. LINE isn't used here.
-  fs.writeFileSync(path.join(tmp, "dev.env"), [`APP_URL=${ORIGIN()}/`, `ALLOWED_ORIGINS=${ORIGIN()}`, "LINE_AUTH_URL=http://127.0.0.1:9/authorize", "LINE_TOKEN_URL=http://127.0.0.1:9/token",
-    "LINE_CHANNEL_ID=1234567890", "LINE_CHANNEL_SECRET=test-line-secret", `SESSION_SECRET=${SECRET}`, "SUB_PEPPER=test-pepper", "ADMIN_CODE=test-admin-code-0123456789abcdefghijklmnop", ""].join("\n"));
-  site = spawn("python3", ["-m", "http.server", String(pagePort), "--bind", "127.0.0.1", "--directory", dir], { detached: true, stdio: "ignore" });
-  await up(`${ORIGIN()}/chat.js`, "the page server");
-  await startWrangler(); await stop(wrangler);
-  const dos = path.join(tmp, "state", "v3", "do", "waveslave-chat-Room"), db = fs.readdirSync(dos).find(n => /^[0-9a-f]{64}\.sqlite$/.test(n));
-  if (!db) throw new Error("wrangler dev made no room database");
+  srv = await start({ file, name: "room" });
+  await srv.startWrangler(); await srv.stopWrangler();
   const now = Date.now(), users = Object.entries(USERS).map(([k, u]) => ({ id: "u-" + k, sub: "sub-" + k, nick: u.nick, key: `key-${k}`, role: u.role || "user", created: now - 40 * DAY, seen: now }));
-  const messages = seedMessages(now), run = spawnSync("python3", ["-I", "-c", SEED], { input: JSON.stringify({ db: path.join(dos, db), users, messages }), encoding: "utf8" });
+  const messages = seedMessages(now), run = spawnSync("python3", ["-I", "-c", SEED], { input: JSON.stringify({ db: srv.roomDb(), users, messages }), encoding: "utf8" });
   if (run.status !== 0) throw new Error("seeding failed: " + run.stderr);
-  await startWrangler();
+  await srv.startWrangler();
 }
-async function tearDown() { await stop(wrangler); await stop(site); try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {} }
+async function tearDown() { if (srv) await srv.tearDown(); }
 
 // The room as a reader sees it, straight from the socket: the history after hello (the last 100 visible messages, oldest first).
 function history() {

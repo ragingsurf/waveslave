@@ -10,8 +10,10 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="WaveSlave">
 <script>if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));</script>
-<!-- Visitor counter: GoatCounter (no cookies, no personal data). Dashboard: https://waveslave.goatcounter.com -->
-<script data-goatcounter="https://waveslave.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
+<!-- Visitor counter: GoatCounter (no cookies, no personal data). Dashboard: https://waveslave.goatcounter.com
+     Pinned to version 5 with the hash GoatCounter publishes, so the browser won't run a changed copy of it: chat sign-ins live
+     on this page (Bryan, Oct 21). To move up a version, take its address and hash from https://www.goatcounter.com/help/countjs-versions -->
+<script data-goatcounter="https://waveslave.goatcounter.com/count" async src="https://gc.zgo.at/count.v5.js" crossorigin="anonymous" integrity="sha384-atnOLvQb9t+jTSipvd75X2yginT4PjVbqDdlJAmxMm+wYElFmeR6EmLP5bYeoRVQ"></script>
 <!-- Passcode screen: the page stays hidden until the 4-digit code is entered, for that visit only.
      Only a SHA-256 of "waveslave:" + the code is kept here. To change the code: printf 'waveslave:XXXX' | sha256sum, and put the result in H. -->
 <script>/* Locked on every visit (each new tab or app launch) unless this visit already entered the code; the unlock reload keeps it via sessionStorage. An app left in the background over a minute locks again when it comes back. ON switches the whole screen: false = the site opens straight to the forecast. */(function(){var ON=false,H="b200079bce89b4d2c4e55f2ef5812f58c1b9827f5086ae8a08bdf78b0d43bcde";window.__lockHash=H;if(!ON)return;try{localStorage.removeItem("waveslave-unlock");if(sessionStorage.getItem("waveslave-unlock")===H){var gone=0;document.addEventListener("visibilitychange",function(){if(document.hidden)gone=Date.now();else if(gone&&Date.now()-gone>60000){sessionStorage.removeItem("waveslave-unlock");location.reload()}});return}}catch(e){}document.documentElement.classList.add("locked")})();</script>

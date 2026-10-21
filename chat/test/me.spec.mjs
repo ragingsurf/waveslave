@@ -9,16 +9,15 @@
 // As in socket.spec.mjs, each test has a room of its own, called straight on its /r/ routes the way the Worker passes
 // the app's requests on (worker.spec.mjs covers the Worker's part), with accounts written straight into its tables and
 // session tokens signed by the test secret. The room's clock stands at T.
-import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
 import { randomB64u, sha256b64u, signToken, subHash } from "../src/auth.js";
-import { checkNick } from "../src/mod.js";
+import {
+  DAY, HOUR, MIN, SEC, addMessages, addUser, all, closeClients, connect, hex, join, newRoom, nextError, ofType, settle, synced,
+  take, until,
+} from "./helpers.mjs";
 
-const SEC = 1000;
-const MIN = 60 * SEC;
-const HOUR = 60 * MIN;
-const DAY = 24 * HOUR;
 // 12:00 UTC (20:00 in Taiwan) on a day years ahead, so no alarm a test sets goes off by itself.
 const T = Date.UTC(2030, 5, 3, 12, 0);
 // The earliest start a log may have at T: 00:00 Taiwan time two days before.
@@ -39,77 +38,12 @@ const CARD = { start: SESSION.start, end: SESSION.end, stars: 4, board: "short",
 // SESSION as GET /me/sessions lists it.
 const LISTED = { spot: "jinshan", start: SESSION.start, end: SESSION.end, stars: 4, board: "short", note: SESSION.note, cond: SESSION.cond };
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const hex = (n) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, "0")).join("");
-const parse = (text) => {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-};
-
-// Waits until fn() gives something truthy, and returns it.
-async function until(fn, what = "a condition", ms = 3000) {
-  const end = Date.now() + ms;
-  for (;;) {
-    const value = await fn();
-    if (value) return value;
-    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
-    await sleep(5);
-  }
-}
-
 // ---- Rooms, accounts and calls -------------------------------------------------------------------------------------
 
 // A room of its own, with its clock at T until the test moves clock.t.
-async function freshRoom(at = T) {
-  const stub = env.ROOM.getByName(`me-${crypto.randomUUID()}`, { locationHint: "apac-ne" });
-  const clock = { t: at };
-  await runInDurableObject(stub, (room) => {
-    room.now = () => clock.t;
-  });
-  const inRoom = (fn) => runInDurableObject(stub, fn);
-  const rows = (query, ...binds) => inRoom((room) => room.sql.exec(query, ...binds).toArray());
-  return { stub, clock, inRoom, rows, now: () => clock.t };
-}
+const freshRoom = (at = T) => newRoom("me", at);
 
 const tokenFor = (r, user, { tv = 0, exp = r.now() + 30 * DAY } = {}) => signToken({ uid: user.id, tv, exp }, env.SESSION_SECRET);
-
-// An account, written straight into the room, `age` old, with a session token. user.sub stands for its sub_hash.
-async function addUser(r, { nick = `Surfer_${hex(3)}`, age = 2 * DAY, role = "user", sub = `sub-${hex(8)}` } = {}) {
-  const user = { id: crypto.randomUUID(), sub, nick };
-  const at = r.now() - age;
-  await r.inRoom((room) => {
-    room.sql.exec("INSERT INTO subs (sub_hash) VALUES (?) ON CONFLICT (sub_hash) DO NOTHING", sub);
-    room.sql.exec(
-      `INSERT INTO users (id, sub_hash, nick, nick_key, role, tv, created, last_seen, nick_changed, consent_at, consent_ver)
-       VALUES (?, ?, ?, ?, ?, 0, ?, ?, NULL, ?, 'v1')`,
-      user.id, sub, nick, checkNick(nick).key, role, at, at, at,
-    );
-  });
-  user.token = await tokenFor(r, user);
-  return user;
-}
-
-// Messages written straight into the room, oldest first. Returns their ids.
-function addMessages(r, uid, n, { ts = r.now() - HOUR, kind = "text", spot = null, hidden_by = null, body } = {}) {
-  return r.inRoom((room) => {
-    const ids = [];
-    for (let k = 0; k < n; k++) {
-      ids.push(
-        room.sql
-          .exec(
-            "INSERT INTO messages (ts, uid, kind, spot, body, hidden_by) VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
-            ts + k, uid, kind, spot, JSON.stringify(body ?? { text: `seeded ${k}` }), hidden_by,
-          )
-          .one().id,
-      );
-    }
-    room.messagesChanged();
-    return ids;
-  });
-}
 
 // Calls one of the room's /me routes as `who` (anything with a token, or null for no Authorization header):
 // {status, data}. A string body goes as it is.
@@ -199,74 +133,7 @@ async function reports(r, spot = "jinshan") {
   return { status: res.status, data: await res.json() };
 }
 
-// ---- Sockets (as in socket.spec.mjs) -------------------------------------------------------------------------------
-
-const randomIp = () => `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
-
-// Every client socket a test opened; each is closed after its test.
-const clients = [];
-afterEach(() => {
-  for (const c of clients.splice(0)) {
-    try {
-      c.ws.close(1000, "done");
-    } catch {
-      // Closed already.
-    }
-  }
-});
-
-function client(ws) {
-  const c = { ws, frames: [], taken: new Set(), closed: null };
-  ws.accept();
-  ws.addEventListener("message", (e) => {
-    c.frames.push(typeof e.data === "string" ? parse(e.data) : e.data);
-  });
-  ws.addEventListener("close", (e) => {
-    c.closed = e.code;
-  });
-  c.send = (frame) => ws.send(typeof frame === "string" ? frame : JSON.stringify(frame));
-  clients.push(c);
-  return c;
-}
-
-async function connect(r) {
-  const res = await r.stub.fetch("https://room/r/ws", { headers: { Upgrade: "websocket", "CF-Connecting-IP": randomIp() } });
-  expect(res.status).toBe(101);
-  return client(res.webSocket);
-}
-
-// Waits for the first frame on c that passes `match` and hasn't been taken yet, and takes it.
-async function take(c, match, ms = 3000) {
-  const end = Date.now() + ms;
-  for (;;) {
-    const i = c.frames.findIndex((f, k) => !c.taken.has(k) && match(f));
-    if (i >= 0) {
-      c.taken.add(i);
-      return c.frames[i];
-    }
-    if (Date.now() > end) throw new Error(`no such frame; got ${JSON.stringify(c.frames).slice(0, 800)}`);
-    await sleep(5);
-  }
-}
-const ofType = (type) => (f) => f?.type === type;
-const nextError = (c) => take(c, ofType("error"));
-const all = (c, type) => c.frames.filter(ofType(type));
-// Long enough for any frame on its way to arrive, before a test checks that none did.
-const settle = () => sleep(60);
-
-// A socket that has said hello, as `user` or as a reader, and has its history.
-async function join(r, user = null) {
-  const c = await connect(r);
-  c.send({ type: "hello", v: 1, ...(user ? { token: user.token } : {}) });
-  c.history = await take(c, ofType("history"));
-  return c;
-}
-
-// Waits until the room has handled every frame c has sent so far (it handles one socket's frames in turn).
-async function synced(c) {
-  c.send({ type: "older", before_id: 1 });
-  await take(c, (f) => (f?.type === "history" && f.before_id === 1) || (f?.type === "error" && f.for === "older"));
-}
+afterEach(closeClients);
 
 // ---- POST /me/sessions ---------------------------------------------------------------------------------------------
 

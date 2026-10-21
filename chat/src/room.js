@@ -960,7 +960,7 @@ export class Room extends DurableObject {
   // To Bryan's sockets only:
   //   msg {msg} with msg.hidden            a message just hidden, with why ("flags", "ban" or "admin"), where everyone
   //                                        else gets update {id, hidden: true}
-  //   hidden {count, messages, banned}     the answer to hidden_list
+  //   hidden {count, messages, banned, banned_count}   the answer to hidden_list
   //   ok {for, ...}                        one of his tools did its work
   // Messages are always the public frame (toPublic()), so no user id or LINE data goes out; only Bryan's sockets learn
   // why a message was hidden, and the LINE account code (sub_hash) that unban takes. A socket that sends five bad
@@ -1461,11 +1461,13 @@ export class Room extends DurableObject {
     this.send(ws, { type: "ok", for: "unlock" });
   }
 
-  // hidden_list: hidden {count, messages, banned}. messages are the newest 100 hidden messages, newest first, each as
-  // its public frame plus why it was hidden (hidden: "flags", "ban" or "admin") and the reasons it was flagged for
-  // (flags: {spam: 2, child: 1}, from the flags Bryan hasn't rejected). count is how many are hidden in all. banned
-  // lists the banned LINE accounts, up to 100: each one's sub_hash, for unban, and its nickname while it still has an
-  // account (null after).
+  // hidden_list: hidden {count, messages, banned, banned_count}. messages are the newest 100 hidden messages, newest
+  // first, each as its public frame plus why it was hidden (hidden: "flags", "ban" or "admin") and the reasons it was
+  // flagged for (flags: {spam: 2, child: 1}, from the flags Bryan hasn't rejected). count is how many are hidden in all.
+  // banned lists the banned LINE accounts, up to 100, the newest accounts first (by the subs row, made when the
+  // account signed up), so the same ones come back each time: each one's sub_hash, for unban, and its nickname while
+  // it still has an account (null after). banned_count is how many are banned in all, so the Unban menu can say when
+  // there are more than it shows.
   onHiddenList(ws) {
     const rows = this.all(
       `SELECT ${MSG_COLS}, hidden_by FROM messages WHERE hidden_by IS NOT NULL ORDER BY id DESC LIMIT ?`,
@@ -1484,9 +1486,11 @@ export class Room extends DurableObject {
       count: this.one("SELECT count(*) AS n FROM messages WHERE hidden_by IS NOT NULL").n,
       messages: shown.map((msg, k) => ({ ...msg, hidden: rows[k].hidden_by, flags: flags.get(msg.id) })),
       banned: this.all(
-        "SELECT s.sub_hash, u.nick FROM subs s LEFT JOIN users u ON u.sub_hash = s.sub_hash WHERE s.banned = 1 LIMIT ?",
+        `SELECT s.sub_hash, u.nick FROM subs s LEFT JOIN users u ON u.sub_hash = s.sub_hash
+         WHERE s.banned = 1 ORDER BY s.rowid DESC LIMIT ?`,
         PAGE_MAX,
       ),
+      banned_count: this.one("SELECT count(*) AS n FROM subs WHERE banned = 1").n,
     });
   }
 

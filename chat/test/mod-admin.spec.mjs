@@ -683,7 +683,7 @@ describe("keep", () => {
 });
 
 describe("hidden_list", () => {
-  it("-> hidden {count, messages, banned}: each hidden message, newest first, with why it was hidden", async () => {
+  it("-> hidden {count, messages, banned, banned_count}: each hidden message, newest first, with why it was hidden", async () => {
     const r = await freshRoom();
     const a = await addUser(r);
     const b = await addUser(r);
@@ -714,9 +714,31 @@ describe("hidden_list", () => {
         shown(byBan, b, T - 2 * MIN, { hidden: "ban", flags: {} }),
         shown(byFlags, a, T - 3 * MIN, { hidden: "flags", flags: { spam: 2, child: 1 } }),
       ],
-      banned: expect.arrayContaining([{ sub_hash: b.sub, nick: b.nick }, { sub_hash: gone.sub, nick: null }]),
+      // The newest LINE accounts first: gone's account was made after b's.
+      banned: [{ sub_hash: gone.sub, nick: null }, { sub_hash: b.sub, nick: b.nick }],
+      banned_count: 2,
     });
-    expect(list.banned).toHaveLength(2);
+  });
+
+  it("lists the newest 100 banned LINE accounts, always the same ones, and says how many are banned in all", async () => {
+    const r = await freshRoom();
+    const bryan = await addUser(r, { role: "admin" });
+    // 130 banned accounts, made in this order, with sub_hash values that sort the other way round; and some that aren't.
+    const subs = Array.from({ length: 130 }, (_, k) => `sub-${String(999 - k).padStart(4, "0")}`);
+    await r.inRoom((room) => {
+      for (const sub of subs) room.sql.exec("INSERT INTO subs (sub_hash, banned) VALUES (?, 1)", sub);
+      for (let k = 0; k < 5; k++) room.sql.exec("INSERT INTO subs (sub_hash, banned) VALUES (?, 0)", `sub-free-${k}`);
+    });
+    const admin = await join(r, bryan);
+    const lists = [];
+    for (let k = 0; k < 2; k++) {
+      admin.send({ type: "hidden_list" });
+      lists.push(await take(admin, ofType("hidden")));
+    }
+    for (const list of lists) {
+      expect(list.banned_count).toBe(130);
+      expect(list.banned.map((row) => row.sub_hash)).toEqual(subs.slice(30).reverse());
+    }
   });
 });
 

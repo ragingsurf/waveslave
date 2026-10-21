@@ -701,7 +701,7 @@ function lineIcon() { const ns = "http://www.w3.org/2000/svg", svg = document.cr
 // ---- Drawing. Each part redraws from the state; drawAll() is relang().
 function drawAll() { if (!R.built) return; closePop(); drawHead(); drawFilters(); drawStatus(); drawBar(); drawReply(); render(); drawSheet(); }
 function drawHead() { const E = R.el;
-  E.title.textContent = S("roomTitle"); E.sub.textContent = [S("roomName"), R.online == null ? null : S("online", R.online)].filter(Boolean).join(" · ");
+  E.title.textContent = S("roomTitle"); E.sub.replaceChildren(...[S("roomName"), R.online == null ? null : S("online", R.online)].filter(Boolean).map(t => el("span", null, t)));
   E.menuBtn.setAttribute("aria-label", S("menu")); E.x.setAttribute("aria-label", S("close"));
   E.filters.setAttribute("aria-label", S("spotHead"));
   E.pinText.textContent = S("rulesShort"); E.pinMore.textContent = S("more"); E.olderBtn.textContent = S("older"); E.empty.textContent = S("noMsgs"); }
@@ -1382,7 +1382,9 @@ html.chat-open,html.chat-open body{overflow:hidden}
 .chatroom>.cr-hd,.chatroom>.cr-filters,.chatroom>.cr-status,.chatroom>.cr-list,.chatroom>.cr-foot{width:100%;max-width:760px;margin-inline:auto}
 .cr-hd{flex:none;display:flex;align-items:center;gap:10px;padding:calc(12px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 12px calc(16px + env(safe-area-inset-left));border-bottom:1px solid var(--line)}
 .cr-title{margin:0;flex:none;font:400 31px/1 VT323,var(--mono);letter-spacing:.07em;color:var(--led-amb);text-shadow:0 0 calc(10px*var(--led-glow)) rgba(255,170,40,.65);white-space:nowrap}
-.cr-sub{flex:1;min-width:0;padding-top:5px;font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* The room's name over its online count, one per line, so the count still shows at 390 px beside the menu button. */
+.cr-sub{flex:1;min-width:0;font-size:12.5px;line-height:1.25;color:var(--muted)}
+.cr-sub span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cr-ic{flex:none;width:36px;height:36px;padding:0;display:grid;place-items:center;border-radius:50%;border:1.5px solid var(--line);background:none;color:var(--muted);font-size:16px;line-height:1;cursor:pointer}
 .cr-x{border-color:var(--led-amb);color:var(--led-amb);font-weight:700}
 .cr-filters{flex:none;display:flex;gap:8px;padding:10px 16px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid var(--line)}

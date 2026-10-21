@@ -3,7 +3,9 @@
 This is Bryan's step-by-step for switching on the WaveSlave chat. It takes about 30 minutes and costs nothing: Cloudflare's
 free plan needs no card, and LINE sign-in is free.
 
-Start once Claude's chat pull request is merged: the chat code is then on the site, switched off. Nothing changes on
+You can do steps 1 to 10 at any time, even before Claude's chat pull request is merged: they set up Cloudflare and LINE, make
+the three random values and put the secrets in GitHub. Only step 11 onward waits for the merge, because step 11 runs the
+Deploy chat workflow from `main`. Once it's merged, the chat code is on the site, switched off. Nothing changes on
 waveslave.tw until the very last step, so you can stop at any point and carry on later.
 
 **What you need:** a computer, your phone with LINE on it, and your GitHub account (the one that owns `ragingsurf/waveslave`).

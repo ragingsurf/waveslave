@@ -27,7 +27,8 @@ const REPORT_COPY_MS = 60_000; // how long reportsFor() reuses its memory copy o
 const KEEPALIVE_MS = 45_000; // the tick while any socket is open; chat.js gives up on a socket after 100 s
 const RETENTION_HOUR_UTC = 19; // 03:00 in Taiwan
 const BATCH = 1000; // rows per retention statement
-const USAGE_SAVE_EVERY = 100; // requests between saves of the usage counts
+const USAGE_SAVE_EVERY = 100; // requests between saves of the usage counts...
+const USAGE_SAVE_MS = 30_000; // ...or time, whichever comes first
 
 // How long things are kept (spec "How long things are kept" and "Retention (daily)").
 const KEEP_MESSAGES = 30 * DAY; // text messages and shared session cards
@@ -149,6 +150,7 @@ export class Room extends DurableObject {
     this.lastId = 0; // the newest visible message's id, for the CHAT button's dot; see messagesChanged()
     this.used = null; // today's usage counts, read from meta on first use
     this.unsaved = 0; // requests counted since the usage counts were last saved
+    this.savedAt = null; // when the usage counts were last saved, by this copy of the room or an earlier one
     this.retentionAt = null; // when retention next runs (meta next_retention), read on first use
     ctx.blockConcurrencyWhile(async () => {
       this.migrate();
@@ -290,30 +292,44 @@ export class Room extends DurableObject {
 
   // Approximate counts for today of room requests ("req") and SQL rows read and written ("read", "write"), for
   // the guard that rests the chat before the free plan's daily limits run out. all() adds the rows itself. The day
-  // is UTC's, as the free limits reset at 00:00 UTC. The counts live in memory and are saved to meta every 100
-  // requests, so a restart loses at most the last 99. Returns today's totals so far.
+  // is UTC's, as the free limits reset at 00:00 UTC. Returns today's totals so far; usage("req", 0) only reads them.
+  //
+  // The counts are kept in memory and saved to one meta row. The room sleeps after a few idle seconds and wakes as
+  // a new copy that starts from that row, so it is saved often: on a request when 30 s have passed since the last
+  // save (by any copy of the room, so the first request after a quiet spell saves), on the 100th request since
+  // then, and at the end of every alarm (which also covers a room that wakes only for the 45 s keepalive). When a
+  // copy goes, it loses only what came in since its last save: under 30 s of traffic, and fewer than 100 requests.
+  // Saving on every request would cost a row written per request, which is the whole write limit at the request
+  // limit; this costs at most about 5,000 rows a day (two saves per 45 s, plus one per 100 requests).
   usage(kind, n = 1) {
     if (kind !== "req" && kind !== "read" && kind !== "write") throw new Error(`usage: unknown kind ${kind}`);
-    const day = new Date(this.now()).toISOString().slice(0, 10);
+    const now = this.now();
+    const day = new Date(now).toISOString().slice(0, 10);
     if (this.used?.day !== day) this.used = this.savedUsage(day);
     this.used[kind] += n;
-    if (kind === "req" && ++this.unsaved >= USAGE_SAVE_EVERY) this.saveUsage();
+    if (kind === "req" && n > 0) {
+      this.unsaved += n;
+      if (this.unsaved >= USAGE_SAVE_EVERY || now - this.savedAt >= USAGE_SAVE_MS) this.saveUsage();
+    }
     return { ...this.used };
   }
 
   // These two use sql.exec directly, not all(): all() counts its rows through usage(), which they are part of.
+  // The row is JSON {day, req, read, write, at}, where at is when it was saved.
   savedUsage(day) {
     const row = this.sql.exec("SELECT value FROM meta WHERE key = 'usage'").toArray()[0];
     const saved = row ? JSON.parse(row.value) : null;
+    this.savedAt = saved?.at ?? -Infinity; // never saved: the next request saves
     if (saved?.day === day) return { day, req: saved.req, read: saved.read, write: saved.write };
     return { day, req: 0, read: 0, write: 0 };
   }
 
   saveUsage() {
     this.unsaved = 0;
+    this.savedAt = this.now();
     const cursor = this.sql.exec(
       "INSERT INTO meta (key, value) VALUES ('usage', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-      JSON.stringify(this.used),
+      JSON.stringify({ ...this.used, at: this.savedAt }),
     );
     cursor.toArray();
     this.used.write += cursor.rowsWritten;
@@ -361,11 +377,11 @@ export class Room extends DurableObject {
   }
 
   // The one alarm. Retention runs once it's past next_retention, then the keepalive tick goes out while sockets
-  // are open, and the next alarm is always set, whatever happened before.
+  // are open. Whatever happened before, the alarm is counted as a request, the usage counts are saved and the next
+  // alarm is set.
   async alarm() {
     const now = this.now();
     try {
-      this.usage("req");
       if (now >= this.nextRetention()) {
         // The next run is set first, so a run that fails waits until tomorrow instead of retrying in a loop.
         this.setNextRetention(now);
@@ -376,7 +392,14 @@ export class Room extends DurableObject {
       }
       this.tick();
     } finally {
-      await this.ctx.storage.setAlarm(this.alarmTime(now));
+      try {
+        // Counted last, so the save covers the rows the alarm itself read and wrote. usage() may have saved
+        // already (30 s since the last save); then there is nothing left to save.
+        this.usage("req");
+        if (this.unsaved > 0) this.saveUsage();
+      } finally {
+        await this.ctx.storage.setAlarm(this.alarmTime(now));
+      }
     }
   }
 

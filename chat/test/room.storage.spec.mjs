@@ -353,24 +353,57 @@ describe("reportsFor() and writes", () => {
 
 // ---- Usage counters ---------------------------------------------------------------------------------------
 
+const savedUsage = (room) => {
+  const text = value(room, "SELECT value FROM meta WHERE key = 'usage'");
+  return text === undefined ? undefined : JSON.parse(text);
+};
+
+// Counts how many times the room saves its usage counts while fn() runs.
+async function saves(room, fn) {
+  let n = 0;
+  const save = room.saveUsage;
+  room.saveUsage = function () {
+    n += 1;
+    return save.call(this);
+  };
+  try {
+    await fn();
+    return n;
+  } finally {
+    delete room.saveUsage;
+  }
+}
+
 describe("usage()", () => {
-  it("keeps today's counts in memory and saves them to meta every 100 requests", async () => {
-    await runInDurableObject(freshRoom(), (room) => {
-      room.now = () => T;
-      const saved = () => {
-        const text = value(room, "SELECT value FROM meta WHERE key = 'usage'");
-        return text === undefined ? undefined : JSON.parse(text);
-      };
+  it("saves today's counts to meta on the first request, then after 100 requests or 30 s, whichever comes first", async () => {
+    await runInDurableObject(freshRoom(), async (room) => {
+      let now = T;
+      room.now = () => now;
+      // Nothing is saved yet, so the first request saves.
+      room.usage("req", 1);
+      expect(savedUsage(room)).toMatchObject({ day: "2030-06-01", req: 1 });
+      // 99 more in the same moment stay in memory; the 100th since that save writes them all.
       for (let i = 0; i < 99; i++) room.usage("req", 1);
       room.usage("read", 500);
       room.usage("write", 7);
-      expect(saved()).toBeUndefined();
-      const now = room.usage("req", 1);
-      expect(now).toMatchObject({ day: "2030-06-01", req: 100 });
-      expect(now.read).toBeGreaterThanOrEqual(500);
-      expect(now.write).toBeGreaterThanOrEqual(7);
-      expect(saved()).toMatchObject({ day: "2030-06-01", req: 100 });
-      expect(saved().read).toBeGreaterThanOrEqual(500);
+      expect(savedUsage(room).req).toBe(1);
+      const totals = room.usage("req", 1);
+      expect(totals).toMatchObject({ day: "2030-06-01", req: 101 });
+      expect(totals.read).toBeGreaterThanOrEqual(500);
+      expect(totals.write).toBeGreaterThanOrEqual(7);
+      expect(savedUsage(room)).toMatchObject({ day: "2030-06-01", req: 101 });
+      expect(savedUsage(room).read).toBeGreaterThanOrEqual(500);
+      expect(savedUsage(room).write).toBeGreaterThanOrEqual(7);
+      // Fewer than 100 requests, but 30 s after the last save.
+      now = T + 29_999;
+      room.usage("req", 1);
+      expect(savedUsage(room).req).toBe(101);
+      now = T + 30_000;
+      room.usage("req", 1);
+      expect(savedUsage(room).req).toBe(103);
+      // Only reading the totals saves nothing.
+      now = T + 90_000;
+      expect(await saves(room, () => expect(room.usage("req", 0).req).toBe(103))).toBe(0);
       expect(() => room.usage("bytes", 1)).toThrow();
     });
   });
@@ -380,20 +413,77 @@ describe("usage()", () => {
       room.now = () => Date.UTC(2030, 5, 1, 23, 59);
       for (let i = 0; i < 150; i++) room.usage("req", 1);
       room.now = () => Date.UTC(2030, 5, 2, 0, 0);
-      expect(room.usage("req", 1)).toEqual({ day: "2030-06-02", req: 1, read: 0, write: 0 });
+      const today = room.usage("req", 1);
+      expect(today).toMatchObject({ day: "2030-06-02", req: 1, read: 0 });
+      expect(today.write).toBeLessThanOrEqual(1); // at most the row that saved them
+      expect(savedUsage(room)).toMatchObject({ day: "2030-06-02", req: 1, read: 0 });
     });
   });
 
-  it("picks up the saved counts after the room restarts", async () => {
+  it("keeps fewer than 100 requests across a restart, once 30 s have passed since the last save", async () => {
     const stub = freshRoom();
     await runInDurableObject(stub, (room) => {
-      room.now = () => T;
-      for (let i = 0; i < 100; i++) room.usage("req", 1);
+      let now = T;
+      room.now = () => now;
+      for (let i = 0; i < 10; i++) room.usage("req", 1);
+      now = T + 30_000;
+      room.usage("req", 1);
     });
     await evictDurableObject(stub);
     await runInDurableObject(stub, (room) => {
+      room.now = () => T + 30_000;
+      expect(room.usage("req", 0).req).toBe(11);
+    });
+  });
+
+  it("counts the 30 s from the last save by any copy of the room, so waking up doesn't cost a write each time", async () => {
+    const stub = freshRoom();
+    await runInDurableObject(stub, (room) => {
       room.now = () => T;
-      expect(room.usage("req", 0).req).toBe(100);
+      room.usage("req", 1); // nothing saved yet, so this saves
+    });
+    await evictDurableObject(stub);
+    await runInDurableObject(stub, async (room) => {
+      let now = T + 10_000;
+      room.now = () => now;
+      expect(await saves(room, () => room.usage("req", 1))).toBe(0);
+      now = T + 30_000;
+      expect(await saves(room, () => room.usage("req", 1))).toBe(1);
+      expect(savedUsage(room).req).toBe(3);
+    });
+  });
+
+  it("saves the counts once at the end of every alarm, so a room that sleeps between ticks keeps them", async () => {
+    const stub = freshRoom();
+    // Fewer than 100 requests in one moment, then an alarm.
+    const first = await runInDurableObject(stub, async (room) => {
+      room.now = () => T - HOUR;
+      for (let i = 0; i < 10; i++) room.usage("req", 1);
+      room.usage("read", 500);
+      room.usage("write", 7);
+      const n = await saves(room, () => room.alarm());
+      // The save came after the alarm's own queries.
+      expect(savedUsage(room).read).toBe(room.usage("read", 0).read);
+      return n;
+    });
+    expect(first).toBe(1);
+    await evictDurableObject(stub);
+    // The next keepalive alarm, 45 s later, in a new copy of the room: still one save.
+    const second = await runInDurableObject(stub, async (room) => {
+      room.now = () => T - HOUR + 45_000;
+      const used = room.usage("req", 0);
+      expect(used.req).toBe(11); // the 10, and the alarm
+      expect(used.read).toBeGreaterThanOrEqual(500);
+      expect(used.write).toBeGreaterThanOrEqual(7);
+      const n = await saves(room, () => room.alarm());
+      expect(savedUsage(room).read).toBe(room.usage("read", 0).read);
+      return n;
+    });
+    expect(second).toBe(1);
+    await evictDurableObject(stub);
+    await runInDurableObject(stub, (room) => {
+      room.now = () => T - HOUR + 45_000;
+      expect(room.usage("req", 0).req).toBe(12);
     });
   });
 });

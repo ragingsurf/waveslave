@@ -285,6 +285,26 @@ test("blocked: numbers that are not phone numbers", () => {
   assert.equal(rule("Chest high at 7:30, 1.2 m @ 9 s"), null);
 });
 
+test("blocked: a list of wave heights or periods is not a phone number", () => {
+  // Each height is a decimal of its own, so the list doesn't run together into "0911131620".
+  assert.equal(rule("swell 0.9 1.1 1.3 1.6 2.0 over the weekend"), null);
+  assert.equal(rule("0.9 1.1 1.0 1.2 1.3"), null);
+  assert.equal(rule("Hs 0.9, 0.8 0.9 1.0 1.2 m"), null);
+  assert.equal(rule("0.9-1.2 1.3-1.6 2.0"), null);
+  assert.equal(rule("〇。九 一。一 一。三 一。六 二。〇"), null); // the same, in Chinese numerals and full stops
+  assert.equal(rule("periods 9.5 10.2 11.0 9.8 12.1 s"), null);
+  assert.equal(rule("0.95 1.25 1.30 1.65 2.05"), null); // two decimals
+  assert.equal(rule("swell 0.9 1.1 1.3 1.6 2.0."), null); // at the end of a sentence
+});
+
+test("blocked: a dot after a single digit still joins a phone number when it isn't a decimal", () => {
+  assert.equal(rule("0.9.1.2.3.4.5.6.7.8"), "phone"); // a chain of dots is not one decimal
+  assert.equal(rule("0.912.345.678"), "phone");
+  assert.equal(rule("0.912-345-678"), "phone"); // three digits after the dot
+  assert.equal(rule("0 9 1 2 3 4 5 6 7 8"), "phone");
+  assert.equal(rule("0912.345.678"), "phone");
+});
+
 test("blocked: investment-scam phrases", () => {
   assert.equal(rule("飆股"), "scam");
   assert.equal(rule("帶單"), "scam");

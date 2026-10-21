@@ -350,7 +350,7 @@ const R = {
   oldest: 0, start: false, older: false, // the oldest id held, whether the room has nothing older, and whether a page of older is on its way
   me: null,           // {nick, role} once the socket is signed in
   pinErr: null,       // what the code box says about the last code tried (the home-screen app's sign-in)
-  online: null, state: "idle", filter: "all", replyTo: null, pending: null, hidden: null, locked: null, fresh: false,
+  online: null, state: "idle", filter: "all", replyTo: null, pending: [], hidden: null, locked: null, fresh: false,
   sheet: null, pop: null, opener: null, noteT: 0, agesT: 0, longAt: 0,
 };
 const sock = { ws: null, ready: false, tries: 0, retryT: 0, deadT: 0, pongT: 0, awayT: 0, held: 0,
@@ -419,7 +419,7 @@ function alive(ws) { clearTimeout(sock.deadT); clearTimeout(sock.pongT); sock.de
 function retry(ms) { clearTimeout(sock.retryT); sock.retryT = setTimeout(guard(() => { if (R.open) connect(); }), ms); }
 // The socket closed, or never opened.
 function lost(code) {
-  sock.ready = false; R.older = false; clearTimeout(sock.deadT); clearTimeout(sock.pongT); restorePending();
+  sock.ready = false; R.older = false; clearTimeout(sock.deadT); clearTimeout(sock.pongT); restorePending(true);
   if (!R.open) return;
   if (code === 4429) { setState("resting"); const now = Date.now(); return retry(Math.ceil((now + 1) / DAY) * DAY - now + Math.random() * 60e3); }
   if (code === 4426) return setState("update");
@@ -484,7 +484,8 @@ const ON = {
   msg(f) {
     const m = clean(f.msg); if (!m || (m.hidden && !isAdmin())) return;
     R.msgs.set(m.id, m); R.gone.delete(m.id);
-    const mine = isMine(m); if (mine && m.kind === "text") R.pending = null;
+    // Only the echo of a text still waiting takes it off the list: another of ours (sent earlier, or on another screen) doesn't.
+    const mine = isMine(m), p = mine && m.kind === "text" ? R.pending.findIndex(x => x.sent === m.body.text) : -1; if (p >= 0) R.pending.splice(p, 1);
     settle(); render({ toEnd: mine }); markSeen();
     if (HOOK.msg) HOOK.msg(m, mine);
   },
@@ -579,9 +580,11 @@ function nickWhy(code) {
   return own(S("nickErr"), code.replace(/^nick:/, "")) || S("failed");
 }
 // The token stopped working (signed out everywhere, deleted, banned): it goes, and the bar shows the LINE button again.
-function signOutQuietly() { save(KEYS.token, null); R.me = null; R.replyTo = null; R.pending = null; if (R.built) drawAll(); }
+function signOutQuietly() { save(KEYS.token, null); R.me = null; R.replyTo = null; R.pending = []; if (R.built) drawAll(); }
 // A text that never made it (refused, or the socket dropped first) goes back in the box, unless something new is being typed there.
-function restorePending() { const p = R.pending; R.pending = null; if (!p || !R.built) return;
+// The room answers a socket's frames in turn, so a refusal is for the oldest text still waiting; a drop loses them all (all), and the
+// oldest goes back.
+function restorePending(all) { const p = R.pending.shift(); if (all) R.pending = []; if (!p || !R.built) return;
   if (!R.el.input.value) R.el.input.value = p.text;
   if (p.reply && R.msgs.has(p.reply)) R.replyTo = p.reply;
   drawReply(); drawSend(); }
@@ -755,6 +758,10 @@ function tickAges() { for (const t of R.el.msgs.querySelectorAll("time[data-ts]"
 function pickFilter(id) { R.filter = id; save(KEYS.filter, id); drawFilters(); render({ toEnd: true }); }
 // One page of 50 older messages, when the list reaches its top (or "Load older messages" is tapped). The room allows one a second.
 function olderPage() { if (!R.start && !R.older && sock.ready && R.oldest > 0) R.older = sock.send({ type: "older", before_id: R.oldest }); }
+// A text as the room stores it (chat/src/mod.js normalise()), to know its echo by: NFKC, so full-width punctuation such as ？ and ，
+// reads as the room's ? and , ; the invisible characters gone; a tab or line break one space; trimmed.
+const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Cc}\p{Cf}\p{Co}\p{Cs}\p{Noncharacter_Code_Point}\u{FFFC}]/gu, BREAKS = /[\t\n\v\f\r\u{0085}\u{2028}\u{2029}]+/gu;
+const asStored = t => t.normalize("NFKC").split(BREAKS).map(p => p.replace(INVISIBLE, "").normalize("NFKC")).join(" ").trim();
 // The message box: text goes as say, tagged with the filter showing (All means no tag; a reply takes its parent's tag in the room).
 // Anything starting with a slash goes as admin, never as say, and isn't kept for a retry: it may be Bryan's code.
 function sendText() {
@@ -763,7 +770,7 @@ function sendText() {
   const admin = /^[/／]/.test(text), f = admin ? { type: "admin", code: text } : { type: "say", text, ...(R.replyTo ? { reply_to: R.replyTo } : R.filter !== "all" ? { spot: R.filter } : {}) };
   if (!sock.send(f)) return note(R.state === "resting" ? S("resting") : S("offline"), true);
   box.value = ""; clearNote(); drawSend();
-  if (!admin) { R.pending = { text, reply: R.replyTo }; R.replyTo = null; drawReply(); }
+  if (!admin) { R.pending.push({ text, sent: asStored(text), reply: R.replyTo }); R.replyTo = null; drawReply(); }
 }
 // A write from the menus; a reader is asked to sign in first.
 function write(frame) { if (!signedIn()) { needSignIn(); return false; } const ok = sock.send(frame); if (!ok) note(S("offline"), true); return ok; }

@@ -34,7 +34,7 @@ const USERS = {
   bryan: { nick: "Bryan", role: "admin" }, kai: { nick: "阿凱" }, mika: { nick: "Mika" }, leo: { nick: "Leo" }, fish: { nick: "小魚" },
   shalom: { nick: "שלום" }, evil: { nick: "<img src=x onerror=alert(2)>" },
   p1: { nick: "Poster1" }, p2: { nick: "Poster2" }, p3: { nick: "Poster3" }, p4: { nick: "Poster4" }, p5: { nick: "Poster5" },
-  p6: { nick: "Poster6" }, p7: { nick: "Poster7" },
+  p6: { nick: "Poster6" }, p7: { nick: "Poster7" }, p8: { nick: "Poster8" },
 };
 const LONG = "W".repeat(500), EMOJI = "🏄🌊🤙🏄🌊🤙🏄🌊🤙🏄", RLO = "‮abc";
 const SPOTS = [null, "jinshan", "fulong", "wushi", null, "suao", "donghe"];
@@ -571,6 +571,27 @@ const CHECKS = {
       await bryan.waitForFunction(t => document.querySelector("#chatSheetTitle").textContent === t && !document.querySelector(".chatroom .cr-sheet").textContent.includes("Poster7"), `Unban (${start.banned})`, { timeout: 5e3 });
       if (start.banned === 0 && await bryan.textContent(".chatroom .cr-sheet-b") !== "No one is banned") throw new Error("the empty Unban list doesn't say so");
     } finally { await asBryan({ type: "unlock" }).catch(() => {}); }
+  },
+  // A text goes back in the box only when it's the one the room refused. Two sent at once (the room takes one say per 5 s): the first
+  // one's echo leaves the second waiting, and the refusal puts the second back. A text the room stores in another form (full-width ！ and
+  // ？ as ! and ?) is still known by its echo: once it's in, a drop puts nothing back.
+  async quickSays(open) {
+    const page = await open({ as: "p8" }); await openRoom(page);
+    await page.evaluate(() => { const box = document.querySelector(".chatroom .cr-in");
+      for (const t of ["First quick one", "Second quick one"]) { box.value = t; box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); } });
+    await textArticle(page, "First quick one");
+    await page.waitForFunction(() => /^Slow down a little/.test(document.querySelector(".chatroom .cr-note").textContent), null, { timeout: 5e3 })
+      .catch(() => { throw new Error("the room didn't refuse the second text"); });
+    const box = await page.inputValue(".chatroom .cr-in");
+    if (box !== "Second quick one") throw new Error(`the refused text isn't back: the box holds ${JSON.stringify(box)}`);
+    if ((await articles(page)).some(a => a.text === "Second quick one")) throw new Error("the second text was posted after all");
+    await page.fill(".chatroom .cr-in", ""); await wait(5200);
+    await page.fill(".chatroom .cr-in", "好浪！有人嗎？"); await page.press(".chatroom .cr-in", "Enter"); await textArticle(page, "好浪!有人嗎?");
+    await page.context().setOffline(true);
+    await page.waitForFunction(() => /Chat is offline/.test(document.querySelector(".chatroom .cr-status").textContent), null, { timeout: 5e3 });
+    const after = await page.inputValue(".chatroom .cr-in");
+    await page.context().setOffline(false);
+    if (after !== "") throw new Error(`a text that went in comes back in the box on a drop: ${JSON.stringify(after)}`);
   },
   // A room left open long enough to hold 600 messages (KEEP_MSGS) still pages up to its first: an older page is never cut as it arrives.
   // Back at the newest, a new message cuts the oldest, to 600, and scrolling up loads them again. A stand-in room of 680.

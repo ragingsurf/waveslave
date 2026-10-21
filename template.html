@@ -257,12 +257,21 @@ svg text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
 .ctry button{flex:none;border:0;background:none;color:var(--muted);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP",sans-serif;padding:6px clamp(5px,calc((100vw - 310px)/10),12px);border-radius:99px;cursor:pointer;position:relative;z-index:1;transition:color .36s,text-shadow .36s}
 html[lang="ja"] .ctry button{padding-inline:clamp(3px,calc((100vw - 350px)/10),12px)}
 .ctry button[aria-pressed="true"]{color:#ffb347;text-shadow:0 0 6px rgba(255,140,0,.7)}
+/* The countries are one button showing the current one (Bryan, Oct 21); a tap drops down the others to switch to, the current one ringed. */
+.ctrywrap{position:relative;justify-self:start;z-index:20}
+.ctrybtn{display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:99px;background:var(--panel);border:1px solid var(--line);color:#ffb347;text-shadow:0 0 6px rgba(255,140,0,.7);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP",sans-serif;cursor:pointer}
+.ctrybtn i{font-style:normal;color:var(--muted);text-shadow:none;transition:transform .2s}
+.ctrywrap.open .ctrybtn i{transform:rotate(180deg)}
+.ctrywrap #ctry{position:absolute;top:calc(100% + 6px);left:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));width:min(480px,calc(100vw - 32px));max-width:none;overflow:visible;
+  padding:6px;border-radius:16px;box-shadow:0 14px 34px rgba(0,0,0,.45);-webkit-mask-image:none;mask-image:none;transition:opacity .16s,transform .16s,visibility .16s}
+.ctrywrap #ctry button{text-align:left;padding:9px 12px}
+.ctrywrap:not(.open) #ctry{visibility:hidden;opacity:0;transform:translateY(-4px);pointer-events:none}
 /* Taiwan mode (the default) keeps the country row's place but shows nothing in it (Bryan, Oct 19: the countries appear, they don't push the
    forecast down), and the map has no country buttons. In World mode the countries flicker on in place; going back, they flicker out. */
-html:not(.world) #ctry{visibility:hidden}
+html:not(.world) #ctryWrap{visibility:hidden}
 html:not(.world) .wsmap .wsctry{display:none}
-html.igniting #ctry>*{animation:flickOn .9s calc(.06s + var(--d,0s)) both}
-html.dousing #ctry>*{animation:flickOff .34s var(--d2,0s) both}
+html.igniting #ctryBtn{animation:flickOn .9s .06s both}
+html.dousing #ctryBtn{animation:flickOff .34s both}
 /* Sliding highlight: in each group of buttons with a pick, one bubble glides (place and size) to the picked one; glider() puts it there.
    Language, country, Forecast/Map and spot picker: a dark bubble under the words. Phone day chips: the ink (today: sea) fill. Map layers and the
    map's countries: the glowing ring, on top, with the fill fading across underneath. */
@@ -433,6 +442,14 @@ html{overscroll-behavior-y:none}
 .wsmap.fs .wsctry button:not(:has(svg)){width:auto;padding:0 8px;font-size:12px}
 .wsmap.fs .wsctry button{transition:background-color .36s,color .36s}
 .wsmap.fs .wsctry button[aria-pressed="true"]{color:#ffb347;background:#0a0f12}
+/* Shut, the map's countries are just its own (with a ▾); open, each shows its outline and name. */
+.wsmap.fs .wsctry:not(.open) button:not([aria-pressed="true"]){display:none}
+.wsmap.fs .wsctry button{position:relative}
+.wsmap.fs .wsctry:not(.open) button[aria-pressed="true"]::after{content:"▾";position:absolute;right:-1px;bottom:-3px;font-size:10px;line-height:1;color:#ffb347}
+.wsmap.fs .wsctry.open button:has(svg){width:auto;display:flex;align-items:center;gap:6px;padding:0 10px 0 5px}
+.wsmap.fs .wsctry.open button:has(svg) svg{margin:0!important}
+.wsmap.fs .wsctry.open button:not([aria-pressed="true"]){background:#1c1340}
+.wsmap.fs .wsctry.open button:has(svg)::after{content:attr(aria-label);font-size:12px;white-space:nowrap}
 .wsmap .wsctry > .glide-pill{z-index:1;border-radius:10px;background:none;border:1px solid #ffb347;box-shadow:0 0 8px rgba(255,140,0,.4)}
 /* With a spot's card open the countries stay clear of it: sideways the card sits between them (however many columns they take: --ctryr is their
    right edge) and the map tools, upright they stop above it. */
@@ -460,7 +477,8 @@ html{overscroll-behavior-y:none}
   </header>
   <div class="ctl">
     <nav class="tabs" role="tablist" aria-label="View"><button role="tab" data-v="fc" aria-selected="true" data-zh="預報" data-ja="予報">Forecast</button><button role="tab" data-v="ws" aria-selected="false" data-zh="地圖" data-ja="地図">Map</button></nav>
-    <div class="ctry" id="ctry" role="group" aria-label="Country"><button data-c="tw" data-zh="台灣" data-ja="台湾">Taiwan</button><button data-c="jp" data-zh="日本" data-ja="日本">Japan</button><button data-c="kr" data-zh="韓國" data-ja="韓国">Korea</button><button data-c="hk" data-zh="香港" data-ja="香港">Hong Kong</button><button data-c="hn" data-zh="海南" data-ja="海南島">Hainan</button><button data-c="vn" data-zh="越南" data-ja="ベトナム">Vietnam</button><button data-c="ph" data-zh="菲律賓" data-ja="フィリピン">Philippines</button><button data-c="id" data-zh="印尼" data-ja="インドネシア">Indonesia</button><button data-c="pg" data-zh="巴布亞紐幾內亞" data-ja="パプアニューギニア">Papua New Guinea</button><button data-c="ca" data-zh="加州" data-ja="カリフォルニア">California</button><button data-c="bj" data-zh="下加州" data-ja="バハ・カリフォルニア">Baja</button><button data-c="hi" data-zh="夏威夷" data-ja="ハワイ">Hawaii</button><button data-c="au" data-zh="澳洲" data-ja="オーストラリア">Australia</button><button data-c="nz" data-zh="紐西蘭" data-ja="ニュージーランド">New Zealand</button><button data-c="vu" data-zh="萬那杜" data-ja="バヌアツ">Vanuatu</button><button data-c="pi" data-zh="南太平洋" data-ja="南太平洋">South Pacific</button><button data-c="mi" data-zh="密克羅尼西亞" data-ja="ミクロネシア">Micronesia</button><button data-c="nw" data-zh="太平洋西北" data-ja="太平洋岸北西部">Pacific NW</button><button data-c="ak" data-zh="阿拉斯加" data-ja="アラスカ">Alaska</button></div>
+    <div class="ctrywrap" id="ctryWrap"><button class="ctrybtn" id="ctryBtn" aria-haspopup="true" aria-expanded="false" aria-controls="ctry"><span id="ctryName">Taiwan</span><i aria-hidden="true">▾</i></button>
+    <div class="ctry" id="ctry" role="group" aria-label="Country"><button data-c="tw" data-zh="台灣" data-ja="台湾">Taiwan</button><button data-c="jp" data-zh="日本" data-ja="日本">Japan</button><button data-c="kr" data-zh="韓國" data-ja="韓国">Korea</button><button data-c="hk" data-zh="香港" data-ja="香港">Hong Kong</button><button data-c="hn" data-zh="海南" data-ja="海南島">Hainan</button><button data-c="vn" data-zh="越南" data-ja="ベトナム">Vietnam</button><button data-c="ph" data-zh="菲律賓" data-ja="フィリピン">Philippines</button><button data-c="id" data-zh="印尼" data-ja="インドネシア">Indonesia</button><button data-c="pg" data-zh="巴布亞紐幾內亞" data-ja="パプアニューギニア">Papua New Guinea</button><button data-c="ca" data-zh="加州" data-ja="カリフォルニア">California</button><button data-c="bj" data-zh="下加州" data-ja="バハ・カリフォルニア">Baja</button><button data-c="hi" data-zh="夏威夷" data-ja="ハワイ">Hawaii</button><button data-c="au" data-zh="澳洲" data-ja="オーストラリア">Australia</button><button data-c="nz" data-zh="紐西蘭" data-ja="ニュージーランド">New Zealand</button><button data-c="vu" data-zh="萬那杜" data-ja="バヌアツ">Vanuatu</button><button data-c="pi" data-zh="南太平洋" data-ja="南太平洋">South Pacific</button><button data-c="mi" data-zh="密克羅尼西亞" data-ja="ミクロネシア">Micronesia</button><button data-c="nw" data-zh="太平洋西北" data-ja="太平洋岸北西部">Pacific NW</button><button data-c="ak" data-zh="阿拉斯加" data-ja="アラスカ">Alaska</button></div></div>
     <nav class="picker" id="picker" aria-label="Choose a spot" data-zh-aria-label="選擇浪點" data-ja-aria-label="ポイントを選ぶ"></nav>
   </div>
 
@@ -637,7 +655,9 @@ function switchSpot(id){ if(!ALL.spots[id] || id===CUR) return; if(!WORLD && spo
   // at Tahiti's two spots stays put, as in the other countries.
   boot(id); if(other || spotCountry(id)==="au" || WS.part(was)!==WS.part(id)){ WS.home(spotCountry(id)); if(other) WS.relang(); } WS.redraw(); }
 // The country row's faded edges: more-l / more-r while buttons are hidden that way.
-function ctryEdges(){ const r = document.getElementById("ctry"); r.classList.toggle("more-l", r.scrollLeft > 1); r.classList.toggle("more-r", r.scrollLeft + r.clientWidth < r.scrollWidth - 1); }
+// The country dropdown: open or shut; the button shows the current country's name in the page's language.
+function ctryOpen(on){ const w = document.getElementById("ctryWrap"); w.classList.toggle("open", on); document.getElementById("ctryBtn").setAttribute("aria-expanded", on); }
+function ctryName(){ const b = document.querySelector('#ctry button[aria-pressed="true"]'); document.getElementById("ctryName").innerHTML = b ? b.innerHTML : ""; }
 // Country switch: back to the spot last open in that country, else its first spot.
 function switchCountry(c){ if(c===spotCountry(CUR)) return; let id; try{ id=localStorage.getItem("waveslave-spot-"+c); }catch(e){}
   switchSpot(ALL.spots[id] && spotCountry(id)===c ? id : countrySpots(c)[0]); }
@@ -647,7 +667,7 @@ let worldGen = 0;
 async function setWorld(on){ if(on===WORLD) return; const gen = ++worldGen, root = document.documentElement, ctry = document.getElementById("ctry"),
     flick = !matchMedia("(prefers-reduced-motion: reduce)").matches && !!document.getAnimations;
   // Until the countries' flicker ends; never longer than 1.5 s.
-  const settled = () => Promise.race([Promise.all(document.getAnimations().filter(a => a.effect && a.effect.target instanceof Element && a.effect.target.parentNode===ctry).map(a => a.finished.catch(() => {}))),
+  const settled = () => Promise.race([Promise.all(document.getAnimations().filter(a => a.effect && a.effect.target instanceof Element && a.effect.target.id==="ctryBtn").map(a => a.finished.catch(() => {}))),
     new Promise(r => setTimeout(r, 1500))]);
   const showing = root.classList.contains("world"); root.classList.remove("igniting", "dousing");
   // Each country catches, and goes out, at its own moment.
@@ -658,7 +678,7 @@ async function setWorld(on){ if(on===WORLD) return; const gen = ++worldGen, root
   keepWorld(false);
   if(flick && showing){ void ctry.offsetWidth; root.classList.add("world", "dousing"); await settled(); if(gen!==worldGen) return; }
   // Back to Taiwan, and the row back to its start (Taiwan's end), so Taiwan is in sight when World mode comes on again.
-  if(spotCountry(CUR)!=="tw") switchCountry("tw"); ctry.scrollLeft = 0;
+  if(spotCountry(CUR)!=="tw") switchCountry("tw"); ctryOpen(false);
   root.classList.remove("world", "dousing"); WS.world(); }
 // Sliding highlight (Bryan, Oct 18): one bubble under a group's picked button that glides (place and size) to the next pick. sel finds the pick;
 // the bubble follows picks, redraws of the group (it goes back in from where it was, so it still glides), language and font changes.
@@ -1166,7 +1186,7 @@ const WS = (() => {
   let seen = "", rsz = 0;
   if (window.ResizeObserver) new ResizeObserver(() => { const box = document.getElementById("wsBox"), k = box.clientWidth + "x" + box.clientHeight;
     if (!FS || !built || document.getElementById("viewWs").hidden || k === seen || rsz) return; rsz = requestAnimationFrame(() => { rsz = 0; seen = box.clientWidth + "x" + box.clientHeight; size(); drawBase(); }); }).observe(document.getElementById("wsBox"));
-  document.addEventListener("keydown", e => { if (e.key === "Escape" && FS) setView("fc"); });
+  document.addEventListener("keydown", e => { if (e.key !== "Escape") return; const w = document.getElementById("wsCtry"); if (w.classList.contains("open")) w.classList.remove("open"); else if (FS) setView("fc"); });
   function screenH() { const so = screen.orientation && screen.orientation.type, land = so ? so.startsWith("landscape") : Math.abs(window.orientation || 0) === 90 || innerWidth > innerHeight;
     const sw = screen.width || innerWidth, sh = screen.height || innerHeight, dev = land ? Math.min(sw, sh) : Math.max(sw, sh), vv = window.visualViewport ? visualViewport.height : innerHeight;
     return { land, h: Math.min(vv, innerHeight, dev) }; }
@@ -1498,6 +1518,14 @@ const WS = (() => {
     const from = [cx, cy, z]; PIN = null; PINBTN = PINX = null; SHEET = null; document.getElementById("wsSheet").hidden = true;
     // switchCountry moves the map to the new home view: it isn't drawn there (hold), and goes back to where it was to fly from.
     hold = true; try { switchCountry(c); } finally { hold = false; } const to = [cx, cy, z]; [cx, cy, z] = from; fly(...to); }
+  // The + and − buttons: zoom about the middle of the map, eased out over 300 ms like the country glide (Bryan, Oct 21). A tap while it is still
+  // moving zooms on from where that zoom was going, so quick taps add up smoothly. With reduced motion, a jump.
+  let zt = 0; function zoomBy(f) { const to = Math.max(zmin, Math.min(homeZ(HOME)*10, (gl && zt ? zt : z)*f)); unglide();
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) { z = to; moved(); return; }
+    const zs = z, t0 = performance.now(); zt = to;
+    const step = now => { const p = Math.min(1, Math.max(0, now - t0)/300), e = 1 - Math.pow(1 - p, 3);
+      z = zs*Math.pow(to/zs, e); moved(); gl = p < 1 ? requestAnimationFrame(step) : (zt = 0); };
+    gl = requestAnimationFrame(step); }
   function zoomAt(f, x, y) { unglide(); const [lon,lat] = ll(x, y); z *= f; clampView(); const [nx,ny] = px(lon, lat); cx += (nx-x)/z; cy = iy(my(cy) - (ny-y)/z); moved(); }
   function legend() { const L = LAY[layer], el = document.getElementById("wsLegend");
     el.innerHTML = `<i style="background:linear-gradient(90deg,${PAL[layer].map(([f,c])=>`${c} ${f*100}%`).join(",")})"></i>` + L.ticks.map(v=>`<span style="left:${lf(v, L)*100}%">${v}${v===L.max?"+ "+L.unit:""}</span>`).join(""); }
@@ -1538,7 +1566,9 @@ const WS = (() => {
     document.getElementById("wsCtry").replaceChildren(...[...document.querySelectorAll("#ctry button")].map(b => { const c = b.dataset.c, d = HOME_ICONS[c], n = d ? document.createElement("button") : b.cloneNode(true);
       if (d) { n.dataset.c = c; n.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" style="display:block;margin:auto"><path d="${d}" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"/></svg>`;
         for (const a of ["aria-label", "title"]) { n.setAttribute(a, b.textContent); for (const l of ["en", "zh", "ja"]) n.setAttribute(`data-${l}-${a}`, b.dataset[l] || b.textContent); } }
-      n.onclick = () => { pressOnly(document.querySelectorAll("#wsCtry button"), n); ctryLater(() => flyTo(c)); }; return n; })); ctryOn();
+      // Shut, only the map's country shows; a tap on it opens the list (Bryan, Oct 21). A pick from the list flies there and shuts it.
+      n.onclick = () => { const w = document.getElementById("wsCtry"); if (!w.classList.contains("open")) { w.classList.add("open"); return; }
+        w.classList.remove("open"); pressOnly(document.querySelectorAll("#wsCtry button"), n); ctryLater(() => flyTo(c)); }; return n; })); ctryOn();
     // The zoom buttons and the countries sit just under the top buttons, however many rows those take (a narrow phone, a longer language): --barb is the bar's bottom edge.
     const bar = document.getElementById("wsLayers"), sec = document.getElementById("viewWs");
     if (window.ResizeObserver) new ResizeObserver(() => sec.style.setProperty("--barb", bar.offsetTop + bar.offsetHeight + "px")).observe(bar);
@@ -1553,7 +1583,7 @@ const WS = (() => {
     // A finger on the pin readout moves the pin instead of scrolling the page.
     fx.addEventListener("touchstart", e => { if (e.touches.length === 1) { const r = fx.getBoundingClientRect(), t = e.touches[0]; if (onPin([t.clientX-r.left, t.clientY-r.top])) e.preventDefault(); } }, {passive: false});
     const rel = e => { const r = fx.getBoundingClientRect(); return [e.clientX-r.left, e.clientY-r.top]; };
-    fx.onpointerdown = e => { unglide(); P.set(e.pointerId, rel(e)); fx.setPointerCapture(e.pointerId); if (P.size === 1) downAt = rel(e); else downAt = null; pinch = null;
+    fx.onpointerdown = e => { unglide(); document.getElementById("wsCtry").classList.remove("open"); P.set(e.pointerId, rel(e)); fx.setPointerCapture(e.pointerId); if (P.size === 1) downAt = rel(e); else downAt = null; pinch = null;
       drag = P.size === 1 && onPin(downAt) ? {ox: downAt[0]-PINBOX[4], oy: downAt[1]-PINBOX[5], moved: false} : null; };
     fx.onpointermove = e => { if (!P.has(e.pointerId)) return; const prev = P.get(e.pointerId), cur = rel(e); P.set(e.pointerId, cur);
       if (drag && P.size === 1) { if (!drag.moved && Math.hypot(cur[0]-downAt[0], cur[1]-downAt[1]) < 6) return; drag.moved = true;
@@ -1579,8 +1609,8 @@ const WS = (() => {
     // Safari on a Mac sends trackpad pinches as gesture events instead.
     let gsc = 1; fx.addEventListener("gesturestart", e => { e.preventDefault(); gsc = 1; });
     fx.addEventListener("gesturechange", e => { e.preventDefault(); const [x,y] = rel(e); zoomAt(e.scale/gsc, x, y); gsc = e.scale; });
-    document.getElementById("wsIn").onclick = () => zoomAt(1.6, W/2, H/2);
-    document.getElementById("wsOut").onclick = () => zoomAt(1/1.6, W/2, H/2);
+    document.getElementById("wsIn").onclick = () => zoomBy(1.6);
+    document.getElementById("wsOut").onclick = () => zoomBy(1/1.6);
     document.getElementById("wsFs").onclick = () => setView("fc"); // ✕ leaves the map for Forecast (the map is only ever full screen)
     built = true; }
   return {
@@ -2195,7 +2225,13 @@ drawDays(); drawDay();
 applyLang();
 { const later = afterGlide(), bs = document.querySelectorAll("#lang button"); bs.forEach(b=>b.onclick=()=>{ pressOnly(bs, b); later(()=>setLang(b.dataset.l)); }); }
 document.querySelector("header .brand .w").addEventListener("click", () => setWorld(!WORLD));
-{ const later = afterGlide(), bs = document.querySelectorAll("#ctry button"); bs.forEach(b=>b.onclick=()=>{ pressOnly(bs, b); const g = worldGen; later(()=>{ if(g===worldGen) switchCountry(b.dataset.c); }); }); }
+{ const later = afterGlide(), bs = document.querySelectorAll("#ctry button"); bs.forEach(b=>b.onclick=()=>{ pressOnly(bs, b); const g = worldGen; later(()=>{ if(g===worldGen) switchCountry(b.dataset.c); });
+    setTimeout(() => ctryOpen(false), 200); }); // shuts once the ring has moved to the new pick
+  const w = document.getElementById("ctryWrap"), btn = document.getElementById("ctryBtn");
+  btn.onclick = () => ctryOpen(!w.classList.contains("open"));
+  document.addEventListener("pointerdown", e => { if(w.classList.contains("open") && !w.contains(e.target)) ctryOpen(false); });
+  document.addEventListener("keydown", e => { if(e.key==="Escape" && w.classList.contains("open")){ ctryOpen(false); btn.focus(); } });
+  new MutationObserver(ctryName).observe(document.getElementById("ctry"), {subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["aria-pressed"]}); ctryName(); }
 for(const [box, sel] of [["#lang", 'button[aria-pressed="true"]'], ["#ctry", 'button[aria-pressed="true"]'], [".tabs", 'button[aria-selected="true"]'], ["#picker", "a[aria-current]"],
   ["#days", '.day[aria-pressed="true"]'], ["#wsLayers", 'button[data-o][aria-pressed="true"]'], ["#wsCtry", 'button[aria-pressed="true"]']]) glider(document.querySelector(box), sel);
 boot(SPOT0);

@@ -105,8 +105,10 @@ const ADMIN_TOOLS = {
 };
 
 // The rate limits (spec "Moderation", step 3), per LINE account. Each rule lets `max` writes through in a window of
-// `ms` that opens with the first of them. The counts are kept in limits as "<sub_hash>:<rule>", so they outlive an
-// account deleted and made again, and so the room can sleep between writes.
+// `ms` that opens with the first of them. The counts are kept in limits as "<sub_hash>:<rule>", so the room can sleep
+// between writes. Deleting the account deletes them with it, as the spec's list of what deletion removes says
+// (forgetAccount()). An account made again starts as a new one, under the new-account limit below, and a ban still
+// holds through subs.
 const SAY_LIMITS = [{ rule: "say:5s", max: 1, ms: 5 * SECOND }, { rule: "say:10m", max: 20, ms: 10 * MINUTE }];
 const NEW_ACCOUNT = DAY; // accounts younger than this may also post only...
 const NEW_SAY_LIMIT = { rule: "say:1h", max: 10, ms: HOUR }; // ...10 messages an hour
@@ -180,8 +182,8 @@ const SCHEMA_V1 = [
     consent_at INTEGER NOT NULL,
     consent_ver TEXT NOT NULL
   )`,
-  // One row per LINE account. It outlives account deletion, so deleting an account doesn't undo a ban or reset
-  // limits. A deleted, unbanned row goes after 30 days.
+  // One row per LINE account. It outlives account deletion, so deleting an account doesn't undo a ban (the limit
+  // counts do go with the account: see SAY_LIMITS). A deleted, unbanned row goes after 30 days.
   `CREATE TABLE subs (
     sub_hash TEXT PRIMARY KEY,
     banned INTEGER NOT NULL DEFAULT 0,

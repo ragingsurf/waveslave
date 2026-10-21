@@ -1552,6 +1552,13 @@ export class Room extends DurableObject {
     }
   }
 
+  // Sends one frame to Bryan's open sockets only (their attachment's role is "admin"), for news of a hidden message.
+  sendToAdmins(frame) {
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState === WebSocket.OPEN && ws.deserializeAttachment()?.role === "admin") this.send(ws, frame);
+    }
+  }
+
   // ---- The user's own routes (/me) -----------------------------------------------------------------------------
   //
   // Each takes the session token as "Authorization: Bearer <token>" (userFromToken()) and answers JSON. A refusal is
@@ -1652,8 +1659,9 @@ export class Room extends DurableObject {
 
   // DELETE /me ("Delete my account"; spec "Deleting an account"): everything of the account goes, in one transaction
   // (forgetAccount()). Then every open screen is told: their text messages and session cards go (update {id, deleted:
-  // true}), and each message they liked has its new count (update {id, likes}). Their sockets close with 4401, as on
-  // signing out everywhere. A locked room doesn't stop it (canWrite()). {ok: true}.
+  // true}), and each message they liked has its new count (update {id, likes}); for a message hidden since, only
+  // Bryan's screens are told, as only they show it. Their sockets close with 4401, as on signing out everywhere. A
+  // locked room doesn't stop it (canWrite()). {ok: true}.
   async deleteAccount(request) {
     const user = await this.userFromToken(bearer(request));
     if (!user) return refuse(401, "auth");
@@ -1662,7 +1670,10 @@ export class Room extends DurableObject {
     const { gone, liked } = this.forgetAccount(user, this.now());
     this.closeUser(user.id, CLOSE_SIGNED_OUT);
     this.announceDeleted(gone);
-    for (const { id, likes } of liked) this.broadcast({ type: "update", id, likes });
+    for (const { id, likes, hidden_by } of liked) {
+      if (hidden_by === null) this.broadcast({ type: "update", id, likes });
+      else this.sendToAdmins({ type: "update", id, likes });
+    }
     return Response.json({ ok: true });
   }
 
@@ -1681,7 +1692,7 @@ export class Room extends DurableObject {
   //   - and the account itself goes.
   // Bryan's copies in holds stay, whatever else is deleted (spec "Moderation", step 5). Nothing else in the room keeps
   // their user id. Returns what the open screens must be told: gone, the messages deleted ({id, spot}), and liked,
-  // the messages whose like counts changed ({id, likes}), each oldest first.
+  // the messages whose like counts changed ({id, likes, hidden_by}), each oldest first.
   forgetAccount(user, now) {
     const sub = user.sub_hash;
     return this.ctx.storage.transactionSync(() => {
@@ -1690,7 +1701,7 @@ export class Room extends DurableObject {
       this.all("UPDATE messages SET uid = NULL WHERE uid = ? AND kind = 'report'", user.id);
       const unliked = this.all("DELETE FROM likes WHERE uid = ? RETURNING msg_id", user.id).map((like) => like.msg_id);
       const liked = this.all(
-        "UPDATE messages SET likes = likes - 1 WHERE id IN (SELECT value FROM json_each(?)) RETURNING id, likes",
+        "UPDATE messages SET likes = likes - 1 WHERE id IN (SELECT value FROM json_each(?)) RETURNING id, likes, hidden_by",
         JSON.stringify(unliked),
       ).sort((a, b) => a.id - b.id);
       this.all("DELETE FROM flags WHERE sub_hash = ?", sub);

@@ -604,6 +604,28 @@ describe("DELETE /me", () => {
     expect(await me(r, u, "GET", "/sessions")).toEqual({ status: 401, data: { error: "auth" } });
   });
 
+  it("tells only Bryan the new like count of a message hidden since they liked it", async () => {
+    const r = await freshRoom();
+    const u = await addUser(r);
+    const v = await addUser(r);
+    const [shown, hidden] = await addMessages(r, v.id, 2);
+    const cu = await join(r, u);
+    for (const id of [shown, hidden]) cu.send({ type: "like", id });
+    await synced(cu);
+    await r.rows("UPDATE messages SET hidden_by = 'flags' WHERE id = ?", hidden);
+    const reader = await join(r);
+    const cb = await join(r, await addUser(r, { role: "admin" }));
+
+    expect(await me(r, u, "DELETE")).toEqual({ status: 200, data: { ok: true } });
+
+    expect(await take(cb, ofType("update"))).toEqual({ type: "update", id: shown, likes: 0 });
+    expect(await take(cb, ofType("update"))).toEqual({ type: "update", id: hidden, likes: 0 });
+    expect(await take(reader, ofType("update"))).toEqual({ type: "update", id: shown, likes: 0 });
+    await settle();
+    expect(all(reader, "update")).toEqual([{ type: "update", id: shown, likes: 0 }]);
+    expect(await r.rows("SELECT id, likes FROM messages ORDER BY id")).toEqual([{ id: shown, likes: 0 }, { id: hidden, likes: 0 }]);
+  });
+
   it("is one transaction: when a step fails, nothing at all is deleted", async () => {
     const r = await freshRoom();
     const u = await addUser(r);

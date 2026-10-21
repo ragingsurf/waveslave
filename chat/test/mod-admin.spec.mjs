@@ -180,7 +180,7 @@ describe("flags", () => {
     }
     for (const frame of [{ id: 999_999, reason: "spam" }, { id: hidden, reason: "spam" }]) {
       c.send({ type: "flag", ...frame });
-      expect(await nextError(c), JSON.stringify(frame)).toEqual({ type: "error", code: "gone", for: "flag" });
+      expect(await nextError(c), JSON.stringify(frame)).toEqual({ type: "error", code: "gone", for: "flag", id: frame.id });
     }
     expect(c.closed).toBeNull(); // three bad frames and two gone ones
     expect(await r.rows("SELECT * FROM flags")).toEqual([]);
@@ -320,7 +320,7 @@ describe("restore", () => {
     const r = await freshRoom();
     const admin = await join(r, await addUser(r, { role: "admin" }));
     admin.send({ type: "restore", id: 999_999 });
-    expect(await nextError(admin)).toEqual({ type: "error", code: "gone", for: "restore" });
+    expect(await nextError(admin)).toEqual({ type: "error", code: "gone", for: "restore", id: 999_999 });
     admin.send({ type: "restore", id: "1" });
     expect(await nextError(admin)).toEqual({ type: "error", code: "invalid", for: "restore" });
   });
@@ -338,8 +338,8 @@ describe("the admin claim", () => {
     const laptop = await join(r, bryan);
     const them = await join(r, other);
     claim(phone, env.ADMIN_CODE);
-    expect(await take(phone, (f) => f?.type === "me" && f.role === "admin")).toEqual({ type: "me", nick: bryan.nick, role: "admin" });
-    expect(await take(laptop, (f) => f?.type === "me" && f.role === "admin")).toEqual({ type: "me", nick: bryan.nick, role: "admin" });
+    expect(await take(phone, (f) => f?.type === "me" && f.role === "admin")).toEqual({ type: "me", nick: bryan.nick, role: "admin", locked: false });
+    expect(await take(laptop, (f) => f?.type === "me" && f.role === "admin")).toEqual({ type: "me", nick: bryan.nick, role: "admin", locked: false });
     expect(await metaOf(r, "admin_uid")).toBe(bryan.id);
     expect(await r.rows("SELECT role FROM users WHERE id = ?", bryan.id)).toEqual([{ role: "admin" }]);
     // His sockets are admin sockets now, through hibernation too.
@@ -362,7 +362,7 @@ describe("the admin claim", () => {
       const bryan = await addUser(r);
       const c = await join(r, bryan);
       claim(c, line);
-      expect(await take(c, (f) => f?.type === "me" && f.role === "admin"), line).toEqual({ type: "me", nick: bryan.nick, role: "admin" });
+      expect(await take(c, (f) => f?.type === "me" && f.role === "admin"), line).toEqual({ type: "me", nick: bryan.nick, role: "admin", locked: false });
     }
   });
 
@@ -381,7 +381,7 @@ describe("the admin claim", () => {
     const bryan = await addUser(r);
     const c = await join(r, bryan);
     claim(c, `/admin ${env.ADMIN_CODE}`);
-    expect(await take(c, (f) => f?.type === "me" && f.role === "admin")).toEqual({ type: "me", nick: bryan.nick, role: "admin" });
+    expect(await take(c, (f) => f?.type === "me" && f.role === "admin")).toEqual({ type: "me", nick: bryan.nick, role: "admin", locked: false });
   });
 
   it("sets a message's role from the account only: a role in a frame changes nothing", async () => {
@@ -428,7 +428,7 @@ describe("the admin claim", () => {
     await tryWith(cs[4], env.ADMIN_CODE);
     const fresh = await join(r, again);
     claim(fresh, next);
-    expect(await take(fresh, (f) => f?.type === "me" && f.role === "admin")).toEqual({ type: "me", nick: again.nick, role: "admin" });
+    expect(await take(fresh, (f) => f?.type === "me" && f.role === "admin")).toEqual({ type: "me", nick: again.nick, role: "admin", locked: false });
     expect(await metaOf(r, "admin_uid")).toBe(again.id);
   });
 
@@ -450,7 +450,7 @@ describe("the admin claim", () => {
     // None of those counted against him: with a long enough code, his claim goes.
     await setAdminCode(r, env.ADMIN_CODE);
     claim(c, env.ADMIN_CODE);
-    expect(await take(c, (f) => f?.type === "me" && f.role === "admin")).toEqual({ type: "me", nick: bryan.nick, role: "admin" });
+    expect(await take(c, (f) => f?.type === "me" && f.role === "admin")).toEqual({ type: "me", nick: bryan.nick, role: "admin", locked: false });
   });
 
   it("needs a signed-in socket that isn't banned: a reader gets error auth, a banned account error banned", async () => {
@@ -582,7 +582,7 @@ describe("ban", () => {
     const admin = await join(r, bryan);
     for (const [msg_id, code] of [[his, "invalid"], [orphan, "gone"], [999_999, "gone"], [String(his), "invalid"]]) {
       admin.send({ type: "ban", msg_id });
-      expect(await nextError(admin), String(msg_id)).toEqual({ type: "error", code, for: "ban" });
+      expect(await nextError(admin), String(msg_id)).toEqual({ type: "error", code, for: "ban", ...(code === "gone" ? { msg_id } : {}) });
     }
     expect(admin.closed).toBeNull();
     expect(await r.rows("SELECT banned FROM subs WHERE sub_hash = ?", bryan.sub)).toEqual([{ banned: 0 }]);
@@ -608,7 +608,7 @@ describe("unban", () => {
     expect(await take(admin, ofType("ok"))).toEqual({ type: "ok", for: "unban", sub_hash: u.sub });
     expect(await r.rows("SELECT banned FROM subs WHERE sub_hash = ?", u.sub)).toEqual([{ banned: 0 }]);
     admin.send({ type: "unban", sub_hash: "sub-nobody" });
-    expect(await nextError(admin)).toEqual({ type: "error", code: "gone", for: "unban" });
+    expect(await nextError(admin)).toEqual({ type: "error", code: "gone", for: "unban", sub_hash: "sub-nobody" });
     admin.send({ type: "unban", sub_hash: 42 });
     expect(await nextError(admin)).toEqual({ type: "error", code: "invalid", for: "unban" });
     expect(await r.rows("SELECT sub_hash FROM subs WHERE sub_hash = 'sub-nobody'")).toEqual([]);
@@ -641,6 +641,35 @@ describe("lock and unlock", () => {
     ca.send({ type: "delete", id: mine });
     expect(await take(ca, ofType("update"))).toEqual({ type: "update", id: mine, deleted: true });
     expect(all(ca, "error")).toHaveLength(2);
+  });
+
+  it("tells Bryan's sockets whether the room is locked: me after hello says so, and lock and unlock reach all of them", async () => {
+    const r = await freshRoom();
+    const a = await addUser(r);
+    const bryan = await addUser(r, { role: "admin" });
+    const phone = await join(r, bryan);
+    const laptop = await join(r, bryan);
+    const reader = await join(r, a);
+    for (const c of [phone, laptop]) expect(all(c, "me")).toEqual([{ type: "me", nick: bryan.nick, role: "admin", locked: false }]);
+    expect(all(reader, "me")).toEqual([{ type: "me", nick: a.nick, role: "user" }]);
+    phone.send({ type: "lock" });
+    for (const c of [phone, laptop]) expect(await take(c, ofType("ok"))).toEqual({ type: "ok", for: "lock" });
+    expect(all(await join(r, bryan), "me")).toEqual([{ type: "me", nick: bryan.nick, role: "admin", locked: true }]);
+    laptop.send({ type: "unlock" });
+    for (const c of [phone, laptop]) expect(await take(c, ofType("ok"))).toEqual({ type: "ok", for: "unlock" });
+    expect(all(await join(r, bryan), "me")).toEqual([{ type: "me", nick: bryan.nick, role: "admin", locked: false }]);
+    await settle();
+    expect(all(reader, "ok")).toEqual([]);
+    expect(all(reader, "me")).toHaveLength(1);
+  });
+
+  it("tells Bryan whether the room is locked when he claims it", async () => {
+    const r = await freshRoom();
+    const bryan = await addUser(r);
+    await r.inRoom((room) => room.setMeta("locked", 1));
+    const c = await join(r, bryan);
+    claim(c, env.ADMIN_CODE);
+    expect(await take(c, (f) => f?.type === "me" && f.role === "admin")).toEqual({ type: "me", nick: bryan.nick, role: "admin", locked: true });
   });
 
   it("unlock reverses it", async () => {
@@ -677,7 +706,7 @@ describe("keep", () => {
     admin.send({ type: "keep", id: hidden });
     expect(await take(admin, ofType("ok"))).toEqual({ type: "ok", for: "keep", id: hidden });
     admin.send({ type: "keep", id: 999_999 });
-    expect(await nextError(admin)).toEqual({ type: "error", code: "gone", for: "keep" });
+    expect(await nextError(admin)).toEqual({ type: "error", code: "gone", for: "keep", id: 999_999 });
     expect((await r.rows("SELECT count(*) AS n FROM holds"))[0].n).toBe(2);
   });
 });
@@ -768,7 +797,7 @@ describe("delete by Bryan", () => {
     expect(await hiddenBy(r, orphan)).toBe("admin");
   });
 
-  it("leaves a message that is already hidden as it is: it keeps why (flags, ban), and nobody is told again", async () => {
+  it("leaves a message that is already hidden as it is, and says ok: it keeps why (flags, ban), and nobody is told again", async () => {
     const r = await freshRoom();
     const u = await addUser(r);
     const flagger = await addFlagger(r);
@@ -780,7 +809,10 @@ describe("delete by Bryan", () => {
     const reader = await join(r);
     const admin = await join(r, bryan);
     // A double tap too: the second Delete on each finds it hidden already.
-    for (const id of [byFlags, byBan, byAdmin, byFlags, byBan]) admin.send({ type: "delete", id });
+    const taps = [byFlags, byBan, byAdmin, byFlags, byBan];
+    for (const id of taps) admin.send({ type: "delete", id });
+    // Each one is answered, so the app is never left waiting for news that won't come.
+    for (const id of taps) expect(await take(admin, ofType("ok"))).toEqual({ type: "ok", for: "delete", id });
     await synced(admin);
     await settle();
     expect(await r.rows("SELECT id, hidden_by FROM messages WHERE uid = ? ORDER BY id", u.id)).toEqual([

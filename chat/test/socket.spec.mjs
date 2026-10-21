@@ -228,7 +228,7 @@ describe("say", () => {
     // A reply to a message that isn't there to see is gone, not invalid.
     for (const reply_to of [999_999, hidden]) {
       c.send({ type: "say", text: "hi", reply_to });
-      expect(await nextError(c), String(reply_to)).toEqual({ type: "error", code: "gone", for: "say" });
+      expect(await nextError(c), String(reply_to)).toEqual({ type: "error", code: "gone", for: "say", reply_to });
     }
     expect(await textCount(r)).toBe(2);
   });
@@ -335,11 +335,12 @@ describe("frames", () => {
       cb.send({ type: "say", text: "Nice", reply_to: msg.id });
       cb.send({ type: "flag", id: msg.id, reason: "spam" });
     }
+    // Each answer names what it was about, so the app knows which message to take off its screen.
     for (const type of ["like", "say", "flag", "like", "say", "flag"]) {
-      expect(await nextError(cb)).toEqual({ type: "error", code: "gone", for: type });
+      expect(await nextError(cb)).toEqual({ type: "error", code: "gone", for: type, [type === "say" ? "reply_to" : "id"]: msg.id });
     }
     ca.send({ type: "delete", id: msg.id });
-    expect(await nextError(ca)).toEqual({ type: "error", code: "gone", for: "delete" });
+    expect(await nextError(ca)).toEqual({ type: "error", code: "gone", for: "delete", id: msg.id });
     cb.send("ping");
     await take(cb, (f) => f === "pong");
     expect([ca.closed, cb.closed]).toEqual([null, null]);
@@ -526,7 +527,7 @@ describe("like", () => {
     const c = await join(r, a);
     for (const id of [999_999, hidden]) {
       c.send({ type: "like", id });
-      expect(await nextError(c), String(id)).toEqual({ type: "error", code: "gone", for: "like" });
+      expect(await nextError(c), String(id)).toEqual({ type: "error", code: "gone", for: "like", id });
     }
     c.send({ type: "like", id: "1" });
     expect(await nextError(c)).toEqual({ type: "error", code: "invalid", for: "like" });
@@ -565,7 +566,7 @@ describe("delete", () => {
     cb.send({ type: "delete", id: msg.id });
     expect(await nextError(cb)).toEqual({ type: "error", code: "invalid", for: "delete" });
     cb.send({ type: "delete", id: 999_999 });
-    expect(await nextError(cb)).toEqual({ type: "error", code: "gone", for: "delete" });
+    expect(await nextError(cb)).toEqual({ type: "error", code: "gone", for: "delete", id: 999_999 });
     await settle();
     expect(all(ca, "update")).toEqual([]);
     expect(await textCount(r)).toBe(1);

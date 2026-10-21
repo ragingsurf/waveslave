@@ -433,7 +433,7 @@ describe("share and unshare", () => {
       const c = await join(r, u);
       for (const [session_id, code] of [[theirs.id, "gone"], [999_999, "gone"], [String(theirs.id), "invalid"], [undefined, "invalid"]]) {
         c.send({ type, session_id });
-        expect(await nextError(c), `${type} ${session_id}`).toEqual({ type: "error", code, for: type });
+        expect(await nextError(c), `${type} ${session_id}`).toEqual({ type: "error", code, for: type, ...(code === "gone" ? { session_id } : {}) });
       }
     }
     const reader = await join(r);
@@ -803,7 +803,7 @@ describe("DELETE /me", () => {
     const again = await addUser(r);
     const c2 = await join(r, again);
     c2.send({ type: "admin", code: env.ADMIN_CODE });
-    expect(await take(c2, isAdminMe)).toEqual({ type: "me", nick: again.nick, role: "admin" });
+    expect(await take(c2, isAdminMe)).toEqual({ type: "me", nick: again.nick, role: "admin", locked: false });
   });
 });
 

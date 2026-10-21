@@ -351,6 +351,13 @@ function readFrame(message) {
 // right place (the message box, the report sheet, the nickname box).
 const errorFrame = (code, about) => ({ type: "error", code, ...(about ? { for: about } : {}) });
 
+// The field a gone answer copies from the frame it answers: what that frame named, so chat.js knows which message, log
+// or LINE account to take off its screen.
+const GONE_TARGET = {
+  say: "reply_to", like: "id", flag: "id", delete: "id", ban: "msg_id", unban: "sub_hash", restore: "id", keep: "id",
+  share: "session_id", unshare: "session_id",
+};
+
 // slow:<seconds>, the wait rounded up to a whole second.
 const slowFor = (ms) => `slow:${Math.ceil(ms / SECOND)}`;
 
@@ -946,8 +953,9 @@ export class Room extends DurableObject {
   // From Bryan only (role "admin"; from anyone else they get error invalid):
   //   ban {msg_id}, unban {sub_hash}, restore {id}, keep {id}, lock, unlock, hidden_list
   // To the app:
-  //   me {nick, role}                      who the socket is signed in as: after hello, after a nickname change, and
-  //                                        after Bryan's claim (role "admin")
+  //   me {nick, role, locked?}             who the socket is signed in as: after hello, after a nickname change, and
+  //                                        after Bryan's claim (role "admin"). Bryan's also says whether the room is
+  //                                        locked, so his menu offers Lock or Unlock
   //   history {messages, before_id?}       after hello (the last 100), or the answer to older
   //   msg {msg}                            a message, to every socket: a new one, or one Bryan restored
   //   update {id, likes} | {id, deleted: true} | {id, hidden: true}
@@ -957,13 +965,15 @@ export class Room extends DurableObject {
   //                                        size, nick:<length|chars|reserved|taken>, or admin (a claim refused); "for"
   //                                        is the frame's type. gone answers a frame that is well formed but names
   //                                        something that isn't there (any more): a message deleted or hidden a
-  //                                        moment ago, a log deleted on another screen, a LINE account with no row
+  //                                        moment ago, a log deleted on another screen, a LINE account with no row.
+  //                                        A gone answer also carries what the frame named, as it named it (id,
+  //                                        msg_id, reply_to, session_id or sub_hash: GONE_TARGET)
   //   ok {for: "share", session_id, shared_msg} | {for: "unshare", session_id}   to the socket that asked
   // To Bryan's sockets only:
   //   msg {msg} with msg.hidden            a message just hidden, with why ("flags", "ban" or "admin"), where everyone
   //                                        else gets update {id, hidden: true}
   //   hidden {count, messages, banned, banned_count}   the answer to hidden_list
-  //   ok {for, ...}                        one of his tools did its work
+  //   ok {for, ...}                        one of his tools did its work; lock and unlock go to all his sockets
   // Messages are always the public frame (toPublic()), so no user id or LINE data goes out; only Bryan's sockets learn
   // why a message was hidden, and the LINE account code (sub_hash) that unban takes. A socket that sends five bad
   // frames (invalid ones, or writes before signing in) is closed with 1008. gone is not a bad frame: a working app gets
@@ -1026,7 +1036,8 @@ export class Room extends DurableObject {
       return;
     }
     if (!code) return;
-    this.send(ws, errorFrame(code, type));
+    const key = code === "gone" && Object.hasOwn(GONE_TARGET, type) ? GONE_TARGET[type] : null;
+    this.send(ws, { ...errorFrame(code, type), ...(key ? { [key]: frame[key] } : {}) });
     // Bad frames: ones the room can't read or that break the protocol, and writes from a socket not signed in. A
     // token that doesn't check out (hello's auth) isn't one, and neither is a blocked or slowed-down write, nor a frame
     // about something that has gone (gone).
@@ -1081,13 +1092,18 @@ export class Room extends DurableObject {
       if (found.user) {
         const { id, tv, role, nick } = found.user;
         ws.serializeAttachment({ ...ws.deserializeAttachment(), uid: id, tv, role });
-        this.send(ws, { type: "me", nick, role });
+        this.send(ws, this.meFrame(nick, role));
       } else {
         this.send(ws, errorFrame(found.error, "hello"));
       }
     }
     this.send(ws, { type: "history", messages: this.history() });
     this.broadcast({ type: "online", online: this.online() });
+  }
+
+  // me {nick, role}, and for Bryan whether the room is locked.
+  meFrame(nick, role) {
+    return { type: "me", nick, role, ...(role === "admin" ? { locked: this.getMeta("locked") === 1 } : {}) };
   }
 
   // older {before_id}: the 50 visible messages before that id, oldest first, at most one page a second per socket.
@@ -1160,8 +1176,9 @@ export class Room extends DurableObject {
   //
   // Bryan's Delete on anyone else's message hides it instead ("admin"): it goes from every screen but his, and stays in
   // his hidden list, where he can restore it or keep it as evidence, until the daily clean-up takes it with the rest.
-  // One that is hidden already (by flags, a ban or an earlier Delete) is left as it is, with nothing said: it keeps the
-  // reason it was hidden for, which his hidden list shows, and nobody is told about it a second time.
+  // One that is hidden already (by flags, a ban or an earlier Delete) is left as it is: it keeps the reason it was
+  // hidden for, which his hidden list shows, and nobody is told about it a second time. He gets ok {for: "delete", id},
+  // as it is hidden from everyone, which is what his Delete does.
   onDelete(ws, user, frame) {
     if (!isId(frame.id)) return "invalid";
     const refused = this.canWrite(user, "delete");
@@ -1169,7 +1186,10 @@ export class Room extends DurableObject {
     if (user.role === "admin") {
       const theirs = this.one("SELECT hidden_by FROM messages WHERE id = ? AND uid IS NOT ?", frame.id, user.id);
       if (theirs) {
-        if (theirs.hidden_by !== null) return;
+        if (theirs.hidden_by !== null) {
+          this.send(ws, { type: "ok", for: "delete", id: frame.id });
+          return;
+        }
         const hidden = this.all(
           `UPDATE messages SET hidden_by = 'admin' WHERE id = ? AND hidden_by IS NULL RETURNING ${MSG_COLS}`,
           frame.id,
@@ -1219,7 +1239,7 @@ export class Room extends DurableObject {
         );
       }
     });
-    this.sendToUser(user.id, { type: "me", nick: nick.nick, role: user.role });
+    this.sendToUser(user.id, this.meFrame(nick.nick, user.role));
   }
 
   // ---- The report button (spec "Moderation", step 4) -------------------------------------------------------------
@@ -1371,7 +1391,7 @@ export class Room extends DurableObject {
       const at = socket.deserializeAttachment();
       if (at?.uid === user.id) socket.serializeAttachment({ ...at, role: "admin" });
     }
-    this.sendToUser(user.id, { type: "me", nick: user.nick, role: "admin" });
+    this.sendToUser(user.id, this.meFrame(user.nick, "admin"));
   }
 
   // The wrong codes tried against the ADMIN_CODE whose digest is `against`: {code: that digest, total, by: {sub_hash:
@@ -1453,15 +1473,16 @@ export class Room extends DurableObject {
 
   // lock and unlock. While the room is locked (meta "locked" = 1), everyone can read but only Bryan can post (spec
   // "Error handling"). Only posting stops (POSTS, in canWrite()), so likes, flags and deletes still work, and so does
-  // anything else that isn't a post.
-  onLock(ws) {
+  // anything else that isn't a post. ok goes to every one of Bryan's sockets, so the menu on each of his screens
+  // offers the one that applies.
+  onLock() {
     this.setMeta("locked", 1);
-    this.send(ws, { type: "ok", for: "lock" });
+    this.sendToAdmins({ type: "ok", for: "lock" });
   }
 
-  onUnlock(ws) {
+  onUnlock() {
     this.setMeta("locked", 0);
-    this.send(ws, { type: "ok", for: "unlock" });
+    this.sendToAdmins({ type: "ok", for: "unlock" });
   }
 
   // hidden_list: hidden {count, messages, banned, banned_count}. messages are the newest 100 hidden messages, newest

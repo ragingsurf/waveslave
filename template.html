@@ -103,6 +103,7 @@ header{position:relative}
 .hero-num{font-family:var(--display);font-weight:800;font-stretch:120%;font-size:clamp(64px,16vw,104px);line-height:.85;letter-spacing:-.02em}
 .hero-num small{font-size:.35em;font-weight:600;margin-left:4px;color:var(--muted)}
 .hero-sub{font-size:16px;margin-top:8px}
+.hero-sub .dim{color:var(--muted)}
 .rating-pill{display:inline-flex;align-items:center;gap:8px;margin-top:14px;padding:6px 12px 6px 8px;border-radius:99px;font-weight:600;font-size:14px;background:color-mix(in srgb,var(--rc) 14%,transparent);color:var(--rc)}
 /* The board pick (Bryan picked this quiver, Oct 18): shortboard, mid-length and longboard standing beside the wave height at their real
    lengths, the pick lit. On a screen too narrow for both, the boards drop under the number. */
@@ -1820,14 +1821,17 @@ function boardPath(w,h,p){ const X=x=>(w/2+x*(w-1.8)).toFixed(2), Y=y=>(.9+y*(h-
     document.getElementById("nowRating").innerHTML = ""; document.getElementById("nowBoard").hidden = true; }
   else {
   document.getElementById("nowH1").innerHTML = r1(b[1])+"<small>m</small>";
-  // Environment Canada's buoys send no wave direction, and a reading can leave out its period: neither is made up (no "from" or arrow,
+  // Under the height, just the numbers (Bryan, Oct 21; it was a sentence, "8.8 s period, waves from the ENE ↙ · read at 19:00"):
+  // "8.8 s · ENE ↙ · 19:00", the reading's time in grey, in every language.
+  // Environment Canada's buoys send no wave direction, and a reading can leave out its period: neither is made up (no direction,
   // a dash for the period), and the rating takes the forecast's value for that hour instead. Korea's buoys (KMA's, as NOAA copies
   // them from the weather reports) send heights in 0.5 m steps and neither, so they say that in place of the period.
-  const fh = hourByT.get(bt) || {}, nd = b[3]==null, bdir = nd ? fh.dir : b[3], bp = b[2]!=null ? b[2]*BUOY_P : fh.p || 0, per = b[2]!=null ? `${r1(bp)} s` : "–";
-  const arw = nd ? "" : ` <span class="dir" style="transform:rotate(${b[3]+180}deg)">↑</span>`, kma = DATA.buoyBy==="kma" && b[2]==null;
-  document.getElementById("nowSub").innerHTML = isZh() ? `${kma ? "浪高以 0.5 m 為單位" : `週期 <b class="mono">${per}</b>`}${nd ? "" : `，浪來自<b>${compass(b[3])}</b>`}${arw} · ${hhmm(bt)} 測得`
-    : isJa() ? `${kma ? "波高は 0.5 m 刻み" : `周期 <b class="mono">${per}</b>`}${nd ? "" : `、<b>${compass(b[3])}</b>からの波`}${arw} · ${hhmm(bt)} 観測`
-    : `${kma ? "Heights in 0.5 m steps" : `<b class="mono">${per}</b> period`}${nd ? "" : `, waves from the <b>${compass(b[3])}</b>`}${arw} · read at ${hhmm(bt)}`;
+  const fh = hourByT.get(bt) || {}, nd = b[3]==null, bdir = nd ? fh.dir : b[3], bp = b[2]!=null ? b[2]*BUOY_P : fh.p || 0;
+  const kma = DATA.buoyBy==="kma" && b[2]==null, dot = `<span class="dim"> · </span>`;
+  document.getElementById("nowSub").innerHTML = (kma ? (isZh() ? "浪高以 0.5 m 為單位" : isJa() ? "波高は 0.5 m 刻み" : "Heights in 0.5 m steps")
+      : `<b><span class="mono">${b[2]!=null ? r1(bp) : "–"}</span>&#8239;s</b>`)
+    + (nd ? "" : `${dot}<b>${compass(b[3])}</b> <span class="dir" style="transform:rotate(${b[3]+180}deg)">↑</span>`)
+    + `${dot}<span class="dim">${hhmm(bt)}</span>`;
   const r = rate(score(b[1]*exposure(bdir), bp, w));
   const v = document.getElementById("nowRating"); v.style.setProperty("--rc", RATE[r][1]);
   v.innerHTML = `<span class="dots">${[0,1,2,3,4].map(i=>`<i class="${i<=r?"on":""}"></i>`).join("")}</span>${RATE[r][0]}`;

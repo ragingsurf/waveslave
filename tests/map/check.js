@@ -552,6 +552,8 @@ const CHECKS = {
   async forecastFitsWidth(open) {
     const page = await open(home("tw")); await page.evaluate(() => setView("fc", true)); await settle(page);
     for (const l of ["en", "zh", "ja"]) {
+      // The languages are in the menu under the button in the corner, which shuts itself after each pick.
+      await page.waitForFunction(() => !document.getElementById("langWrap").classList.contains("open")); await page.click("#langBtn");
       await page.click(`#lang button[data-l="${l}"]`); await settle(page);
       const r = await page.evaluate(() => { const d = document.documentElement, w = document.querySelector(".wrap"), edge = w.getBoundingClientRect().right - parseFloat(getComputedStyle(w).paddingRight);
         return { sw: d.scrollWidth, cw: d.clientWidth, wide: [...w.children].map(e => [e.id || e.className || e.tagName, e.getBoundingClientRect().right]).filter(([, x]) => x > edge + 0.5).map(([e, x]) => `${e} ends at ${x}px, past the column's ${edge}px`) }; });
@@ -609,12 +611,13 @@ const CHECKS = {
   },
   // Taiwan mode, the page's default: no country row and no country buttons over the map, and zoomed out no other country's spot to tap (a
   // tap where Pipeline is drops a pin instead). World mode (setWorld, the tap on the W) brings them back and is kept; switching it off from
-  // Hawaii brings the page and the map back to Taiwan. Then on Forecast the W itself switches it on and off, with nothing under the row moving,
-  // and the row comes back at its start.
+  // Hawaii brings the page and the map back to Taiwan. Then on Forecast the W itself switches it on and off: Taiwan mode keeps no gap for the
+  // row (Bryan, Oct 21), so the spot picker sits 8px under Forecast / Map, and World mode's row opens between them. The row comes back at its start.
   async taiwanMode(open) {
     const page = await open({ spot: "donghe", saved: MID, world: false });
     const shown = () => page.evaluate(() => ({ world: WORLD, cls: document.documentElement.classList.contains("world"), kept: localStorage.getItem("waveslave-world"),
-      row: getComputedStyle(document.getElementById("ctry")).visibility !== "hidden", picker: document.getElementById("picker").getBoundingClientRect().top - document.querySelector(".tabs").getBoundingClientRect().bottom, scroll: scrollY, btns: [...document.querySelectorAll("#wsCtry button")].filter(b => b.offsetParent).length,
+      row: document.getElementById("ctry").getClientRects().length > 0, slot: document.getElementById("ctrySlot").offsetHeight,
+      picker: document.getElementById("picker").getBoundingClientRect().top - document.querySelector(".tabrow").getBoundingClientRect().bottom, scroll: scrollY, btns: document.getElementById("wsCtry").offsetParent ? document.querySelectorAll("#wsCtry button").length : 0,
       want: document.querySelectorAll("#ctry button").length, cur: CUR, cc: spotCountry(CUR), MC: window.__ws.view().MC }));
     let a = await shown();
     if (a.world || a.cls) throw new Error("the page opened in World mode, want Taiwan mode");
@@ -629,12 +632,14 @@ const CHECKS = {
     await page.evaluate(() => setWorld(false)); await settle(page); a = await shown();
     if (a.world || a.cls || a.kept !== "0" || a.row || a.btns) throw new Error(`after setWorld(false) WORLD is ${a.world}, the class ${a.cls}, waveslave-world ${a.kept}, the row ${a.row}, ${a.btns} buttons`);
     if (a.cc !== "tw" || a.MC !== "tw") throw new Error(`after setWorld(false) from Hawaii the page is on ${a.cur} and the map on ${a.MC}, want Taiwan`);
-    // And the real switch: back on Forecast, a tap on the W in the logo turns World mode on, and another turns it off. The countries come and
-    // go in a place kept for them, so the spot picker and the forecast under it never move.
+    // And the real switch: back on Forecast, a tap on the W in the logo turns World mode on, and another turns it off. The row opens 10px
+    // under Forecast / Map and the spot picker moves down by that and the row's height; Taiwan mode closes it again, leaving no gap.
     await page.click("#wsFs"); await settle(page); const at = (await shown()).picker;
+    if (Math.abs(at - 8) > 0.5) throw new Error(`in Taiwan mode the spot picker is ${at}px under Forecast / Map, want 8px (no gap kept for the countries)`);
     for (const want of [true, false]) { await page.click("header .brand .w"); await settle(page); a = await shown();
       if (a.world !== want || a.row !== want) throw new Error(`a tap on the W left WORLD ${a.world} and the country row ${a.row ? "showing" : "hidden"}, want ${want ? "World mode" : "Taiwan mode"}`);
-      if (a.picker !== at) throw new Error(`a tap on the W moved the spot picker from ${at} to ${a.picker} under the tabs (scrollY ${a.scroll})`); }
+      const pick = want ? at + 10 + a.slot : at;
+      if (Math.abs(a.picker - pick) > 0.5) throw new Error(`after a tap on the W the spot picker is ${a.picker}px under Forecast / Map, want ${pick} (scrollY ${a.scroll})`); }
     // The row scrolled to its far end comes back, after Taiwan mode, at its start: Taiwan in sight.
     const left = await page.evaluate(async () => { const r = document.getElementById("ctry"); await setWorld(true); r.scrollLeft = r.scrollWidth; await setWorld(false); await setWorld(true); return r.scrollLeft; });
     if (left !== 0) throw new Error(`back in World mode the country row is scrolled ${left}px along, want 0 (Taiwan in sight)`);

@@ -81,13 +81,21 @@ html.world .brand .w::after{opacity:1}
 html.igniting header .brand .w::after{animation:flickOn .9s both}
 html.dousing header .brand .w::after{animation:flickOff .4s both}
 .where{color:var(--muted);font-size:13px}
-/* EN / 中文 switch, pinned to the top right corner. */
+/* Language (Bryan, Oct 21): one small button pinned to the top right corner, naming the page's language; a tap drops down English, 中文 and
+   日本語 to switch to, the current one lit. The page already follows the phone's language, so most visitors never need it. */
 header{position:relative}
-.lang{position:absolute;top:0;right:0;z-index:2;display:flex;gap:2px;padding:3px;border-radius:99px;background:var(--panel);border:1px solid var(--line)}
-.lang button{border:0;background:none;color:var(--muted);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP","Microsoft JhengHei",sans-serif;padding:6px 8px;border-radius:99px;cursor:pointer;position:relative;z-index:1;transition:color .36s,text-shadow .36s}
+.langwrap{position:absolute;top:0;right:0;z-index:20}
+.langbtn{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:99px;background:var(--panel);border:1px solid var(--line);color:var(--muted);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP","Microsoft JhengHei",sans-serif;white-space:nowrap;cursor:pointer}
+.lang{position:absolute;top:calc(100% + 6px);right:0;display:flex;flex-direction:column;gap:2px;min-width:128px;padding:6px;border-radius:14px;background:var(--panel);border:1px solid var(--line);box-shadow:0 14px 34px rgba(0,0,0,.45);transition:opacity .16s,transform .16s,visibility .16s}
+.langwrap:not(.open) .lang{visibility:hidden;opacity:0;transform:translateY(-4px);pointer-events:none}
+.lang button{border:0;background:none;color:var(--ink);font:600 14px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP","Microsoft JhengHei",sans-serif;text-align:left;padding:9px 12px;border-radius:99px;cursor:pointer;position:relative;z-index:1;transition:color .36s,text-shadow .36s}
 .lang button[aria-pressed="true"]{color:#ffb347;text-shadow:0 0 6px rgba(255,140,0,.7)}
-.fresh{font-size:12px;padding:4px 10px;border-radius:99px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
-.fresh.stale{border-color:var(--fair);color:var(--fair)}
+/* How fresh the data is (Bryan, Oct 21): a quiet line at the end of the Forecast / Map row, "Updated 18:44" by a green light, with the age
+   once the data is an hour old; past 12 hours the day too, all in amber. */
+.fresh{font-size:12px;color:var(--muted);white-space:nowrap}
+.fresh::before{content:"";display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;background:var(--good);box-shadow:0 0 6px var(--good);vertical-align:1px}
+.fresh.stale{color:var(--fair)}
+.fresh.stale::before{background:var(--fair);box-shadow:0 0 6px var(--fair)}
 
 /* Now */
 .now{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:20px;display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:20px}
@@ -244,10 +252,16 @@ svg text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
 .quick{display:flex;flex-wrap:wrap;gap:10px}
 /* The country buttons fit a phone: their side padding shrinks on narrow screens (more in Japanese, whose names are longer), and if they still
    don't fit, the row scrolls sideways inside itself like the spot picker, so the page never slides sideways. */
-/* Forecast / Map, the countries and the spots are one group of controls, evenly and closely spaced (Bryan, Oct 19); the spot row's 2px of
-   padding (room for its glow) is taken back so it sits the same distance under the countries as they do under Forecast / Map. */
-.ctl{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
-.ctl .picker{margin-top:-2px}
+/* Forecast / Map, the countries and the spots are one group of controls, evenly and closely spaced (Bryan, Oct 19), 10px apart; the spot
+   row's 2px of padding (room for its glow) is taken back so it sits the same distance under the row above it as the countries do under
+   Forecast / Map. The space above the countries is their slot's own margin, not a gap, so it opens and closes with the slot (setWorld). */
+.ctl{display:grid;grid-template-columns:minmax(0,1fr)}
+.ctl .picker{margin-top:8px}
+/* Forecast / Map with the freshness line at the far end of its row; where both don't fit (a long line, when the data is old), the line drops
+   under the switch. */
+.tabrow{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 10px}
+/* The country row's slot: it clips the row while it opens and closes. */
+.ctryslot{overflow:hidden;margin-top:10px}
 .ctry{position:relative;display:flex;width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:none;overscroll-behavior-x:contain;gap:2px;padding:3px;margin:0;border-radius:99px;background:var(--panel);border:1px solid var(--line)}
 .ctry::-webkit-scrollbar{display:none}
 /* Six countries don't fit one row on most phones: the row's edge fades where buttons are hidden (more-l / more-r, set as it scrolls). */
@@ -257,9 +271,10 @@ svg text{font-family:var(--mono);font-size:10px;fill:var(--muted)}
 .ctry button{flex:none;border:0;background:none;color:var(--muted);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP",sans-serif;padding:6px clamp(5px,calc((100vw - 310px)/10),12px);border-radius:99px;cursor:pointer;position:relative;z-index:1;transition:color .36s,text-shadow .36s}
 html[lang="ja"] .ctry button{padding-inline:clamp(3px,calc((100vw - 350px)/10),12px)}
 .ctry button[aria-pressed="true"]{color:#ffb347;text-shadow:0 0 6px rgba(255,140,0,.7)}
-/* Taiwan mode (the default) keeps the country row's place but shows nothing in it (Bryan, Oct 19: the countries appear, they don't push the
-   forecast down), and the map has no country buttons. In World mode the countries flicker on in place; going back, they flicker out. */
-html:not(.world) #ctry{visibility:hidden}
+/* Taiwan mode (the default) has no country row and keeps no gap for it, so the spot picker sits right under Forecast / Map (Bryan, Oct 21;
+   till then the row's place was kept, empty), and the map has no country buttons. In World mode the row opens and the countries flicker on in
+   it; going back, they flicker out and the row closes (setWorld). */
+html:not(.world) .ctryslot{display:none}
 html:not(.world) .wsmap .wsctry{display:none}
 html.igniting #ctry>*{animation:flickOn .9s calc(.06s + var(--d,0s)) both}
 html.dousing #ctry>*{animation:flickOff .34s var(--d2,0s) both}
@@ -460,12 +475,12 @@ html{overscroll-behavior-y:none}
     <div class="brandbox">
       <h1 class="brand" aria-label="WaveSlave"><span class="w">W</span>aveSlave</h1>
     </div>
-    <div class="lang" id="lang" role="group" aria-label="Language / 語言 / 言語"><button data-l="en" aria-pressed="true" lang="en">EN</button><button data-l="zh" aria-pressed="false" lang="zh-Hant-TW">中文</button><button data-l="ja" aria-pressed="false" lang="ja">日本語</button></div>
-    <span class="fresh" id="fresh">Data snapshot</span>
+    <div class="langwrap" id="langWrap"><button class="langbtn" id="langBtn" aria-haspopup="true" aria-expanded="false" aria-controls="lang" aria-label="Language / 語言 / 言語"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 2.6 15.4 0 18M12 3c-2.6 2.6-2.6 15.4 0 18"/></svg><span id="langName">EN</span></button>
+    <div class="lang" id="lang" role="group" aria-label="Language / 語言 / 言語"><button data-l="en" aria-pressed="true" lang="en">English</button><button data-l="zh" aria-pressed="false" lang="zh-Hant-TW">中文</button><button data-l="ja" aria-pressed="false" lang="ja">日本語</button></div></div>
   </header>
   <div class="ctl">
-    <nav class="tabs" role="tablist" aria-label="View"><button role="tab" data-v="fc" aria-selected="true" data-zh="預報" data-ja="予報">Forecast</button><button role="tab" data-v="ws" aria-selected="false" data-zh="地圖" data-ja="地図">Map</button></nav>
-    <div class="ctry" id="ctry" role="group" aria-label="Country"><button data-c="tw" data-zh="台灣" data-ja="台湾">Taiwan</button><button data-c="jp" data-zh="日本" data-ja="日本">Japan</button><button data-c="kr" data-zh="韓國" data-ja="韓国">Korea</button><button data-c="hk" data-zh="香港" data-ja="香港">Hong Kong</button><button data-c="hn" data-zh="海南" data-ja="海南島">Hainan</button><button data-c="vn" data-zh="越南" data-ja="ベトナム">Vietnam</button><button data-c="ph" data-zh="菲律賓" data-ja="フィリピン">Philippines</button><button data-c="id" data-zh="印尼" data-ja="インドネシア">Indonesia</button><button data-c="pg" data-zh="巴布亞紐幾內亞" data-ja="パプアニューギニア">Papua New Guinea</button><button data-c="ca" data-zh="加州" data-ja="カリフォルニア">California</button><button data-c="bj" data-zh="下加州" data-ja="バハ・カリフォルニア">Baja</button><button data-c="hi" data-zh="夏威夷" data-ja="ハワイ">Hawaii</button><button data-c="au" data-zh="澳洲" data-ja="オーストラリア">Australia</button><button data-c="nz" data-zh="紐西蘭" data-ja="ニュージーランド">New Zealand</button><button data-c="vu" data-zh="萬那杜" data-ja="バヌアツ">Vanuatu</button><button data-c="pi" data-zh="南太平洋" data-ja="南太平洋">South Pacific</button><button data-c="mi" data-zh="密克羅尼西亞" data-ja="ミクロネシア">Micronesia</button><button data-c="nw" data-zh="太平洋西北" data-ja="太平洋岸北西部">Pacific NW</button><button data-c="ak" data-zh="阿拉斯加" data-ja="アラスカ">Alaska</button></div>
+    <div class="tabrow"><nav class="tabs" role="tablist" aria-label="View"><button role="tab" data-v="fc" aria-selected="true" data-zh="預報" data-ja="予報">Forecast</button><button role="tab" data-v="ws" aria-selected="false" data-zh="地圖" data-ja="地図">Map</button></nav><span class="fresh" id="fresh">Data snapshot</span></div>
+    <div class="ctryslot" id="ctrySlot"><div class="ctry" id="ctry" role="group" aria-label="Country"><button data-c="tw" data-zh="台灣" data-ja="台湾">Taiwan</button><button data-c="jp" data-zh="日本" data-ja="日本">Japan</button><button data-c="kr" data-zh="韓國" data-ja="韓国">Korea</button><button data-c="hk" data-zh="香港" data-ja="香港">Hong Kong</button><button data-c="hn" data-zh="海南" data-ja="海南島">Hainan</button><button data-c="vn" data-zh="越南" data-ja="ベトナム">Vietnam</button><button data-c="ph" data-zh="菲律賓" data-ja="フィリピン">Philippines</button><button data-c="id" data-zh="印尼" data-ja="インドネシア">Indonesia</button><button data-c="pg" data-zh="巴布亞紐幾內亞" data-ja="パプアニューギニア">Papua New Guinea</button><button data-c="ca" data-zh="加州" data-ja="カリフォルニア">California</button><button data-c="bj" data-zh="下加州" data-ja="バハ・カリフォルニア">Baja</button><button data-c="hi" data-zh="夏威夷" data-ja="ハワイ">Hawaii</button><button data-c="au" data-zh="澳洲" data-ja="オーストラリア">Australia</button><button data-c="nz" data-zh="紐西蘭" data-ja="ニュージーランド">New Zealand</button><button data-c="vu" data-zh="萬那杜" data-ja="バヌアツ">Vanuatu</button><button data-c="pi" data-zh="南太平洋" data-ja="南太平洋">South Pacific</button><button data-c="mi" data-zh="密克羅尼西亞" data-ja="ミクロネシア">Micronesia</button><button data-c="nw" data-zh="太平洋西北" data-ja="太平洋岸北西部">Pacific NW</button><button data-c="ak" data-zh="阿拉斯加" data-ja="アラスカ">Alaska</button></div></div>
     <nav class="picker" id="picker" aria-label="Choose a spot" data-zh-aria-label="選擇浪點" data-ja-aria-label="ポイントを選ぶ"></nav>
   </div>
 
@@ -612,8 +627,11 @@ function applyLang(){ const L = isZh() || isJa() ? LANG : "en"; document.documen
   document.querySelectorAll("[data-zh]").forEach(e => { if(e.dataset.en==null) e.dataset.en = e.innerHTML; e.innerHTML = L!=="en" && e.dataset[L] || e.dataset.en; });
   for(const a of ["aria-label","alt","title"]) document.querySelectorAll(`[data-zh-${a}]`).forEach(e => { const k = "en-"+a; if(!e.hasAttribute("data-"+k)) e.setAttribute("data-"+k, e.getAttribute(a)||"");
     e.setAttribute(a, L!=="en" && e.getAttribute(`data-${L}-${a}`) || e.getAttribute("data-"+k)); });
-  document.querySelectorAll("#lang button").forEach(b => b.setAttribute("aria-pressed", b.dataset.l===LANG)); }
+  document.querySelectorAll("#lang button").forEach(b => b.setAttribute("aria-pressed", b.dataset.l===LANG));
+  document.getElementById("langName").textContent = {en: "EN", zh: "中文", ja: "日本語"}[LANG]; }
 function setLang(l){ if(l===LANG) return; LANG=l; try{ localStorage.setItem("waveslave-lang", l); }catch(e){} applyLang(); boot(CUR); WS.relang(); }
+// The language menu under the button in the corner: open or shut.
+function langOpen(on){ document.getElementById("langWrap").classList.toggle("open", on); document.getElementById("langBtn").setAttribute("aria-expanded", on); }
 // World mode shows every country; Taiwan mode, the default, only Taiwan's spots, in the forecast and on the map. The W in the logo switches
 // (setWorld), remembered on this device; the class "world" on the page was set from it before first paint.
 let WORLD = document.documentElement.classList.contains("world");
@@ -641,25 +659,33 @@ function ctryEdges(){ const r = document.getElementById("ctry"); r.classList.tog
 // Country switch: back to the spot last open in that country, else its first spot.
 function switchCountry(c){ if(c===spotCountry(CUR)) return; let id; try{ id=localStorage.getItem("waveslave-spot-"+c); }catch(e){}
   switchSpot(ALL.spots[id] && spotCountry(id)===c ? id : countrySpots(c)[0]); }
-// World mode on or off. The W flickers to neon and the countries flicker on in their row, one by one; or they flicker out and the page goes
-// back to Taiwan. With reduced motion it just switches. A tap mid-flicker turns it straight back (gen drops the old one).
+// World mode on or off. The W flickers to neon, the country row opens and the countries flicker on in it, one by one; or they flicker out,
+// the row closes and the page goes back to Taiwan. With reduced motion it just switches. A tap mid-flicker turns it straight back (gen drops
+// the old one).
 let worldGen = 0;
 async function setWorld(on){ if(on===WORLD) return; const gen = ++worldGen, root = document.documentElement, ctry = document.getElementById("ctry"),
-    flick = !matchMedia("(prefers-reduced-motion: reduce)").matches && !!document.getAnimations;
+    slot = document.getElementById("ctrySlot"), flick = !matchMedia("(prefers-reduced-motion: reduce)").matches && !!document.getAnimations;
   // Until the countries' flicker ends; never longer than 1.5 s.
   const settled = () => Promise.race([Promise.all(document.getAnimations().filter(a => a.effect && a.effect.target instanceof Element && a.effect.target.parentNode===ctry).map(a => a.finished.catch(() => {}))),
     new Promise(r => setTimeout(r, 1500))]);
+  // The row's slot opens to the row's height, and its 10px above with it, so the spot picker and the forecast ease down instead of jumping
+  // (Bryan, Oct 21); or it closes from there, and stays shut until the row is hidden. A slide still going carries on from where it is.
+  const slide = open => { const at = slot.getAnimations().length ? {height: slot.offsetHeight+"px", marginTop: getComputedStyle(slot).marginTop} : null;
+    slot.getAnimations().forEach(a => a.cancel()); const full = {height: slot.offsetHeight+"px", marginTop: "10px"}, shut = {height: "0px", marginTop: "0px"};
+    return slot.animate(open ? [at || shut, full] : [at || full, shut], {duration: 300, easing: "cubic-bezier(.22,1,.36,1)", fill: open ? "none" : "forwards"}).finished.catch(() => {}); };
   const showing = root.classList.contains("world"); root.classList.remove("igniting", "dousing");
   // Each country catches, and goes out, at its own moment.
   [...ctry.children].forEach((b, i) => { b.style.setProperty("--d", ((i*37)%11/11*.22).toFixed(3)+"s"); b.style.setProperty("--d2", ((i*53)%7/7*.06).toFixed(3)+"s"); });
-  if(on){ keepWorld(true); if(!flick){ WS.world(); return; }
-    void ctry.offsetWidth; root.classList.add("igniting"); WS.world();
+  // The row comes back at its start (Taiwan's end), so Taiwan is in sight: a hidden row keeps where it was scrolled to.
+  if(on){ keepWorld(true); if(!showing) ctry.scrollLeft = 0; if(!flick){ WS.world(); return; }
+    void ctry.offsetWidth; root.classList.add("igniting"); WS.world(); if(!showing || slot.getAnimations().length) slide(true);
     await settled(); if(gen===worldGen) root.classList.remove("igniting"); return; }
   keepWorld(false);
-  if(flick && showing){ void ctry.offsetWidth; root.classList.add("world", "dousing"); await settled(); if(gen!==worldGen) return; }
-  // Back to Taiwan, and the row back to its start (Taiwan's end), so Taiwan is in sight when World mode comes on again.
-  if(spotCountry(CUR)!=="tw") switchCountry("tw"); ctry.scrollLeft = 0;
-  root.classList.remove("world", "dousing"); WS.world(); }
+  if(flick && showing){ void ctry.offsetWidth; root.classList.add("world", "dousing"); await settled(); if(gen!==worldGen) return;
+    await slide(false); if(gen!==worldGen) return; }
+  // Back to Taiwan.
+  if(spotCountry(CUR)!=="tw") switchCountry("tw");
+  root.classList.remove("world", "dousing"); slot.getAnimations().forEach(a => a.cancel()); WS.world(); }
 // Sliding highlight (Bryan, Oct 18): one bubble under a group's picked button that glides (place and size) to the next pick. sel finds the pick;
 // the bubble follows picks, redraws of the group (it goes back in from where it was, so it still glides), language and font changes.
 function glider(box, sel){ if(!box) return; let ro = null;
@@ -1757,17 +1783,15 @@ hours.forEach(x => { x.w = windAt(x.t); const b = x.t<=nowMs ? bObs.get(x.t) : n
 const hourByT = new Map(hours.map(x=>[x.t,x]));
 const isDay = (t,key) => { const s=DATA.sun[key]; if(!s) return true; const hm=hhmm(t); return hm>=s.first && hm<=s.last; };
 
-// ---- freshness
+// ---- freshness: "Updated 18:44"; from an hour old it adds the age, and past 12 hours the day too, in amber (stale).
 const updated = Date.parse(DATA.updated);
-(() => { const el=document.getElementById("fresh"); const ageH=(nowMs-updated)/36e5;
-  const when = isZh() ? (ageH<1 ? "不到一小時前" : ageH<48 ? Math.round(ageH)+" 小時前" : Math.round(ageH/24)+" 天前")
-    : isJa() ? (ageH<1 ? "1時間以内" : ageH<48 ? Math.round(ageH)+" 時間前" : Math.round(ageH/24)+" 日前")
-    : ageH<1 ? "less than an hour ago" : ageH<48 ? Math.round(ageH)+" h ago" : Math.round(ageH/24)+" days ago";
-  el.textContent = isZh() ? "資料更新於 "+dayName(dayKey(updated),todayKey)+" "+hhmm(updated)+" · "+when
-    : isJa() ? "データ "+dayName(dayKey(updated),todayKey)+" "+hhmm(updated)+" · "+when
-    : "Data from "+dayName(dayKey(updated),todayKey).replace(/^(Today|Tomorrow)$/,m=>m.toLowerCase())+" "+hhmm(updated)+" · "+when;
-  el.classList.remove("stale");
-  if(ageH>12) el.classList.add("stale"); })();
+(() => { const el=document.getElementById("fresh"); const ageH=(nowMs-updated)/36e5, stale=ageH>12;
+  const when = ageH<1 ? "" : " · "+(isZh() ? (ageH<48 ? Math.round(ageH)+" 小時前" : Math.round(ageH/24)+" 天前")
+    : isJa() ? (ageH<48 ? Math.round(ageH)+" 時間前" : Math.round(ageH/24)+" 日前")
+    : ageH<48 ? Math.round(ageH)+" h ago" : Math.round(ageH/24)+" days ago");
+  const at = (stale ? dayName(dayKey(updated),todayKey).replace(/^(Today|Tomorrow|Yesterday)$/,m=>m.toLowerCase())+" " : "")+hhmm(updated);
+  el.textContent = isZh() ? "更新於 "+at+when : isJa() ? at+" 更新"+when : "Updated "+at+when;
+  el.classList.toggle("stale", stale); })();
 
 // A surfboard standing in a w x h box, nose at the top. Shape numbers are in board widths (x, -.5 to .5) and lengths (y, 0 nose to 1 tail):
 // nose 0 pointed .. 1 round; wide = where the widest point sits; full = how soon the nose fills out; hold = how long the rails stay parallel
@@ -2178,7 +2202,12 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
 drawDays(); drawDay();
 }
 applyLang();
-{ const later = afterGlide(), bs = document.querySelectorAll("#lang button"); bs.forEach(b=>b.onclick=()=>{ pressOnly(bs, b); later(()=>setLang(b.dataset.l)); }); }
+{ const later = afterGlide(), bs = document.querySelectorAll("#lang button"); bs.forEach(b=>b.onclick=()=>{ pressOnly(bs, b); later(()=>setLang(b.dataset.l));
+    setTimeout(() => langOpen(false), 200); }); // shuts once the bubble has moved to the new pick
+  const w = document.getElementById("langWrap"), btn = document.getElementById("langBtn");
+  btn.onclick = () => langOpen(!w.classList.contains("open"));
+  document.addEventListener("pointerdown", e => { if(w.classList.contains("open") && !w.contains(e.target)) langOpen(false); });
+  document.addEventListener("keydown", e => { if(e.key==="Escape" && w.classList.contains("open")){ langOpen(false); btn.focus(); } }); }
 document.querySelector("header .brand .w").addEventListener("click", () => setWorld(!WORLD));
 { const later = afterGlide(), bs = document.querySelectorAll("#ctry button"); bs.forEach(b=>b.onclick=()=>{ pressOnly(bs, b); const g = worldGen; later(()=>{ if(g===worldGen) switchCountry(b.dataset.c); }); }); }
 for(const [box, sel] of [["#lang", 'button[aria-pressed="true"]'], ["#ctry", 'button[aria-pressed="true"]'], [".tabs", 'button[aria-selected="true"]'], ["#picker", "a[aria-current]"],

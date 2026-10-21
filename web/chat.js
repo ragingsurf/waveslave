@@ -848,7 +848,7 @@ function openMain() {
   if (isAdmin()) sock.send({ type: "hidden_list" });
 }
 // The page's own language buttons do the switch, and the menu offers only the languages the page shows a button for: 日本語 is switched
-// off on the site for now (Bryan, Oct 21, #92), its button hidden, so it is never picked here. Its strings stay, as the page's do.
+// off on the site for now, in #92 (Bryan, Oct 21), its button hidden, so it is never picked here. Its strings stay, as the page's do.
 function langButton(l) { const b = document.querySelector(`#lang button[data-l="${l}"]`); return b && !b.hidden && !b.closest("[hidden]") ? b : null; }
 function pickLang(l) { const b = langButton(l); if (b) b.click(); }
 

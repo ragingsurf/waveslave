@@ -264,11 +264,14 @@ function blockedReading(text, list) {
 // ways, as nothing and as a space, and the message is blocked if either reading is. If both are, the rule
 // that comes first in RULE_ORDER is reported, so "hello<tab>t.me/x" is Telegram (the space reading), not a
 // link (the glued reading, "hellot.me/x").
+// A break right after a full stop is read only as a space: it ends a sentence, and glued it would turn
+// "Nice session.<newline>TW forecast" into the link "session.tw". A link split there ("example.<newline>com")
+// shows as "example. com", which passes when typed on one line too.
 export function blocked(check, list) {
   const text = String(check ?? "");
   if (!text) return null;
   if (!text.includes("\n")) return blockedReading(text, list);
-  const glued = blockedReading(text.replace(/\n+/g, ""), list);
+  const glued = blockedReading(text.replace(/\.\n+/g, ". ").replace(/\n+/g, ""), list);
   const spaced = blockedReading(text.replace(/\n+/g, " "), list);
   if (!glued || !spaced) return glued ?? spaced;
   return RULE_ORDER.indexOf(spaced.rule) < RULE_ORDER.indexOf(glued.rule) ? spaced : glued;

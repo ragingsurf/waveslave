@@ -436,6 +436,25 @@ test("blocked: a tab or line break is still the edge of a word", () => {
   assert.equal(rule("hello\nline.me/ti/x"), "line");
 });
 
+test("blocked: a line that ends in a full stop is not glued to the next one", () => {
+  // Read as nothing, the break would make "session.tw", "session.net", "9.com", "clean.io" and "line.me".
+  assert.equal(rule("Nice session.\nTW forecast"), null);
+  assert.equal(rule("Fun session.\nNet is slow"), null);
+  assert.equal(rule("good tide at 9.\nCom on down"), null);
+  assert.equal(rule("Waves are clean.\nIo is crowded"), null);
+  assert.equal(rule("What a line.\nMe and Kai got it"), null);
+  assert.equal(rule("Clean today.\r\n\r\nTV said so"), null);
+  assert.equal(rule("Good waves.\tNet is up"), null);
+  // A break anywhere else is still read both ways, and a link split after its dot is as much a link as
+  // "example. com" typed on one line, which passes too.
+  assert.equal(rule("example.\ncom/abc"), null);
+  assert.equal(rule("exam\nple.com"), "link");
+  assert.equal(rule("example.c\nom"), "link");
+  assert.equal(rule("example\n.com"), "link");
+  assert.equal(rule("lin\ne.me/ti/g/x"), "line");
+  assert.equal(rule("0912.\n345.\n678"), "phone");
+});
+
 test("blocked: ordinary text with tabs and line breaks passes", () => {
   assert.equal(rule("Clean peaks\nGood tide\r\n\tFew people"), null);
   assert.equal(rule("Chest high\nat 7:30,\n1.2 m @ 9 s"), null);

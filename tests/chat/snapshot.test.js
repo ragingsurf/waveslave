@@ -65,7 +65,8 @@ async function cardAgrees(open, time, when, bad) {
     if (!s) { bad.push(`${when}, ${id}: no snapshot`); continue; }
     wellFormed(s, `${when}, ${id}`);
     say("height", got.h, s.bhs == null ? "–" : `${r1(s.bhs)}m`);
-    const per = /^([\d.]+) s period/.exec(got.sub), from = /waves from the (\w+)/.exec(got.sub), read = /read at (\d\d:\d\d)$/.exec(got.sub);
+    // The buoy line under the height reads "8.8 s · ENE ↑ · 19:00" since #93 (a narrow no-break space before the s).
+    const per = /^([\d.]+)\u202Fs/.exec(got.sub), from = / · ([A-Z]{1,3}) ↑/.exec(got.sub), read = / · (\d\d:\d\d)$/.exec(got.sub);
     say("period", per ? per[1] : null, s.btp == null ? null : r1(s.btp));
     say("wave direction", from ? from[1] : null, s.bdp == null ? null : compass(s.bdp));
     say("buoy time", read ? read[1] : null, s.bhs_t ? s.bhs_t.slice(11, 16) : null);

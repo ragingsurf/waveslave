@@ -1807,23 +1807,24 @@ export class Room extends DurableObject {
     return oldest === null ? Infinity : oldest + LOGIN_TTL + LOGIN_GRACE;
   }
 
-  // The one alarm. Retention runs once it's past next_retention, then the keepalive tick goes out while sockets
-  // are open, or, while the chat rests, the sockets are closed instead (rest()). Whatever happened before, the alarm
-  // is counted as a request, the usage counts are saved and the next alarm is set: the next retention or tick, or
-  // sooner when a handoff still waiting runs out before them.
+  // The one alarm. Expired sign-ins go first, then retention runs once it's past next_retention, then the keepalive
+  // tick goes out while sockets are open, or, while the chat rests, the sockets are closed instead (rest()). Whatever
+  // happened before, the alarm is counted as a request, the usage counts are saved and the next alarm is set: the
+  // next retention or tick, or sooner when a handoff still waiting runs out before them.
   async alarm() {
     const now = this.now();
     let handoffsDue = Infinity;
     try {
+      // Expired sign-ins go on every alarm, not only at 19:00, and before anything that might fail: a handoff holds
+      // a raw LINE ID. The handoffs still waiting are read here too, so a retention run that fails can't leave one
+      // waiting for tomorrow's run.
+      this.dropExpiredLogins(now);
+      handoffsDue = this.handoffsDue();
       if (now >= this.nextRetention()) {
         // The next run is set first, so a run that fails waits until tomorrow instead of retrying in a loop.
         this.setNextRetention(now);
         this.retention(now);
-      } else {
-        // Expired sign-ins go on every alarm, not only at 19:00: a handoff holds a raw LINE ID.
-        this.dropExpiredLogins(now);
       }
-      handoffsDue = this.handoffsDue();
       if (!this.rest()) this.tick();
     } finally {
       try {

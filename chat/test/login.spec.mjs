@@ -768,6 +768,28 @@ describe("a handoff's raw LINE sub lasts its 10 minutes and no longer", () => {
       expect(second).toBeLessThanOrEqual(T + 15 * MIN + 2000);
     });
   });
+
+  it("drops an expired handoff and comes back for the next one even when the 19:00 run fails", async () => {
+    // The first handoff's own alarm came late, at the daily run (alarms can), and that run fails.
+    const T19 = Date.UTC(2030, 5, 3, 19, 0);
+    const stub = env.ROOM.getByName(`login-${crypto.randomUUID()}`, { locationHint: "apac-ne" });
+    await runInDurableObject(stub, async (room, state) => {
+      room.now = () => T19 - 12 * MIN;
+      await handoff(room, await sha256b64u("old"));
+      room.now = () => T19 - 5 * MIN;
+      await handoff(room, await sha256b64u("new"));
+      room.retention = () => {
+        throw new Error("retention failed");
+      };
+      room.now = () => T19;
+      await expect(room.alarm()).rejects.toThrow("retention failed");
+      expect(rows(room, "SELECT h FROM handoffs")).toEqual([{ h: await sha256b64u("new") }]);
+      // Not tomorrow's run: just after the second handoff runs out.
+      const next = await state.storage.getAlarm();
+      expect(next).toBeGreaterThanOrEqual(T19 + 5 * MIN);
+      expect(next).toBeLessThanOrEqual(T19 + 5 * MIN + 2000);
+    });
+  });
 });
 
 // ---- When the room can't answer --------------------------------------------------------------------------------

@@ -427,18 +427,23 @@ const ON = {
     drawAll();
   },
   // The last 100 messages after hello, or a page of 50 older ones (before_id). After hello it is the truth from its oldest message on:
-  // a message held from before a drop that isn't in it was deleted or hidden meanwhile.
+  // a message held from before a drop that isn't in it was deleted or hidden meanwhile. Those held from before its oldest stay only when
+  // they meet it. More than 100 posted while the room was shut or the socket down leaves a gap between them that nothing would fill, so
+  // then they all go and scrolling up loads them again, a page at a time.
   history(f) {
     const list = (Array.isArray(f.messages) ? f.messages : []).map(clean).filter(m => m && (!m.hidden || isAdmin()));
     if (f.before_id == null) {
       const ids = new Set(list.map(m => m.id)), low = list.length ? Math.min(...ids) : Infinity, whole = list.length < PAGE_N;
+      const gap = !whole && Math.max(0, ...R.msgs.keys()) < low - 1;
+      if (gap) { R.msgs.clear(); R.gone.clear(); }
       const heldOlder = [...R.msgs.keys()].some(id => id < low);
       for (const id of [...R.msgs.keys()]) if ((whole || id >= low) && !ids.has(id)) { R.msgs.delete(id); R.gone.add(id); }
       R.start = whole || (R.start && heldOlder);
       for (const m of list) R.msgs.set(m.id, m);
+      if (R.replyTo && !R.msgs.has(R.replyTo)) { R.replyTo = null; drawReply(); } // the reply line shows what a reply would go to
       const first = R.fresh; R.fresh = false; sock.ready = true; sock.tries = 0; setState("live");
       if (isAdmin()) sock.send({ type: "hidden_list" });
-      settle(); render({ toEnd: first });
+      settle(); render({ toEnd: first || gap }); // the reading place went with the gap: the newest are where to be
     } else {
       R.older = false;
       for (const m of list) if (!R.msgs.has(m.id)) R.msgs.set(m.id, m);

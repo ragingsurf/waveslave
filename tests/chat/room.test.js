@@ -393,6 +393,69 @@ const CHECKS = {
     if (now.length !== 150 || asks.length !== 1 || asks[0].before_id !== first[0].id) throw new Error(`after the top: ${now.length} messages, asked ${JSON.stringify(asks)}`);
     if (!eq(now.slice(50).map(a => a.id), first.map(a => a.id)) || !(top > 0)) throw new Error(`the older page didn't go above the others (scrollTop ${top})`);
   },
+  // Review Focus 1 after a long time away: more than 100 messages posted while the room was shut, or while its socket was down, so the
+  // new history starts past everything held. The room shows just the new 100 (a reply into the gap quotes "an earlier message", not
+  // "Message deleted"), and scrolling up loads every older page down to the room's first message, each message once. It starts as a
+  // small room (all of it held, nothing older), which must page again. Fewer than 100 while away keeps what's held. The room here is a
+  // stand-in, since posting hundreds of messages through the real one would meet its rate limits.
+  async reopenAfterMany(open) {
+    const all = [], asks = [], REPLY = { 205: 70, 330: 240 }; let n = 0, cur = null;
+    const post = k => { for (let i = 0; i < k; i++) { const id = all.length + 1;
+      all.push({ id, ts: Date.now() - 3600e3 + id * 1e3, nick: "Kai", role: null, kind: "text", spot: null, body: { text: `M${id}` }, reply_to: REPLY[id] || null, likes: 0 }); } };
+    post(60);
+    const page = await open({ as: "p1", ws: route => { n++; cur = route;
+      route.onMessage(m => { const f = JSON.parse(m);
+        if (f.type === "hello") route.send(JSON.stringify({ type: "history", messages: all.slice(-100) }));
+        if (f.type === "older") { asks.push(f.before_id); route.send(JSON.stringify({ type: "history", before_id: f.before_id, messages: all.filter(x => x.id < f.before_id).slice(-50) })); } }); } });
+    const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
+    const ids = async () => (await articles(page)).map(a => a.id);
+    const quote = async id => (await articles(page)).find(a => a.id === id)?.quote;
+    const shows = async (a, b, what) => { const got = await ids();
+      if (!eq(got, range(a, b))) throw new Error(`${what}: the room shows ${got.length} messages (${got.slice(0, 3)} … ${got.slice(-3)}), want ${a}..${b} once each`); };
+    const live = (sockets, last) => page.waitForFunction(([s, last]) => document.querySelector(".chatroom .cr-status").hidden
+      && document.querySelector(".chatroom .cr-msgs article:last-child")?.dataset.id === String(last), [sockets, last], { timeout: 10e3 })
+      .then(() => { if (n !== sockets) throw new Error(`${n} sockets, want ${sockets}`); });
+    // Up to the top until the room has nothing older: the older button goes once a short page comes back.
+    const scrollUp = async () => { for (let i = 0; i < 12; i++) {
+      if (await page.evaluate(() => document.querySelector(".chatroom .cr-older").hidden)) return;
+      const had = (await ids()).length;
+      await page.evaluate(() => { document.querySelector(".chatroom .cr-list").scrollTop = 0; });
+      await page.waitForFunction(had => document.querySelectorAll(".chatroom .cr-msgs article").length !== had || document.querySelector(".chatroom .cr-older").hidden, had, { timeout: 5e3 })
+        .catch(() => { throw new Error(`scrolled to the top with ${had} messages and nothing loaded (asked ${asks})`); });
+      await wait(150);
+    } throw new Error("12 pages and the room still had older ones"); };
+
+    await openRoom(page); await shows(1, 60, "a small room");
+    if (!(await page.evaluate(() => document.querySelector(".chatroom .cr-older").hidden))) throw new Error("a room of 60 offers older messages");
+    // Shut, 150 posted, opened again: the new history is 111..210.
+    await page.keyboard.press("Escape"); post(150);
+    await page.click(".chatfab"); await live(2, 210);
+    await shows(111, 210, "opened again after 150 new");
+    if (await quote(205) !== "↳ an earlier message") throw new Error(`a reply into the gap quotes ${JSON.stringify(await quote(205))}`);
+    await scrollUp(); await shows(1, 210, "scrolled up after opening again");
+    if (!eq(asks, [111, 61, 11])) throw new Error(`asked for the pages before ${asks}, want 111, 61, 11`);
+    if (await quote(205) !== "↳ Kai M70") throw new Error(`once loaded, the reply quotes ${JSON.stringify(await quote(205))}`);
+    // The socket drops, 150 more are posted before it's back: the new history is 261..360. A reply begun before the drop goes with the
+    // gap (its line would show nothing), and one begun before a short drop stays. Reading far up when it dropped, the place read went
+    // with the gap: the room comes back at its newest.
+    const replyTo = async id => { await page.click(`.chatroom article[data-id="${id}"] .cm-more`); await page.click(".chatroom .cr-pop >> text=Reply"); };
+    const replying = () => page.evaluate(() => !document.querySelector(".chatroom .cr-reply").hidden);
+    await replyTo(200); if (!(await replying())) throw new Error("Reply didn't show the reply line");
+    await page.evaluate(() => document.querySelector('.chatroom article[data-id="30"]').scrollIntoView({ block: "center" })); await wait(200);
+    post(150); cur.close({ code: 1001, reason: "gone" }); await live(3, 360);
+    await shows(261, 360, "back after a drop and 150 new");
+    if (await replying()) throw new Error("the reply line still holds a reply to a message the gap took");
+    const end = await page.evaluate(() => { const l = document.querySelector(".chatroom .cr-list"); return l.scrollHeight - l.scrollTop - l.clientHeight; });
+    if (end > 2) throw new Error(`back after the gap the room sits ${Math.round(end)} px above its newest message`);
+    if (await quote(330) !== "↳ an earlier message") throw new Error(`after the drop a reply into the gap quotes ${JSON.stringify(await quote(330))}`);
+    asks.length = 0; await scrollUp(); await shows(1, 360, "scrolled up after the drop");
+    if (!eq(asks, [261, 211, 161, 111, 61, 11])) throw new Error(`after the drop asked for the pages before ${asks}`);
+    // A drop with 30 new: the history (291..390) meets what's held, which stays, and nothing older is asked for.
+    await replyTo(350); post(30); asks.length = 0; cur.close({ code: 1001, reason: "gone" }); await live(4, 390);
+    await shows(1, 390, "back after a drop and 30 new");
+    if (!(await replying())) throw new Error("a short drop lost the reply begun before it");
+    if (asks.length || await page.evaluate(() => !document.querySelector(".chatroom .cr-older").hidden)) throw new Error(`with everything held the room asked for ${asks} or offers older`);
+  },
   // Bryan's messages carry the fixed WaveSlave badge, and nobody else's does.
   async badge(open) {
     const page = await open({}); await openRoom(page);

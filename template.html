@@ -338,9 +338,6 @@ table.obs th{text-align:left;font-weight:600;color:var(--muted);font-size:11px;l
 table.obs td{padding:5px 8px;border-bottom:1px solid var(--line);font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
 table.obs tr:last-child td{border-bottom:0}
 table.obs td.hb{font-weight:600}
-table.mdl th:first-child,table.mdl td:first-child{position:sticky;left:0;background:var(--panel)}
-table.mdl td{text-align:center}table.mdl td:first-child{text-align:left;font-family:var(--body);font-weight:600}
-table.mdl tr.main td{color:var(--sea)}table.mdl tr.spr td{border-top:1px solid var(--muted)}
 /* Pull to refresh: an amber LED sign (like the readout) drops in from the top: PULL, LET GO, then LOADING. */
 /* The page itself doesn't bounce at the top (overscroll-behavior), so only the sign moves and Safari's own pull-to-refresh doesn't fight it. */
 html{overscroll-behavior-y:none}
@@ -510,11 +507,6 @@ html{overscroll-behavior-y:none}
       <span><i style="background:var(--ink);width:8px;height:8px;border-radius:50%"></i><span data-zh="浮標實測" data-ja="ブイ実測">Buoy measured</span></span>
     </div>
     <div class="tides" id="tides"></div>
-    <details class="mdlx">
-      <summary><span class="btn" data-zh="點此比較各家模式" data-ja="タップしてモデルを比較">Tap to check model chart</span><span class="best" id="mdlSum"></span></summary>
-      <div class="tbl-box"><table class="obs mdl" id="mdlTbl"></table></div>
-      <div class="where" style="font-size:12px;margin-top:6px" data-zh="同一浪點多種預報的浪高（公尺）。WaveSlave 採用法國氣象局（Météo-France）模式，其他模式僅供對照，不影響評分。" data-ja="同じポイントの複数の予報の波高（m）。WaveSlave はメテオフランスのモデルを使い、他は比較用で評価には影響しません。">Wave height (m) from several forecasts for the same spot. WaveSlave uses Météo-France; the others are a cross-check and don't change the ratings.</div>
-    </details>
     <details class="mdlx">
       <summary><span class="btn" data-zh="點此查看浮標紀錄" data-ja="タップしてブイの記録を見る">Tap to check buoy history</span><span class="best" id="pastSum"></span></summary>
       <div class="past-grid" style="margin-top:10px">
@@ -2067,31 +2059,6 @@ function drawDay(){
   hit.addEventListener("pointermove", show, {passive:true}); hit.addEventListener("pointerdown", show, {passive:true});
   // Start the readout on the current hour (or the best hour) so it never jumps from empty.
   const startT = nowMs>=t0 && nowMs<t1 ? t0+Math.floor((nowMs-t0)/36e5)*36e5 : d.top.t; shownT=startT; render(startT);
-  drawModels(d.key);
-}
-// ---- model check: the main forecast against ECMWF, GFS, DWD and CWA's own wave forecast, every 3 hours.
-const MSRC = [["WaveSlave", new Map(hours.filter(q=>q.t>=tp(DATA.hourly[0][0])).map(q=>[q.t,q.h]))]]
-  .concat(Object.entries(DATA.models||{}).map(([k,rows]) => [k, new Map(rows.map(r=>[tp(r[0]),r[1]]))]))
-  .concat(DATA.cwawave && DATA.cwawave.length ? [["CWA", new Map(DATA.cwawave.map(r=>[tp(r[0]),r[1]]))]] : [])
-  .concat(DATA.jmawave && DATA.jmawave.length ? [["JMA", new Map(DATA.jmawave.map(r=>[tp(r[0]),r[1]]))]] : []);
-function agree(t){ const v = MSRC.map(([,m])=>m.get(t)).filter(x=>x!=null); if(v.length<3) return null;
-  const lo=Math.min(...v), hi=Math.max(...v), mean=v.reduce((a,b)=>a+b,0)/v.length, sp=hi-lo;
-  return {sp, k: sp<=0.3||sp<=mean*0.2 ? 0 : sp<=0.6||sp<=mean*0.4 ? 1 : 2}; }
-const AGREE = [["Models agree","var(--good)"],["Some spread","var(--fair)"],["Models split","var(--bad)"]].map(([n,c]) => [T(n),c]);
-function drawModels(key){
-  // The day starts at the spot's local midnight, moved on to the next 3-hour model step (the models run on the Taipei 3-hour grid).
-  const t0 = (m => m + (3*36e5 - (m + 8*36e5)%(3*36e5))%(3*36e5))(lp(key+"T00:00")), ts = [0,3,6,9,12,15,18,21].map(h=>t0+h*36e5), tbl = document.getElementById("mdlTbl"), sum = document.getElementById("mdlSum");
-  if(MSRC.length<2){ tbl.innerHTML=""; sum.textContent=isZh()?"這次更新沒有其他模式資料":isJa()?"今回の更新では他のモデルはありません":"Other models not available in this update"; return; }
-  const ag = ts.map(agree), ok = ag.filter(Boolean);
-  if(!ok.length){ sum.textContent = isZh()?"這天的模式資料不足":isJa()?"この日はモデルが足りません":"Not enough models cover this day"; }
-  else { const sp = ok.map(a=>a.sp).sort((a,b)=>a-b)[Math.floor(ok.length/2)], k = Math.round(ok.reduce((a,b)=>a+b.k,0)/ok.length);
-    // Odd one out: the source furthest from the others on average.
-    let odd=null, oddD=0; for(const [n,m] of MSRC){ let dd=0, c=0; for(const t of ts){ const v=m.get(t); if(v==null) continue; const o=MSRC.filter(([n2])=>n2!==n).map(([,m2])=>m2.get(t)).filter(x=>x!=null); if(!o.length) continue; dd+=v-o.reduce((a,b)=>a+b,0)/o.length; c++; } if(c && Math.abs(dd/c)>Math.abs(oddD)){ odd=n; oddD=dd/c; } }
-    sum.innerHTML = `<b style="color:${AGREE[k][1]}">${AGREE[k][0]}</b> · ${isZh()?"差距":isJa()?"幅":"spread"} ${r1(sp)} m${k>0&&odd&&Math.abs(oddD)>=0.2?(isZh()?` · ${odd} ${oddD>0?"偏高":"偏低"}`:isJa()?` · ${odd} は${oddD>0?"高め":"低め"}`:` · ${odd} runs ${oddD>0?"higher":"lower"}`):""}`; }
-  const cell = v => v==null ? `<td style="color:var(--muted)">–</td>` : `<td>${r1(v)}</td>`;
-  tbl.innerHTML = `<thead><tr><th></th>${ts.map(t=>`<th style="text-align:center">${hhmm(t).slice(0,2)}</th>`).join("")}</tr></thead><tbody>`
-    + MSRC.map(([n,m],i)=>`<tr${i?"":' class="main"'}><td>${n}</td>${ts.map(t=>cell(m.get(t))).join("")}</tr>`).join("")
-    + `<tr class="spr"><td>${isZh()?"一致？":isJa()?"一致？":"Agree?"}</td>${ag.map(a=>a?`<td><span style="color:${AGREE[a.k][1]}" title="${AGREE[a.k][0]}${isZh()?"，差距":isJa()?"、幅":", spread"} ${r1(a.sp)} m">${["●","◐","○"][a.k]}</span></td>`:`<td style="color:var(--muted)">–</td>`).join("")}</tr></tbody>`;
 }
 let rsz=0; window.onresize = (() => { clearTimeout(rsz); rsz=setTimeout(() => { const w=document.querySelector(".chart-box").clientWidth; if(w!==lastBoxW) drawDay(); WS.resize(); }, 150); });
 addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));

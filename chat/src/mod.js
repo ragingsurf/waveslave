@@ -160,20 +160,22 @@ const LINK = new RegExp(
   "|(?<![\\p{L}\\p{N}-])(?:" + LABEL + ")+[a-z]{2,24}\\/\\S",                     // name.anything/path
   "u");
 
-// Taiwan mobile numbers: 09xxxxxxxx, or +886 9xxxxxxxx (also 886, 00886, and a leftover 0 after 886).
-// Spaces, dashes, dots, "・" and slashes between digits are removed before this runs (phoneDigits), except
-// the point of a decimal such as a wave height: one digit, a dot and one or two digits, standing alone
-// (not part of a chain of dots like "0.9.1.2"). Without that, "swell 0.9 1.1 1.3 1.6 2.0" would read
-// "0911131620". A phone number written as a list of decimals ("0.9 1.2 3.4 5.6 7.8") looks the same as a
-// list of heights, so it passes too: this chat talks about wave heights far more than anyone would spell a
-// number that way.
-const BETWEEN_DIGITS = /(?<=\d)[\s\-.・/]+(?=\d)/gu;
+// Taiwan mobile numbers: 09xxxxxxxx, or +886 9xxxxxxxx (also 886, 00886, and a leftover 0 after 886), with any spaces,
+// dashes, dots, "・" or slashes between the digits (SEP). Its edges are read on the text as typed: the character just
+// before its first digit and the one just after its last must not be digits. So "0912 345 678 2 boards" is a phone
+// number followed by a 2, while "20260912345678" is one long number. The cost: a run of spaced numbers that starts with
+// 09 and has ten digits or more ("09 10 12 14 16 18") reads as a phone number with more after it, as a number hidden
+// that way would. A dot between digits counts as a separator, except the point of a decimal such as a wave height: one
+// digit, a dot and one or two digits, standing alone (not part of a chain of dots like "0.9.1.2"). Without that, "swell
+// 0.9 1.1 1.3 1.6 2.0" would read "0911131620". A phone number written as a list of decimals ("0.9 1.2 3.4 5.6 7.8")
+// looks the same as a list of heights, so it passes too: this chat talks about wave heights far more than anyone would
+// spell a number that way.
+const SEP = "[\\s\\-.・/]*";
 const DECIMAL = /(?<![\d.])\d\.\d{1,2}(?!\d|\.\d)/gu;
-const PHONE = /(?<!\d)(?:0|(?:\+|00)?8860?)9\d{8}(?!\d)/u;
+const PHONE = new RegExp(`(?<!\\d)(?:0|(?:\\+|0${SEP}0${SEP})?8${SEP}8${SEP}6(?:${SEP}0)?)${SEP}9(?:${SEP}\\d){8}(?!\\d)`, "u");
 
-// The text the phone check reads: each decimal point becomes a comma, which is not a separator, and then
-// the separators between digits go.
-const phoneDigits = (text) => text.replace(DECIMAL, (d) => d.replace(".", ",")).replace(BETWEEN_DIGITS, "");
+// The text the phone check reads: each decimal point becomes a comma, which is not a separator.
+const phoneText = (text) => text.replace(DECIMAL, (d) => d.replace(".", ","));
 
 // The lists in blocklist.json, turned into patterns once per list object. Entries go through
 // normalise() as well, so they can be written in any form (capitals, full-width, Chinese numerals).
@@ -247,7 +249,7 @@ function blockedReading(text, list) {
   if (hit(c.short, net)) return { rule: "short" };
   if (LINK.test(net)) return { rule: "link" };
 
-  if (PHONE.test(phoneDigits(text))) return { rule: "phone" };
+  if (PHONE.test(phoneText(text))) return { rule: "phone" };
 
   if (hit(c.scam, text)) return { rule: "scam" };
   if (hit(c.vape, text)) return { rule: "vape" };

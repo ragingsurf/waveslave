@@ -342,6 +342,22 @@ test("blocked: a dot after a single digit still joins a phone number when it isn
   assert.equal(rule("0912.345.678"), "phone");
 });
 
+test("blocked: a number written next to a phone number doesn't hide it", () => {
+  // The edges are read on the text as typed, so a number after a space or a dash is not part of the phone number.
+  assert.equal(rule("0912 345 678 2 boards"), "phone");
+  assert.equal(rule("0912 345 678 1.2m"), "phone");
+  assert.equal(rule("0912-345-678-9"), "phone");
+  assert.equal(rule("+886 912 345 678 3 people"), "phone");
+  assert.equal(rule("room 5 0912 345 678"), "phone");
+  assert.equal(rule("2026 0912345678"), "phone");
+  // A digit right next to it, with nothing between, still makes a longer number.
+  assert.equal(rule("20260912345678"), null);
+  assert.equal(rule("09123456789"), null);
+  assert.equal(rule("0912 345 6789"), null);
+  // The cost: ten spaced digits from 09 on, with more after them, read as a phone number too.
+  assert.equal(rule("09 10 12 14 16 18"), "phone");
+});
+
 test("blocked: investment-scam phrases", () => {
   assert.equal(rule("飆股"), "scam");
   assert.equal(rule("帶單"), "scam");

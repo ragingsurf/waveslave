@@ -21,7 +21,8 @@ const PAGE = typeof ALL === "object" && !!ALL && typeof LANG === "string" && typ
   && typeof countrySpots === "function" && typeof switchSpot === "function" && typeof setView === "function";
 if (!/^https?:\/\/./i.test(CHAT_URL) || !CONTACT || typeof CONTACT.name !== "string" || typeof CONTACT.email !== "string" || !CONTACT.name || !CONTACT.email || !PAGE) return;
 const BASE = CHAT_URL.replace(/\/+$/, "");
-// Tests only: window.__chatTest makes CHAT note each time the room is asked to open (CHAT._opened) and hand over the strings (CHAT._strings).
+// Tests only: window.__chatTest makes CHAT note each time the room is asked to open (CHAT._opened) and hand over the strings (CHAT._strings)
+// and the conditions snapshot (CHAT._snap(id, ms)).
 const TEST = window.__chatTest ? [] : null;
 
 // What chat.js keeps on this device: the session token and the sign-in's verifier, the newest message seen (for the button's dot) and the
@@ -86,7 +87,13 @@ const STR = {
     locked: "The room is locked. You can still read.", failed: "That didn't go through. Try again.",
     blocked: { link: "Links can't be posted here. Edit it and send again.", line: "LINE IDs and invites can't be posted here. Edit it and send again.",
       phone: "Phone numbers can't be posted here. Edit it and send again.", other: "That can't be posted here. Edit it and send again." },
-    pinShown: code => `Signed in with LINE. Go back to the WaveSlave app and enter this code: ${code}`, pinBox: "Enter the code from the LINE sign-in",
+    pinTitle: "Almost done", pinShown: "Signed in with LINE. Go back to the WaveSlave app and enter this code:", pinBox: "Enter the code from the LINE sign-in",
+    pinGo: "Sign in", pinWrong: "That code isn't right. Check it and try again.", signedIn: "Signed in with LINE", signInAgain: "Log in with LINE again first",
+    posted: "Report posted", stars: n => `${n} of 5 stars`, future: "The start can't be later than now.", tooLong: "A session can be up to 12 hours.",
+    saved: "Saved to your diary", savedShared: "Saved, and shared to the chat", notShared: why => `Saved to your diary, but it couldn't be shared: ${why}`,
+    full: "Your diary is full (1,000 sessions). Delete one in My sessions first.", loading: "Loading…", sharedTag: "Shared",
+    deleteWhat: "Your messages, shared sessions, session logs and nickname are deleted now, on every device. Your reports stay, as “a surfer”. This can't be undone.",
+    deleted: "Your account is deleted", signedOut: "Signed out on every device",
     // The privacy note (Taiwan's Personal Data Protection Act, Article 8): short at first sign-in, in full behind More.
     privacyHead: "Privacy note", contactHead: "Contact",
     privacyShort: "To post, the chat keeps your nickname, a one-way code made from your LINE ID and what you post. Cloudflare stores it outside Taiwan, and LINE (LY Corp) handles sign-in. Posts are public. The full privacy note is under More.",
@@ -145,7 +152,13 @@ const STR = {
     locked: "聊天室已鎖定，仍可閱讀。", failed: "沒有送出，請再試一次。",
     blocked: { link: "這裡不能貼連結，修改後再送出。", line: "這裡不能留 LINE ID 或邀請，修改後再送出。", phone: "這裡不能留電話號碼，修改後再送出。",
       other: "這段內容不能在這裡發表，修改後再送出。" },
-    pinShown: code => `已使用 LINE 登入。請回到 WaveSlave App，輸入這組代碼：${code}`, pinBox: "輸入 LINE 登入後顯示的代碼",
+    pinTitle: "差一步就完成", pinShown: "已使用 LINE 登入。請回到 WaveSlave App，輸入這組代碼：", pinBox: "輸入 LINE 登入後顯示的代碼",
+    pinGo: "登入", pinWrong: "代碼不正確，請確認後再試一次。", signedIn: "已用 LINE 登入", signInAgain: "請先重新用 LINE 登入",
+    posted: "已送出回報", stars: n => `${n} 顆星（滿分 5 顆）`, future: "開始時間不能晚於現在。", tooLong: "一次衝浪最長 12 小時。",
+    saved: "已存入你的日誌", savedShared: "已儲存，並分享到聊天室", notShared: why => `已存入你的日誌，但無法分享：${why}`,
+    full: "日誌已滿（1,000 筆），請先在「我的日誌」刪除一筆。", loading: "載入中…", sharedTag: "已分享",
+    deleteWhat: "你的訊息、分享的日誌、私人日誌和暱稱會立即從所有裝置上刪除。你的浪況回報會保留，顯示為「一位浪友」。刪除後無法復原。",
+    deleted: "你的帳號已刪除", signedOut: "已登出所有裝置",
     privacyHead: "隱私權說明", contactHead: "聯絡我們",
     privacyShort: "要發言，聊天室會保存你的暱稱、由 LINE ID 單向產生的代碼，以及你發表的內容。資料由 Cloudflare 存放在台灣以外的伺服器，登入由 LINE（LY Corp）處理。發言內容是公開的。完整的隱私權說明在「更多」裡。",
     privacy: c => [
@@ -203,7 +216,13 @@ const STR = {
     locked: "ルームはロック中です。閲覧はできます。", failed: "送信できませんでした。もう一度お試しください。",
     blocked: { link: "リンクは投稿できません。直してから送ってください。", line: "LINE IDや招待は投稿できません。直してから送ってください。",
       phone: "電話番号は投稿できません。直してから送ってください。", other: "この内容は投稿できません。直してから送ってください。" },
-    pinShown: code => `LINEでログインしました。WaveSlaveアプリに戻って、このコードを入力してください：${code}`, pinBox: "LINEログイン後に表示されたコードを入力",
+    pinTitle: "あと少しです", pinShown: "LINEでログインしました。WaveSlaveアプリに戻って、このコードを入力してください：", pinBox: "LINEログイン後に表示されたコードを入力",
+    pinGo: "ログイン", pinWrong: "コードが違います。確認してもう一度お試しください。", signedIn: "LINEでログインしました", signInAgain: "もう一度LINEでログインしてください",
+    posted: "波情報を投稿しました", stars: n => `星${n}つ（5段階）`, future: "開始時刻を今より後にはできません。", tooLong: "1回のセッションは最長12時間です。",
+    saved: "日記に保存しました", savedShared: "保存して、チャットに共有しました", notShared: why => `日記に保存しましたが、共有できませんでした：${why}`,
+    full: "日記がいっぱいです（1,000件）。先に「マイセッション」で1件削除してください。", loading: "読み込み中…", sharedTag: "共有中",
+    deleteWhat: "メッセージ、共有したセッション、セッション記録、ニックネームが、すべての端末から今すぐ削除されます。波情報は「サーファー」として残ります。元に戻すことはできません。",
+    deleted: "アカウントを削除しました", signedOut: "すべての端末でログアウトしました",
     privacyHead: "プライバシーについて", contactHead: "お問い合わせ",
     privacyShort: "投稿するには、ニックネーム、LINE IDから一方向に作ったコード、投稿内容をチャットに保存します。データはCloudflareが台湾国外に保存し、ログインはLINE（LY Corp）が扱います。投稿は公開されます。プライバシーについての全文は「詳しく」にあります。",
     privacy: c => [
@@ -223,8 +242,9 @@ function S(key, ...args) { const t = own(STR[LANG], key) ?? own(STR.en, key); re
 // A code's label in the page's language: L("cond", "ok") is "OK".
 const L = (group, code) => own(S(group), code);
 
-// Runs f and keeps any error inside the chat: the page carries on whatever happens here.
-const guard = f => (...a) => { try { return f(...a); } catch (e) { console.warn("chat:", e); } };
+// Runs f and keeps any error inside the chat: the page carries on whatever happens here. An async f's failure is caught too, so it never
+// reaches the page as an unhandled rejection.
+const guard = f => (...a) => { try { const r = f(...a); if (r && typeof r.then === "function") r.then(null, e => console.warn("chat:", e)); return r; } catch (e) { console.warn("chat:", e); } };
 // localStorage and sessionStorage can be missing or throw (a private window, blocked storage), so each read and write is wrapped.
 function load(key, session) { try { return (session ? sessionStorage : localStorage).getItem(key); } catch (e) { return null; } }
 function save(key, value, session) { try { const s = session ? sessionStorage : localStorage; if (value == null) s.removeItem(key); else s.setItem(key, String(value)); } catch (e) {} }
@@ -267,7 +287,7 @@ function ask(id) { const n = ++asked; askedAt = Date.now();
   api("/reports?spot=" + encodeURIComponent(id)).then(j => {
     if (n !== asked) return;
     if (!j || !Array.isArray(j.reports)) throw new Error("chat: no reports in the answer");
-    data = { spot: id, reports: j.reports.filter(isReport) }; online = count(j.online); lastId = count(j.last_id) || 0; draw();
+    data = { spot: id, reports: withLive(id, j.reports.filter(isReport)) }; online = count(j.online); lastId = count(j.last_id) || 0; draw();
   }).catch(guard(() => { if (n !== asked) return; data = null; online = null; lastId = 0; draw(); })); }
 
 // The report strip, the last child of the "Right now" card (#nowReports in template.html): up to 3 chips for the spot, each a dot
@@ -317,10 +337,10 @@ const KEEP_MSGS = 600;                                // messages kept in memory
 const FRAME_MAX = 4096;                               // bytes in a frame; the room closes a socket that sends a bigger one
 const LANGS = [["en", "English", "en"], ["zh", "中文", "zh-Hant-TW"], ["ja", "日本語", "ja"]];
 
-// What the sign-in and the report and log sheets add: login() starts LINE's sign-in, signin(s) finishes one back from LINE, sheet(name,
-// spot) opens the report or log form, menu lists the main menu's items for signed-in people ({label(), act()}), and ok and error take
-// the room's answers to their frames by the frame's type (an error handler returns false to leave it to the room's own words).
-const HOOK = { login: null, signin: null, sheet: null, menu: [], ok: {}, error: {} };
+// What the sign-in and the report and log sheets add (further down): login() starts LINE's sign-in, signin(s) finishes one back from
+// LINE, sheet(name, spot) opens the report or log form, msg(m, mine) sees each new message, and ok and error take the room's answers to
+// their frames by the frame's type (an error handler returns false to leave it to the room's own words).
+const HOOK = { login: null, signin: null, sheet: null, msg: null, ok: {}, error: {} };
 
 const R = {
   built: false, open: false, el: {},
@@ -329,6 +349,7 @@ const R = {
   nodes: new Map(),   // id -> its <article>, kept while it draws the same
   oldest: 0, start: false, older: false, // the oldest id held, whether the room has nothing older, and whether a page of older is on its way
   me: null,           // {nick, role} once the socket is signed in
+  pinErr: null,       // what the code box says about the last code tried (the home-screen app's sign-in)
   online: null, state: "idle", filter: "all", replyTo: null, pending: null, hidden: null, locked: null, fresh: false,
   sheet: null, pop: null, opener: null, noteT: 0, agesT: 0, longAt: 0,
 };
@@ -458,6 +479,7 @@ const ON = {
     R.msgs.set(m.id, m); R.gone.delete(m.id);
     const mine = isMine(m); if (mine && m.kind === "text") R.pending = null;
     settle(); render({ toEnd: mine }); markSeen();
+    if (HOOK.msg) HOOK.msg(m, mine);
   },
   // Likes changed, or a message went (deleted, or hidden for everyone but Bryan).
   update(f) {
@@ -517,7 +539,7 @@ const slowFor = code => { const m = /^slow:(\d+)$/.exec(code); return m ? Math.m
 function why(code) {
   if (code.startsWith("blocked:")) { const r = code.slice(8); return own(S("blocked"), r === "short" || r === "telegram" ? "link" : r) || S("blocked").other; }
   const s = slowFor(code); if (s) return S("slowDown", s);
-  return code === "locked" ? S("locked") : code === "banned" ? S("banned") : code === "update" ? S("reloadNew") : S("failed");
+  return code === "locked" ? S("locked") : code === "banned" ? S("banned") : code === "update" ? S("reloadNew") : code === "full" ? S("full") : S("failed");
 }
 function nickWhy(code) {
   if (code.startsWith("blocked:")) return S("nickErr").blocked;
@@ -554,14 +576,21 @@ function build() {
   E.reply = el("div", { class: "cr-reply" }, el("span", null, "↳ "), E.replyText, btn("cr-ic cr-unreply", null, "✕", () => { R.replyTo = null; drawReply(); E.input.focus(); }));
   E.note = el("p", { class: "cr-note", role: "status" });
   E.rep = btn("cr-pill cr-rep", null, "", () => HOOK.sheet && HOOK.sheet("report", R.filter !== "all" ? R.filter : isSpot(shown) ? shown : null));
-  E.log = btn("cr-pill", null, "", () => HOOK.sheet && HOOK.sheet("log", R.filter !== "all" ? R.filter : isSpot(shown) ? shown : null));
+  E.log = btn("cr-pill cr-diary", null, "", () => HOOK.sheet && HOOK.sheet("log", R.filter !== "all" ? R.filter : isSpot(shown) ? shown : null));
   E.input = el("input", { class: "cr-in", type: "text", maxlength: "500", dir: "auto", enterkeyhint: "send", autocomplete: "off" });
   E.send = btn("cr-pill cr-send", null, "", () => sendText());
   E.barIn = el("div", { class: "cr-bar" }, E.rep, E.log, E.input, E.send);
   E.lineWord = el("span", { class: "cr-line-w" });
   E.line = btn("cr-line", null, [lineIcon(), el("i", { class: "cr-line-sep", "aria-hidden": "true" }), E.lineWord], () => HOOK.login && HOOK.login());
   E.barOut = el("div", { class: "cr-bar" }, E.line);
-  E.foot = el("div", { class: "cr-foot" }, E.reply, E.note, E.barIn, E.barOut);
+  // The home-screen app's code box (spec "Login", step 5): while a sign-in it started waits, the pin LINE showed in the other browser.
+  E.pinLab = el("label", { class: "cr-lab", for: "chatPinIn" }); E.pinErr = el("p", { class: "cr-err", role: "alert" });
+  E.pinIn = el("input", { class: "cr-in cr-pin-in", id: "chatPinIn", type: "text", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "6", enterkeyhint: "go" });
+  E.pinGo = btn("cr-pill cr-send", null, "", () => pinEntered());
+  E.pinIn.addEventListener("keydown", guard(e => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); pinEntered(); } }));
+  E.pinIn.addEventListener("input", guard(() => { if (R.pinErr) { R.pinErr = null; drawBar(); } }));
+  E.pinBox = el("div", { class: "cr-pinbox" }, E.pinLab, el("div", { class: "cr-bar" }, E.pinIn, E.pinGo), E.pinErr);
+  E.foot = el("div", { class: "cr-foot" }, E.reply, E.note, E.barIn, E.pinBox, E.barOut);
   E.sheetTitle = el("h2", { id: "chatSheetTitle" }); E.sheetX = btn("cr-ic cr-x", null, "✕", () => closeSheet());
   E.sheetBody = el("div", { class: "cr-sheet-b" });
   E.sheet = el("div", { class: "cr-sheet", role: "dialog", "aria-modal": "true", "aria-labelledby": "chatSheetTitle", tabindex: "-1" }, el("div", { class: "cr-sheet-hd" }, E.sheetTitle, E.sheetX), E.sheetBody);
@@ -609,9 +638,12 @@ function drawStatus() { const s = R.el.status; s.textContent = "";
   else if (R.state === "resting") s.append(S("resting"));
   else if (R.state === "update") { const b = el("button", { type: "button", class: "cr-link" }, S("reloadNew")); b.addEventListener("click", guard(() => location.reload())); s.append(b); }
   s.hidden = !s.firstChild; }
-// Signed in: + Report, 📓 Log and the message box. Signed out: one LINE button in LINE's own style (its green, its icon, its words).
+// Signed in: + Report, 📓 Log and the message box. Signed out: one LINE button in LINE's own style (its green, its icon, its words), with
+// the code box above it while a sign-in started here waits.
 function drawBar() { const E = R.el, on = signedIn();
   E.barIn.hidden = !on; E.barOut.hidden = on; E.menuBtn.hidden = false;
+  E.pinBox.hidden = on || !pendingV(); E.pinLab.textContent = S("pinBox"); E.pinGo.textContent = S("pinGo"); E.pinIn.setAttribute("aria-label", S("pinBox"));
+  E.pinErr.textContent = R.pinErr || ""; E.pinErr.hidden = !R.pinErr;
   E.rep.textContent = S("report"); E.log.textContent = S("log"); E.send.textContent = S("send");
   E.input.setAttribute("placeholder", S("say")); E.input.setAttribute("aria-label", S("say")); E.lineWord.textContent = S("lineLogin"); drawSend(); }
 const drawSend = () => { if (R.built) R.el.send.hidden = !R.el.input.value.trim(); };
@@ -674,12 +706,14 @@ function reportCard(m) { const b = m.body, s = b.snap || {}, fc = [waves(s), win
     el("div", { class: "cm-big" }, [L("sizeHigh", b.size), L("cond", b.cond), L("crowdChip", b.crowd)].join(" · ")),
     fc || buoy ? el("div", { class: "cm-sub" }, S("forecastSaid", fc, buoy, at ? at.slice(11, 16) : null)) : null); }
 // "Session log · Wushi 烏石 · Today 07:00–08:30 / ★★☆☆☆ “Kept nosediving on takeoff” / Conditions then: 0.9 m @ 7 s, NE 9 kt · Mini-mal".
-function sessionCard(m) { const b = m.body, c = b.cond && typeof b.cond === "object" ? b.cond : null;
-  const cond = c && [[waves(c), wind(c)].filter(Boolean).join(", "), fin(c.tide) == null ? null : `${S("tide")} ${Math.round(c.tide * 100)} cm`, fin(c.bhs) == null ? null : `${S("buoy")} ${c.bhs.toFixed(1)} m`].filter(Boolean).join(" · ");
+function sessionCard(m) { const b = m.body, cond = condLine(b.cond);
   return el("div", { class: "cm-card" }, el("div", { class: "cm-cap" }, `${S("sessionLog")} · ${spotFull(m.spot)} · ${dayOf(b.start)} ${hm(b.start)}–${hm(b.end)}`),
     el("div", { class: "cm-big" }, el("span", { class: "cm-stars", role: "img", "aria-label": `${b.stars}/5` }, "★".repeat(b.stars) + "☆".repeat(5 - b.stars)),
       b.note ? [" ", el("span", { dir: "auto" }, `“${b.note}”`)] : null),
     el("div", { class: "cm-sub" }, `${cond ? `${S("conditionsThen")}: ${cond}` : S("noConditions")} · ${L("board", b.board)}`)); }
+// "0.9 m @ 7 s, NE 9 kt · tide 30 cm · buoy 0.8 m": a log's conditions, or null when none were recorded.
+function condLine(c) { if (!c || typeof c !== "object") return null;
+  return [[waves(c), wind(c)].filter(Boolean).join(", "), fin(c.tide) == null ? null : `${S("tide")} ${Math.round(c.tide * 100)} cm`, fin(c.bhs) == null ? null : `${S("buoy")} ${c.bhs.toFixed(1)} m`].filter(Boolean).join(" · ") || null; }
 const waves = s => fin(s.hs) == null ? null : `${s.hs.toFixed(1)} m` + (fin(s.tp) == null ? "" : ` @ ${Math.round(s.tp)} s`);
 const wind = s => fin(s.ws) == null ? null : (fin(s.wd) == null ? "" : compass(s.wd) + " ") + `${Math.round(s.ws)} kt`;
 // Every minute the ages move on, in place.
@@ -743,13 +777,15 @@ function openMsgMenu(id, anchor) {
 // Report: why, then it goes. The room says nothing back, so nobody learns whether a flag counted.
 function flagMenu(m) { const n = R.nodes.get(m.id);
   openPop(n && n.querySelector(".cm-more"), CODES.reason.map(r => ({ label: L("reasons", r), act: () => { if (write({ type: "flag", id: m.id, reason: r })) note(S("flagged")); } })), S("flag")); }
-// The main menu: the language (the page's own buttons do the switch), then for a signed-in person Change nickname and what the
-// sign-in adds (My sessions, Download my data, Sign out everywhere, Delete my account); Bryan also gets Lock, Unlock, Hidden messages
-// with how many wait for him, and Unban.
+// The main menu: the language (the page's own buttons do the switch), then for a signed-in person My sessions, Change nickname, Download
+// my data, Sign out everywhere (a second tap confirms) and Delete my account (a sheet says what goes first); Bryan also gets Lock,
+// Unlock, Hidden messages with how many wait for him, and Unban.
 function openMain() {
   const it = LANGS.map(([l, name, tag]) => ({ label: name, lang: tag, check: LANG === l, act: () => pickLang(l) }));
+  if (signedIn()) it.push({ label: S("mySessions"), act: () => openSheet("sessions", sessionsSheet) });
   if (signedIn() && R.me) it.push({ label: S("changeNick"), act: () => openSheet("nick", nickSheet) });
-  if (signedIn()) for (const h of HOOK.menu) it.push({ label: h.label(), act: h.act });
+  if (signedIn()) it.push({ label: S("download"), act: guard(download) }, { label: S("signOutAll"), danger: true, confirm: true, act: guard(signOutAll) },
+    { label: S("deleteAccount"), danger: true, act: () => openSheet("delete", deleteSheet) });
   if (isAdmin()) it.push({ label: S("lockRoom"), check: R.locked === true, act: () => write({ type: "lock" }) }, { label: S("unlockRoom"), check: R.locked === false, act: () => write({ type: "unlock" }) },
     { label: S("hiddenMsgs", R.hidden ? R.hidden.count : "…"), key: "hidden", act: () => openSheet("hidden", hiddenSheet) }, { label: S("unban"), act: () => openSheet("unban", unbanSheet) });
   openPop(R.el.menuBtn, it, S("menu"), true);
@@ -758,10 +794,14 @@ function openMain() {
 function pickLang(l) { const b = document.querySelector(`#lang button[data-l="${l}"]`); if (b) b.click(); else if (typeof setLang === "function") setLang(l); }
 
 // ---- Sheets over the room (mockups 3 to 5): a title in the LED face and a body built by build(state). A sheet keeps its state, so
-// relang() can build it again in the new language with what was typed or picked.
-function openSheet(name, buildIt) { closePop(); R.sheet = { name, build: buildIt, state: {}, back: document.activeElement }; drawSheet(); const f = R.el.sheet.querySelector("input, button:not(.cr-x)"); (f || R.el.sheet).focus(); }
+// relang() can build it again in the new language with what was typed or picked; state is what it starts with. Built again, the sheet
+// keeps the focus on the control that had it (each control that can be rebuilt has a data-k).
+function openSheet(name, buildIt, state) { closePop(); const back = R.sheet ? R.sheet.back : document.activeElement;
+  R.sheet = { name, build: buildIt, state: state || {}, back }; drawSheet(); const f = R.el.sheet.querySelector("input, button:not(.cr-x)"); (f || R.el.sheet).focus(); }
 function drawSheet() { const s = R.sheet, E = R.el; if (!R.built) return; E.shade.hidden = !s; if (!s) return;
-  const { title, body } = s.build(s.state); E.sheetTitle.textContent = title; E.sheetBody.replaceChildren(...[body].flat(Infinity).filter(Boolean)); E.sheetX.setAttribute("aria-label", S("close")); }
+  const a = document.activeElement, k = a && E.sheet.contains(a) ? a.getAttribute("data-k") : null;
+  const { title, body } = s.build(s.state); E.sheetTitle.textContent = title; E.sheetBody.replaceChildren(...[body].flat(Infinity).filter(Boolean)); E.sheetX.setAttribute("aria-label", S("close"));
+  const n = k && [...E.sheetBody.querySelectorAll("[data-k]")].find(x => x.getAttribute("data-k") === k); if (n) n.focus({ preventScroll: true }); }
 function closeSheet() { const s = R.sheet; if (!s) return; R.sheet = null; R.el.shade.hidden = true; R.el.sheetBody.replaceChildren();
   if (s.back && s.back.isConnected && s.back.getClientRects().length) s.back.focus(); else R.el.room.focus(); }
 // More: the house rules in full, the privacy note in full, and who to contact.
@@ -829,7 +869,7 @@ document.addEventListener("visibilitychange", guard(() => {
   if (!R.open) return;
   clearTimeout(sock.awayT);
   if (document.visibilityState === "hidden") sock.awayT = setTimeout(guard(() => { if (document.visibilityState === "hidden" && R.open) { stopSocket(); setState("away"); } }), AWAY_MS);
-  else { check(); markSeen(); }
+  else { check(); markSeen(); drawBar(); }
 }));
 addEventListener("offline", guard(() => { if (R.open && sock.ws) { stopSocket(); lost(1006); } }));
 addEventListener("online", guard(() => { if (R.open && R.state !== "update") { sock.tries = 0; connect(); } }));
@@ -840,6 +880,341 @@ function enter(o) {
   if (VIEW !== "fc") setView("fc", true);
   if (TEST) TEST.push({ ...o, view: VIEW, forecast: !document.getElementById("viewFc").hidden });
   openRoom(o);
+}
+
+// ---- Signing in with LINE (spec "Login (LINE, web flow)"). Before leaving for LINE the page makes a random 32-byte verifier v and keeps it
+// in localStorage with when it was made, keeps the spot it's on (sessionStorage), and opens /auth/line/start?h=<base64url SHA-256(v)>.
+// LINE sends the browser back to ?chat#c=<code>&p=<pin> (or #e=<what went wrong>), which start-up takes out of the address at once and
+// hands to finishSignin():
+//   - this page holds a v under 10 minutes old: POST /auth/redeem {v, code}. A known account gets its session token; a new person gets the
+//     sign-up sheet, the nickname prefilled from the LINE name, and POST /auth/signup once the tick is ticked.
+//   - no v, or the code was made for another one: the sign-in finished in a browser that didn't start it (the iPhone home-screen app hands
+//     it to Safari). This page shows only the pin, for the app that did start it, and signs nobody in.
+// The app that started it shows a code box while its v waits, and sends POST /auth/redeem {v, pin}. Three wrong pins or 10 minutes void
+// the sign-in. The LINE name only prefills the box; nothing here keeps it.
+const V_MS = 10 * 60e3, CONSENT = "v1"; // how long a sign-in waits; the version of the house rules and privacy note the tick agrees to
+const b64u = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+// This page's v while its sign-in can still finish, else null.
+function pendingV() {
+  try { const o = JSON.parse(load(KEYS.v) || "null"), age = o ? Date.now() - o.at : NaN;
+    return o && typeof o.v === "string" && /^[A-Za-z0-9_-]{43}$/.test(o.v) && age > -60e3 && age < V_MS ? o.v : null; } catch (e) { return null; }
+}
+async function login() {
+  const subtle = window.crypto && crypto.subtle; if (!subtle) return note(S("loginFailed"), true);
+  const v = b64u(crypto.getRandomValues(new Uint8Array(32))), h = b64u(new Uint8Array(await subtle.digest("SHA-256", new TextEncoder().encode(v))));
+  save(KEYS.v, JSON.stringify({ v, at: Date.now() })); save(KEYS.ret, CUR, true);
+  if (!pendingV()) return note(S("loginFailed"), true); // storage is refused here, so the sign-in could never finish
+  R.pinErr = null; drawBar();
+  location.assign(`${BASE}/auth/line/start?h=${h}`);
+}
+function finishSignin(s) {
+  if (!s || typeof s !== "object") return;
+  if (typeof s.error === "string") { save(KEYS.v, null); drawBar(); return note(s.error === "banned" ? S("banned") : s.error === "resting" ? S("resting") : S("loginFailed"), true); }
+  const v = pendingV(), code = typeof s.code === "string" && /^[A-Za-z0-9_-]{22}$/.test(s.code) ? s.code : null, pin = typeof s.pin === "string" && /^\d{6}$/.test(s.pin) ? s.pin : null;
+  if (v && code) return redeem(v, { code }, pin);
+  if (pin) return openSheet("pin", pinSheet, { pin });
+  note(S("loginFailed"), true);
+}
+// What to say when a sign-in step fails.
+function loginWhy(e) { const b = (e && e.body) || {};
+  return b.resting ? S("resting") : b.error === "banned" ? S("banned") : !(e && e.status) ? S("offline") : S("loginFailed"); }
+// Redeems a sign-in with this page's v and LINE's code, or the pin typed in the code box. Once it's answered, v is no longer kept: a new
+// person's sign-up carries it in the sheet, and a sheet shut without joining means starting again.
+async function redeem(v, proof, pin) {
+  try {
+    const j = await api("/auth/redeem", { method: "POST", body: { v, ...proof } });
+    if (j && typeof j.token === "string") return signedInAs(j.token);
+    if (!j || j.needs_signup !== true) throw new Error("chat: the redeem answer has no token");
+    save(KEYS.v, null); R.pinErr = null; drawBar();
+    openSheet("signup", signupSheet, { v, proof, nick: typeof j.line_name === "string" ? [...j.line_name.trim()].slice(0, 20).join("") : "" });
+  } catch (e) {
+    const code = e && e.body && e.body.error;
+    if (code === "v" && pin) return openSheet("pin", pinSheet, { pin }); // the code was made for another v: finished away from where it began
+    if (proof.pin && code === "pin") { R.pinErr = S("pinWrong"); return drawBar(); }
+    if (code === "expired" || code === "banned") save(KEYS.v, null);
+    if (proof.pin) { R.pinErr = loginWhy(e); return drawBar(); }
+    drawBar(); note(loginWhy(e), true);
+  }
+}
+// Signed in: the token is kept, and the socket starts again with it.
+function signedInAs(token) {
+  save(KEYS.token, token); save(KEYS.v, null); R.pinErr = null;
+  if (R.sheet && (R.sheet.name === "signup" || R.sheet.name === "pin")) closeSheet();
+  drawAll(); note(S("signedIn"));
+  if (R.open) { sock.tries = 0; connect(); }
+}
+// The code box: the pin, for this page's waiting sign-in.
+function pinEntered() { const v = pendingV(), pin = R.el.pinIn.value.replace(/\D/g, "");
+  if (!v) return drawBar();
+  if (!/^\d{6}$/.test(pin)) { R.pinErr = S("pinWrong"); return drawBar(); }
+  R.pinErr = null; drawBar(); redeem(v, { pin }, null); }
+// The page with no v: the pin, and nothing else.
+function pinSheet(st) { return { title: S("pinTitle"), body: [el("p", null, S("pinShown")), el("p", { class: "cr-pin-code" }, st.pin)] }; }
+// First sign-in (mockup 3): the short privacy notice (the full one opens in place), the nickname prefilled from the LINE name, and the one
+// tick; Join waits for it. What's public is said under the tick.
+function signupSheet(st) {
+  const nick = el("input", { class: "cr-in cr-field", id: "chatNickIn", type: "text", maxlength: "20", dir: "auto", autocomplete: "nickname", "data-k": "nick" });
+  const tick = el("input", { type: "checkbox", "data-k": "consent" }), join = el("button", { type: "button", class: "cr-pill cr-go", "data-k": "join" }, S("join"));
+  const can = () => !!st.tick && !!(st.nick || "").trim() && !st.sending;
+  nick.value = st.nick || ""; tick.checked = !!st.tick; join.disabled = !can();
+  nick.addEventListener("input", guard(() => { st.nick = nick.value; join.disabled = !can(); }));
+  nick.addEventListener("keydown", guard(e => { if (e.key === "Enter" && !e.isComposing && can()) signup(st); }));
+  tick.addEventListener("change", guard(() => { st.tick = tick.checked; join.disabled = !can(); }));
+  join.addEventListener("click", guard(() => signup(st)));
+  const more = el("button", { type: "button", class: "cr-link", "data-k": "more" }, S("more"));
+  more.addEventListener("click", guard(() => { st.more = true; drawSheet(); }));
+  return { title: S("welcome"), body: [el("p", null, S("privacyShort"), st.more ? null : [" ", more]), st.more ? el("div", { class: "cr-more" }, moreSheet().body) : null,
+    el("label", { class: "cr-lab cr-lab-top", for: "chatNickIn" }, S("nickname")), nick, st.err ? el("p", { class: "cr-err", role: "alert" }, st.err) : null,
+    el("label", { class: "cr-tick" }, tick, el("span", null, S("consent"))), el("p", { class: "cr-fine" }, S("publicNote")), el("div", { class: "cr-go-row" }, join)] };
+}
+async function signup(st) {
+  const nick = (st.nick || "").trim(); if (!st.tick || !nick || st.sending) return;
+  st.sending = true; st.err = null; drawSheet();
+  try {
+    const j = await api("/auth/signup", { method: "POST", body: { v: st.v, ...st.proof, nick, consent: CONSENT } });
+    if (!j || typeof j.token !== "string") throw new Error("chat: the signup answer has no token");
+    signedInAs(j.token);
+  } catch (e) {
+    st.sending = false; const b = (e && e.body) || {};
+    if (b.error === "expired" || b.error === "banned" || b.error === "v") { if (R.sheet && R.sheet.state === st) closeSheet(); return note(loginWhy(e), true); }
+    st.err = b.error === "nick" ? nickWhy(typeof b.code === "string" ? b.code : "") : loginWhy(e);
+    if (R.sheet && R.sheet.state === st) drawSheet();
+  }
+}
+
+// ---- The user's own calls (/me, with the session token). A token the backend no longer takes (signed out everywhere, deleted, banned)
+// signs out quietly, and the socket starts again as a reader's.
+async function me(path, opts = {}) {
+  const token = load(KEYS.token);
+  if (!token) throw Object.assign(new Error("chat: signed out"), { status: 401, body: { error: "auth" } });
+  try { return await api(path, { ...opts, token }); }
+  catch (e) { if (e && e.status === 401 && load(KEYS.token) === token) { signOutQuietly(); if (R.open) { sock.tries = 0; connect(); } } throw e; }
+}
+function meWhy(e) { const b = (e && e.body) || {};
+  return b.resting ? S("resting") : !(e && e.status) ? S("offline") : b.error === "auth" ? S("signInAgain") : typeof b.error === "string" ? why(b.error) : S("failed"); }
+// Signed out on purpose (everywhere, or the account deleted): the room says so, and its socket starts again without the token.
+function signedOut(text) { const had = signedIn(); signOutQuietly(); note(text); if (had && R.open) { sock.tries = 0; connect(); } }
+async function signOutAll() {
+  try { await me("/me/signout", { method: "POST" }); } catch (e) { return note(meWhy(e), true); }
+  signedOut(S("signedOut"));
+}
+// Download my data: what the room keeps about this account, as a JSON file.
+async function download() {
+  let j; try { j = await me("/me/export"); } catch (e) { return note(meWhy(e), true); }
+  const url = URL.createObjectURL(new Blob([JSON.stringify(j, null, 2)], { type: "application/json" })), a = el("a", { href: url, download: "waveslave-chat-data.json", hidden: "" });
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 60e3);
+  note(`${S("download")} · ${S("done")}`);
+}
+// Delete my account: a sheet that says what goes, and one button.
+function deleteSheet(st) {
+  const go = el("button", { type: "button", class: "cr-pill cr-go cr-danger", "data-k": "delete-account" }, S("deleteAccount")); go.disabled = !!st.sending;
+  go.addEventListener("click", guard(async () => {
+    if (st.sending) return; st.sending = true; st.err = null; drawSheet();
+    try { await me("/me", { method: "DELETE" }); }
+    catch (e) { st.sending = false; st.err = meWhy(e); if (R.sheet && R.sheet.state === st) drawSheet(); return; }
+    if (R.sheet && R.sheet.state === st) closeSheet();
+    signedOut(S("deleted"));
+  }));
+  return { title: S("deleteAccount"), body: [el("p", null, S("deleteWhat")), st.err ? el("p", { class: "cr-err", role: "alert" }, st.err) : null, el("div", { class: "cr-go-row" }, go)] };
+}
+
+// ---- The report and log sheets (mockups 4 and 5): rows of pills, one pick each. A tap on one picks it and builds the sheet again.
+//   pills(st, key, head, codes, label, o)   a row of pills under the label head; st[key] is the pick, and each pill's data-k is
+//                                           "<key>:<code>". o.aria(code) names a pill whose text doesn't say it all; with no head, the
+//                                           row goes under the label above it (o.under, that row's key).
+function pills(st, key, head, codes, label, o = {}) {
+  const id = "chatOpt-" + (head ? key : o.under);
+  return [head ? el("div", { class: "cr-lab cr-lab-top", id }, head) : null, el("div", { class: "cr-opts", role: "group", "aria-labelledby": id }, codes.map(c => {
+    const b = el("button", { type: "button", class: "cr-opt", "data-k": `${key}:${c}`, "aria-pressed": String(st[key] === c), "aria-label": o.aria ? o.aria(c) : null }, label(c));
+    b.addEventListener("click", guard(() => { st[key] = c; st.err = null; drawSheet(); })); return b; }))];
+}
+// + Report and the strip's "Post a report": the report form, preset to a spot. Signed out, the LINE button is asked for first.
+function sheet(name, spot) {
+  if (!signedIn()) return needSignIn();
+  const st = { spot: isSpot(spot) ? spot : isSpot(shown) ? shown : TW()[0] };
+  if (name === "report") openSheet("report", reportSheet, st); else if (name === "log") openSheet("log", logSheet, st);
+}
+// Post a report: spot, size, conditions and crowd, four taps with the spot preset. It goes on the socket with what the page shows for that
+// spot now (snapshot()); the sheet shuts when the room has it, and says why when the room refuses it.
+function reportSheet(st) {
+  const post = el("button", { type: "button", class: "cr-pill cr-go", "data-k": "post" }, S("post"));
+  post.disabled = !(st.size && st.cond && st.crowd) || !!st.sent; post.addEventListener("click", guard(() => postReport(st)));
+  return { title: S("postTitle"), body: [el("p", { class: "cr-lead" }, S("postSub")),
+    pills(st, "spot", S("spotHead"), TW(), spotName), pills(st, "size", S("sizeHead"), CODES.size, c => L("size", c)),
+    pills(st, "cond", S("condHead"), CODES.cond, c => L("cond", c)), pills(st, "crowd", S("crowdHead"), CODES.crowd, c => L("crowd", c)),
+    st.err ? el("p", { class: "cr-err", role: "alert" }, st.err) : null,
+    el("div", { class: "cr-go-row cr-go-split" }, el("span", null, S("showsOn", spotName(st.spot))), post)] };
+}
+function postReport(st) {
+  if (st.sent || !(st.size && st.cond && st.crowd)) return;
+  const snap = snapshot(st.spot, Date.now());
+  if (!sock.send({ type: "report", spot: st.spot, size: st.size, cond: st.cond, crowd: st.crowd, ...(snap ? { snap } : {}) })) { st.err = R.state === "resting" ? S("resting") : S("offline"); return drawSheet(); }
+  st.sent = true; st.err = null; clearTimeout(st.t);
+  // A socket that drops before the room answers leaves the sheet as it was, to send again.
+  st.t = setTimeout(guard(() => { if (R.sheet && R.sheet.state === st && st.sent) { st.sent = false; st.err = S("failed"); drawSheet(); } }), 10e3);
+  drawSheet();
+}
+// Log a session: the spot, the day on the Taipei clock (today, yesterday or the day before) with start and end, 1-5 stars, the board and a
+// note of up to 300 characters. The conditions are added from the page's data at the session's middle, and shown before saving. "Share to
+// chat for tips" starts off (Bryan, Oct 21).
+const dayStart = k => (Math.floor((Date.now() + TZ) / DAY) - k) * DAY - TZ; // 00:00 in Taipei, k days ago
+const md = ms => { const t = new Date(ms + TZ); return `${t.getUTCMonth() + 1}/${t.getUTCDate()}`; };
+const p2 = n => String(n).padStart(2, "0");
+// The session's start and end in ms from the sheet's day and times ("07:00"), on the Taipei clock; an end before the start is the next day.
+function logTimes(st) {
+  const m = v => { const x = /^(\d\d):(\d\d)(?::\d\d(?:\.\d+)?)?$/.exec(v || ""); return x && +x[1] < 24 && +x[2] < 60 ? (+x[1] * 60 + +x[2]) * 60e3 : null; };
+  const a = m(st.start), b = m(st.end); if (a == null || b == null) return null;
+  const start = dayStart(st.day) + a, end = dayStart(st.day) + b; return { start, end: end > start ? end : end + DAY };
+}
+function logSheet(st) {
+  if (st.day == null) { // to start: today, the 90 minutes up to the last half hour
+    const now = Math.floor(((Date.now() + TZ) % DAY) / 60e3), end = Math.floor(now / 30) * 30, start = Math.max(0, end - 90), at = n => `${p2(Math.floor(n / 60))}:${p2(n % 60)}`;
+    Object.assign(st, { day: 0, start: at(start), end: at(Math.max(end, start + 30)), note: "", share: false });
+  }
+  const time = k => { const i = el("input", { class: "cr-time", type: "time", "data-k": k, "aria-label": S(k) }); i.value = st[k];
+    i.addEventListener("input", guard(() => { st[k] = i.value; st.err = null; drawAuto(); })); return el("label", null, S(k), i); };
+  const auto = el("p", { class: "cr-auto", "aria-live": "polite" }), drawAuto = () => { const t = logTimes(st), c = t && condLine(snapshot(st.spot, (t.start + t.end) / 2));
+    auto.textContent = c ? `🌊 ${S("autoAdded")}: ${c}` : S("noConditions"); };
+  drawAuto();
+  const noteIn = el("input", { class: "cr-in cr-field", type: "text", maxlength: "300", dir: "auto", autocomplete: "off", "data-k": "note", placeholder: S("notePh"), "aria-label": S("note") });
+  noteIn.value = st.note; noteIn.addEventListener("input", guard(() => { st.note = noteIn.value; }));
+  const share = el("input", { type: "checkbox", role: "switch", "data-k": "share" }); share.checked = !!st.share;
+  share.addEventListener("change", guard(() => { st.share = share.checked; }));
+  const go = el("button", { type: "button", class: "cr-pill cr-go", "data-k": "save" }, S("save")); go.disabled = !st.stars || !st.board || !!st.sending;
+  go.addEventListener("click", guard(() => saveLog(st)));
+  return { title: S("logTitle"), body: [el("p", { class: "cr-lead" }, S("logSub")),
+    pills(st, "spot", S("spotWhen"), TW(), spotName), pills(st, "day", null, [0, 1, 2], d => `${S(["today", "yesterday", "dayBefore"][d])} · ${md(dayStart(d))}`, { under: "spot" }),
+    el("div", { class: "cr-times" }, time("start"), time("end")),
+    pills(st, "stars", S("howWent"), [1, 2, 3, 4, 5], n => "★".repeat(n), { aria: n => S("stars", n) }), pills(st, "board", S("boardHead"), CODES.board, c => L("board", c)),
+    el("div", { class: "cr-lab-top" }, noteIn), auto, st.err ? el("p", { class: "cr-err", role: "alert" }, st.err) : null,
+    el("div", { class: "cr-go-row cr-go-split" }, el("label", { class: "cr-switch" }, share, el("span", null, S("share"))), go)] };
+}
+async function saveLog(st) {
+  if (st.sending || !st.stars || !st.board) return;
+  const t = logTimes(st);
+  st.err = !t ? S("failed") : t.start > Date.now() ? S("future") : t.end - t.start > 12 * 3600e3 ? S("tooLong") : null;
+  if (st.err) return drawSheet();
+  const cond = snapshot(st.spot, (t.start + t.end) / 2);
+  const body = { spot: st.spot, start: t.start, end: t.end, stars: st.stars, board: st.board, note: (st.note || "").trim(), ...(cond ? { cond } : {}), share: !!st.share };
+  st.sending = true; drawSheet();
+  let j; try { j = await me("/me/sessions", { method: "POST", body }); }
+  catch (e) { st.sending = false; st.err = meWhy(e); if (R.sheet && R.sheet.state === st) drawSheet(); return; }
+  if (R.sheet && R.sheet.state === st) closeSheet();
+  // A share the room refused (a blocked note, the day's 5 shares, a locked room) still saves the log, private, to share later.
+  if (j && typeof j.error === "string") note(S("notShared", why(j.error)), true); else note(body.share ? S("savedShared") : S("saved"));
+}
+// My sessions: the logs, newest first, with their conditions. Each can be shared or unshared (on the socket) and deleted (a second tap
+// confirms).
+const isLog = l => !!l && Number.isSafeInteger(l.id) && isSpot(l.spot) && fin(l.start) != null && fin(l.end) != null && Number.isInteger(l.stars) && l.stars >= 1 && l.stars <= 5
+  && CODES.board.includes(l.board) && (l.note == null || typeof l.note === "string") && (l.cond == null || typeof l.cond === "object");
+function sessionsSheet(st) {
+  if (!st.asked) { st.asked = true;
+    me("/me/sessions").then(guard(j => { st.list = (Array.isArray(j) ? j : []).filter(isLog).map(l => ({ ...l, shared: l.shared === true })); }), guard(e => { st.err = meWhy(e); }))
+      .finally(guard(() => { if (R.sheet && R.sheet.state === st) drawSheet(); })); }
+  const rows = (st.list || []).map(l => {
+    const act = (k, label, f) => { const b = el("button", { type: "button", class: "cr-pill" + (k === "delete" ? " cr-del" : ""), "data-k": k }, label); b.disabled = !!l.busy; b.addEventListener("click", guard(f)); return b; };
+    const cond = condLine(l.cond), stars = el("span", { class: "cm-stars", role: "img", "aria-label": `${l.stars}/5` }, "★".repeat(l.stars) + "☆".repeat(5 - l.stars));
+    return el("div", { class: "cr-row cr-log", "data-id": String(l.id) },
+      el("p", { class: "cr-log-cap" }, `${spotFull(l.spot)} · ${dayOf(l.start)} ${hm(l.start)}–${hm(l.end)}`, l.shared ? el("span", { class: "cr-tag" }, S("sharedTag")) : null),
+      el("p", null, stars, l.note ? [" ", el("span", { dir: "auto" }, `“${l.note}”`)] : null),
+      el("p", { class: "cr-row-t" }, `${cond ? `${S("conditionsThen")}: ${cond}` : S("noConditions")} · ${L("board", l.board)}`),
+      l.err ? el("p", { class: "cr-err", role: "alert" }, l.err) : null,
+      el("div", { class: "cr-go-row" }, act(l.shared ? "unshare" : "share", S(l.shared ? "unshareLog" : "shareLog"), () => { if (write({ type: l.shared ? "unshare" : "share", session_id: l.id })) { l.busy = true; l.err = null; drawSheet(); } }),
+        act("delete", l.confirm ? `${S("del")} · ${S("tapAgain")}` : S("del"), () => l.confirm ? deleteLog(st, l) : (l.confirm = true, drawSheet()))));
+  });
+  return { title: S("mySessions"), body: rows.length ? rows : [st.err ? el("p", { class: "cr-err", role: "alert" }, st.err) : el("p", null, st.list ? S("noSessions") : S("loading"))] };
+}
+async function deleteLog(st, l) {
+  l.busy = true; l.err = null; drawSheet();
+  try { await me(`/me/sessions/${l.id}`, { method: "DELETE" }); st.list = st.list.filter(x => x !== l); }
+  catch (e) { l.busy = false; l.confirm = false; l.err = meWhy(e); }
+  if (R.sheet && R.sheet.state === st) drawSheet();
+}
+// The room's answer to share and unshare, for the log My sessions shows (the error frame doesn't say which log, so it's the one waiting).
+function logShared(id, shared) { const s = R.sheet, l = s && s.name === "sessions" && (s.state.list || []).find(x => x.id === id);
+  if (l) { l.shared = shared; l.busy = false; drawSheet(); } }
+function shareRefused(code) { const s = R.sheet, l = s && s.name === "sessions" && (s.state.list || []).find(x => x.busy);
+  if (!l || code === "auth") return false; l.busy = false; l.err = why(code); drawSheet(); return true; }
+// The room's answers to a report: the sheet shuts when the report comes back on the socket, or says why it was refused.
+function reportRefused(code) { const s = R.sheet;
+  if (!s || s.name !== "report" || !s.state.sent || code === "auth") return false;
+  clearTimeout(s.state.t); s.state.sent = false; s.state.err = why(code); drawSheet(); return true; }
+function newMessage(m, mine) {
+  if (m.kind !== "report") return;
+  liveReport(m);
+  const s = R.sheet; if (mine && s && s.name === "report" && s.state.sent && m.spot === s.state.spot) { clearTimeout(s.state.t); closeSheet(); note(S("posted")); }
+}
+// A report seen on the socket goes on its spot's strip at once. /reports may be answered from the browser's minute-long copy for a while
+// after, so ask() puts back any of these the answer doesn't have yet (withLive()).
+const live = [];
+const sameReport = (a, b) => a.ts === b.ts && a.size === b.size && a.cond === b.cond && a.crowd === b.crowd;
+function liveReport(m) {
+  const r = { spot: m.spot, ts: m.ts, size: m.body.size, cond: m.body.cond, crowd: m.body.crowd };
+  if (!live.some(x => x.spot === r.spot && sameReport(x, r))) live.push(r);
+  if (live.length > 50) live.shift();
+  if (data && data.spot === m.spot) { data.reports = withLive(m.spot, data.reports); draw(); }
+}
+function withLive(spot, reports) {
+  const since = Date.now() - 4 * 3600e3, add = live.filter(r => r.spot === spot && r.ts > since && !reports.some(x => sameReport(x, r))).map(({ ts, size, cond, crowd }) => ({ ts, size, cond, crowd }));
+  return add.length ? reports.concat(add).sort((a, b) => b.ts - a.ts) : reports;
+}
+Object.assign(HOOK, { login: guard(login), signin: guard(finishSignin), sheet: guard(sheet), msg: guard(newMessage),
+  ok: { share: f => logShared(f.session_id, true), unshare: f => logShared(f.session_id, false) }, error: { report: reportRefused, share: shareRefused, unshare: shareRefused } });
+
+// ---- The conditions snapshot (spec "Front end", Conditions snapshot): what the page's own data says for a spot at a moment, as raw
+// numbers, each with the Taipei clock time of the reading it came from ("<key>_t"), plus ALL.updated. A report takes now; a session log
+// the middle of the session.
+//   Waves     hs, tp, dp and the swell part shs, stp, sdp: the model's row for that hour, from hourly (today on) or hist.wave (the days
+//             before)
+//   Wind      ws, wd. Up to now: the station's latest reading (hist.station and dwind), or with none the model's row for that hour
+//             (hist.wx and wx). Later: the CWA forecast (wind), its nearest within 3 hours, as the page's windAt() takes it.
+//   Tide      tide: tides[day], interpolated at that minute as the page's tide reading is
+//   Buoy      bhs, btp, bdp: the latest on-the-hour reading (hist.buoy and buoy)
+// A measured reading (buoy or station) counts up to 3 hours before the moment, so "now" is the reading the Right now card shows on a page
+// fresh from the hourly refresh, while an hour long past or still to come has none. The conversions are those of boot()'s Right now
+// block: periods ×1.3, heights in metres and wind in knots as the data has them, and the tide in metres to the centimetre the card shows.
+// A value that's missing, or outside the range the backend takes (chat/src/mod.js SNAP_KEYS), is left out, never sent as null: the room
+// refuses a snapshot with either. null when nothing is known. Times are never written with toISOString(), whose milliseconds the room
+// refuses, and never on the device's clock.
+const HOUR = 3600e3, MEASURED = 3 * HOUR;
+const BUOY_P = 1.3; // template.html boot(): "const BUOY_P = 1.3", the period every buoy and forecast row is shown with
+const SNAP_RANGE = { hs: [0, 15], tp: [0, 30], dp: [0, 360], shs: [0, 15], stp: [0, 30], sdp: [0, 360], ws: [0, 120], wd: [0, 360], tide: [-5, 5], bhs: [0, 15], btp: [0, 30], bdp: [0, 360] };
+const SNAP_TIME = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?Z?$/; // mod.js ISO_TIME
+// template.html boot(): tp, "YYYY-MM-DDTHH:MM" on the Taipei clock (every time in the data) to ms.
+const tp = s => Date.UTC(+s.slice(0,4), +s.slice(5,7)-1, +s.slice(8,10), +s.slice(11,13)||0, +s.slice(14,16)||0) - 8*3600e3;
+const taipei = ms => { const d = new Date(ms + TZ); return `${d.getUTCFullYear()}-${p2(d.getUTCMonth() + 1)}-${p2(d.getUTCDate())}T${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`; };
+const rowsOf = (...lists) => lists.flatMap(l => Array.isArray(l) ? l.filter(r => Array.isArray(r) && typeof r[0] === "string" && SNAP_TIME.test(r[0])) : []);
+// template.html boot(): tideEv and tideAt(), the cosine between highs and lows, in cm. Tide times are on the spot's own clock (tz 8 here).
+function tideAt(s, t) {
+  const off = ((fin(s.tz) ?? 8) - 8) * HOUR, ev = Object.entries(s.tides && typeof s.tides === "object" ? s.tides : {})
+    .flatMap(([d, evs]) => Array.isArray(evs) ? evs.filter(e => Array.isArray(e) && typeof e[0] === "string" && fin(e[2]) != null).map(e => ({ t: tp(d + "T" + e[0]) - off, cm: e[2] })) : [])
+    .filter(e => fin(e.t) != null).sort((a, b) => a.t - b.t);
+  for (let i = 0; i < ev.length - 1; i++) { const a = ev[i], b = ev[i+1];
+    if (t >= a.t && t <= b.t) { const f = (t-a.t)/(b.t-a.t); return a.cm+(b.cm-a.cm)*(1-Math.cos(Math.PI*f))/2; } }
+  return null;
+}
+function snapshot(id, ms) {
+  const s = isSpot(id) ? own(ALL.spots, id) : null; if (!s || fin(ms) == null) return null;
+  const H = s.hist && typeof s.hist === "object" ? s.hist : {}, hour = Math.floor(ms / HOUR) * HOUR, out = {};
+  const put = (key, v, t) => { const r = SNAP_RANGE[key]; if (fin(v) != null && v >= r[0] && v <= r[1]) { out[key] = v; out[key + "_t"] = t; } };
+  const period = p => fin(p) == null ? null : p * BUOY_P;
+  const atHour = list => list.find(r => tp(r[0]) === hour);
+  const latest = (list, ok) => { let best = null, bt = -Infinity; for (const r of list) { const t = tp(r[0]); if (t <= ms && t > ms - MEASURED && t > bt && ok(r, t)) { best = r; bt = t; } } return best; };
+  const w = atHour(rowsOf(H.wave, s.hourly));
+  if (w) { put("hs", w[1], w[0]); put("tp", period(w[2]), w[0]); put("dp", w[3], w[0]); put("shs", w[4], w[0]); put("stp", period(w[5]), w[0]); put("sdp", w[6], w[0]); }
+  if (ms <= Date.now()) {
+    const st = latest(rowsOf(H.station, s.dwind), r => fin(r[1]) != null), m = st ? null : atHour(rowsOf(H.wx, s.wx).filter(r => fin(r[4]) != null));
+    if (st) { put("ws", st[1], st[0]); put("wd", st[2], st[0]); } else if (m) { put("ws", m[4], m[0]); put("wd", m[5], m[0]); }
+  } else {
+    let f = null, fd = Infinity; for (const r of rowsOf(s.wind)) { const d = Math.abs(tp(r[0]) - ms); if (fin(r[1]) != null && d < fd) { f = r; fd = d; } }
+    if (f && fd <= 3 * HOUR) { put("ws", f[1], f[0]); put("wd", f[2], f[0]); }
+  }
+  const cm = tideAt(s, ms); if (fin(cm) != null) put("tide", Math.round(cm) / 100, taipei(ms));
+  const b = latest(rowsOf(H.buoy, s.buoy), (r, t) => t % HOUR === 0 && fin(r[1]) != null); // template.html boot(): bObs, the on-the-hour rows with a height
+  if (b) { put("bhs", b[1], b[0]); put("btp", period(b[2]), b[0]); put("bdp", b[3], b[0]); }
+  if (!Object.keys(out).length) return null;
+  if (typeof ALL.updated === "string" && ALL.updated.length <= 24 && SNAP_TIME.test(ALL.updated)) out.updated = ALL.updated;
+  return out;
 }
 
 // ---- The look (mockups 1 and 2), in the page's own colours. The strip's "Post a report" and the button are amber LED pills, like the
@@ -961,6 +1336,32 @@ html:not([lang="en"]) .cr-sheet-hd h2{font:700 21px/1.25 var(--body);letter-spac
 .cr-row-1{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .cr-row-t{color:var(--muted)}
 .cr-row .cr-go-row{margin-top:6px}
+.cr-lead{color:var(--muted)}
+.cr-lab-top{margin-top:16px}
+.cr-opts{display:flex;flex-wrap:wrap;gap:8px}
+.cr-opts+.cr-opts{margin-top:8px}
+.cr-opt{padding:7px 15px;border-radius:99px;border:1.5px solid var(--line);background:none;color:var(--sea);font-size:14.5px;font-weight:600;line-height:1.3;cursor:pointer}
+.cr-opt[aria-pressed="true"]{border-color:var(--led-amb);color:var(--led-amb);box-shadow:0 0 8px rgba(255,140,0,.25)}
+.cr-times{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:10px}
+.cr-times label{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.cr-time{height:38px;padding:0 10px;border-radius:12px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:15px var(--body)}
+.cr-sheet-b .cr-auto{margin:12px 0 0;padding:10px 13px;border-radius:14px;background:var(--bg);font-size:13px;line-height:1.45;color:var(--muted)}
+.cr-go:disabled{opacity:.45;cursor:default}
+.cr-go-split{justify-content:space-between;align-items:center}
+.cr-go-split>span{min-width:0;font-size:13px;color:var(--muted)}
+.cr-switch{display:flex;align-items:center;gap:10px;min-width:0;font-size:14px}
+.cr-switch input,.cr-tick input{flex:none;width:20px;height:20px;margin:0;accent-color:#ffb347}
+.cr-tick{display:flex;gap:10px;align-items:flex-start;margin:14px 0 6px;font-size:13.5px;line-height:1.45}
+.cr-tick input{margin-top:1px}
+.cr-sheet-b .cr-fine{font-size:12.5px;color:var(--muted)}
+.cr-more{margin:4px 0 8px;padding:2px 13px 8px;border-radius:14px;background:var(--bg)}
+.cr-danger{background:var(--bad);color:#fff}
+.cr-del{color:var(--bad)}
+.cr-tag{margin-left:8px;padding:1px 8px;border-radius:99px;border:1px solid var(--led-amb);color:var(--led-amb);font-size:11px;font-weight:700;white-space:nowrap}
+.cr-log-cap{font-weight:600}
+.cr-sheet-b .cr-pin-code{margin:18px 0 6px;font:400 56px/1 VT323,var(--mono);letter-spacing:.2em;text-align:center;color:var(--led-amb);text-shadow:0 0 calc(10px*var(--led-glow)) rgba(255,170,40,.65)}
+.cr-pinbox{margin:0 0 10px}
+.cr-pin-in{letter-spacing:.2em}
 `;
 
 // ---- The page's hooks (template.html). boot() calls spot() for each spot it shows, which is also on every language change and every
@@ -969,7 +1370,7 @@ window.CHAT = {
   spot: guard(id => { if (id === shown) return; shown = id; data = null; if (inTaiwan(id)) ask(id); else asked++; draw(); }),
   relang: guard(() => { draw(); drawAll(); }),
 };
-if (TEST) Object.assign(window.CHAT, { _opened: TEST, _strings: STR });
+if (TEST) Object.assign(window.CHAT, { _opened: TEST, _strings: STR, _snap: snapshot });
 
 // While a finger drags the day picker, the day card or the day chart, the button lets touches through, so a drag that runs under it
 // carries on.

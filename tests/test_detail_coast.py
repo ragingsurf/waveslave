@@ -1,5 +1,5 @@
-# tools/detail_coast.py cuts Natural Earth 10 m land to the map's DETAIL boxes (Hong Kong, Hainan, Papua New Guinea, Vanuatu) for the
-# map's COAST.
+# tools/detail_coast.py cuts Natural Earth 10 m land to the map's DETAIL boxes (Hong Kong, Hainan, Papua New Guinea, Vanuatu, the Cape
+# of Baja California) for the map's COAST.
 # Run: python3 -m unittest discover -s tests -v
 import contextlib, io, json, os, sys, tempfile, unittest
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
@@ -50,6 +50,25 @@ class Template(unittest.TestCase):
         self.assertEqual(rings[0], sq(114, 22.2, 0.1))
         self.assertEqual(sorted({x for x, y in rings[1]}), [113.4371, 114])
         self.assertEqual(len(rings), 2)
+
+    def test_a_box_past_180_cuts_west_longitudes(self):
+        # By the push the page's outlines run east (California's -120.3 is 239.7), so a box past 180° (the Cape of Baja California's) takes
+        # Natural Earth's land west of 180° moved on by 360°, and its rings come out on east longitudes as well.
+        tmp = tempfile.mkdtemp(); land, page = os.path.join(tmp, 'land.geojson'), os.path.join(tmp, 'page.html')
+        sq = lambda x, y, d: [[x, y], [x + d, y], [x + d, y + d], [x, y + d], [x, y]]
+        # A coast across the box's east edge at 110°W; an island at 110°E and land across 0° from 20°W to 170°E, both of which stay out (moved
+        # east by 360° where west of 0°, the second would stretch from 170°E to 340°E, over the box)
+        with open(land, 'w', encoding='utf-8') as f:
+            json.dump({'features': [{'geometry': {'type': 'Polygon', 'coordinates': [sq(-110.5, 23, 1)]}},
+                                    {'geometry': {'type': 'Polygon', 'coordinates': [sq(109.5, 23.2, 1)]}},
+                                    {'geometry': {'type': 'Polygon', 'coordinates': [[[-20, 10], [170, 10], [170, 40], [-20, 40], [-20, 10]]]}}]}, f)
+        with open(page, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(['  const DETAIL = [[248.9371, 250.0629, 22.7517, 24.2483]];', '  for (const [l, r, s, n] of MAPM.DETAIL) for (...) {', '    ... }']))
+        with contextlib.redirect_stdout(io.StringIO()): dc.main(land, page, 0.0005)
+        with open(page, encoding='utf-8') as f: rings = json.loads(f.read().split('\n')[4][len('  COAST.push(...'):-len(');')])
+        self.assertEqual(len(rings), 1)
+        self.assertEqual(sorted({x for x, y in rings[0]}), [249.5, 250.0629])
+        self.assertEqual(sorted({y for x, y in rings[0]}), [23, 24])
 
     def test_the_page_keeps_what_the_tool_reads(self):
         # template.html's own DETAIL boxes stay on one line the tool can parse, with one clip-out loop and the push in place after it.

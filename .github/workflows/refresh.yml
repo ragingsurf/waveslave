@@ -51,7 +51,7 @@ jobs:
           restore-keys: state-
       - name: Restore log days the cache lost
         run: |
-          for d in $(printf '%s\n' log log-jp log-ca log-hi log-au log-nw log-kr log-ph log-id log-nz log-pi log-ak log-mi log-hk log-hn log-vn log-pg log-vu $(ls -d log-*/ 2>/dev/null | tr -d /) | sort -u); do
+          for d in $(printf '%s\n' log log-jp log-ca log-hi log-au log-nw log-kr log-ph log-id log-nz log-pi log-ak log-mi log-hk log-hn log-vn log-pg log-vu log-bj $(ls -d log-*/ 2>/dev/null | tr -d /) | sort -u); do
             sh logstore.sh restore "$d" || echo "$d restore failed" >&2
           done
       - name: Build

@@ -557,9 +557,12 @@ const CHECKS = {
   async forecastFitsWidth(open) {
     const page = await open(home("tw")); await page.evaluate(() => setView("fc", true)); await settle(page);
     for (const l of ["en", "zh", "ja"]) {
-      // The languages are in the menu under the button in the corner, which shuts itself after each pick.
-      await page.waitForFunction(() => !document.getElementById("langWrap").classList.contains("open")); await page.click("#langBtn");
-      await page.click(`#lang button[data-l="${l}"]`); await settle(page);
+      // The languages are in the menu under the button in the corner, which shuts itself after each pick. 日本語 is hidden from it for now (#92),
+      // but its text is still there, so it's switched to directly.
+      if (await page.evaluate(l => document.querySelector(`#lang button[data-l="${l}"]`).hidden, l)) await page.evaluate(l => setLang(l), l);
+      else { await page.waitForFunction(() => !document.getElementById("langWrap").classList.contains("open")); await page.click("#langBtn");
+        await page.click(`#lang button[data-l="${l}"]`); }
+      await settle(page);
       const r = await page.evaluate(() => { const d = document.documentElement, w = document.querySelector(".wrap"), edge = w.getBoundingClientRect().right - parseFloat(getComputedStyle(w).paddingRight);
         return { sw: d.scrollWidth, cw: d.clientWidth, wide: [...w.children].map(e => [e.id || e.className || e.tagName, e.getBoundingClientRect().right]).filter(([, x]) => x > edge + 0.5).map(([e, x]) => `${e} ends at ${x}px, past the column's ${edge}px`) }; });
       if (r.wide.length) throw new Error(`in ${l}, ${r.wide.join("; ")}`);

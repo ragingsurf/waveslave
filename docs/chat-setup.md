@@ -53,7 +53,7 @@ screenshot or the repo. Claude never needs them.
    |---|---|
    | **Region to provide the service** | Taiwan |
    | **Company or owner's country or region** | Taiwan (where you live) |
-   | **Channel icon** | Optional. The site's `web/icon-512.png` works. |
+   | **Channel icon** | Optional. Open https://waveslave.tw/icon-512.png, save the picture to your computer, and upload it here. |
    | **Channel name** | `WaveSlave` (LINE doesn't allow the word "LINE" in it) |
    | **Channel description** | `Sign in to post in the WaveSlave surf chat.` |
    | **App types** | **Web app** only |

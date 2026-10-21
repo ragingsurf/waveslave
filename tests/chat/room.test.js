@@ -34,6 +34,7 @@ const USERS = {
   bryan: { nick: "Bryan", role: "admin" }, kai: { nick: "阿凱" }, mika: { nick: "Mika" }, leo: { nick: "Leo" }, fish: { nick: "小魚" },
   shalom: { nick: "שלום" }, evil: { nick: "<img src=x onerror=alert(2)>" },
   p1: { nick: "Poster1" }, p2: { nick: "Poster2" }, p3: { nick: "Poster3" }, p4: { nick: "Poster4" }, p5: { nick: "Poster5" },
+  p6: { nick: "Poster6" }, p7: { nick: "Poster7" },
 };
 const LONG = "W".repeat(500), EMOJI = "🏄🌊🤙🏄🌊🤙🏄🌊🤙🏄", RLO = "‮abc";
 const SPOTS = [null, "jinshan", "fulong", "wushi", null, "suao", "donghe"];
@@ -122,6 +123,21 @@ const dragDown = async (page, [x, y], dy) => { const s = await page.context().ne
   await s.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
   for (let i = 1; i <= 12; i++) { await s.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y + dy*i/12 }] }); await page.waitForTimeout(16); }
   return s; };
+// A stand-in room's text message "M<id>", posted id seconds after an hour ago.
+const standIn = (id, more = {}) => ({ id, ts: Date.now() - 3600e3 + id * 1e3, nick: "Kai", role: null, kind: "text", spot: null, body: { text: `M${id}` }, reply_to: null, likes: 0, ...more });
+// The room's note line says t, within 10 s.
+const notes = (page, t) => page.waitForFunction(t => document.querySelector(".chatroom .cr-note").textContent === t, t, { timeout: 10e3 })
+  .catch(async () => { throw new Error(`the note says ${JSON.stringify(await page.evaluate(() => document.querySelector(".chatroom .cr-note").textContent))}, want ${JSON.stringify(t)}`); });
+// Frames sent to the room as Bryan from a socket of the test's own, once each is answered (ok or error).
+function asBryan(...frames) {
+  return new Promise((ok, no) => { const ws = new WS(`${CHAT().replace("http", "ws")}/ws`, { origin: ORIGIN() }), t = setTimeout(() => { ws.terminate(); no(new Error("Bryan's socket got no answer")); }, 10e3);
+    let left = frames.length;
+    ws.on("open", () => ws.send(JSON.stringify({ type: "hello", v: 1, token: token("u-bryan") })));
+    ws.on("message", d => { const f = JSON.parse(String(d));
+      if (f.type === "me") for (const x of frames) ws.send(JSON.stringify(x));
+      if ((f.type === "ok" || f.type === "error") && --left === 0) { clearTimeout(t); ws.close(); ok(); } });
+    ws.on("error", e => { clearTimeout(t); no(e); }); });
+}
 
 const CHECKS = {
   // The CHAT button opens the room full screen, above the full-screen map's z-index, and sets html.chat-open. While it's open, a pull from
@@ -266,7 +282,8 @@ const CHECKS = {
     if (s.list[0] > s.list[1] || s.page > 390) throw new Error(`the room scrolls sideways (${s.list}, page ${s.page})`);
   },
   // Review Focus 5: with text typed in the box and the room scrolled up, switching to 中文 from the room's menu redraws the words and keeps
-  // the text and the place in the list. An open sheet stays open through a switch, in the new language.
+  // the text and the place in the list. An open sheet stays open through a switch, in the new language. The menu offers the languages
+  // the page shows a button for: English and 中文, since 日本語 is off on the site (#92).
   async language(open) {
     const page = await open({ as: "p5" }); await openRoom(page);
     const draft = "draft 草稿 🏄"; await page.fill(".chatroom .cr-in", draft);
@@ -275,7 +292,11 @@ const CHECKS = {
     const place = () => page.evaluate(() => { const l = document.querySelector(".chatroom .cr-list"), top = l.getBoundingClientRect().top + document.querySelector(".chatroom .cr-pin").offsetHeight;
       const a = [...l.querySelectorAll("article")].find(a => a.getBoundingClientRect().bottom > top); return { id: a.dataset.id, y: Math.round(a.getBoundingClientRect().top), top: l.scrollTop }; });
     const was = await place();
-    await page.click(".chatroom .cr-menu"); await page.click('.chatroom .cr-pop [lang="zh-Hant-TW"]');
+    await page.click(".chatroom .cr-menu");
+    const langs = await page.evaluate(() => ({ items: [...document.querySelectorAll(".chatroom .cr-pop [role=menuitemradio]")].map(b => b.textContent), ja: document.querySelector('#lang button[data-l="ja"]')?.hidden }));
+    if (langs.ja !== true) throw new Error("the page shows its 日本語 button (the check itself is off)");
+    if (!eq(langs.items, ["English", "中文"])) throw new Error(`the menu offers ${JSON.stringify(langs.items)}, want English and 中文 as the page does`);
+    await page.click('.chatroom .cr-pop [lang="zh-Hant-TW"]');
     await page.waitForFunction(() => document.querySelector('.chatroom .cr-filters [data-f="all"]').textContent === "全部");
     const now = await place(), s = await page.evaluate(() => ({ value: document.querySelector(".chatroom .cr-in").value, ph: document.querySelector(".chatroom .cr-in").placeholder,
       sub: document.querySelector(".chatroom .cr-sub").textContent, pin: document.querySelector(".chatroom .cr-pin").textContent, open: document.documentElement.classList.contains("chat-open"),
@@ -460,6 +481,117 @@ const CHECKS = {
     if (!s.credits || /chat=/.test(s.href)) throw new Error(`the credits' chat line is ${s.credits ? "shown" : "hidden"}, the address ${s.href}`);
     await page.keyboard.press("Escape");
     if (!(await page.evaluate(() => document.querySelector(".chatroom .cr-shade").hidden && document.documentElement.classList.contains("chat-open")))) throw new Error("Escape didn't close just the sheet");
+  },
+  // Bryan's tools, as he uses them (the seeded admin). His menu offers Lock or Unlock, whichever applies, from the room's own word: on a
+  // page opened while the room is locked too, and both his pages follow a lock or unlock made on either. Locked, a reader's text is
+  // refused with why and stays in the box. His Delete hides someone else's message from everyone but him ("Hidden by you"), and a second
+  // Delete on it is answered. A message hidden while someone has its menu open is gone for them: their 👍 says so in one line. Hidden
+  // messages (n) lists it, with Keep as evidence and Restore, and Restore brings it back for everyone. Ban takes the poster's sign-in,
+  // and Unban (n) lists them by nickname and lifts it. The room is unlocked again at the end, whatever happens.
+  async adminTools(open) {
+    const bryan = await open({ as: "bryan" }), p6 = await open({ as: "p6" }), p7 = await open({ as: "p7" });
+    try {
+      for (const p of [bryan, p6, p7]) await openRoom(p);
+      // The main menu, once Bryan's counts are in (it asks for the hidden list as it opens).
+      const main = async page => { await page.click(".chatroom .cr-menu");
+        await page.waitForFunction(() => ["hidden", "unban"].every(k => /\(\d+\)$/.test(document.querySelector(`.chatroom .cr-pop [data-k="${k}"]`)?.textContent || "")), null, { timeout: 5e3 })
+          .catch(async () => { throw new Error(`Bryan's menu doesn't count what's hidden and banned: ${JSON.stringify(await menuItems(page))}`); });
+        const items = await menuItems(page), n = k => +/\((\d+)\)$/.exec(items.find(t => t.startsWith(k)))[1];
+        return { items, lock: items.filter(t => /^(Lock|Unlock) the room$/.test(t)), hidden: n("Hidden messages"), banned: n("Unban") }; };
+      // A count in the open menu reaching t, once the room's answer to the menu's ask is in (until then it shows the last one).
+      const counts = (page, k, t) => page.waitForFunction(([k, t]) => document.querySelector(`.chatroom .cr-pop [data-k="${k}"]`)?.textContent === t, [k, t], { timeout: 5e3 })
+        .catch(async () => { throw new Error(`Bryan's menu says ${JSON.stringify(await page.textContent(`.chatroom .cr-pop [data-k="${k}"]`))}, want ${JSON.stringify(t)}`); });
+      const lockOnly = async (page, want, what) => { const m = await main(page); if (!eq(m.lock, [want])) throw new Error(`${what}, Bryan's menu offers ${JSON.stringify(m.lock)}`); return m; };
+      const start = await lockOnly(bryan, "Lock the room", "with the room open");
+      await bryan.click('.chatroom .cr-pop >> text="Lock the room"'); await notes(bryan, "Lock the room · Done");
+      const again = await open({ as: "bryan" }); await openRoom(again);
+      await lockOnly(again, "Unlock the room", "on a page opened while it's locked"); await again.keyboard.press("Escape");
+      await lockOnly(bryan, "Unlock the room", "once he's locked it"); await bryan.keyboard.press("Escape");
+      await p6.fill(".chatroom .cr-in", "Locked out?"); await p6.press(".chatroom .cr-in", "Enter");
+      await notes(p6, "The room is locked. You can still read.");
+      if (await p6.inputValue(".chatroom .cr-in") !== "Locked out?") throw new Error("the text the locked room refused isn't back in the box");
+      await p6.fill(".chatroom .cr-in", "");
+      await main(again); await again.click('.chatroom .cr-pop >> text="Unlock the room"');
+      for (const p of [again, bryan]) await notes(p, "Unlock the room · Done");
+      await lockOnly(bryan, "Lock the room", "unlocked from his other page"); await bryan.keyboard.press("Escape");
+      await again.context().close();
+      // Delete hides it, while p7 has its menu open.
+      await say(p6, "Hide me please"); await textArticle(bryan, "Hide me please"); await textArticle(p7, "Hide me please");
+      const hid = await idOf(bryan, "Hide me please");
+      await p7.click(`.chatroom article[data-id="${hid}"] .cm-more`);
+      await bryan.click(`.chatroom article[data-id="${hid}"] .cm-more`);
+      if (!eq(await menuItems(bryan), ["Reply", "👍", "Report", "Delete", "Ban", "Keep as evidence"])) throw new Error(`Bryan's menu on someone's message has ${JSON.stringify(await menuItems(bryan))}`);
+      await bryan.click('.chatroom .cr-pop >> text="Delete"'); await bryan.click(".chatroom .cr-pop >> text=/^Delete/");
+      await bryan.waitForFunction(id => document.querySelector(`.chatroom article[data-id="${id}"] .cm-why`)?.textContent === "Hidden by you", hid, { timeout: 10e3 });
+      for (const p of [p6, p7]) await p.waitForFunction(id => !document.querySelector(`.chatroom article[data-id="${id}"]`), hid, { timeout: 10e3 });
+      await p7.click('.chatroom .cr-pop >> text="👍"'); await notes(p7, "That's gone already");
+      await bryan.click(`.chatroom article[data-id="${hid}"] .cm-more`);
+      if (!eq(await menuItems(bryan), ["Delete", "Ban", "Restore", "Keep as evidence"])) throw new Error(`Bryan's menu on a hidden message has ${JSON.stringify(await menuItems(bryan))}`);
+      await bryan.click('.chatroom .cr-pop >> text="Delete"'); await bryan.click(".chatroom .cr-pop >> text=/^Delete/");
+      await notes(bryan, "Delete · Done");
+      // Hidden messages (n): Keep as evidence, then Restore.
+      await main(bryan); await counts(bryan, "hidden", `Hidden messages (${start.hidden + 1})`);
+      await bryan.click('.chatroom .cr-pop [data-k="hidden"]');
+      await bryan.waitForFunction(t => document.querySelector("#chatSheetTitle").textContent === t, `Hidden messages (${start.hidden + 1})`, { timeout: 5e3 });
+      const row = bryan.locator(".chatroom .cr-sheet .cr-row", { hasText: "Hide me please" });
+      const line = await row.locator("p").first().textContent();
+      if (line !== "Poster6 · Hidden by you") throw new Error(`the hidden list says ${JSON.stringify(line)} of it`);
+      await row.locator("button", { hasText: "Keep as evidence" }).click(); await notes(bryan, "Keep as evidence · Done");
+      await row.locator("button", { hasText: "Restore" }).click(); await notes(bryan, "Restore · Done");
+      for (const p of [p6, p7]) await textArticle(p, "Hide me please");
+      await bryan.waitForFunction(([t, id]) => document.querySelector("#chatSheetTitle").textContent === t && !document.querySelector(".chatroom .cr-sheet").textContent.includes("Hide me please")
+        && !document.querySelector(`.chatroom article[data-id="${id}"]`).classList.contains("cm-hidden"), [`Hidden messages (${start.hidden})`, hid], { timeout: 5e3 });
+      if (start.hidden === 0 && await bryan.textContent(".chatroom .cr-sheet-b") !== "No hidden messages") throw new Error("the empty hidden list doesn't say so");
+      await bryan.keyboard.press("Escape");
+      // Ban, then Unban (n).
+      await say(p7, "Ban me"); await textArticle(bryan, "Ban me");
+      const bad = await idOf(bryan, "Ban me");
+      await bryan.click(`.chatroom article[data-id="${bad}"] .cm-more`);
+      await bryan.click('.chatroom .cr-pop >> text="Ban"'); await bryan.click(".chatroom .cr-pop >> text=/^Ban/");
+      await notes(bryan, "Ban · Done");
+      await p7.waitForFunction(() => document.querySelector(".chatroom .cr-note").textContent === "This LINE account can't post here" && document.querySelector(".chatroom .cr-line").getClientRects().length > 0, null, { timeout: 10e3 })
+        .catch(() => { throw new Error("the banned page isn't told, or still shows the message box"); });
+      await main(bryan); await counts(bryan, "unban", `Unban (${start.banned + 1})`);
+      await bryan.click('.chatroom .cr-pop [data-k="unban"]');
+      await bryan.waitForFunction(t => document.querySelector("#chatSheetTitle").textContent === t, `Unban (${start.banned + 1})`, { timeout: 5e3 });
+      await bryan.locator(".chatroom .cr-sheet .cr-row", { hasText: "Poster7" }).locator("button", { hasText: "Unban" }).click(); await notes(bryan, "Unban · Done");
+      await bryan.waitForFunction(t => document.querySelector("#chatSheetTitle").textContent === t && !document.querySelector(".chatroom .cr-sheet").textContent.includes("Poster7"), `Unban (${start.banned})`, { timeout: 5e3 });
+      if (start.banned === 0 && await bryan.textContent(".chatroom .cr-sheet-b") !== "No one is banned") throw new Error("the empty Unban list doesn't say so");
+    } finally { await asBryan({ type: "unlock" }).catch(() => {}); }
+  },
+  // Share and Unshare in My sessions wait for the room with a flag of their own. One the room never answers (the socket dropped) gives
+  // the row back after 10 s, saying it didn't go through; a refused share's why goes on its own row, not on one whose Delete is on its
+  // way; and a log the room has no more of (gone) leaves the list, with a line to say so. A stand-in room, and /me/sessions answered here.
+  async shareAnswers(open) {
+    const replies = [], shares = [];
+    const page = await open({ as: "p1", clock: true, ws: route => route.onMessage(m => { const f = JSON.parse(m);
+      if (f.type === "hello") { route.send(JSON.stringify({ type: "me", nick: "Poster1", role: "user" })); route.send(JSON.stringify({ type: "history", messages: [standIn(1)] })); }
+      if (f.type === "share" || f.type === "unshare") { shares.push(f.session_id); const r = replies.shift(); if (r) route.send(JSON.stringify({ type: "error", for: f.type, ...r(f) })); } }) });
+    const now = Date.now(), log = id => ({ id, spot: "jinshan", start: now - (id + 2) * 3600e3, end: now - (id + 1) * 3600e3, stars: 3, board: "short", note: `Log ${id}`, cond: null, shared: false });
+    const cors = { "access-control-allow-origin": ORIGIN(), "access-control-allow-headers": "authorization, content-type", "access-control-allow-methods": "GET, POST, DELETE" };
+    await page.route(`${CHAT()}/me/sessions`, r => r.fulfill({ status: r.request().method() === "OPTIONS" ? 204 : 200, headers: cors, contentType: "application/json", body: JSON.stringify([1, 2, 3].map(log)) }));
+    await page.route(`${CHAT()}/me/sessions/*`, r => r.request().method() === "OPTIONS" ? r.fulfill({ status: 204, headers: cors }) : null); // a Delete that never comes back
+    await openRoom(page);
+    await page.click(".chatroom .cr-menu"); await page.click('.chatroom .cr-pop >> text="My sessions"');
+    await page.waitForFunction(() => document.querySelectorAll(".chatroom .cr-sheet .cr-log").length === 3, null, { timeout: 5e3 });
+    const row = id => `.chatroom .cr-sheet .cr-log[data-id="${id}"]`;
+    const rowLook = id => page.evaluate(sel => { const r = document.querySelector(sel); return r && { off: [...r.querySelectorAll("button")].map(b => b.disabled), err: r.querySelector(".cr-err")?.textContent ?? null }; }, row(id));
+    await page.click(`${row(1)} [data-k="share"]`);
+    if (!eq(await rowLook(1), { off: [true, true], err: null })) throw new Error(`while its share is on its way the row reads ${JSON.stringify(await rowLook(1))}`);
+    await page.clock.fastForward(10.5e3);
+    await page.waitForFunction(sel => document.querySelector(`${sel} .cr-err`)?.textContent === "That didn't go through. Try again.", row(1), { timeout: 5e3 })
+      .catch(async () => { throw new Error(`10 s after a share nobody answered the row reads ${JSON.stringify(await rowLook(1))}`); });
+    if (!eq((await rowLook(1)).off, [false, false])) throw new Error("the unanswered share's row stays off");
+    await page.click(`${row(2)} [data-k="delete"]`); await page.click(`${row(2)} [data-k="delete"]`);
+    replies.push(() => ({ code: "slow:30" })); await page.click(`${row(3)} [data-k="share"]`);
+    await page.waitForFunction(sel => !!document.querySelector(`${sel} .cr-err`), row(3), { timeout: 5e3 })
+      .catch(async () => { throw new Error(`the refused share went to ${JSON.stringify([await rowLook(2), await rowLook(3)])}`); });
+    const [two, three] = [await rowLook(2), await rowLook(3)];
+    if (!eq(two, { off: [true, true], err: null }) || !eq(three, { off: [false, false], err: "Slow down a little · try again in 30 s" })) throw new Error(`the refused share: row 2 ${JSON.stringify(two)}, row 3 ${JSON.stringify(three)}`);
+    replies.push(f => ({ code: "gone", session_id: f.session_id })); await page.click(`${row(1)} [data-k="share"]`);
+    await page.waitForFunction(sel => !document.querySelector(sel), row(1), { timeout: 5e3 }).catch(() => { throw new Error("a log the room has no more of stays in the list"); });
+    const top = await page.evaluate(() => document.querySelector(".chatroom .cr-sheet-b > .cr-fine")?.textContent ?? null);
+    if (top !== "That's gone already" || !eq(shares, [1, 3, 1])) throw new Error(`with the log gone the sheet says ${JSON.stringify(top)} (shares sent: ${shares})`);
   },
 };
 

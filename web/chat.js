@@ -62,7 +62,7 @@ const STR = {
     flagged: "Thanks, it's reported.", tapAgain: "tap again to confirm", done: "Done",
     menu: "Menu", mySessions: "My sessions", changeNick: "Change nickname (once a week)", download: "Download my data",
     signOutAll: "Sign out everywhere", deleteAccount: "Delete my account", lockRoom: "Lock the room", unlockRoom: "Unlock the room",
-    hiddenMsgs: n => `Hidden messages (${n})`, unban: "Unban", adminOn: "Admin tools are on", adminNo: "That command isn't available",
+    hiddenMsgs: n => `Hidden messages (${n})`, unban: "Unban", unbanN: n => `Unban (${n})`, adminOn: "Admin tools are on", adminNo: "That command isn't available",
     hiddenWhy: { flags: "Hidden by reports", ban: "Hidden by a ban", admin: "Hidden by you" }, noHidden: "No hidden messages", noBanned: "No one is banned",
     nickErr: { length: "2–20 characters", chars: "Only letters, digits, spaces and _ - .", reserved: "That name is reserved", taken: "That nickname is taken",
       blocked: "That nickname isn't allowed" },
@@ -84,7 +84,7 @@ const STR = {
     // When something goes wrong
     offline: "Chat is offline", retry: "Retry", resting: "Chat is resting until 08:00", loginFailed: "Couldn't sign in with LINE, try again",
     banned: "This LINE account can't post here", slowDown: s => `Slow down a little · try again in ${s} s`, reloadNew: "Reload for the new chat",
-    locked: "The room is locked. You can still read.", failed: "That didn't go through. Try again.",
+    locked: "The room is locked. You can still read.", failed: "That didn't go through. Try again.", gone: "That's gone already",
     blocked: { link: "Links can't be posted here. Edit it and send again.", line: "LINE IDs and invites can't be posted here. Edit it and send again.",
       phone: "Phone numbers can't be posted here. Edit it and send again.", other: "That can't be posted here. Edit it and send again." },
     pinTitle: "Almost done", pinShown: "Signed in with LINE. Go back to the WaveSlave app and enter this code:", pinBox: "Enter the code from the LINE sign-in",
@@ -130,7 +130,7 @@ const STR = {
     flagged: "已檢舉，謝謝你。", tapAgain: "再按一次確認", done: "完成",
     menu: "選單", mySessions: "我的日誌", changeNick: "更改暱稱（每週一次）", download: "下載我的資料",
     signOutAll: "登出所有裝置", deleteAccount: "刪除我的帳號", lockRoom: "鎖定聊天室", unlockRoom: "解除鎖定",
-    hiddenMsgs: n => `被隱藏的訊息（${n}）`, unban: "解除停權", adminOn: "管理工具已開啟", adminNo: "無法使用這個指令",
+    hiddenMsgs: n => `被隱藏的訊息（${n}）`, unban: "解除停權", unbanN: n => `解除停權（${n}）`, adminOn: "管理工具已開啟", adminNo: "無法使用這個指令",
     hiddenWhy: { flags: "因檢舉而隱藏", ban: "因停權而隱藏", admin: "由你隱藏" }, noHidden: "沒有被隱藏的訊息", noBanned: "沒有被停權的帳號",
     nickErr: { length: "暱稱需 2–20 個字", chars: "只能用文字、數字、空格和 _ - .", reserved: "這個暱稱保留給站方", taken: "這個暱稱已經有人用了",
       blocked: "這個暱稱不能使用" },
@@ -149,7 +149,7 @@ const STR = {
     shareLog: "分享", unshareLog: "取消分享", noSessions: "還沒有日誌",
     offline: "聊天室離線", retry: "重試", resting: "聊天室休息中，08:00 恢復", loginFailed: "無法用 LINE 登入，請再試一次",
     banned: "這個 LINE 帳號無法在這裡發言", slowDown: s => `慢一點 · ${s} 秒後再試`, reloadNew: "請重新整理以使用新版聊天室",
-    locked: "聊天室已鎖定，仍可閱讀。", failed: "沒有送出，請再試一次。",
+    locked: "聊天室已鎖定，仍可閱讀。", failed: "沒有送出，請再試一次。", gone: "已經不在了",
     blocked: { link: "這裡不能貼連結，修改後再送出。", line: "這裡不能留 LINE ID 或邀請，修改後再送出。", phone: "這裡不能留電話號碼，修改後再送出。",
       other: "這段內容不能在這裡發表，修改後再送出。" },
     pinTitle: "差一步就完成", pinShown: "已使用 LINE 登入。請回到 WaveSlave App，輸入這組代碼：", pinBox: "輸入 LINE 登入後顯示的代碼",
@@ -194,7 +194,7 @@ const STR = {
     flagged: "通報しました。ありがとうございます。", tapAgain: "もう一度タップで確定", done: "完了",
     menu: "メニュー", mySessions: "マイセッション", changeNick: "ニックネーム変更（週1回）", download: "データをダウンロード",
     signOutAll: "すべての端末でログアウト", deleteAccount: "アカウントを削除", lockRoom: "ルームをロック", unlockRoom: "ロックを解除",
-    hiddenMsgs: n => `非表示のメッセージ（${n}）`, unban: "利用停止を解除", adminOn: "管理ツールがオンになりました", adminNo: "このコマンドは使えません",
+    hiddenMsgs: n => `非表示のメッセージ（${n}）`, unban: "利用停止を解除", unbanN: n => `利用停止を解除（${n}）`, adminOn: "管理ツールがオンになりました", adminNo: "このコマンドは使えません",
     hiddenWhy: { flags: "通報で非表示", ban: "利用停止で非表示", admin: "あなたが非表示にしました" }, noHidden: "非表示のメッセージはありません", noBanned: "利用停止中のアカウントはありません",
     nickErr: { length: "2〜20文字で入力してください", chars: "文字・数字・スペース・_ - . のみ使えます", reserved: "このニックネームは予約されています",
       taken: "このニックネームは使われています", blocked: "このニックネームは使えません" },
@@ -213,7 +213,7 @@ const STR = {
     shareLog: "共有", unshareLog: "共有をやめる", noSessions: "まだ記録はありません",
     offline: "チャットに接続できません", retry: "再試行", resting: "チャットは08:00まで休止中です", loginFailed: "LINEでログインできませんでした。もう一度お試しください",
     banned: "このLINEアカウントでは投稿できません", slowDown: s => `少しペースを落としてください · ${s}秒後に再試行`, reloadNew: "新しいチャットを使うには再読み込みしてください",
-    locked: "ルームはロック中です。閲覧はできます。", failed: "送信できませんでした。もう一度お試しください。",
+    locked: "ルームはロック中です。閲覧はできます。", failed: "送信できませんでした。もう一度お試しください。", gone: "すでにありません",
     blocked: { link: "リンクは投稿できません。直してから送ってください。", line: "LINE IDや招待は投稿できません。直してから送ってください。",
       phone: "電話番号は投稿できません。直してから送ってください。", other: "この内容は投稿できません。直してから送ってください。" },
     pinTitle: "あと少しです", pinShown: "LINEでログインしました。WaveSlaveアプリに戻って、このコードを入力してください：", pinBox: "LINEログイン後に表示されたコードを入力",
@@ -438,10 +438,12 @@ function onFrame(text) {
   if (typeof on === "function") on(f);
 }
 const ON = {
-  // Who this socket is signed in as: after hello, after a nickname change, and after Bryan's claim.
+  // Who this socket is signed in as: after hello, after a nickname change, and after Bryan's claim. Bryan's also says
+  // whether the room is locked, so his menu offers Lock or Unlock.
   me(f) {
     if (typeof f.nick !== "string") return;
     const was = R.me; R.me = { nick: f.nick, role: f.role === "admin" ? "admin" : "user" };
+    R.locked = R.me.role !== "admin" ? null : typeof f.locked === "boolean" ? f.locked : R.locked;
     if (was && was.nick !== f.nick) for (const m of R.msgs.values()) if (m.nick === was.nick) m.nick = f.nick;
     if (R.sheet && R.sheet.name === "nick" && R.sheet.state.sent) { closeSheet(); note(`${S("changeNick")} · ${S("done")}`); }
     if (was && was.role !== "admin" && R.me.role === "admin") { note(S("adminOn")); sock.send({ type: "hidden_list" }); }
@@ -493,6 +495,7 @@ const ON = {
   tick(f) { ON.online(f); },
   error(f) {
     const code = typeof f.code === "string" ? f.code : "invalid", about = typeof f.for === "string" ? f.for : "";
+    if (code === "gone") return gone(about, f);
     const hook = own(HOOK.error, about); if (typeof hook === "function" && hook(code) !== false) return;
     if (about === "hello") { if (code === "banned") note(S("banned"), true); if (code === "auth" || code === "banned") signOutQuietly(); return; }
     if (about === "older") { R.older = false; const s = slowFor(code); if (s) setTimeout(guard(() => { if (R.built && R.el.list.scrollTop < 60) olderPage(); }), s * 1e3); return; }
@@ -502,25 +505,46 @@ const ON = {
     if (code === "auth") { signOutQuietly(); sock.tries = 0; return connect(); }
     note(why(code), true);
   },
-  // One of Bryan's tools did its work (or a log was shared, which the sheets take).
+  // One of Bryan's tools did its work (or a log was shared, which the sheets take). Lock and unlock reach all his screens;
+  // delete comes back only for a message that was hidden already, which stays as it is.
   ok(f) {
     const about = typeof f.for === "string" ? f.for : "", hook = own(HOOK.ok, about);
     if (typeof hook === "function") return hook(f);
-    const label = own({ lock: "lockRoom", unlock: "unlockRoom", ban: "ban", unban: "unban", restore: "restore", keep: "keep" }, about);
+    const label = own({ lock: "lockRoom", unlock: "unlockRoom", ban: "ban", unban: "unban", restore: "restore", keep: "keep", delete: "del" }, about);
     if (!label) return;
     if (about === "lock" || about === "unlock") R.locked = about === "lock";
     if (about === "unban" || about === "restore" || about === "ban") sock.send({ type: "hidden_list" });
     note(`${S(label)} · ${S("done")}`);
   },
-  // Bryan's hidden list: how many are hidden, the newest 100 with why, and the banned LINE accounts (each with the code unban takes).
+  // Bryan's hidden list: how many are hidden, the newest 100 with why, and the banned LINE accounts (the newest 100, each with the code
+  // unban takes) with how many are banned in all.
   hidden(f) {
     if (!isAdmin()) return;
+    const banned = (Array.isArray(f.banned) ? f.banned : []).filter(b => b && typeof b.sub_hash === "string").map(b => ({ sub_hash: b.sub_hash, nick: typeof b.nick === "string" ? b.nick : null }));
     R.hidden = { count: count(f.count) || 0, messages: (Array.isArray(f.messages) ? f.messages : []).map(m => { const c = clean(m); return c && { ...c, flags: m.flags && typeof m.flags === "object" ? m.flags : {} }; }).filter(Boolean),
-      banned: (Array.isArray(f.banned) ? f.banned : []).filter(b => b && typeof b.sub_hash === "string").map(b => ({ sub_hash: b.sub_hash, nick: typeof b.nick === "string" ? b.nick : null })) };
+      banned, bannedCount: Math.max(count(f.banned_count) ?? 0, banned.length) };
     if (R.sheet && (R.sheet.name === "hidden" || R.sheet.name === "unban")) drawSheet();
-    const item = R.pop && R.pop.main && R.pop.box.querySelector('[data-k="hidden"]'); if (item) item.textContent = S("hiddenMsgs", R.hidden.count);
+    const item = k => R.pop && R.pop.main ? R.pop.box.querySelector(`[data-k="${k}"]`) : null;
+    if (item("hidden")) item("hidden").textContent = S("hiddenMsgs", R.hidden.count);
+    if (item("unban")) item("unban").textContent = S("unbanN", R.hidden.bannedCount);
   },
 };
+// A write that lost a race (error gone): what it named is gone, or is already as it asked. The room names it (gone carries the frame's
+// id, msg_id, reply_to, session_id or sub_hash), so its row is drawn as it is now: a message that isn't there to see leaves the list
+// (Bryan keeps one his screen shows hidden), a reply's text goes back in the box, a log leaves My sessions, and Bryan's hidden list is
+// asked for again. Then one short line, "That's gone already". It is never a bad frame, so nothing else changes.
+function gone(about, f) {
+  const id = Number.isSafeInteger(f.id) ? f.id : null;
+  if (about === "share" || about === "unshare") return logGone(f.session_id);
+  if (about === "say") { if (Number.isSafeInteger(f.reply_to)) dropMsg(f.reply_to); restorePending(); }
+  else if (id && ["like", "flag", "delete", "restore", "keep"].includes(about)) {
+    const m = R.msgs.get(id); if (m && !(isAdmin() && m.hidden && (about === "like" || about === "flag"))) dropMsg(id);
+  }
+  if (isAdmin() && ["ban", "unban", "restore", "keep"].includes(about)) sock.send({ type: "hidden_list" });
+  note(S("gone"));
+}
+// A message that isn't there any more leaves the list, as a delete would take it.
+function dropMsg(id) { if (!R.msgs.delete(id)) return; R.gone.add(id); if (R.replyTo === id) { R.replyTo = null; drawReply(); } render(); }
 // After merging: the oldest id held, and at most KEEP_MSGS messages (a room left open for days drops its oldest).
 function settle() {
   const ids = [...R.msgs.keys()].sort((a, b) => a - b);
@@ -778,20 +802,25 @@ function openMsgMenu(id, anchor) {
 function flagMenu(m) { const n = R.nodes.get(m.id);
   openPop(n && n.querySelector(".cm-more"), CODES.reason.map(r => ({ label: L("reasons", r), act: () => { if (write({ type: "flag", id: m.id, reason: r })) note(S("flagged")); } })), S("flag")); }
 // The main menu: the language (the page's own buttons do the switch), then for a signed-in person My sessions, Change nickname, Download
-// my data, Sign out everywhere (a second tap confirms) and Delete my account (a sheet says what goes first); Bryan also gets Lock,
-// Unlock, Hidden messages with how many wait for him, and Unban.
+// my data, Sign out everywhere (a second tap confirms) and Delete my account (a sheet says what goes first); Bryan also gets Lock or
+// Unlock, whichever applies (both while the room hasn't said), Hidden messages with how many wait for him, and Unban with how many are
+// banned.
 function openMain() {
-  const it = LANGS.map(([l, name, tag]) => ({ label: name, lang: tag, check: LANG === l, act: () => pickLang(l) }));
+  const it = LANGS.filter(([l]) => langButton(l)).map(([l, name, tag]) => ({ label: name, lang: tag, check: LANG === l, act: () => pickLang(l) }));
   if (signedIn()) it.push({ label: S("mySessions"), act: () => openSheet("sessions", sessionsSheet) });
   if (signedIn() && R.me) it.push({ label: S("changeNick"), act: () => openSheet("nick", nickSheet) });
   if (signedIn()) it.push({ label: S("download"), act: guard(download) }, { label: S("signOutAll"), danger: true, confirm: true, act: guard(signOutAll) },
     { label: S("deleteAccount"), danger: true, act: () => openSheet("delete", deleteSheet) });
-  if (isAdmin()) it.push({ label: S("lockRoom"), check: R.locked === true, act: () => write({ type: "lock" }) }, { label: S("unlockRoom"), check: R.locked === false, act: () => write({ type: "unlock" }) },
-    { label: S("hiddenMsgs", R.hidden ? R.hidden.count : "…"), key: "hidden", act: () => openSheet("hidden", hiddenSheet) }, { label: S("unban"), act: () => openSheet("unban", unbanSheet) });
+  if (isAdmin()) it.push(...[R.locked !== true ? { label: S("lockRoom"), act: () => write({ type: "lock" }) } : null, R.locked !== false ? { label: S("unlockRoom"), act: () => write({ type: "unlock" }) } : null,
+    { label: S("hiddenMsgs", R.hidden ? R.hidden.count : "…"), key: "hidden", act: () => openSheet("hidden", hiddenSheet) },
+    { label: S("unbanN", R.hidden ? R.hidden.bannedCount : "…"), key: "unban", act: () => openSheet("unban", unbanSheet) }].filter(Boolean));
   openPop(R.el.menuBtn, it, S("menu"), true);
   if (isAdmin()) sock.send({ type: "hidden_list" });
 }
-function pickLang(l) { const b = document.querySelector(`#lang button[data-l="${l}"]`); if (b) b.click(); else if (typeof setLang === "function") setLang(l); }
+// The page's own language buttons do the switch, and the menu offers only the languages the page shows a button for: 日本語 is switched
+// off on the site for now (Bryan, Oct 21, #92), its button hidden, so it is never picked here. Its strings stay, as the page's do.
+function langButton(l) { const b = document.querySelector(`#lang button[data-l="${l}"]`); return b && !b.hidden && !b.closest("[hidden]") ? b : null; }
+function pickLang(l) { const b = langButton(l); if (b) b.click(); }
 
 // ---- Sheets over the room (mockups 3 to 5): a title in the LED face and a body built by build(state). A sheet keeps its state, so
 // relang() can build it again in the new language with what was typed or picked; state is what it starts with. Built again, the sheet
@@ -829,11 +858,11 @@ function hiddenSheet() { const h = R.hidden;
     return el("div", { class: "cr-row" }, el("p", null, el("b", { dir: "auto" }, m.nick ?? S("aSurfer")), ` · ${own(S("hiddenWhy"), m.hidden) || ""}${flags ? " · " + flags : ""}`),
       el("p", { class: "cr-row-t", dir: "auto" }, excerpt(m)), el("div", { class: "cr-go-row" }, act("restore", "restore"), act("keep", "keep"))); }) : [];
   return { title: S("hiddenMsgs", h ? h.count : "…"), body: rows.length ? rows : el("p", null, h ? S("noHidden") : "…") }; }
-// Bryan's Unban: the banned LINE accounts, by the nickname they had.
+// Bryan's Unban: the banned LINE accounts, by the nickname they had, the newest 100, under how many are banned in all.
 function unbanSheet() { const h = R.hidden;
   const rows = h ? h.banned.map(b => { const go = el("button", { type: "button", class: "cr-pill" }, S("unban")); go.addEventListener("click", guard(() => write({ type: "unban", sub_hash: b.sub_hash })));
     return el("div", { class: "cr-row cr-row-1" }, el("b", { dir: "auto" }, b.nick ?? S("aSurfer")), go); }) : [];
-  return { title: S("unban"), body: rows.length ? rows : el("p", null, h ? S("noBanned") : "…") }; }
+  return { title: S("unbanN", h ? h.bannedCount : "…"), body: rows.length ? rows : el("p", null, h ? S("noBanned") : "…") }; }
 
 // ---- Opening and closing. Escape closes the menu, then the sheet, then the room; Tab stays inside whichever is on top.
 function openRoom(o = {}) {
@@ -1104,7 +1133,7 @@ async function saveLog(st) {
   if (j && typeof j.error === "string") note(S("notShared", why(j.error)), true); else note(body.share ? S("savedShared") : S("saved"));
 }
 // My sessions: the logs, newest first, with their conditions. Each can be shared or unshared (on the socket) and deleted (a second tap
-// confirms).
+// confirms). A line at the top says when a log went meanwhile.
 const isLog = l => !!l && Number.isSafeInteger(l.id) && isSpot(l.spot) && fin(l.start) != null && fin(l.end) != null && Number.isInteger(l.stars) && l.stars >= 1 && l.stars <= 5
   && CODES.board.includes(l.board) && (l.note == null || typeof l.note === "string") && (l.cond == null || typeof l.cond === "object");
 function sessionsSheet(st) {
@@ -1112,17 +1141,18 @@ function sessionsSheet(st) {
     me("/me/sessions").then(guard(j => { st.list = (Array.isArray(j) ? j : []).filter(isLog).map(l => ({ ...l, shared: l.shared === true })); }), guard(e => { st.err = meWhy(e); }))
       .finally(guard(() => { if (R.sheet && R.sheet.state === st) drawSheet(); })); }
   const rows = (st.list || []).map(l => {
-    const act = (k, label, f) => { const b = el("button", { type: "button", class: "cr-pill" + (k === "delete" ? " cr-del" : ""), "data-k": k }, label); b.disabled = !!l.busy; b.addEventListener("click", guard(f)); return b; };
+    const act = (k, label, f) => { const b = el("button", { type: "button", class: "cr-pill" + (k === "delete" ? " cr-del" : ""), "data-k": k }, label); b.disabled = !!l.busy || !!l.sharing; b.addEventListener("click", guard(f)); return b; };
     const cond = condLine(l.cond), stars = el("span", { class: "cm-stars", role: "img", "aria-label": `${l.stars}/5` }, "★".repeat(l.stars) + "☆".repeat(5 - l.stars));
     return el("div", { class: "cr-row cr-log", "data-id": String(l.id) },
       el("p", { class: "cr-log-cap" }, `${spotFull(l.spot)} · ${dayOf(l.start)} ${hm(l.start)}–${hm(l.end)}`, l.shared ? el("span", { class: "cr-tag" }, S("sharedTag")) : null),
       el("p", null, stars, l.note ? [" ", el("span", { dir: "auto" }, `“${l.note}”`)] : null),
       el("p", { class: "cr-row-t" }, `${cond ? `${S("conditionsThen")}: ${cond}` : S("noConditions")} · ${L("board", l.board)}`),
       l.err ? el("p", { class: "cr-err", role: "alert" }, l.err) : null,
-      el("div", { class: "cr-go-row" }, act(l.shared ? "unshare" : "share", S(l.shared ? "unshareLog" : "shareLog"), () => { if (write({ type: l.shared ? "unshare" : "share", session_id: l.id })) { l.busy = true; l.err = null; drawSheet(); } }),
+      el("div", { class: "cr-go-row" }, act(l.shared ? "unshare" : "share", S(l.shared ? "unshareLog" : "shareLog"), () => shareLog(st, l)),
         act("delete", l.confirm ? `${S("del")} · ${S("tapAgain")}` : S("del"), () => l.confirm ? deleteLog(st, l) : (l.confirm = true, drawSheet()))));
   });
-  return { title: S("mySessions"), body: rows.length ? rows : [st.err ? el("p", { class: "cr-err", role: "alert" }, st.err) : el("p", null, st.list ? S("noSessions") : S("loading"))] };
+  return { title: S("mySessions"), body: [st.note ? el("p", { class: "cr-fine", role: "status" }, st.note) : null,
+    rows.length ? rows : st.err ? el("p", { class: "cr-err", role: "alert" }, st.err) : el("p", null, st.list ? S("noSessions") : S("loading"))] };
 }
 async function deleteLog(st, l) {
   l.busy = true; l.err = null; drawSheet();
@@ -1130,11 +1160,26 @@ async function deleteLog(st, l) {
   catch (e) { l.busy = false; l.confirm = false; l.err = meWhy(e); }
   if (R.sheet && R.sheet.state === st) drawSheet();
 }
-// The room's answer to share and unshare, for the log My sessions shows (the error frame doesn't say which log, so it's the one waiting).
-function logShared(id, shared) { const s = R.sheet, l = s && s.name === "sessions" && (s.state.list || []).find(x => x.id === id);
-  if (l) { l.shared = shared; l.busy = false; drawSheet(); } }
-function shareRefused(code) { const s = R.sheet, l = s && s.name === "sessions" && (s.state.list || []).find(x => x.busy);
-  if (!l || code === "auth") return false; l.busy = false; l.err = why(code); drawSheet(); return true; }
+// Share or Unshare, on the socket. The row waits for the room's answer with a flag of its own (sharing, apart from a delete's busy), and
+// a socket that drops before the answer comes leaves the row as it was after 10 s, to try again.
+let shareN = 0;
+function shareLog(st, l) {
+  if (l.busy || l.sharing || !write({ type: l.shared ? "unshare" : "share", session_id: l.id })) return;
+  l.sharing = ++shareN; l.err = null; st.note = null; clearTimeout(l.t);
+  l.t = setTimeout(guard(() => { if (!l.sharing) return; l.sharing = 0; l.err = S("failed"); if (R.sheet && R.sheet.state === st) drawSheet(); }), 10e3);
+  drawSheet();
+}
+// The room's answers to share and unshare, for the logs My sessions shows. ok names its log; an error other than gone doesn't, and the
+// room answers a socket's frames in turn, so it is for the oldest share still waiting.
+const sessionsState = () => R.sheet && R.sheet.name === "sessions" ? R.sheet.state : null;
+function logShared(id, shared) { const st = sessionsState(), l = st && (st.list || []).find(x => x.id === id);
+  if (l) { clearTimeout(l.t); l.shared = shared; l.sharing = 0; drawSheet(); } }
+function shareRefused(code) { const st = sessionsState(), l = st && (st.list || []).filter(x => x.sharing).sort((a, b) => a.sharing - b.sharing)[0];
+  if (!l || code === "auth") return false; clearTimeout(l.t); l.sharing = 0; l.err = why(code); drawSheet(); return true; }
+// A log the room has no more of (deleted on another screen) leaves My sessions, and a line at the top says so.
+function logGone(id) { const st = sessionsState(), l = st && (st.list || []).find(x => x.id === id);
+  if (!l) return note(S("gone"));
+  clearTimeout(l.t); st.list = st.list.filter(x => x !== l); st.note = S("gone"); drawSheet(); }
 // The room's answers to a report: the sheet shuts when the report comes back on the socket, or says why it was refused.
 function reportRefused(code) { const s = R.sheet;
   if (!s || s.name !== "report" || !s.state.sent || code === "auth") return false;

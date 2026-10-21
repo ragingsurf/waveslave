@@ -1,6 +1,6 @@
 <title>WaveSlave</title>
 <script>/* Language before first paint: the saved pick, else the browser's (zh → 中文). 日本語 is switched off for now, so a saved ja reads as English. */try{var l=localStorage.getItem("waveslave-lang")||(/^zh/i.test(navigator.language)?"zh":"en");document.documentElement.lang=l==="zh"?"zh-Hant-TW":"en";}catch(e){}</script>
-<script>/* World mode (the secret switch, the W in the logo) before first paint, so Taiwan mode never flashes up the country row. Behind the World passcode (web/head.html) it waits for the code on each visit. */try{if(localStorage.getItem("waveslave-world")==="1"&&(!window.__worldLock||wsUnlocked()))document.documentElement.classList.add("world")}catch(e){}</script>
+<script>/* World mode (the secret switch, the W in the logo) before first paint, so Taiwan mode never flashes up the country row. Behind the World passcode (web/head.html) it waits for the code each time the page opens. */try{if(localStorage.getItem("waveslave-world")==="1"&&(!window.__worldLock||wsUnlocked()))document.documentElement.classList.add("world")}catch(e){}</script>
 <style>/* Opening animation cover: dark from the first paint until the intro takes over; it lifts by itself after 6 s if the intro never runs. */
 html.intro-on::after{content:"";position:fixed;inset:0;z-index:9997;background:#07050f;animation:introSafe 0s 6s forwards}@keyframes introSafe{to{visibility:hidden}}</style>
 <script>/* Opening animation once per visit, never for reduced motion, and not behind the passcode screen (it plays after the unlock reload). */try{if(!document.documentElement.classList.contains("locked")&&!sessionStorage.getItem("waveslave-intro")&&!matchMedia("(prefers-reduced-motion: reduce)").matches)document.documentElement.classList.add("intro-on")}catch(e){}</script>
@@ -651,7 +651,7 @@ function langOpen(on){ document.getElementById("langWrap").classList.toggle("ope
 let WORLD = document.documentElement.classList.contains("world");
 // The World passcode (web/head.html): until the code is in for this visit, World mode opens the PIN box first (wsPin) and comes on once it's right.
 const worldLocked = () => !!window.__worldLock && !(window.wsUnlocked && wsUnlocked());
-function keepWorld(on){ WORLD = on; document.documentElement.classList.toggle("world", on); try{ localStorage.setItem("waveslave-world", on ? "1" : "0"); }catch(e){} }
+function keepWorld(on){ WORLD = on; if(!on && window.wsRelock) wsRelock(); document.documentElement.classList.toggle("world", on); try{ localStorage.setItem("waveslave-world", on ? "1" : "0"); }catch(e){} }
 // Spot comes from the link (#nanwan) or the last one picked on this device; Donghe otherwise. In Taiwan mode the last one is the last Taiwan
 // spot; a link to another country's spot turns World mode on, so it still opens.
 let SPOT_PEND = null;   // a link to another country's spot while World mode waits for the passcode: opened once it's in

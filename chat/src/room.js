@@ -1,6 +1,6 @@
 // The room: the one Durable Object behind the Taiwan chat, named "taiwan". All the chat's data lives in its
 // SQLite storage. The design is in docs/superpowers/specs/2026-10-21-taiwan-chat-design.md, "Data (room
-// SQLite)", "Alarm", "Retention (daily)" and "Free-plan budget".
+// SQLite)", "Alarm", "Retention (daily)", "Moderation" and "Free-plan budget".
 //
 //   migrate()                  creates the tables, once per schema version, before the room does anything else
 //   history(beforeId, limit)   a page of the room, as the public frames readers get
@@ -14,11 +14,15 @@
 //   signOut                    POST /me/signout: every token of the user stops working, and their sockets close
 //   canWrite(user, kind)       the one gate for every write, from the socket and from /me: sign-in, ban, lock, limits
 //   openSocket, webSocket*     the socket and its frames (spec "Socket protocol"; the frames are listed there below)
+//   onFlag, flagger()          the report button, and when a flag counts (spec "Moderation", step 4)
+//   onAdmin                    Bryan's claim to the admin role (step 7)
+//   onBan ... onHiddenList     Bryan's tools (step 5), plus his Delete in onDelete
+//   where                      GET /admin/where: which Cloudflare data centre the room lives in
 //
 // Times are epoch milliseconds. The Worker calls the room as https://room/<route> with a JSON body.
 import { DurableObject } from "cloudflare:workers";
-import { hmacB64u, pin6, randomB64u, readToken, sha256b64u, signToken, subHash } from "./auth.js";
-import { blocked, checkNick, normalise, SPOTS, validReport } from "./mod.js";
+import { hmacB64u, pin6, randomB64u, readToken, sameText, sha256b64u, signToken, subHash } from "./auth.js";
+import { blocked, checkNick, normalise, REASONS, SPOTS, validReport } from "./mod.js";
 import BLOCKLIST from "../blocklist.json";
 
 const SECOND = 1000;
@@ -75,6 +79,7 @@ const TEXT_MAX = 500; // characters in a text message
 const CLOSE_BAD = 1008; // five bad frames
 const CLOSE_TOO_BIG = 1009; // a frame over 4 KB
 const CLOSE_SIGNED_OUT = 4401; // the account signed out everywhere: its tokens no longer work
+const CLOSE_BANNED = 4403; // Bryan banned the account: "This LINE account can't post here"
 const CLOSE_UPDATE = 4426; // the app speaks a protocol version the room no longer takes, so it must reload
 
 // What a socket's attachment holds (it lives with the socket, through hibernation): uid, tv and role once it has said
@@ -83,9 +88,16 @@ const CLOSE_UPDATE = 4426; // the app speaks a protocol version the room no long
 const NEW_SOCKET = Object.freeze({ uid: null, tv: null, role: null, v: null, bad: 0, olderAt: 0 });
 
 // The frames a socket may send, and the method that answers each. Reading needs no sign-in (Bryan, Oct 21: sign in
-// with LINE to post), so hello and older work for everyone; the writes need a socket that said hello signed in.
+// with LINE to post), so hello and older work for everyone; the writes need a socket that said hello signed in, and
+// Bryan's tools need Bryan (role "admin").
 const READS = { hello: "onHello", older: "onOlder" };
-const WRITES = { say: "onSay", report: "onReport", like: "onLike", delete: "onDelete", nick: "onNick" };
+const WRITES = {
+  say: "onSay", report: "onReport", like: "onLike", delete: "onDelete", nick: "onNick", flag: "onFlag", admin: "onAdmin",
+};
+const ADMIN_TOOLS = {
+  ban: "onBan", unban: "onUnban", restore: "onRestore", keep: "onKeep", lock: "onLock", unlock: "onUnlock",
+  hidden_list: "onHiddenList",
+};
 
 // The rate limits (spec "Moderation", step 3), per LINE account. Each rule lets `max` writes through in a window of
 // `ms` that opens with the first of them. The counts are kept in limits as "<sub_hash>:<rule>", so they outlive an
@@ -96,11 +108,38 @@ const NEW_SAY_LIMIT = { rule: "say:1h", max: 10, ms: HOUR }; // ...10 messages a
 const REPORT_LIMIT = { rule: "report:1d", max: 6, ms: DAY }; // plus one per spot every 2 hours, "report:<spot>"
 const REPORT_SPOT_EVERY = 2 * HOUR;
 const LIKE_LIMIT = { rule: "like:10m", max: 30, ms: 10 * MINUTE };
+const FLAG_LIMIT = { rule: "flag:1d", max: 20, ms: DAY };
 const NICK_EVERY = 7 * DAY; // one nickname change a week, counted from users.nick_changed
 const NICK_HELD = 30 * DAY; // how long a freed nickname is kept for the account that had it
 
 // The writes a locked room (meta "locked" = 1) stops: the ones that post to the room. Bryan still can.
 const POSTS = new Set(["say", "report"]);
+
+// The report button (spec "Moderation", step 4). A flag counts only from an account at least 24 hours old with a
+// post, that isn't banned and has fewer than 2 flags Bryan has rejected; 3 counted flags hide a message. A sexual or
+// child-safety flag hides it alone when it comes from an account at least 7 days old with 5 posts or more, at most 3
+// times a day per LINE account; past that it counts as one of the 3.
+const FLAGS_TO_HIDE = 3;
+const FLAGGER_AGE = DAY;
+const FLAGGER_REJECTED = 2;
+const ONE_FLAG_REASONS = new Set(["sexual", "child"]);
+const ONE_FLAG_AGE = 7 * DAY;
+const ONE_FLAG_POSTS = 5;
+const ONE_FLAG_LIMIT = { rule: "oneflag:1d", max: 3, ms: DAY };
+
+// Bryan's tools (step 5) and his claim (step 7).
+const BAN_HIDES = DAY; // a ban hides the user's messages from the last 24 hours
+const ADMIN_CODE_MIN = 32; // an ADMIN_CODE shorter than this switches the claim off
+const CLAIM_TRIES = 3; // wrong codes that stop one LINE account claiming...
+const CLAIM_TRIES_ALL = 10; // ...and wrong codes in all that stop everyone, until ADMIN_CODE is changed
+// "/admin <code>" as typed, with either slash, in front of the code in an admin frame; and any slash command.
+const ADMIN_COMMAND = /^[/／]admin\s+/iu;
+const SLASH = /^[/／]/u;
+const TRACE_URL = "https://www.cloudflare.com/cdn-cgi/trace"; // Cloudflare's own page, which says where it was served
+const COLO = /^colo=[A-Z]{3}$/;
+
+// A message's columns as the room reads them to send it out (toPublic()).
+const MSG_COLS = "id, ts, uid, kind, spot, body, reply_to, likes";
 
 // Every table in the spec, including the ones that later parts of the room first write to.
 const SCHEMA_V1 = [
@@ -127,6 +166,8 @@ const SCHEMA_V1 = [
     banned INTEGER NOT NULL DEFAULT 0,
     deleted_at INTEGER
   )`,
+  // The banned LINE accounts, for Bryan's Unban list.
+  "CREATE INDEX subs_banned ON subs (sub_hash) WHERE banned = 1",
   // Everything posted in the room. body is JSON, and never holds the nickname (that is looked up from users).
   // uid is NULL on a report over 30 days old. hidden_by says why a message is hidden, when it is.
   `CREATE TABLE messages (
@@ -147,6 +188,8 @@ const SCHEMA_V1 = [
   // For the spot cards. It holds only visible reports, so reportsFor() reads just the rows it returns; with
   // (spot, ts) alone it would also read every tagged message and hidden report on the way.
   "CREATE INDEX messages_reports ON messages (spot, ts) WHERE kind = 'report' AND hidden_by IS NULL",
+  // Bryan's hidden list, which reads only the hidden messages.
+  "CREATE INDEX messages_hidden ON messages (id) WHERE hidden_by IS NOT NULL",
   // One 👍 per person per message; messages.likes is kept in step with it.
   "CREATE TABLE likes (msg_id INTEGER NOT NULL, uid TEXT NOT NULL, PRIMARY KEY (msg_id, uid)) WITHOUT ROWID",
   // Flags count once per LINE account, so they are keyed by sub_hash.
@@ -158,6 +201,8 @@ const SCHEMA_V1 = [
     rejected INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (msg_id, sub_hash)
   )`,
+  // One LINE account's flags: how many Bryan has rejected (flagger()), and the ones that go with the account.
+  "CREATE INDEX flags_sub ON flags (sub_hash, rejected)",
   // The surf diary: private until shared, when shared_msg is the session card's message id. cond is JSON.
   `CREATE TABLE sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -287,6 +332,8 @@ function limitsFor(user, kind, spot, now) {
       return [REPORT_LIMIT, { rule: `report:${spot}`, max: 1, ms: REPORT_SPOT_EVERY }];
     case "like":
       return [LIKE_LIMIT];
+    case "flag":
+      return [FLAG_LIMIT];
     default:
       return [];
   }
@@ -520,6 +567,8 @@ export class Room extends DurableObject {
         return this.openSocket(request);
       case "POST /r/me/signout":
         return this.signOut(request);
+      case "GET /r/where":
+        return this.where(request);
       default:
         return Response.json({ error: "not found" }, { status: 404 });
     }
@@ -776,9 +825,10 @@ export class Room extends DurableObject {
   //   banned     the LINE account is banned
   //   locked     the room is locked (meta "locked" = 1); only posting stops (POSTS), and never for Bryan
   //   slow:<s>   over a rate limit, with the seconds until the write would go through
-  // Kinds: say, report (with its spot), like, delete and nick. A null answer also counts the write against its limits,
-  // so the caller asks last, once nothing else can refuse it. A nickname change is limited by users.nick_changed,
-  // which the change itself sets, so for "nick" this only checks.
+  // Kinds: say, report (with its spot), like, delete, nick, flag and admin (a claim), and the name of each of Bryan's
+  // tools. A null answer also counts the write against its limits, so the caller asks last, once nothing else can
+  // refuse it. A nickname change is limited by users.nick_changed, which the change itself sets, so for "nick" this
+  // only checks.
   canWrite(user, kind, spot = null) {
     if (!user) return "auth";
     if (user.banned) return "banned";
@@ -788,20 +838,27 @@ export class Room extends DurableObject {
       const wait = user.nick_changed === null ? 0 : user.nick_changed + NICK_EVERY - now;
       return wait > 0 ? slowFor(wait) : null;
     }
-    const limits = limitsFor(user, kind, spot, now).map((limit) => {
-      const key = `${user.sub_hash}:${limit.rule}`;
+    const wait = this.useLimits(user.sub_hash, limitsFor(user, kind, spot, now), now);
+    return wait > 0 ? slowFor(wait) : null;
+  }
+
+  // Counts one use of each of `limits` (see SAY_LIMITS) for LINE account `sub` and returns 0, when every one of them
+  // has room. Otherwise it counts nothing, and returns how long until they all have room again, in ms.
+  useLimits(sub, limits, now) {
+    const counts = limits.map((limit) => {
+      const key = `${sub}:${limit.rule}`;
       const row = this.one("SELECT n, window_end FROM limits WHERE key = ?", key);
       return { ...limit, key, open: row !== null && row.window_end > now ? row : null };
     });
-    const wait = Math.max(0, ...limits.map(({ open, max }) => (open && open.n >= max ? open.window_end - now : 0)));
-    if (wait > 0) return slowFor(wait);
-    for (const { key, ms, open } of limits) {
+    const wait = Math.max(0, ...counts.map(({ open, max }) => (open && open.n >= max ? open.window_end - now : 0)));
+    if (wait > 0) return wait;
+    for (const { key, ms, open } of counts) {
       this.all(
         "INSERT INTO limits (key, n, window_end) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE SET n = excluded.n, window_end = excluded.window_end",
         key, open ? open.n + 1 : 1, open ? open.window_end : now + ms,
       );
     }
-    return null;
+    return 0;
   }
 
   // ---- The socket (spec "Socket protocol") ---------------------------------------------------------------------
@@ -812,18 +869,30 @@ export class Room extends DurableObject {
   //   say {text, spot?, reply_to?}         a text message
   //   report {spot, size, cond, crowd, snap?}
   //   like {id}, delete {id}, nick {nick}
+  //   flag {id, reason}                    the report button; reason is spam, harass, sexual, child or other
+  //   admin {code}                         Bryan's claim: chat.js sends any text that starts with a slash this way
   //   "ping"                               plain text, answered "pong" by the runtime without waking the room
+  // From Bryan only (role "admin"; from anyone else they get error invalid):
+  //   ban {msg_id}, unban {sub_hash}, restore {id}, keep {id}, lock, unlock, hidden_list
   // To the app:
-  //   me {nick, role}                      who the socket is signed in as: after hello, and after a nickname change
+  //   me {nick, role}                      who the socket is signed in as: after hello, after a nickname change, and
+  //                                        after Bryan's claim (role "admin")
   //   history {messages, before_id?}       after hello (the last 100), or the answer to older
-  //   msg {msg}                            a new message, to every socket
-  //   update {id, likes} | {id, deleted: true}
+  //   msg {msg}                            a message, to every socket: a new one, or one Bryan restored
+  //   update {id, likes} | {id, deleted: true} | {id, hidden: true}
   //   online {online}                      when a socket says hello or closes
   //   tick {online}                        every 45 s while any socket is open (alarm())
-  //   error {code, for?}                   auth, banned, locked, slow:<s>, blocked:<rule>, invalid, update, size, or
-  //                                        nick:<length|chars|reserved|taken>; "for" is the frame's type
-  // Messages are always the public frame (toPublic()), so no user id or LINE data goes out. A socket that sends five
-  // bad frames (invalid ones, or writes before signing in) is closed with 1008, and a frame over 4 KB closes it with
+  //   error {code, for?}                   auth, banned, locked, slow:<s>, blocked:<rule>, invalid, update, size,
+  //                                        nick:<length|chars|reserved|taken>, or admin (a claim refused); "for" is
+  //                                        the frame's type
+  // To Bryan's sockets only:
+  //   msg {msg} with msg.hidden            a message just hidden, with why ("flags", "ban" or "admin"), where everyone
+  //                                        else gets update {id, hidden: true}
+  //   hidden {count, messages, banned}     the answer to hidden_list
+  //   ok {for, ...}                        one of his tools did its work
+  // Messages are always the public frame (toPublic()), so no user id or LINE data goes out; only Bryan's sockets learn
+  // why a message was hidden, and the LINE account code (sub_hash) that unban takes. A socket that sends five bad
+  // frames (invalid ones, or writes before signing in) is closed with 1008, and a frame over 4 KB closes it with
   // 1009. Each address may hold 5 sockets.
 
   // GET /ws, once the Worker has checked the Origin: a new socket, unless the visitor's address already holds 5. The
@@ -855,7 +924,8 @@ export class Room extends DurableObject {
       return;
     }
     const frame = readFrame(message);
-    const type = frame && (Object.hasOwn(READS, frame.type) || Object.hasOwn(WRITES, frame.type)) ? frame.type : null;
+    const known = (list) => Object.hasOwn(list, frame.type);
+    const type = frame && (known(READS) || known(WRITES) || known(ADMIN_TOOLS)) ? frame.type : null;
     let code = "invalid";
     try {
       if (type) code = await this.onFrame(ws, { ...NEW_SOCKET, ...ws.deserializeAttachment() }, type, frame);
@@ -896,7 +966,11 @@ export class Room extends DurableObject {
     // its way is checked against it too.
     const user = this.account(at.uid, at.tv);
     if (!user) return "auth";
-    return this[WRITES[type]](ws, user, frame);
+    if (Object.hasOwn(WRITES, type)) return this[WRITES[type]](ws, user, frame);
+    if (user.role !== "admin") return "invalid";
+    const refused = this.canWrite(user, type);
+    if (refused) return refused;
+    return this[ADMIN_TOOLS[type]](ws, user, frame);
   }
 
   // hello {v, token?}. A version the room doesn't take gets error update and the socket closes with 4426: the app shows
@@ -990,10 +1064,23 @@ export class Room extends DurableObject {
   // delete {id}: a user deletes a message of their own (the owner check is in the WHERE), and its likes go with it.
   // Every socket is told, so it goes from every screen. Replies keep their reply_to: the app shows "Message deleted"
   // for a parent it doesn't have.
+  //
+  // Bryan's Delete on anyone else's message hides it instead ("admin"): it goes from every screen but his, and stays in
+  // his hidden list, where he can restore it or keep it as evidence, until the daily clean-up takes it with the rest.
   onDelete(ws, user, frame) {
     if (!isId(frame.id)) return "invalid";
     const refused = this.canWrite(user, "delete");
     if (refused) return refused;
+    if (user.role === "admin") {
+      const hidden = this.all(
+        `UPDATE messages SET hidden_by = 'admin' WHERE id = ? AND uid IS NOT ? RETURNING ${MSG_COLS}`,
+        frame.id, user.id,
+      );
+      if (hidden.length > 0) {
+        this.announceHidden(hidden, "admin");
+        return;
+      }
+    }
     const gone = this.ctx.storage.transactionSync(() => {
       const row = this.one("DELETE FROM messages WHERE id = ? AND uid = ? RETURNING spot", frame.id, user.id);
       if (row) this.all("DELETE FROM likes WHERE msg_id = ?", frame.id);
@@ -1022,6 +1109,292 @@ export class Room extends DurableObject {
       }
     });
     this.sendToUser(user.id, { type: "me", nick: nick.nick, role: user.role });
+  }
+
+  // ---- The report button (spec "Moderation", step 4) -------------------------------------------------------------
+
+  // flag {id, reason}, on a message that is there to see. Flags are kept by LINE account (sub_hash), so an account
+  // flags a message once, however often it signs up again. A self-flag, a flag on Bryan's messages and one on a message
+  // he restored are ignored, and nothing is kept. Otherwise the message hides once 3 counted flags reach it, or at once
+  // on a one-flag hide (see FLAGS_TO_HIDE and flagger()). The flagger gets no answer either way, so nobody learns
+  // whether their flag counted. 20 flags a day.
+  onFlag(ws, user, frame) {
+    if (!isId(frame.id) || !REASONS.includes(frame.reason)) return "invalid";
+    const msg = this.one(
+      `SELECT m.uid, m.flag_immune, u.role FROM messages m LEFT JOIN users u ON u.id = m.uid
+       WHERE m.id = ? AND m.hidden_by IS NULL`,
+      frame.id,
+    );
+    if (!msg) return "invalid";
+    const refused = this.canWrite(user, "flag");
+    if (refused) return refused;
+    if (msg.uid === user.id || msg.role === "admin" || msg.flag_immune) return;
+    const now = this.now();
+    const added = this.one(
+      "INSERT INTO flags (msg_id, sub_hash, reason, ts) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING msg_id",
+      frame.id, user.sub_hash, frame.reason, now,
+    );
+    if (!added) return;
+    // The one-flag allowance is used only when it hides something.
+    const alone = ONE_FLAG_REASONS.has(frame.reason) && this.flagger(user.sub_hash, now).trusted
+      && this.useLimits(user.sub_hash, [ONE_FLAG_LIMIT], now) === 0;
+    if (alone || this.flaggedEnough(frame.id, now)) this.hideForFlags(frame.id, now);
+  }
+
+  // What the flags of LINE account `sub` weigh now: {counts} when they count toward the 3 that hide a message, and
+  // {trusted} when its sexual and child-safety flags may also hide one on their own. A flag counts from an account at
+  // least 24 hours old with a post, that isn't banned and has fewer than 2 flags Bryan has rejected; trusted is at
+  // least 7 days old with 5 posts. Posts are the account's messages still in the room and not hidden: text and session
+  // cards go after 30 days, so in practice this is posts of the last 30 days. It is worked out when a flag comes in, so
+  // a ban or a rejection stops an account's flags counting from then on. A few rows read, all by index.
+  flagger(sub, now) {
+    const no = { counts: false, trusted: false };
+    const user = this.one(
+      "SELECT u.id, u.created, s.banned FROM users u LEFT JOIN subs s ON s.sub_hash = u.sub_hash WHERE u.sub_hash = ?",
+      sub,
+    );
+    if (!user || user.banned || user.created > now - FLAGGER_AGE) return no;
+    const posts = this.one(
+      `SELECT count(*) AS n FROM (SELECT 1 FROM messages WHERE uid = ? AND hidden_by IS NULL LIMIT ${ONE_FLAG_POSTS})`,
+      user.id,
+    ).n;
+    if (posts === 0) return no;
+    const rejected = this.one(
+      `SELECT count(*) AS n FROM (SELECT 1 FROM flags WHERE sub_hash = ? AND rejected = 1 LIMIT ${FLAGGER_REJECTED})`,
+      sub,
+    ).n;
+    if (rejected >= FLAGGER_REJECTED) return no;
+    return { counts: true, trusted: user.created <= now - ONE_FLAG_AGE && posts >= ONE_FLAG_POSTS };
+  }
+
+  // Whether 3 of a message's flags count now (see flagger()). It stops looking at the third.
+  flaggedEnough(msgId, now) {
+    let counted = 0;
+    for (const { sub_hash } of this.all("SELECT sub_hash FROM flags WHERE msg_id = ? AND rejected = 0", msgId)) {
+      if (this.flagger(sub_hash, now).counts && ++counted >= FLAGS_TO_HIDE) return true;
+    }
+    return false;
+  }
+
+  // Hides a message for its flags. One hidden with a child-safety flag on it is copied to holds as well, in the same
+  // step: Bryan keeps it for 180 days, whatever else is deleted (spec "Moderation", step 5).
+  hideForFlags(msgId, now) {
+    const hidden = this.ctx.storage.transactionSync(() => {
+      const rows = this.all(
+        `UPDATE messages SET hidden_by = 'flags' WHERE id = ? AND hidden_by IS NULL RETURNING ${MSG_COLS}`,
+        msgId,
+      );
+      if (rows.length > 0 && this.one("SELECT 1 FROM flags WHERE msg_id = ? AND reason = 'child' AND rejected = 0", msgId)) {
+        this.hold(rows[0], "child", now);
+      }
+      return rows;
+    });
+    this.announceHidden(hidden, "flags");
+  }
+
+  // Tells everyone that messages (rows as MSG_COLS reads them) are hidden now, once that is stored. Readers get update
+  // {id, hidden: true} and take each one off their screens; Bryan's sockets get it again as msg, marked with why. The
+  // spot cards and the CHAT button's dot follow (messagesChanged()).
+  announceHidden(rows, reason) {
+    if (rows.length === 0) return;
+    this.messagesChanged(rows.length === 1 ? rows[0].spot : undefined);
+    const sorted = [...rows].sort((a, b) => a.id - b.id);
+    for (const msg of this.toPublic(sorted)) {
+      this.broadcast({ type: "update", id: msg.id, hidden: true }, { type: "msg", msg: { ...msg, hidden: reason } });
+    }
+  }
+
+  // A copy of a message (a row as MSG_COLS reads it) in holds, which Bryan keeps for 180 days, whatever else is
+  // deleted: the message as it was (body holds its time, kind, spot, reply and body, as JSON), its author's user id and
+  // LINE account code, and why it is kept ("child" or "keep").
+  hold(row, reason, now) {
+    const sub = row.uid === null ? null : (this.one("SELECT sub_hash FROM users WHERE id = ?", row.uid)?.sub_hash ?? null);
+    const copy = { ts: row.ts, kind: row.kind, spot: row.spot, reply_to: row.reply_to, body: JSON.parse(row.body) };
+    this.all(
+      "INSERT INTO holds (msg_id, body, uid, sub_hash, reason, ts) VALUES (?, ?, ?, ?, ?, ?)",
+      row.id, JSON.stringify(copy), row.uid, sub, reason, now,
+    );
+  }
+
+  // ---- Bryan's claim (spec "Moderation", step 7) -----------------------------------------------------------------
+
+  // admin {code}. chat.js sends any text that starts with a slash as this frame, never as say, so the code may come as
+  // the line Bryan typed ("/admin <code>", with either slash) or alone. It is compared with ADMIN_CODE in constant time,
+  // on SHA-256 digests (sameText). The first right code makes that account Bryan's: meta admin_uid and role "admin",
+  // and each of its sockets gets me with the new role. Claims are closed after that.
+  //   - An ADMIN_CODE under 32 characters, or none, switches claiming off.
+  //   - 3 wrong codes stop that LINE account claiming, and 10 in all stop everyone, until ADMIN_CODE is changed: the
+  //     counts are kept with a digest of the code they were tried against, and a new code starts them again.
+  //   - Any other slash command ("/shrug") is not a claim, so people who type those can't use up the 10.
+  //   - A claim refused for any of these reasons is not counted.
+  // Each of these refusals is error admin, whatever the reason, and none is a bad frame. A banned account gets banned.
+  async onAdmin(ws, user, frame) {
+    if (typeof frame.code !== "string") return "invalid";
+    const code = this.env.ADMIN_CODE;
+    if (typeof code !== "string" || code.length < ADMIN_CODE_MIN) return "admin";
+    const line = frame.code.trim();
+    const typed = ADMIN_COMMAND.test(line);
+    if (!typed && SLASH.test(line)) return "admin";
+    const tried = typed ? line.replace(ADMIN_COMMAND, "") : line;
+    const [right, against] = await Promise.all([sameText(tried, code), sha256b64u(`admin code ${code}`)]);
+    // Nothing awaits from here on, so two claims at once can't both get in, or both count as one. The account is read
+    // again first: it may have been banned, signed out or deleted while the digests were made.
+    const refused = this.canWrite(this.account(user.id, user.tv), "admin");
+    if (refused) return refused;
+    if (this.getMeta("admin_uid") !== null) return "admin";
+    const claims = this.claims(against);
+    const mine = claims.by[user.sub_hash] ?? 0;
+    if (claims.total >= CLAIM_TRIES_ALL || mine >= CLAIM_TRIES) return "admin";
+    if (!right) {
+      const by = { ...claims.by, [user.sub_hash]: mine + 1 };
+      this.setMeta("admin_claims", JSON.stringify({ ...claims, total: claims.total + 1, by }));
+      return "admin";
+    }
+    this.ctx.storage.transactionSync(() => {
+      this.setMeta("admin_uid", user.id);
+      this.all("UPDATE users SET role = 'admin' WHERE id = ?", user.id);
+    });
+    // His sockets are admin sockets from now on (the attachment's role), so hidden messages reach them.
+    for (const socket of this.ctx.getWebSockets()) {
+      const at = socket.deserializeAttachment();
+      if (at?.uid === user.id) socket.serializeAttachment({ ...at, role: "admin" });
+    }
+    this.sendToUser(user.id, { type: "me", nick: user.nick, role: "admin" });
+  }
+
+  // The wrong codes tried against the ADMIN_CODE whose digest is `against`: {code: that digest, total, by: {sub_hash:
+  // n}}. Counts made against an older code don't apply.
+  claims(against) {
+    const saved = JSON.parse(this.getMeta("admin_claims") ?? "null");
+    return saved?.code === against ? saved : { code: against, total: 0, by: {} };
+  }
+
+  // ---- Bryan's tools (spec "Moderation", step 5) -----------------------------------------------------------------
+  //
+  // Each needs role "admin" (onFrame checks it) and answers ok {for, ...} to the socket that asked.
+
+  // ban {msg_id}: bans the author of that message. Their LINE account is marked banned in subs, which outlives the
+  // account, so they can't sign in or sign up again; tv goes up, so their tokens stop working; their sockets close
+  // with 4403; and their flags stop counting (flagger()). Their messages from the last 24 hours are hidden ("ban"),
+  // and so is the one the ban was for, whatever its age. Bryan's own account can't be banned. ok carries the account's
+  // sub_hash, which unban takes.
+  onBan(ws, user, frame) {
+    if (!isId(frame.msg_id)) return "invalid";
+    const target = this.one(
+      "SELECT u.id, u.sub_hash, u.role FROM messages m JOIN users u ON u.id = m.uid WHERE m.id = ?",
+      frame.msg_id,
+    );
+    if (!target || target.role === "admin") return "invalid";
+    const hidden = this.ctx.storage.transactionSync(() => {
+      this.all("INSERT INTO subs (sub_hash, banned) VALUES (?, 1) ON CONFLICT (sub_hash) DO UPDATE SET banned = 1", target.sub_hash);
+      this.all("UPDATE users SET tv = tv + 1 WHERE id = ?", target.id);
+      return this.all(
+        `UPDATE messages SET hidden_by = 'ban' WHERE uid = ? AND hidden_by IS NULL AND (ts > ? OR id = ?) RETURNING ${MSG_COLS}`,
+        target.id, this.now() - BAN_HIDES, frame.msg_id,
+      );
+    });
+    this.closeUser(target.id, CLOSE_BANNED);
+    this.announceHidden(hidden, "ban");
+    this.send(ws, { type: "ok", for: "ban", msg_id: frame.msg_id, sub_hash: target.sub_hash });
+  }
+
+  // unban {sub_hash}: lifts a LINE account's ban. Its hidden messages stay hidden until Bryan restores them, and its old
+  // tokens stay dead: the person signs in with LINE again.
+  onUnban(ws, user, frame) {
+    if (typeof frame.sub_hash !== "string") return "invalid";
+    const lifted = this.one("UPDATE subs SET banned = 0 WHERE sub_hash = ? AND banned = 1 RETURNING sub_hash", frame.sub_hash);
+    if (!lifted) return "invalid";
+    this.send(ws, { type: "ok", for: "unban", sub_hash: frame.sub_hash });
+  }
+
+  // restore {id}: Bryan says a message is fine. Its flags are marked rejected (an account with 2 rejected flags stops
+  // counting) and it is made immune, so flags can't hide it again. A hidden one comes back for everyone: each socket
+  // gets it as msg, which chat.js merges by id.
+  onRestore(ws, user, frame) {
+    if (!isId(frame.id)) return "invalid";
+    const restored = this.ctx.storage.transactionSync(() => {
+      const was = this.one("SELECT hidden_by FROM messages WHERE id = ?", frame.id);
+      if (!was) return null;
+      this.all("UPDATE flags SET rejected = 1 WHERE msg_id = ?", frame.id);
+      const row = this.one(`UPDATE messages SET hidden_by = NULL, flag_immune = 1 WHERE id = ? RETURNING ${MSG_COLS}`, frame.id);
+      return { row, wasHidden: was.hidden_by !== null };
+    });
+    if (!restored) return "invalid";
+    if (restored.wasHidden) {
+      this.messagesChanged(restored.row.spot);
+      this.broadcast({ type: "msg", msg: this.toPublic([restored.row])[0] });
+    }
+    this.send(ws, { type: "ok", for: "restore", id: frame.id });
+  }
+
+  // keep {id}: "Keep as evidence". A copy goes to holds for 180 days, whatever happens to the message; keeping it again
+  // keeps no second copy.
+  onKeep(ws, user, frame) {
+    if (!isId(frame.id)) return "invalid";
+    const row = this.one(`SELECT ${MSG_COLS} FROM messages WHERE id = ?`, frame.id);
+    if (!row) return "invalid";
+    if (!this.one("SELECT 1 FROM holds WHERE msg_id = ? AND reason = 'keep'", frame.id)) this.hold(row, "keep", this.now());
+    this.send(ws, { type: "ok", for: "keep", id: frame.id });
+  }
+
+  // lock and unlock. While the room is locked (meta "locked" = 1), everyone can read but only Bryan can post (spec
+  // "Error handling"). Only posting stops (POSTS, in canWrite()), so likes, flags and deletes still work, and so does
+  // anything else that isn't a post.
+  onLock(ws) {
+    this.setMeta("locked", 1);
+    this.send(ws, { type: "ok", for: "lock" });
+  }
+
+  onUnlock(ws) {
+    this.setMeta("locked", 0);
+    this.send(ws, { type: "ok", for: "unlock" });
+  }
+
+  // hidden_list: hidden {count, messages, banned}. messages are the newest 100 hidden messages, newest first, each as
+  // its public frame plus why it was hidden (hidden: "flags", "ban" or "admin") and the reasons it was flagged for
+  // (flags: {spam: 2, child: 1}, from the flags Bryan hasn't rejected). count is how many are hidden in all. banned
+  // lists the banned LINE accounts, up to 100: each one's sub_hash, for unban, and its nickname while it still has an
+  // account (null after).
+  onHiddenList(ws) {
+    const rows = this.all(
+      `SELECT ${MSG_COLS}, hidden_by FROM messages WHERE hidden_by IS NOT NULL ORDER BY id DESC LIMIT ?`,
+      PAGE_MAX,
+    );
+    const flags = new Map(rows.map((row) => [row.id, {}]));
+    const counted = this.all(
+      `SELECT msg_id, reason, count(*) AS n FROM flags
+       WHERE rejected = 0 AND msg_id IN (SELECT value FROM json_each(?)) GROUP BY msg_id, reason`,
+      JSON.stringify(rows.map((row) => row.id)),
+    );
+    for (const { msg_id, reason, n } of counted) flags.get(msg_id)[reason] = n;
+    const shown = this.toPublic(rows);
+    this.send(ws, {
+      type: "hidden",
+      count: this.one("SELECT count(*) AS n FROM messages WHERE hidden_by IS NOT NULL").n,
+      messages: shown.map((msg, k) => ({ ...msg, hidden: rows[k].hidden_by, flags: flags.get(msg.id) })),
+      banned: this.all(
+        "SELECT s.sub_hash, u.nick FROM subs s LEFT JOIN users u ON u.sub_hash = s.sub_hash WHERE s.banned = 1 LIMIT ?",
+        PAGE_MAX,
+      ),
+    });
+  }
+
+  // GET /admin/where (Bryan only): where the room lives. It asks Cloudflare's trace page, served by the data centre the
+  // room runs in, and answers its colo= line as text ("colo=NRT"), and nothing else from it. 401 {error: "auth"}
+  // without a good token, 403 {error: "admin"} for anyone but Bryan, and 502 {error: "trace"} when the page can't be
+  // read.
+  async where(request) {
+    const user = await this.userFromToken(bearer(request));
+    if (!user) return refuse(401, "auth");
+    if (user.role !== "admin") return refuse(403, "admin");
+    try {
+      const res = await fetch(TRACE_URL);
+      const line = res.ok ? (await res.text()).split("\n").map((l) => l.trim()).find((l) => COLO.test(l)) : undefined;
+      if (line) return new Response(`${line}\n`, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    } catch (err) {
+      console.error("chat: the trace failed:", err?.name ?? "error");
+    }
+    return refuse(502, "trace");
   }
 
   // Stores a new message from `user` and sends it to every socket as msg.
@@ -1129,13 +1502,15 @@ export class Room extends DurableObject {
     if (online > 0) this.broadcast({ type: "tick", online });
   }
 
-  // Sends one frame to every open socket. A frame is a JSON object whose "type" is the spec's frame name.
-  broadcast(frame) {
+  // Sends one frame to every open socket, or `forAdmin` instead to Bryan's (their attachment's role is "admin"). A
+  // frame is a JSON object whose "type" is the spec's frame name.
+  broadcast(frame, forAdmin = frame) {
     const text = JSON.stringify(frame);
+    const adminText = forAdmin === frame ? text : JSON.stringify(forAdmin);
     for (const ws of this.ctx.getWebSockets()) {
       if (ws.readyState !== WebSocket.OPEN) continue;
       try {
-        ws.send(text);
+        ws.send(adminText !== text && ws.deserializeAttachment()?.role === "admin" ? adminText : text);
       } catch {
         // It closed in the meantime.
       }

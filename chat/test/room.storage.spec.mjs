@@ -138,12 +138,20 @@ describe("schema", () => {
   it("indexes messages on (ts), (spot, ts) and (uid, ts), plus the public reports per spot, and sessions on (uid, start)", async () => {
     await runInDurableObject(freshRoom(), (room) => {
       expect(indexes(room, "messages")).toEqual([
+        { cols: "id", partial: true }, // the hidden ones, for Bryan's list
         { cols: "spot,ts", partial: false },
         { cols: "spot,ts", partial: true },
         { cols: "ts", partial: false },
         { cols: "uid,ts", partial: false },
       ]);
       expect(indexes(room, "sessions")).toEqual([{ cols: "uid,start", partial: false }]);
+    });
+  });
+
+  it("indexes flags by LINE account, and the banned LINE accounts, for the moderation tools", async () => {
+    await runInDurableObject(freshRoom(), (room) => {
+      expect(indexes(room, "flags")).toEqual([{ cols: "sub_hash,rejected", partial: false }]);
+      expect(indexes(room, "subs")).toEqual([{ cols: "sub_hash", partial: true }]);
     });
   });
 

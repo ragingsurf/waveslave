@@ -98,7 +98,7 @@ const STR = {
     locked: "The room is locked. You can still read.", failed: "That didn't go through. Try again.", gone: "That's gone already",
     blocked: { link: "Links can't be posted here. Edit it and send again.", line: "LINE IDs and invites can't be posted here. Edit it and send again.",
       phone: "Phone numbers can't be posted here. Edit it and send again.", other: "That can't be posted here. Edit it and send again." },
-    pinTitle: "Almost done", pinShown: "Signed in with LINE. Go back to the WaveSlave app and enter this code:", pinBox: "Enter the code from the LINE sign-in",
+    pinTitle: "Almost done", pinShown: "Signed in with LINE. Now go back to the WaveSlave app: it finishes signing in by itself. If it asks for a code, enter this one:", pinBox: "Enter the code from the LINE sign-in",
     pinGo: "Sign in", pinWrong: "That code isn't right. Check it and try again.", signedIn: "Signed in with LINE", signInAgain: "Log in with LINE again first",
     posted: "Report posted", stars: n => `${n} of 5 stars`, future: "The start can't be later than now.", tooLong: "A session can be up to 12 hours.",
     saved: "Saved to your diary", savedShared: "Saved, and shared to the chat", notShared: why => `Saved to your diary, but it couldn't be shared: ${why}`,
@@ -163,7 +163,7 @@ const STR = {
     locked: "聊天室已鎖定，仍可閱讀。", failed: "沒有送出，請再試一次。", gone: "已經不在了",
     blocked: { link: "這裡不能貼連結，修改後再送出。", line: "這裡不能留 LINE ID 或邀請，修改後再送出。", phone: "這裡不能留電話號碼，修改後再送出。",
       other: "這段內容不能在這裡發表，修改後再送出。" },
-    pinTitle: "差一步就完成", pinShown: "已使用 LINE 登入。請回到 WaveSlave App，輸入這組代碼：", pinBox: "輸入 LINE 登入後顯示的代碼",
+    pinTitle: "差一步就完成", pinShown: "已使用 LINE 登入。請回到 WaveSlave App，它會自動完成登入。如果要求輸入代碼，請輸入這組：", pinBox: "輸入 LINE 登入後顯示的代碼",
     pinGo: "登入", pinWrong: "代碼不正確，請確認後再試一次。", signedIn: "已用 LINE 登入", signInAgain: "請先重新用 LINE 登入",
     posted: "已送出回報", stars: n => `${n} 顆星（滿分 5 顆）`, future: "開始時間不能晚於現在。", tooLong: "一次衝浪最長 12 小時。",
     saved: "已存入你的日誌", savedShared: "已儲存，並分享到聊天室", notShared: why => `已存入你的日誌，但無法分享：${why}`,
@@ -227,7 +227,7 @@ const STR = {
     locked: "ルームはロック中です。閲覧はできます。", failed: "送信できませんでした。もう一度お試しください。", gone: "すでにありません",
     blocked: { link: "リンクは投稿できません。直してから送ってください。", line: "LINE IDや招待は投稿できません。直してから送ってください。",
       phone: "電話番号は投稿できません。直してから送ってください。", other: "この内容は投稿できません。直してから送ってください。" },
-    pinTitle: "あと少しです", pinShown: "LINEでログインしました。WaveSlaveアプリに戻って、このコードを入力してください：", pinBox: "LINEログイン後に表示されたコードを入力",
+    pinTitle: "あと少しです", pinShown: "LINEでログインしました。WaveSlaveアプリに戻ると自動でログインします。コードを求められたら、これを入力してください：", pinBox: "LINEログイン後に表示されたコードを入力",
     pinGo: "ログイン", pinWrong: "コードが違います。確認してもう一度お試しください。", signedIn: "LINEでログインしました", signInAgain: "もう一度LINEでログインしてください",
     posted: "波情報を投稿しました", stars: n => `星${n}つ（5段階）`, future: "開始時刻を今より後にはできません。", tooLong: "1回のセッションは最長12時間です。",
     saved: "日記に保存しました", savedShared: "保存して、チャットに共有しました", notShared: why => `日記に保存しましたが、共有できませんでした：${why}`,
@@ -993,6 +993,11 @@ function enter(o) {
 //     it to Safari). This page shows only the pin, for the app that did start it, and signs nobody in.
 // The app that started it shows a code box while its v waits, and sends POST /auth/redeem {v, pin}. Three wrong pins or 10 minutes void
 // the sign-in. The LINE name only prefills the box; nothing here keeps it.
+// Before that, the app tries to finish by itself (Bryan, Oct 23: "make it go straight back to the app"). While its v waits and the page is
+// in view, it asks POST /auth/redeem {v, auto: true} every few seconds and on coming back to the foreground. The backend answers once
+// LINE has finished, and only to the network the sign-in finished from (the same phone's Safari), so coming back to the app is enough.
+// From another network it answers "net", and the code box is the way in. iOS gives a page no way to switch from Safari back to a
+// home-screen app, so the person still switches back themselves.
 const V_MS = 10 * 60e3, CONSENT = "v1"; // how long a sign-in waits; the version of the house rules and privacy note the tick agrees to
 const b64u = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 // This page's v while its sign-in can still finish, else null.
@@ -1005,11 +1010,37 @@ async function login() {
   const v = b64u(crypto.getRandomValues(new Uint8Array(32))), h = b64u(new Uint8Array(await subtle.digest("SHA-256", new TextEncoder().encode(v))));
   save(KEYS.v, JSON.stringify({ v, at: Date.now() })); save(KEYS.ret, CUR, true);
   if (!pendingV()) return note(S("loginFailed"), true); // storage is refused here, so the sign-in could never finish
-  R.pinErr = null; drawBar();
+  R.pinErr = null; auto.net = false; drawBar(); autoWatch();
   location.assign(`${BASE}/auth/line/start?h=${h}`);
 }
+// The sign-in finishing by itself: auto.t is the timer that asks, auto.busy while an answer is on its way, auto.net once the backend has
+// said the sign-in finished on another network (then only the code box finishes it).
+const AUTO_MS = 3e3, auto = { t: 0, busy: false, net: false };
+function autoWatch() { clearInterval(auto.t); auto.t = 0; if (!pendingV() || auto.net) return; auto.t = setInterval(guard(autoTry), AUTO_MS); autoTry(); }
+async function autoTry() {
+  const v = pendingV();
+  if (!v || auto.net || signedIn()) { clearInterval(auto.t); auto.t = 0; return; }
+  if (auto.busy || R.pinBusy || document.visibilityState === "hidden") return;
+  auto.busy = true;
+  try {
+    const j = await api("/auth/redeem", { method: "POST", body: { v, auto: true } });
+    clearInterval(auto.t); auto.t = 0;
+    if (j && typeof j.token === "string") save(KEYS.token, j.token); // kept at once, even if the room can't open yet
+    landing({ got: j, v });
+  } catch (e) {
+    const code = e && e.body && e.body.error;
+    if (code === "net") { auto.net = true; clearInterval(auto.t); auto.t = 0; landing({ net: true }); }
+    else if (code === "banned") { clearInterval(auto.t); auto.t = 0; landing({ error: "banned" }); }
+    // "expired" (LINE hasn't finished yet), offline or resting: ask again on the next tick.
+  } finally { auto.busy = false; }
+}
+document.addEventListener("visibilitychange", guard(() => { if (document.visibilityState === "visible") autoTry(); }));
+addEventListener("pageshow", guard(() => autoTry()));
+addEventListener("focus", guard(() => autoTry()));
 function finishSignin(s) {
   if (!s || typeof s !== "object") return;
+  if (s.got) { try { return landed(s.got, s.v, { auto: true }); } catch (e) { return note(S("loginFailed"), true); } }
+  if (s.net) { drawBar(); if (R.el.pinIn && !R.el.pinBox.hidden) R.el.pinIn.focus({ preventScroll: true }); return; }
   if (typeof s.error === "string") { save(KEYS.v, null); drawBar(); return note(s.error === "banned" ? S("banned") : s.error === "resting" ? S("resting") : S("loginFailed"), true); }
   const v = pendingV(), code = typeof s.code === "string" && /^[A-Za-z0-9_-]{22}$/.test(s.code) ? s.code : null, pin = typeof s.pin === "string" && /^\d{6}$/.test(s.pin) ? s.pin : null;
   if (v && code) return redeem(v, { code }, pin);
@@ -1023,11 +1054,7 @@ function loginWhy(e) { const b = (e && e.body) || {};
 // person's sign-up carries it in the sheet, and a sheet shut without joining means starting again.
 async function redeem(v, proof, pin) {
   try {
-    const j = await api("/auth/redeem", { method: "POST", body: { v, ...proof } });
-    if (j && typeof j.token === "string") return signedInAs(j.token);
-    if (!j || j.needs_signup !== true) throw new Error("chat: the redeem answer has no token");
-    save(KEYS.v, null); R.pinErr = null; drawBar();
-    openSheet("signup", signupSheet, { v, proof, nick: typeof j.line_name === "string" ? [...j.line_name.trim()].slice(0, 20).join("") : "" });
+    landed(await api("/auth/redeem", { method: "POST", body: { v, ...proof } }), v, proof);
   } catch (e) {
     const code = e && e.body && e.body.error;
     if (code === "v" && pin) return openSheet("pin", pinSheet, { pin }); // the code was made for another v: finished away from where it began
@@ -1036,6 +1063,13 @@ async function redeem(v, proof, pin) {
     if (proof.pin) { R.pinErr = loginWhy(e); return drawBar(); }
     drawBar(); note(loginWhy(e), true);
   }
+}
+// A redeem's answer: a known account is signed in, and a new person gets the sign-up sheet, which carries v and the proof.
+function landed(j, v, proof) {
+  if (j && typeof j.token === "string") return signedInAs(j.token);
+  if (!j || j.needs_signup !== true) throw new Error("chat: the redeem answer has no token");
+  save(KEYS.v, null); R.pinErr = null; drawBar();
+  openSheet("signup", signupSheet, { v, proof, nick: typeof j.line_name === "string" ? [...j.line_name.trim()].slice(0, 20).join("") : "" });
 }
 // Signed in: the token is kept, and the socket starts again with it.
 function signedInAs(token) {
@@ -1550,11 +1584,17 @@ document.addEventListener("click", guard(e => { const a = e.target instanceof El
 if (signin) { const back = load(KEYS.ret, true); save(KEYS.ret, null, true); if (back && own(ALL.spots, back) && inTaiwan(back) && back !== CUR) switchSpot(back); }
 window.CHAT.spot(CUR);
 showChat();
-if (opening && on()) enter(signin ? { signin } : q.get("chat") === "privacy" ? { privacy: true } : {});
-else if (signin && typeof setWorld === "function") {
+// The room with a sign-in to finish: at once while the chat is on, else once developer mode is (the PIN box first, when it's locked).
+function landing(signin) {
+  if (on()) return enter({ signin });
+  if (typeof setWorld !== "function") return;
   waiting = { signin };
   if (typeof worldLocked === "function" && worldLocked() && typeof wsPin === "function") wsPin(guard(() => setWorld(true)), guard(() => { waiting = null; }));
   else setWorld(true);
 }
+if (opening && on()) enter(signin ? { signin } : q.get("chat") === "privacy" ? { privacy: true } : {});
+else if (signin) landing(signin);
+// A sign-in this page started and LINE finished elsewhere (the home-screen app, opened again after iOS closed it): it goes on asking.
+if (!signin && pendingV()) autoWatch();
 
 } catch (e) { try { console.warn("chat:", e); } catch (e2) {} } })();

@@ -299,12 +299,20 @@ All `/me/*` and `/admin/*` routes use `Authorization: Bearer` and run inside the
      - for a known user: the session token, deleting the handoff row;
      - for a new person: `{needs_signup, line_name}`, keeping the row.
 5. **Login finished in a different browser.** This happens with the iPhone home-screen app, which hands the login to Safari.
-   - The page there has no matching `v`. It shows: "Signed in with LINE. Go back to the WaveSlave app and enter this code:
-     482913", and nothing else.
-   - The home-screen app shows a code box while its `v` is pending, and sends `POST /auth/redeem {v, pin}`.
+   - The page there has no matching `v`. It shows: "Signed in with LINE. Now go back to the WaveSlave app: it finishes
+     signing in by itself. If it asks for a code, enter this one: 482913", and nothing else.
+   - **By itself (Oct 23).** The callback stores `net`, an HMAC (keyed with `SUB_PEPPER`) of the network it came from
+     (`CF-Connecting-IP`: an IPv4 address, or an IPv6 /64), never the address. While its `v` is pending and the page is in
+     view, the home-screen app sends `POST /auth/redeem {v, auto: true}` every 3 seconds and on coming back to the
+     foreground. The room answers 410 `expired` until the handoff exists, opens it only from the same network, and answers
+     403 `net` otherwise, counting nothing. So coming back to the app is enough (iOS has no way for Safari to switch back to
+     a home-screen app). Signup takes `{v, auto: true}` the same way.
+   - Otherwise (`net`, or iCloud Private Relay giving the two a different address), the home-screen app shows a code box
+     while its `v` is pending, and sends `POST /auth/redeem {v, pin}`.
    - Three wrong pins, or 10 minutes, void the handoff.
-   - This is why a link someone else built can't sign them in as you: they hold neither your `v` nor your screen.
-6. **Signup.** `POST /auth/signup {v, code or pin, nick, consent: "v1"}` creates the user only after the tick, and records
+   - This is why a link someone else built can't sign them in as you: they hold neither your `v` nor your screen, and
+     aren't on your network.
+6. **Signup.** `POST /auth/signup {v, code, pin or auto, nick, consent: "v1"}` creates the user only after the tick, and records
    `consent_at` and `consent_ver`. The LINE name is used only to prefill the nickname, and is never stored.
 7. **Session token.**
    - Base64url `{uid, tv, exp}` plus an HMAC-SHA256 signature with `SESSION_SECRET`, valid 180 days.

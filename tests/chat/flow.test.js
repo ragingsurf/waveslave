@@ -1,6 +1,6 @@
 // Browser checks of the Taiwan chat's whole signed-in flow (web/chat.js) against the real backend (chat/) and a fake LINE: sign in with LINE,
 // sign up, post a message and a report, log a session and share it, unshare it, My sessions, Download my data, Sign out everywhere,
-// Delete my account, and the home-screen app's pin path.
+// Delete my account, and the home-screen app's pin path and its finishing by itself.
 // Usage: node tests/chat/flow.test.js <page.html>   (a page built with tests/map/tool.py)
 // Prints ok / FAIL for each step, and exits 1 on any FAIL or page error. The steps are one story, each building on the last, so after a FAIL
 // the rest are skipped. It needs chat/'s node_modules (npm ci in chat/).
@@ -229,7 +229,7 @@ const STEPS = {
     const shown = await a.evaluate(() => ({ title: document.getElementById("chatSheetTitle").textContent, text: document.querySelector(".chatroom .cr-sheet-b").textContent,
       pin: document.querySelector(".chatroom .cr-pin-code").textContent, inputs: document.querySelectorAll(".chatroom .cr-sheet input").length,
       token: localStorage.getItem("waveslave-chat-token"), href: location.href }));
-    if (!/^\d{6}$/.test(shown.pin) || !shown.text.startsWith("Signed in with LINE. Go back to the WaveSlave app and enter this code:") || shown.inputs || shown.token || /#[cp]=/.test(shown.href))
+    if (!/^\d{6}$/.test(shown.pin) || !shown.text.startsWith("Signed in with LINE. Now go back to the WaveSlave app: it finishes signing in by itself. If it asks for a code, enter this one:") || shown.inputs || shown.token || /#[cp]=/.test(shown.href))
       throw new Error(`the browser without v shows ${JSON.stringify(shown)}`);
     // A wrong code tapped in twice uses one of the three tries, not two: Sign in is off while the first is checked (each redeem held
     // here for 300 ms, so the second tap comes while it's on its way).
@@ -243,6 +243,27 @@ const STEPS = {
     await b.waitForSelector('.chatroom .cr-sheet [data-k="nick"]');
     if (await b.inputValue('.chatroom .cr-sheet [data-k="nick"]') !== line.name) throw new Error("the sign-up sheet isn't prefilled");
     await b.check('.chatroom .cr-sheet [data-k="consent"]'); await b.click('.chatroom .cr-sheet [data-k="join"]');
+    await signedInBar(b);
+    if (!(await b.evaluate(() => !!localStorage.getItem("waveslave-chat-token") && !localStorage.getItem("waveslave-chat-v")))) throw new Error("B isn't signed in, or still holds v");
+    if (await b.isVisible(".chatroom .cr-pinbox")) throw new Error("the code box still shows");
+    if (await a.evaluate(() => localStorage.getItem("waveslave-chat-token"))) throw new Error("A got signed in too");
+  },
+  // The home-screen app finishing by itself (Bryan, Oct 23). As in pinPath, B starts and A, with no v, finishes, but now both are on one
+  // network (the same CF-Connecting-IP on A's return from LINE and on B's calls): B signs itself in, the known account from pinPath, with
+  // nothing typed. A still shows the code, for when the networks differ.
+  async autoPath(s) {
+    const IP = { "cf-connecting-ip": "203.0.113.7" }, withIp = r => r.continue({ headers: { ...r.request().headers(), ...IP } });
+    const b = await s.open({}); let start = null;
+    await b.click(".chatfab"); await roomLive(b);
+    await b.route(`${CHAT()}/auth/line/start**`, r => { start = r.request().url(); return r.fulfill({ status: 204 }); });
+    await b.route(`${CHAT()}/auth/redeem`, withIp);
+    await b.click(".chatroom .cr-line");
+    for (let i = 0; i < 50 && !start; i++) await wait(100);
+    if (!start) throw new Error("the LINE button didn't start a sign-in");
+    const a = await s.open({ go: false });
+    await a.setExtraHTTPHeaders(IP); // on every request, the callback LINE redirects to included
+    await a.goto(start, { waitUntil: "load" }); await a.waitForURL(u => u.href.startsWith(ORIGIN()), { waitUntil: "load" });
+    await a.waitForSelector(".chatroom .cr-pin-code");
     await signedInBar(b);
     if (!(await b.evaluate(() => !!localStorage.getItem("waveslave-chat-token") && !localStorage.getItem("waveslave-chat-v")))) throw new Error("B isn't signed in, or still holds v");
     if (await b.isVisible(".chatroom .cr-pinbox")) throw new Error("the code box still shows");

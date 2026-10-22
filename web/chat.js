@@ -2,8 +2,9 @@
 // reports on the "Right now" card, the floating CHAT button, and the room. Taiwan only, one room for all of it, free, and people answer
 // each other (Bryan, Oct 21).
 // One classic script, loaded with defer after the page's own scripts. It declares no global names: it reads the page's ALL, LANG, CUR,
-// VIEW, SPT, T, countrySpots, switchSpot and setView by bare name, and gives the page only window.CHAT = {spot, relang}, which template.html
-// calls from boot() (a spot is shown) and setLang() (the language changed). It brings its own <style>, so its look ships with it.
+// VIEW, SPT, T, countrySpots, switchSpot and setView by bare name (and WORLD, setWorld, worldLocked and wsPin for developer mode), and gives
+// the page only window.CHAT = {spot, relang, dev}, which template.html calls from boot() (a spot is shown), setLang() (the language
+// changed) and keepWorld() (developer mode came on or went off). It brings its own <style>, so its look ships with it.
 // - It never throws into the page: each way in is wrapped, and while CHAT_URL or CONTACT is empty it does nothing at all, so the page
 //   works exactly as it does without it.
 // - Everything from the network goes in through textContent, setAttribute or a lookup in this file's own tables, never as HTML. No chat
@@ -22,6 +23,12 @@ const PAGE = typeof ALL === "object" && !!ALL && typeof LANG === "string" && typ
   && typeof countrySpots === "function" && typeof switchSpot === "function" && typeof setView === "function";
 if (!/^https?:\/\/./i.test(CHAT_URL) || !CONTACT || typeof CONTACT.name !== "string" || typeof CONTACT.email !== "string" || !CONTACT.name || !CONTACT.email || !PAGE) return;
 const BASE = CHAT_URL.replace(/\/+$/, "");
+// Who sees it (Bryan, Oct 22): only developer mode (the page's World mode, behind the PIN on the W in the logo) until Bryan says it's ready
+// for everyone; then PUBLIC goes to true. Tests set window.__chatPublic to see the chat as everyone will. While neither holds, the chat shows
+// nothing (no button, no strip, no credits line) and asks the backend nothing; template.html's keepWorld() calls CHAT.dev() each time the
+// mode changes. on() is read from the page's WORLD by bare name, like the rest of the page's state.
+const PUBLIC = window.__chatPublic === true;
+const on = () => PUBLIC || (typeof WORLD === "boolean" && WORLD);
 // Tests only: window.__chatTest makes CHAT note each time the room is asked to open (CHAT._opened) and hand over the strings (CHAT._strings)
 // and the conditions snapshot (CHAT._snap(id, ms)).
 const TEST = window.__chatTest ? [] : null;
@@ -300,7 +307,7 @@ function ask(id) { const n = ++asked; askedAt = Date.now();
 // reached. It is drawn again each minute, asking nothing, so the ages move on and a report past 4 hours leaves (the button keeps the focus).
 function drawStrip() {
   const s = document.getElementById("nowReports"); if (!s) return; const had = s.contains(document.activeElement);
-  const d = data && data.spot === shown && inTaiwan(shown) ? data : null;
+  const d = on() && data && data.spot === shown && inTaiwan(shown) ? data : null;
   s.hidden = !d; s.textContent = ""; if (!d) return;
   const post = el("button", { type: "button", class: "rp-post" }, S("postReport"));
   post.addEventListener("click", guard(() => enter({ sheet: "report", spot: shown })));
@@ -314,7 +321,7 @@ function drawStrip() {
 setInterval(guard(() => { if (document.visibilityState !== "hidden") drawStrip(); }), 60e3);
 
 // The CHAT button: CHAT, how many are online, and a pink dot while there's a message newer than the last one seen. The CSS shows it in
-// Taiwan (html.tw, set by boot()) on the Forecast view only.
+// Taiwan (html.tw, set by boot()) while the chat is on for this visitor (html.chat-on, set by shown()), on the Forecast view only.
 const dot = el("i", { class: "chatfab-dot", "aria-hidden": "true" }), word = el("b"), num = el("span", { class: "chatfab-n" });
 const fab = el("button", { type: "button", class: "chatfab" }, dot, word, num);
 fab.addEventListener("click", guard(() => enter({})));
@@ -1350,7 +1357,7 @@ function snapshot(id, ms) {
 //   stamp (99), and only on the Forecast view (with the map up, #viewFc is hidden). It's pinned to the screen, not to the header, so a
 //   header change never moves it. In 中文 and 日本語 its word takes the body font, as "Pick your day" does (VT323 has no CJK).
 // - .thru lets touches through it while a finger drags the day picker or the day chart (see below).
-// - html.tw .wrap: in Taiwan the page ends 84 px lower, so the button never covers the end of the credits.
+// - html.tw.chat-on .wrap: in Taiwan, with the chat on, the page ends 84 px lower, so the button never covers the end of the credits.
 // - .chatroom: the room covers everything, the full-screen map included, and the page behind it doesn't scroll. Its title, its ✕ and
 //   the picked filter are in the page's LED amber (--led-amb, darker in the light theme); + Report is the strip's amber pill.
 // - Nicknames and message text are isolated from the line around them, and break anywhere when they have to, so no message can push the
@@ -1370,7 +1377,7 @@ const CSS = `
 #nowReports .rp-dot[data-cond="choppy"],#nowReports .rp-dot[data-cond="blown"]{background:var(--bad)}
 #nowReports .rp-none{margin:0;font-size:13px;color:var(--muted)}
 .chatfab{position:fixed;right:calc(14px + env(safe-area-inset-right));bottom:calc(18px + env(safe-area-inset-bottom));z-index:90;display:none;align-items:center;gap:9px;height:46px;padding:0 18px 0 19px;border-radius:99px;border:1.5px solid #ffb347;background:#140e05;color:#ffb347;cursor:pointer;-webkit-tap-highlight-color:transparent;box-shadow:0 0 16px rgba(255,140,0,.4),0 6px 18px rgba(0,0,0,.45)}
-html.tw .chatfab{display:flex}
+html.tw.chat-on .chatfab{display:flex}
 html.chat-open .chatfab{display:none}
 html:has(#viewFc[hidden]) .chatfab{display:none}
 .chatfab.thru{pointer-events:none}
@@ -1378,7 +1385,7 @@ html:has(#viewFc[hidden]) .chatfab{display:none}
 html:not([lang="en"]) .chatfab b{font:700 16px/1 var(--body);letter-spacing:.04em}
 .chatfab-n{font:600 12.5px/1 var(--body);color:#fff3dc;white-space:nowrap}
 .chatfab-dot{flex:none;width:9px;height:9px;border-radius:50%;background:#ff3d7f;box-shadow:0 0 8px #ff3d7f}
-html.tw .wrap{padding-bottom:calc(84px + env(safe-area-inset-bottom))}
+html.tw.chat-on .wrap{padding-bottom:calc(84px + env(safe-area-inset-bottom))}
 html.chat-open,html.chat-open body{overflow:hidden}
 .chatroom{position:fixed;inset:0;z-index:110;display:flex;flex-direction:column;background:var(--bg);color:var(--ink);font:15px/1.45 var(--body);overscroll-behavior:contain;outline:none;-webkit-text-size-adjust:100%}
 .chatroom[hidden],.chatroom [hidden]{display:none!important}
@@ -1497,8 +1504,9 @@ html:not([lang="en"]) .cr-sheet-hd h2{font:700 21px/1.25 var(--body);letter-spac
 // ---- The page's hooks (template.html). boot() calls spot() for each spot it shows, which is also on every language change and every
 // return from the map, so the spot already shown is left alone; setLang() calls relang() to redraw in the new language, asking nothing.
 window.CHAT = {
-  spot: guard(id => { if (id === shown) return; shown = id; data = null; if (inTaiwan(id)) ask(id); else asked++; draw(); }),
+  spot: guard(id => { if (id === shown) return; shown = id; data = null; if (inTaiwan(id) && on()) ask(id); else asked++; draw(); }),
   relang: guard(() => { draw(); drawAll(); }),
+  dev: guard(() => showChat()),
 };
 if (TEST) Object.assign(window.CHAT, { _opened: TEST, _strings: STR, _snap: snapshot });
 
@@ -1509,24 +1517,44 @@ addEventListener("touchstart", guard(e => { if (e.target instanceof Element && e
 for (const t of ["touchend", "touchcancel"]) addEventListener(t, guard(e => { if (!e.touches.length) fab.classList.remove("thru"); }), { passive: true, capture: true });
 // Coming back to the page asks again, at most once a minute (the backend lets the browser keep an answer that long anyway).
 document.addEventListener("visibilitychange", guard(() => {
-  if (document.visibilityState === "visible" && shown && inTaiwan(shown) && Date.now() - askedAt >= 60e3) ask(shown); }));
+  if (document.visibilityState === "visible" && on() && shown && inTaiwan(shown) && Date.now() - askedAt >= 60e3) ask(shown); }));
 
 // ---- Start-up. A sign-in back from LINE (?chat#c=<code>&p=<pin>, or ?chat#e=<error>), ?chat and ?chat=privacy (the credits' Privacy
 // link) come out of the address at once, so the code never stays in it or in the history. boot() ran before this script loaded, so the
 // spot already up is drawn here. Back from LINE, the page goes back to the spot it was on when it left; then the room opens. The credits'
-// chat line (#chatCredits) shows now that the chat is on.
+// chat line (#chatCredits) shows while the chat is on for this visitor.
+// While it's developer mode only, a sign-in back from LINE finds developer mode off (the page forgets the PIN when it's left for LINE), so
+// the PIN box comes up first and the room opens once the PIN is in; cancelled, the sign-in is dropped. A plain ?chat link does nothing then.
 const q = new URLSearchParams(location.search), f = new URLSearchParams(location.hash.slice(1));
 const signin = f.has("e") ? { error: f.get("e") } : f.has("c") ? { code: f.get("c"), pin: f.get("p") } : null, opening = q.has("chat") || !!signin;
 if (opening) { try { history.replaceState(null, "", location.pathname + "#" + CUR); } catch (e) { location.hash = CUR; } }
 document.head.append(el("style", null, CSS));
 document.body.append(fab);
-const credits = document.getElementById("chatCredits"); if (credits) credits.hidden = false;
+const credits = document.getElementById("chatCredits");
+let waiting = null; // a sign-in back from LINE, waiting for developer mode to come on
+let wasOn = on();    // whether the chat was on for this visitor when last looked at; CHAT.spot() has already asked for the spot up
+// Developer mode came on or went off (CHAT.dev), or start-up: the button, strip and credits line follow. Coming on, the strip asks for the
+// spot shown and a sign-in waiting for developer mode goes on; going off, the room closes with its socket and an answer still on its way
+// is dropped.
+function showChat() {
+  const now = on(), turned = now !== wasOn; wasOn = now;
+  document.documentElement.classList.toggle("chat-on", now); if (credits) credits.hidden = !now;
+  if (now) { if (turned && shown && inTaiwan(shown)) ask(shown); if (waiting) { const o = waiting; waiting = null; enter(o); } }
+  else if (turned) { closeRoom(); asked++; data = null; online = null; lastId = 0; }
+  draw();
+}
 // The credits' Privacy link opens the note in place, not by loading the whole page again. One listener on the document, never on the
 // link itself, since applyLang() writes the credits' HTML anew; a click meant for a new tab or window goes on as a link.
 document.addEventListener("click", guard(e => { const a = e.target instanceof Element ? e.target.closest('a[href="?chat=privacy"]') : null;
   if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); enter({ privacy: true }); }));
 if (signin) { const back = load(KEYS.ret, true); save(KEYS.ret, null, true); if (back && own(ALL.spots, back) && inTaiwan(back) && back !== CUR) switchSpot(back); }
 window.CHAT.spot(CUR);
-if (opening) enter(signin ? { signin } : q.get("chat") === "privacy" ? { privacy: true } : {});
+showChat();
+if (opening && on()) enter(signin ? { signin } : q.get("chat") === "privacy" ? { privacy: true } : {});
+else if (signin && typeof setWorld === "function") {
+  waiting = { signin };
+  if (typeof worldLocked === "function" && worldLocked() && typeof wsPin === "function") wsPin(guard(() => setWorld(true)), guard(() => { waiting = null; }));
+  else setWorld(true);
+}
 
 } catch (e) { try { console.warn("chat:", e); } catch (e2) {} } })();

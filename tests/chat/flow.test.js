@@ -261,7 +261,7 @@ const STEPS = {
       await ctx.addInitScript(([o, lock]) => {
         try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", "fc"); localStorage.setItem("waveslave-lang", "en"); localStorage.setItem("waveslave-world", "0");
           if (lock) sessionStorage.setItem("waveslave-unlock", lock); } catch (e) {}
-        window.__chatUrl = o.url; window.__chatContact = o.contact;
+        window.__chatUrl = o.url; window.__chatContact = o.contact; window.__chatPublic = true;
         // What the address says once the page is ready: chat.js (deferred) has run by then.
         document.addEventListener("DOMContentLoaded", () => { window.__hrefAtReady = location.href; }, { once: true }); }, [{ url: CHAT(), contact: CONTACT }, LOCK]);
       const page = await ctx.newPage(); page.on("pageerror", e => errs.push(String(e)));

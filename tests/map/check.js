@@ -778,7 +778,7 @@ const CHECKS = {
     await ctx.addInitScript(([saved, now, lock, world, store, chat]) => { Date.now = () => now; try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", "ws"); localStorage.setItem("waveslave-lang", "en");
       if (world) localStorage.setItem("waveslave-world", "1"); for (const k in store || {}) localStorage.setItem(k, store[k]);
       if (lock) sessionStorage.setItem("waveslave-unlock", lock); if (saved) localStorage.setItem(saved.key, JSON.stringify(saved.view)); } catch (e) {}
-      if (chat && typeof chat.url === "string") { window.__chatUrl = chat.url; window.__chatContact = { name: "Test Operator", email: "chat@example.com" }; } }, [saved, NOW, LOCK, world, store, chat]);
+      if (chat && typeof chat.url === "string") { window.__chatUrl = chat.url; window.__chatPublic = true; window.__chatContact = { name: "Test Operator", email: "chat@example.com" }; } }, [saved, NOW, LOCK, world, store, chat]);
     const page = await ctx.newPage(); page.on("pageerror", e => errs.push(String(e)));
     await page.goto(PAGE + "#" + spot, { waitUntil: "load" });
     await page.waitForFunction(() => (document.getElementById("wsTime") || {}).textContent); // the map has drawn once

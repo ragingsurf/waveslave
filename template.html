@@ -1545,11 +1545,11 @@ const WS = (() => {
   let mvRaf = 0; // without streaks running, moves still redraw at most once per screen frame
   // A map on the move (a glide, a flight, a run of wheel notches) is drawn the quick way, FAST: the colours stretched plainly and nothing glowing,
   // as soon as a second move follows the first within 150 ms; 150 ms after the last one it's drawn once more in full (Oct 22). A single jump
-  // (reduced motion, the test hook) is drawn in full straight away. On the move, the last drawing is only stretched and slid (stretch) for up
+  // (reduced motion, the test hook) is drawn in full straight away. In a glide or flight (anim), the last drawing is only stretched and slid (stretch) for up
   // to 100 ms while it's within a quarter of the zoom it was drawn at, so a big screen isn't drawn afresh on every frame of a flight.
   let FAST = false, crisp = 0; const quick = () => FAST || TLF != null; // and so is the map while the time bar is dragged
-  function moved() { clampView(); FAST = !!crisp; clearTimeout(crisp); crisp = setTimeout(() => { crisp = 0; if (FAST) { FAST = false; if (raf) dirty = true; else drawBase(); } }, 150);
-    if (FAST && drawn && performance.now() - drawn.at < 100 && z/drawn.z > .8 && z/drawn.z < 1.25) { stretch(); return; }
+  function moved(anim) { clampView(); FAST = !!crisp; clearTimeout(crisp); crisp = setTimeout(() => { crisp = 0; if (FAST) { FAST = false; if (raf) dirty = true; else drawBase(); } }, 150);
+    if (anim && FAST && drawn && performance.now() - drawn.at < 100 && z/drawn.z > .8 && z/drawn.z < 1.25) { stretch(); return; }
     if (raf) dirty = true; else if (!mvRaf) mvRaf = requestAnimationFrame(() => { mvRaf = 0; drawBase(); }); }
   // Fingers (and the wheel) move the map as it was last drawn, stretched and slid into place, which the phone does at once, and the map is drawn
   // afresh once they rest a moment or let go (Oct 22): drawing it on every move lagged badly on Android phones. The streaks wait meanwhile.
@@ -1563,14 +1563,14 @@ const WS = (() => {
   function glide(tx, ty, tz) { unglide(); if (matchMedia("(prefers-reduced-motion: reduce)").matches) { [cx, cy, z] = [tx, ty, tz]; moved(); return; }
     const x0 = cx, y0 = my(cy), y1 = my(ty), zs = z, t0 = performance.now();
     const step = now => { const p = Math.min(1, Math.max(0, now - t0)/700), e = p < .5 ? 4*p*p*p : 1 - Math.pow(2 - 2*p, 3)/2;
-      [cx, cy, z] = p < 1 ? [x0 + (tx-x0)*e, iy(y0 + (y1-y0)*e), zs*Math.pow(tz/zs, e)] : [tx, ty, tz]; moved(); gl = p < 1 ? requestAnimationFrame(step) : 0; };
+      [cx, cy, z] = p < 1 ? [x0 + (tx-x0)*e, iy(y0 + (y1-y0)*e), zs*Math.pow(tz/zs, e)] : [tx, ty, tz]; moved(p < 1); gl = p < 1 ? requestAnimationFrame(step) : 0; };
     gl = requestAnimationFrame(step); }
   // A country button's trip flies like a camera (MAPM.flight), the view's width being W/z degrees: eased gently in and out so it sets off at once,
   // and the further it goes the longer it takes, 0.8 to 1.6 s. Zoomed out past the whole Pacific, the map holds at its widest. With reduced motion, a jump.
   function fly(tx, ty, tz) { if (matchMedia("(prefers-reduced-motion: reduce)").matches) return glide(tx, ty, tz); unglide();
     const f = MAPM.flight(cx, my(cy), W/z, tx, my(ty), W/tz), ms = Math.min(1600, Math.max(800, f.S*250)), t0 = performance.now();
     const step = now => { const p = Math.min(1, Math.max(0, now - t0)/ms), [x, y, w] = f.at((1 - Math.cos(Math.PI*p))/2);
-      [cx, cy, z] = p < 1 ? [x, iy(y), W/w] : [tx, ty, tz]; moved(); gl = p < 1 ? requestAnimationFrame(step) : 0; };
+      [cx, cy, z] = p < 1 ? [x, iy(y), W/w] : [tx, ty, tz]; moved(p < 1); gl = p < 1 ? requestAnimationFrame(step) : 0; };
     gl = requestAnimationFrame(step); }
   // The map's country buttons: the pressed one is the map's country.
   const ctryOn = () => document.querySelectorAll("#wsCtry button").forEach(b => b.setAttribute("aria-pressed", b.dataset.c === MC));

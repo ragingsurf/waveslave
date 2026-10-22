@@ -434,8 +434,10 @@ function retry(ms) { clearTimeout(sock.retryT); sock.retryT = setTimeout(guard((
 function lost(code) {
   sock.ready = false; R.older = false; clearTimeout(sock.openT); clearTimeout(sock.deadT); clearTimeout(sock.pongT);
   // Texts still waiting stay on the list for the next socket's history to settle (settlePending()); resting or too old, none comes soon.
+  // Signed out, deleted or banned (4401, 4403), the next socket says hello as a reader, or as whoever another tab signed in as, so their
+  // history can't settle them: the text goes back in the box first, before the quiet sign-out empties the list.
   if (!R.open) return;
-  if (code === 4429 || code === 4426) restorePending(true);
+  if (code === 4429 || code === 4426 || code === 4401 || code === 4403) restorePending(true);
   if (code === 4429) { setState("resting"); const now = Date.now(); return retry(Math.ceil((now + 1) / DAY) * DAY - now + Math.random() * 60e3); }
   if (code === 4426) return setState("update");
   if (code === 4401 || code === 4403) { if (code === 4403) note(S("banned"), true); return tokenRefused(true); }

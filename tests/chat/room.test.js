@@ -886,6 +886,25 @@ const CHECKS = {
       .catch(async () => { throw new Error(`after the 1008 close: ${JSON.stringify(await look())}`); });
     if ((await look()).note !== "That didn't go through. Try again.") throw new Error(`the text came back, but the line says ${JSON.stringify((await look()).note)}`);
   },
+  // A text sent just before the room closes the socket with 4401 (signed out everywhere, or the account deleted) or 4403 (banned) isn't
+  // lost: the page signs out quietly, and the text is back in the box for when they sign in again. A stand-in room that closes the
+  // socket, unanswered, when a text comes.
+  async pendingSignedOut(open) {
+    for (const code of [4401, 4403]) {
+      const text = `Sent as it closed (${code})`;
+      const page = await open({ as: "p1", ws: route => { route.onMessage(m => { if (m === "ping") return route.send("pong");
+        const f = JSON.parse(m);
+        if (f.type === "hello") { if (f.token) route.send(JSON.stringify({ type: "me", nick: "Poster1", role: "user" })); route.send(JSON.stringify({ type: "history", messages: [standIn(1)] })); }
+        if (f.type === "say") route.close({ code, reason: "signed out" }); }); } });
+      await openRoom(page);
+      await page.fill(".chatroom .cr-in", text); await page.press(".chatroom .cr-in", "Enter");
+      await page.waitForFunction(() => document.querySelector(".chatroom .cr-line").getClientRects().length > 0 && !localStorage.getItem("waveslave-chat-token"), null, { timeout: 5e3 })
+        .catch(() => { throw new Error(`after a ${code} close the page didn't sign out`); });
+      await wait(300);
+      const box = await page.evaluate(() => document.querySelector(".chatroom .cr-in").value);
+      if (box !== text) throw new Error(`after a ${code} close the box holds ${JSON.stringify(box)}, want the text sent just before`);
+    }
+  },
 };
 
 (async () => {

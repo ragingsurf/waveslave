@@ -1435,7 +1435,7 @@ const WS = (() => {
     // The map's own layers (colours, swell arrows, land, pressure lines, typhoon tracks) are drawn only inside the Pacific box: zoomed out on a phone held upright, plain dark sea above and below it.
     // The overlays drawn after them (spot markers, tags, towns, the open spot's dial and the pin) are not clipped and may cross the box's edge: cut off there, they would look broken.
     const B = MAPM.PBOX, [bl, bt] = px(B.l, B.n), [br, bb] = px(B.r, B.s); g.save(); g.beginPath(); g.rect(bl, bt, br-bl, bb-bt); g.clip();
-    heat(g, S, TLF != null ? Math.round(cell*1.6) : cell, TLF != null); // coarser colours while the time bar is dragged, full detail once it lets go
+    heat(g, S, quick() ? Math.round(cell*1.6) : cell, TLF != null); // coarser colours while the map or time bar moves, full detail once it rests
     if (layer === "swell") swellArrows(g, S);
     landLayer(g, close);
     isobars(g); tracks(g, t); g.restore();
@@ -1626,11 +1626,13 @@ const WS = (() => {
   // Fingers (and the wheel) move the map as it was last drawn, stretched and slid into place, which the phone does at once, and the map is drawn
   // afresh once they rest a moment or let go (Oct 22): drawing it on every move lagged badly on Android phones. The streaks wait meanwhile.
   // A drag or zoom out that slides the picture off an edge of the map would leave that edge blank till the fingers rest, so then it's drawn again the
-  // quick way on the next frame (Bryan, Oct 22: "why is it not loading the sides?"). After one such draw the next waits twice as long as it took,
-  // so a slow phone still mostly slides.
+  // quick way on the very next frame (Bryan, Oct 22: "why is it not loading the sides?"; a blank side is worse than a dropped frame). A zoom in
+  // past half again as close as it was drawn is drawn again too, so it isn't left blurry; that waits twice as long as the last draw took, so a slow
+  // phone still mostly stretches.
   let drawn = null, settle = 0, fill = 0, cost = 0;
+  const stale = () => bare() || z/drawn.z > 1.5 && performance.now() - drawn.at > 2*cost;
   function liveMoved() { clampView(); if (!drawn) return moved(); stretch(); clearTimeout(settle); settle = setTimeout(settled, 120);
-    if (!fill && bare() && performance.now() - drawn.at > 2*cost) fill = requestAnimationFrame(() => { fill = 0; if (!settle || !bare()) return;
+    if (!fill && stale()) fill = requestAnimationFrame(() => { fill = 0; if (!settle || !stale()) return;
       const t = performance.now(), f = FAST; FAST = true; drawBase(); FAST = f; cost = performance.now() - t; }); }
   function slid() { const k = z/drawn.z; return [W/2*(1-k) + (drawn.cx-cx)*z, H/2*(1-k) - (drawn.y-my(cy))*z, k]; }
   function stretch() { const [x, y, k] = slid(); base.style.transform = `translate(${x}px,${y}px) scale(${k})`; }
@@ -1753,7 +1755,8 @@ const WS = (() => {
       zoomAt(Math.exp(-d*(e.ctrlKey ? 0.012 : 0.0025)), x, y, true); }, {passive: false});
     // Safari on a Mac sends trackpad pinches as gesture events instead.
     let gsc = 1; fx.addEventListener("gesturestart", e => { e.preventDefault(); gsc = 1; });
-    fx.addEventListener("gesturechange", e => { e.preventDefault(); const [x,y] = rel(e); zoomAt(e.scale/gsc, x, y, true); gsc = e.scale; });
+    // iPhones send them for a two-finger pinch too, alongside the pointers the pinch above already follows: those are left to it, or the zoom runs at double speed.
+    fx.addEventListener("gesturechange", e => { e.preventDefault(); if (P.size) return; const [x,y] = rel(e); zoomAt(e.scale/gsc, x, y, true); gsc = e.scale; });
     document.getElementById("wsIn").onclick = () => zoomBy(1.6);
     document.getElementById("wsOut").onclick = () => zoomBy(1/1.6);
     document.getElementById("wsFs").onclick = () => setView("fc"); // ✕ leaves the map for Forecast (the map is only ever full screen)

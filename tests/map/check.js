@@ -584,7 +584,8 @@ const CHECKS = {
     if (sign !== "LET GO ▲") throw new Error(`on the Forecast page the drag leaves the sign saying ${sign}, want LET GO ▲`);
   },
   // The map dragged or zoomed out and still moving: it is drawn again as it goes, so no edge it slides or shrinks away from shows blank (Oct 22).
-  // A finger on a phone (upright and on its side) and a tablet, a mouse drag and a run of wheel notches out on a laptop.
+  // A finger on a phone (upright and on its side) and a tablet, a pinch out and in on a phone (not left stretched blurry either), a mouse drag and a
+  // run of wheel notches out on a laptop.
   async dragFillsEdges(open) {
     const blank = async (page, b) => { await page.waitForTimeout(50); // under the 120 ms rest that draws it anyway
       const t = await page.evaluate(() => document.getElementById("wsBase").style.transform);
@@ -596,6 +597,13 @@ const CHECKS = {
       await s.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
       for (let i = 1; i <= 12; i++) { await s.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x - b.width*.6*i/12, y }] }); await page.waitForTimeout(16); }
       const r = await blank(page, b); await s.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }); if (r) bad.push(`${name} finger drag: ${r}`); }
+    for (const [name, d0, d1] of [["phone pinch out", 150, 10], ["phone pinch in", 20, 160]]) {
+      const page = await open(home("tw")), b = await page.locator("#wsFx").boundingBox(), s = await page.context().newCDPSession(page), x = b.x + b.width/2, y = b.y + b.height/2;
+      await s.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: x - d0, y, id: 0 }, { x: x + d0, y, id: 1 }] });
+      for (let i = 1; i <= 12; i++) { const d = d0 + (d1-d0)*i/12; await s.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x - d, y, id: 0 }, { x: x + d, y, id: 1 }] }); await page.waitForTimeout(16); }
+      let r = await blank(page, b); const k = await page.evaluate(() => +(/scale\(([\d.e-]+)\)/.exec(document.getElementById("wsBase").style.transform) || [0, 1])[1]);
+      if (k > 1.6) r = (r ? r + ", " : "") + `stretched ${k.toFixed(2)}x, so blurry`;
+      await s.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }); if (r) bad.push(`${name}: ${r}`); }
     const laptop = { width: 1440, height: 900 };
     { const page = await open({ ...home("tw"), size: laptop }), b = await page.locator("#wsFx").boundingBox(), x = b.x + b.width*.8, y = b.y + b.height/2;
       await page.mouse.move(x, y); await page.mouse.down();

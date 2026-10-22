@@ -91,8 +91,10 @@ const SOCKETS_PER_IP = 5;
 // connection itself, and the runtime still hands the room every frame: a test client under wrangler dev kept one
 // closed socket sending about 4,000 frames a second for 45 s, fast enough to spend the day's 100,000 in about 25 s.
 // Nothing in the room can stop those calls, and Cloudflare may count each one against the day's limit, so the room
-// counts them too (webSocketMessage()). Such a client can still put the chat to rest for the day, but rest() then
-// stops it at 90%, before Cloudflare's own limit would make the chat fail with errors.
+// counts them too (webSocketMessage()). The chat rests at 90% (rest()) and tells the open screens it is resting first,
+// but nothing stops a client that keeps sending after its close: rest() closes only open sockets, and one already
+// closing goes on being handed frames, each still counted. Such a client can still take the count past the daily
+// limit within seconds, and new visitors may then see "offline" instead of "resting".
 const FRAMES_PER_SOCKET = 1000;
 const OLDER_PAGE = 50; // messages in each page of older ones
 const OLDER_EVERY = SECOND; // one page of older messages a second per socket
@@ -1049,8 +1051,9 @@ export class Room extends DurableObject {
   // A frame that reaches a socket the room has already closed (1008, 1009, 4429 or any other close) is counted, and
   // rest() asked, like any other frame, and then dropped: not answered. The runtime hands the room every frame a
   // client sends after the close for as long as the client keeps the connection, and a client that ignores the close
-  // can send without limit (see FRAMES_PER_SOCKET). Each of those calls may count against Cloudflare's daily limit,
-  // and counting them here is what lets rest() put the chat to rest at 90% instead of letting that limit make it fail.
+  // can send without limit (see FRAMES_PER_SOCKET). Each of those calls may count against Cloudflare's daily limit, so
+  // the room counts them, and rests at 90% (rest()); but resting doesn't stop such a client either: its frames go on
+  // coming and being counted, and can take the count past the daily limit (FRAMES_PER_SOCKET says what then).
   async webSocketMessage(ws, message) {
     this.usage("req");
     await this.ensureAlarm();

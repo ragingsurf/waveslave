@@ -508,8 +508,9 @@ What each action costs:
   the connection open: about 4,000 a second for 45 s in a test under `wrangler dev`, enough for the day's 100,000 in about 25 s.
   Nothing in the room can stop those calls. Cloudflare bills incoming WebSocket messages as requests (20 to 1 for billing), and
   its pricing page doesn't say whether that ratio applies to the free plan's 100,000 a day, so the room counts each one as a room
-  request, like every other frame. Such a client can still put the chat to rest for the day, but the chat then rests at 90% and
-  says so, instead of failing with Cloudflare's errors once the daily limit is passed.
+  request, like every other frame. The chat rests at 90% and tells the open screens it is resting first, but nothing stops a
+  client that keeps sending after its close: it can still take the count past the daily limit within seconds, and new visitors
+  may then see "offline" instead of "resting".
 
 At launch (a few hundred Taiwan page views and a few hundred messages a day) that is under 5% of every limit.
 

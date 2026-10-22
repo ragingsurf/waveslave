@@ -75,11 +75,19 @@ const PROTO_OLDEST = Math.max(1, PROTO - 1); // the room takes the current versi
 const FRAME_MAX = 4096; // bytes of UTF-8 in one frame; a bigger one closes the socket
 const BAD_FRAMES = 5; // bad frames that close a socket
 const SOCKETS_PER_IP = 5;
+// Frames one socket may send, of any kind (ruling R22). Every frame the room's code sees is a room request against the
+// free plan's 100,000 a day (DAILY_LIMITS), refused or not, so without this one connection could spend the whole day's
+// budget and put the chat to rest. 1,000 is 1% of it. The room's own limits keep a person far below that: 20 messages
+// and 30 likes per 10 minutes, a page of older messages a second. A reconnecting client counts from nothing on each new
+// socket, and chat.js starts a new one after 5 minutes in the background. The next frame past it is not answered: the
+// socket is closed with 1008, as for bad frames, which chat.js takes as a drop and opens a new socket after 1 s.
+// Bryan's sockets (role "admin") aren't counted, so his tools always work.
+const FRAMES_PER_SOCKET = 1000;
 const OLDER_PAGE = 50; // messages in each page of older ones
 const OLDER_EVERY = SECOND; // one page of older messages a second per socket
 const TEXT_MAX = 500; // characters in a text message
 // Close codes. 1008 and 1009 are the standard ones; the 44xx ones are the chat's own, for chat.js to read.
-const CLOSE_BAD = 1008; // five bad frames
+const CLOSE_BAD = 1008; // five bad frames, or more than FRAMES_PER_SOCKET
 const CLOSE_TOO_BIG = 1009; // a frame over 4 KB
 const CLOSE_SIGNED_OUT = 4401; // the account signed out everywhere, or was deleted: its tokens no longer work
 const CLOSE_BANNED = 4403; // Bryan banned the account: "This LINE account can't post here"
@@ -88,8 +96,8 @@ const CLOSE_RESTING = 4429; // the chat is resting (rest()): "Chat is resting un
 
 // What a socket's attachment holds (it lives with the socket, through hibernation): uid, tv and role once it has said
 // hello with a good token, and null for a reader; v, its protocol version, once it has said hello; bad, the bad frames
-// it has sent; and olderAt, when it last got a page of older messages.
-const NEW_SOCKET = Object.freeze({ uid: null, tv: null, role: null, v: null, bad: 0, olderAt: 0 });
+// it has sent; olderAt, when it last got a page of older messages; and frames, every frame it has sent (but "ping").
+const NEW_SOCKET = Object.freeze({ uid: null, tv: null, role: null, v: null, bad: 0, olderAt: 0, frames: 0 });
 
 // The frames a socket may send, and the method that answers each. Reading needs no sign-in (Bryan, Oct 21: sign in
 // with LINE to post), so hello and older work for everyone; the writes need a socket that said hello signed in, and
@@ -978,8 +986,9 @@ export class Room extends DurableObject {
   // why a message was hidden, and the LINE account code (sub_hash) that unban takes. A socket that sends five bad
   // frames (invalid ones, or writes before signing in) is closed with 1008. gone is not a bad frame: a working app gets
   // it from ordinary races (a double tap, a like on a message hidden just as it was tapped). A frame over 4 KB closes
-  // it with 1009. Each address may hold 5 sockets. The room's own close codes: 4401 signed out everywhere (or the
-  // account is deleted), 4403 banned, 4426 reload for the new chat, and 4429 resting.
+  // it with 1009. A socket that has sent 1,000 frames of any kind is closed with 1008 at the next one, unanswered
+  // (FRAMES_PER_SOCKET); Bryan's never are. Each address may hold 5 sockets. The room's own close codes: 4401 signed out
+  // everywhere (or the account is deleted), 4403 banned, 4426 reload for the new chat, and 4429 resting.
 
   // GET /ws, once the Worker has checked the Origin: a new socket, unless the visitor's address already holds 5. The
   // address is kept only as a tag on its sockets, and only as its HMAC under SUB_PEPPER, so the room never holds an IP
@@ -1012,11 +1021,13 @@ export class Room extends DurableObject {
   }
 
   // Every frame from a socket but "ping". Each one is a room request against the free plan's daily limit. While the
-  // chat rests, a frame isn't answered: the socket is closed with 4429, with every other open one (rest()).
+  // chat rests, a frame isn't answered: the socket is closed with 4429, with every other open one (rest()). A frame past
+  // the socket's 1,000 isn't answered either: the socket is closed with 1008 (overFrames()).
   async webSocketMessage(ws, message) {
     this.usage("req");
     await this.ensureAlarm();
     if (this.rest()) return;
+    if (this.overFrames(ws)) return;
     if (frameBytes(message) > FRAME_MAX) {
       this.send(ws, errorFrame("size"));
       ws.close(CLOSE_TOO_BIG, "frame too big");
@@ -1046,6 +1057,21 @@ export class Room extends DurableObject {
       if (at.bad + 1 >= BAD_FRAMES) ws.close(CLOSE_BAD, "bad frames");
       else ws.serializeAttachment({ ...at, bad: at.bad + 1 });
     }
+  }
+
+  // Counts one more frame from ws, in its attachment, so the count lives through hibernation. Past FRAMES_PER_SOCKET the
+  // socket is closed with 1008 and this says so: the frame goes unanswered. Bryan's sockets aren't counted.
+  overFrames(ws) {
+    const at = { ...NEW_SOCKET, ...ws.deserializeAttachment() };
+    if (at.role === "admin") return false;
+    ws.serializeAttachment({ ...at, frames: at.frames + 1 });
+    if (at.frames + 1 <= FRAMES_PER_SOCKET) return false;
+    try {
+      ws.close(CLOSE_BAD, "too many frames");
+    } catch {
+      // It closed in the meantime.
+    }
+    return true;
   }
 
   // A socket closed (the runtime has already answered its close, as the compatibility date asks): everyone left hears

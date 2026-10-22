@@ -408,7 +408,8 @@ function validBody(kind, b) {
 // after 12 s, or 100 s without a frame, counts as a drop; back in the foreground it sends "ping" (the room answers "pong" without
 // waking), or starts again if the socket is still trying to open; after 5 minutes in the background it closes until the page is back.
 // The room's own close codes: 4401 the account signed out everywhere or was deleted, 4403 banned, 4426 this page is too old, 4429 the
-// chat is resting until 00:00 UTC (08:00 in Taiwan).
+// chat is resting until 00:00 UTC (08:00 in Taiwan). Any other close is a drop, the room's 1008 included (five bad frames, or a frame
+// past the 1,000 one socket may send): a new socket starts it all again.
 function connect() {
   stopSocket();
   if (R.state !== "offline") setState("connecting");

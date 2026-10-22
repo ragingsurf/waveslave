@@ -351,6 +351,112 @@ describe("frames", () => {
   });
 });
 
+// ---- Frames per socket (ruling R22) --------------------------------------------------------------------------------
+
+// Each test sends 1,000 frames or more, so it may take longer than the usual 5 s.
+describe("frames per socket", { timeout: 60_000 }, () => {
+  // FRAMES_PER_SOCKET in room.js: one socket may send 1,000 frames, 1% of the free plan's 100,000 requests a day, counting
+  // every frame the room's code sees (hello, and refused and invalid ones too). The next one closes it with 1008,
+  // unanswered. Bryan's sockets aren't counted.
+  const CAP = 1000;
+  const requests = (r) => r.inRoom((room) => room.usage("req", 0).req);
+  // The room's answers to older {before_id: 1} on c so far: a page (empty: nothing is older than id 1), or slow:1 while the
+  // room's clock stands still.
+  const olderAnswers = (c) =>
+    c.frames.filter((f) => (f?.type === "history" && f.before_id === 1) || (f?.type === "error" && f.for === "older")).length;
+  // n frames from c that the room refuses or answers without closing it, sent at once; resolves once each is answered.
+  async function spend(c, n) {
+    const before = olderAnswers(c);
+    for (let k = 0; k < n; k++) c.send({ type: "older", before_id: 1 });
+    await until(() => olderAnswers(c) === before + n, `${n} answers`, 30_000);
+  }
+  const stillOpen = async (c) => {
+    c.send("ping");
+    await take(c, (f) => f === "pong");
+    expect(c.closed).toBeNull();
+  };
+
+  it("closes a reader's socket (1008) on its 1,001st frame, refused and invalid ones counted; then it costs nothing", async () => {
+    const r = await freshRoom(T);
+    const c = await join(r); // its hello is frame 1
+    for (const bad of ["not json", "[1]", "null", JSON.stringify({ type: "dance" })]) c.send(bad);
+    await until(() => all(c, "error").filter((f) => f.code === "invalid").length === 4, "the four invalid answers");
+    await spend(c, CAP - 5); // slow:1 for all but the first: 1,000 frames in all
+    await stillOpen(c);
+    const before = await requests(r);
+    const answered = c.frames.length;
+    c.send({ type: "older", before_id: 1 });
+    await until(() => c.closed !== null, "the close", 5000);
+    expect(c.closed).toBe(1008);
+    expect(c.frames.length).toBe(answered);
+    expect(await requests(r)).toBe(before + 1);
+    // Whatever it tries to send now never reaches the room, so the day's budget stops growing from it.
+    for (let k = 0; k < 20; k++) {
+      try {
+        c.send({ type: "older", before_id: 1 });
+      } catch {
+        // Closed.
+      }
+    }
+    await settle();
+    expect(await requests(r)).toBe(before + 1);
+    expect(await r.inRoom((room) => room.online())).toBe(0);
+  });
+
+  it("counts a signed-in socket's refused writes too", async () => {
+    const r = await freshRoom(T);
+    const a = await addUser(r);
+    const c = await join(r, a);
+    say(c, "first");
+    await take(c, msgWith("first"));
+    // Each of these is slow:5, as the room's clock stands still.
+    for (let k = 0; k < CAP - 2; k++) say(c, `again ${k}`);
+    await until(() => all(c, "error").length === CAP - 2, "the slow answers", 30_000);
+    await stillOpen(c);
+    say(c, "one too many");
+    await until(() => c.closed !== null, "the close", 5000);
+    expect(c.closed).toBe(1008);
+    expect(all(c, "error").length).toBe(CAP - 2);
+  });
+
+  it("keeps the count with the socket through hibernation", async () => {
+    const r = await freshRoom(T);
+    const c = await join(r);
+    await spend(c, 600);
+    await evictDurableObject(r.stub);
+    await spend(c, CAP - 601);
+    await stillOpen(c);
+    c.send({ type: "older", before_id: 1 });
+    await until(() => c.closed !== null, "the close", 5000);
+    expect(c.closed).toBe(1008);
+  });
+
+  it("leaves normal use alone: a reconnecting client starts again from nothing, and can post at its last frame", async () => {
+    const r = await freshRoom(T);
+    const a = await addUser(r);
+    const first = await join(r, a);
+    await spend(first, CAP - 1);
+    await stillOpen(first);
+    first.ws.close(1000, "back in a moment");
+    const again = await join(r, a);
+    await spend(again, CAP - 2);
+    say(again, "Still here"); // its 1,000th frame
+    await take(again, msgWith("Still here"));
+    await stillOpen(again);
+  });
+
+  it("never counts Bryan's sockets: his tools keep working past 1,000 frames", async () => {
+    const r = await freshRoom(T);
+    const bryan = await addUser(r, { role: "admin" });
+    const c = await join(r, bryan);
+    for (let k = 0; k < CAP + 50; k++) c.send({ type: "hidden_list" });
+    await until(() => all(c, "hidden").length === CAP + 50, "his hidden lists", 30_000);
+    await stillOpen(c);
+    c.send({ type: "lock" });
+    expect(await take(c, ofType("ok"))).toEqual({ type: "ok", for: "lock" });
+  });
+});
+
 // ---- Blocks and limits ---------------------------------------------------------------------------------------------
 
 describe("blocks and rate limits", () => {

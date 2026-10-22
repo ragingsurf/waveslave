@@ -345,6 +345,9 @@ All `/me/*` and `/admin/*` routes use `Authorization: Bearer` and run inside the
 - **Room to clients:** `history`, `msg`, `update` (likes, hide, delete), `online`, `tick`, `error {code}`.
 - **Before signing in,** a socket may send only `hello` and `older`. Five bad frames close it. Each IP may hold at most 5 sockets,
   counted in memory only.
+- **Frames per socket (ruling R22):** one socket may send at most 1,000 frames of any kind, refused and invalid ones included, which
+  is 1% of the day's request budget (see Free-plan budget). The next one goes unanswered and closes the socket with 1008, which
+  `chat.js` treats as a drop: a new socket, which counts from nothing. Bryan's sockets aren't counted.
 - **What public frames carry:** only `{id, ts, nick, role, kind, spot, body, reply_to, likes}`. Hidden messages go only to
   Bryan's sockets. No uid or LINE data is ever sent.
 - **Every change is broadcast,** so a delete or hide disappears from every open screen.
@@ -490,6 +493,8 @@ What each action costs:
   seeded with a year of data.
 - **Keepalive:** about 1,920 room requests a day, only while someone has the room open.
 - **Each message:** 1 room request and a few rows written.
+- **One socket** can spend at most 1,000 room requests, 1% of the daily limit, however many frames it sends (Socket protocol,
+  "Frames per socket"). Without that cap one socket could spend the whole day's budget on refused frames.
 
 At launch (a few hundred Taiwan page views and a few hundred messages a day) that is under 5% of every limit.
 

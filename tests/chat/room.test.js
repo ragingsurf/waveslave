@@ -867,6 +867,25 @@ const CHECKS = {
       .catch(async () => { throw new Error(`the refusal: ${JSON.stringify(await look())}`); });
     if ((await look()).box !== "The third one") throw new Error(`the refusal put ${JSON.stringify((await look()).box)} back in the box`);
   },
+  // A socket the room closes with 1008 (five bad frames, or a frame past its 1,000: FRAMES_PER_SOCKET in chat/src/room.js, ruling R22) is
+  // a drop like any other: a new socket opens by itself, and a text the closed one never answered goes back in the box with a line to say
+  // so. A stand-in room that closes the first socket, unanswered, when a text comes.
+  async frameCap(open) {
+    let n = 0;
+    const page = await open({ as: "p1", ws: route => { const k = ++n; route.onMessage(m => { if (m === "ping") return route.send("pong");
+      const f = JSON.parse(m);
+      if (f.type === "hello") { route.send(JSON.stringify({ type: "me", nick: "Poster1", role: "user" })); route.send(JSON.stringify({ type: "history", messages: [standIn(1)] })); }
+      if (f.type === "say" && k === 1) route.close({ code: 1008, reason: "too many frames" }); }); } });
+    await openRoom(page);
+    const look = () => page.evaluate(() => ({ status: document.querySelector(".chatroom .cr-status").hidden ? null : document.querySelector(".chatroom .cr-status").textContent,
+      box: document.querySelector(".chatroom .cr-in").value, note: document.querySelector(".chatroom .cr-note").textContent }));
+    await page.fill(".chatroom .cr-in", "One frame too many"); await page.press(".chatroom .cr-in", "Enter");
+    for (let i = 0; i < 50 && n < 2; i++) await wait(100);
+    if (n !== 2) throw new Error(`5 s after a 1008 close the page has opened ${n - 1} new sockets, want 1`);
+    await page.waitForFunction(() => document.querySelector(".chatroom .cr-status").hidden && document.querySelector(".chatroom .cr-in").value === "One frame too many", null, { timeout: 5e3 })
+      .catch(async () => { throw new Error(`after the 1008 close: ${JSON.stringify(await look())}`); });
+    if ((await look()).note !== "That didn't go through. Try again.") throw new Error(`the text came back, but the line says ${JSON.stringify((await look()).note)}`);
+  },
 };
 
 (async () => {

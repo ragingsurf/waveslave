@@ -388,6 +388,9 @@ html{overscroll-behavior-y:none}
 /* Full screen there's no page to scroll under the map, so the phone takes no part of a gesture on it (Oct 22): with pan-y, Android's browsers
    took over any pinch or drag that set off up or down, and the map stopped following the fingers. */
 .wsmap.fs #wsFx{touch-action:none}
+/* Nor anywhere else on the full-screen map (Oct 22): a pinch that began on a button, the time label or the gaps between them zoomed the
+   whole page on Android, and the time bar slid off the bottom. A spot's forecast table scrolls itself, so it still scrolls. */
+.wsmap.fs{touch-action:none}
 .wsmap #wsBase{transform-origin:0 0}
 .wsmap .zoom{position:absolute;top:8px;right:8px;display:grid;gap:6px}
 .wsmap .zoom button,.wsmap .wsctry button{touch-action:manipulation;width:34px;height:34px;border-radius:10px;border:1px solid #ff2bd6;background:rgba(28,19,64,.9);color:#ff9ef0;font:600 18px/1 "Public Sans",system-ui,sans-serif;cursor:pointer}
@@ -1214,7 +1217,9 @@ const WS = (() => {
   const TRUEFS = matchMedia("(pointer: coarse)").matches;
   // win=false fills the window without asking the browser for full screen yet (the opening animation asks once it has finished: see goFull).
   function setFs(on, win = true) { if (on === FS) return; FS = on; const sec = document.getElementById("viewWs"), b = document.getElementById("wsFs");
-    sec.classList.toggle("fs", FS); document.documentElement.style.overflow = FS ? "hidden" : ""; b.textContent = FS ? "✕" : "⛶"; b.setAttribute("aria-label", T(FS ? "Back to Forecast" : "Full screen"));
+    sec.classList.toggle("fs", FS); document.documentElement.style.overflow = FS ? "hidden" : "";
+    // and the page doesn't zoom under the map either (Android browsers that pinch-zoom whatever touch-action says, Samsung Internet's included)
+    document.querySelector('meta[name="viewport"]').content = "width=device-width, initial-scale=1" + (FS ? ", maximum-scale=1" : ""); b.textContent = FS ? "✕" : "⛶"; b.setAttribute("aria-label", T(FS ? "Back to Forecast" : "Full screen"));
     try { if (FS && win && TRUEFS && sec.requestFullscreen && document.fullscreenEnabled) sec.requestFullscreen().catch(() => {}); else if (!FS && document.fullscreenElement) document.exitFullscreen().catch(() => {}); } catch(e) {}
     requestAnimationFrame(() => { if (sec.hidden) return; size(); parts.forEach(spawn); drawBase(); }); }
   document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && FS) setView("fc"); });

@@ -357,8 +357,8 @@ describe("frames", () => {
 describe("frames per socket", { timeout: 60_000 }, () => {
   // FRAMES_PER_SOCKET in room.js: one socket may send 1,000 frames, 1% of the free plan's 100,000 requests a day, counting
   // every frame the room's code sees (hello, and refused and invalid ones too). The next one closes it with 1008,
-  // unanswered. Frames that reach it once it is closed aren't answered, but they are still counted, so rest() still guards
-  // the day's limit against a client that ignores the close. Bryan's sockets aren't counted.
+  // unanswered. Frames that reach it once it is closed aren't answered, but they are still counted, so the room still
+  // rests at 90%, though that doesn't stop a client that ignores the close. Bryan's sockets aren't counted.
   const CAP = 1000;
   const requests = (r) => r.inRoom((room) => room.usage("req", 0).req);
   // The room's answers to older {before_id: 1} on c so far: a page (empty: nothing is older than id 1), or slow:1 while the

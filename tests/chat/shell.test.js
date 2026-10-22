@@ -58,11 +58,14 @@ const CHECKS = {
     if (!page.tried.includes(want)) throw new Error(`the page asked ${page.tried.join(", ") || "nothing"}, not ${want}`);
   },
   // Developer mode only (Bryan, Oct 22): in Taiwan mode, as everyone sees the site, there's no CHAT button, no strip and no credits line,
-  // and nothing is asked of the backend.
+  // and nothing is asked of the backend, at load or on coming back to the page later (straight away, and again a minute on).
   async devOnly(open) {
     const page = await open({ pub: false }); await wait(300); const l = await look(page);
     const credits = await page.evaluate(() => document.getElementById("chatCredits").hidden);
     if (l.fab || l.strip || !credits || page.asked.length) throw new Error(`in Taiwan mode the button is ${l.fab ? "there" : "gone"}, the strip ${l.strip ? "shows" : "is hidden"}, the credits line ${credits ? "is hidden" : "shows"} and the page asked for ${page.asked.join(", ") || "nothing"}`);
+    const back = () => page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await back(); await wait(300); await page.evaluate(() => window.__skew(61e3)); await back(); await wait(300);
+    if (page.asked.length) throw new Error(`back on the page in Taiwan mode, it asked for ${page.asked.join(", ")}`);
   },
   // In developer mode (World mode, its PIN in for this visit) the chat is there on a Taiwan spot, asking for the spot's reports once.
   async devOn(open) {
@@ -78,30 +81,49 @@ const CHECKS = {
     await page.evaluate(() => document.querySelector(".chatfab").click()); await wait(200);
     if (!await page.evaluate(() => document.documentElement.classList.contains("chat-open"))) throw new Error("the CHAT button didn't open the room");
     await page.evaluate(() => setWorld(false)); await wait(300); let l = await look(page);
-    const off = await page.evaluate(() => ({ open: document.documentElement.classList.contains("chat-open"), credits: document.getElementById("chatCredits").hidden }));
-    if (off.open || l.fab || l.strip || !off.credits) throw new Error(`out of developer mode the room is ${off.open ? "open" : "shut"}, the button ${l.fab ? "there" : "gone"}, the strip ${l.strip ? "shows" : "is hidden"}, the credits line ${off.credits ? "hidden" : "shows"}`);
+    const off = await page.evaluate(() => ({ open: document.documentElement.classList.contains("chat-open"), room: document.querySelector(".chatroom").hidden, credits: document.getElementById("chatCredits").hidden }));
+    if (off.open || !off.room || l.fab || l.strip || !off.credits) throw new Error(`out of developer mode the room is ${off.open ? "open" : "shut"} and ${off.room ? "hidden" : "showing"}, the button ${l.fab ? "there" : "gone"}, the strip ${l.strip ? "shows" : "is hidden"}, the credits line ${off.credits ? "hidden" : "shows"}`);
     const before = page.asked.length;
     await page.evaluate(() => { sessionStorage.setItem("waveslave-unlock", window.__lockHash); return setWorld(true); }); await wait(300); l = await look(page);
-    if (!l.fab || !l.strip || page.asked.length !== before + 1) throw new Error(`back in developer mode the button is ${l.fab ? "there" : "gone"}, the strip ${l.strip ? "shows" : "is hidden"} and the page asked ${page.asked.length - before} times`);
+    const credits = await page.evaluate(() => document.getElementById("chatCredits").hidden);
+    if (!l.fab || !l.strip || credits || page.asked.length !== before + 1) throw new Error(`back in developer mode the button is ${l.fab ? "there" : "gone"}, the strip ${l.strip ? "shows" : "is hidden"}, the credits line ${credits ? "is hidden" : "shows"} and the page asked ${page.asked.length - before} times`);
   },
-  // Back from LINE with developer mode off (the page forgets the PIN when it's left): the address is cleaned at once and the PIN box comes
-  // up before anything else; the room opens with the sign-in once the PIN is in, and a cancelled PIN drops the sign-in. A plain ?chat
+  // Back from LINE with developer mode off (the page forgets the PIN when it's left), with a code or an error: the address is cleaned at once
+  // and the PIN box comes up before anything else; the room opens with the sign-in once the PIN is in, and a cancelled PIN drops the sign-in.
+  // With the PIN still in for this visit there's no PIN box: developer mode comes on and the room opens with the sign-in. A plain ?chat
   // link does nothing out of developer mode.
   async devSignin(open) {
-    for (const ok of [true, false]) {
-      const page = await open({ pub: false, pin: true, unlocked: false, spot: "c=abc123&p=482913", query: "?chat", session: { "waveslave-chat-return": "wushi" } }); await wait(200);
+    const want = { "c=abc123&p=482913": { code: "abc123", pin: "482913" }, "e=access_denied": { error: "access_denied" } };
+    for (const frag of Object.keys(want)) for (const ok of [true, false]) {
+      const page = await open({ pub: false, pin: true, unlocked: false, spot: frag, query: "?chat", session: { "waveslave-chat-return": "wushi" } }); await wait(200);
       let s = await page.evaluate(() => ({ href: location.href, cur: CUR, opened: window.CHAT._opened.length, pin: !!window.__pinAsked }));
-      if (/[?&#](c|e|p)=|\?chat/.test(s.href) || s.cur !== "wushi") throw new Error(`the address is ${s.href} on ${s.cur}, want #wushi`);
-      if (!s.pin || s.opened || page.asked.length) throw new Error(`before the PIN: PIN box ${s.pin ? "asked" : "not asked"}, room asked ${s.opened} times, backend asked for ${page.asked.join(", ") || "nothing"}`);
+      if (/[?&#](c|e|p)=|\?chat/.test(s.href) || s.cur !== "wushi") throw new Error(`#${frag}: the address is ${s.href} on ${s.cur}, want #wushi`);
+      if (!s.pin || s.opened || page.asked.length) throw new Error(`#${frag} before the PIN: PIN box ${s.pin ? "asked" : "not asked"}, room asked ${s.opened} times, backend asked for ${page.asked.join(", ") || "nothing"}`);
       await page.evaluate(ok => { if (ok) { sessionStorage.setItem("waveslave-unlock", window.__lockHash); window.__pinAsked.done(); } else window.__pinAsked.cancel(); }, ok); await wait(300);
       if (!ok) await page.evaluate(() => { sessionStorage.setItem("waveslave-unlock", window.__lockHash); return setWorld(true); });
       await wait(300); s = await page.evaluate(() => ({ opened: window.CHAT._opened }));
-      if (ok && (s.opened.length !== 1 || !eq(s.opened[0].signin, { code: "abc123", pin: "482913" }))) throw new Error(`with the PIN in the room was asked ${JSON.stringify(s.opened)}, want once with the sign-in`);
-      if (!ok && s.opened.length) throw new Error(`after a cancelled PIN, developer mode opened the room ${JSON.stringify(s.opened)}`);
+      if (ok && (s.opened.length !== 1 || !eq(s.opened[0].signin, want[frag]))) throw new Error(`#${frag}: with the PIN in the room was asked ${JSON.stringify(s.opened)}, want once with ${JSON.stringify(want[frag])}`);
+      if (!ok && s.opened.length) throw new Error(`#${frag}: after a cancelled PIN, developer mode opened the room ${JSON.stringify(s.opened)}`);
+    }
+    {
+      const page = await open({ pub: false, pin: true, unlocked: true, spot: "c=abc123&p=482913", query: "?chat", session: { "waveslave-chat-return": "wushi" } }); await wait(600);
+      const s = await page.evaluate(() => ({ world: WORLD, opened: window.CHAT._opened, pin: !!window.__pinAsked }));
+      if (s.pin || !s.world || s.opened.length !== 1 || !eq(s.opened[0].signin, want["c=abc123&p=482913"])) throw new Error(`with the PIN in for this visit: PIN box ${s.pin ? "asked" : "not asked"}, WORLD ${s.world}, the room was asked ${JSON.stringify(s.opened)}`);
     }
     const page = await open({ pub: false, pin: true, unlocked: false, spot: "jinshan", query: "?chat" }); await wait(200);
     const s = await page.evaluate(() => ({ href: location.href, opened: window.CHAT._opened.length, pin: !!window.__pinAsked }));
     if (/\?chat/.test(s.href) || s.opened || s.pin || page.asked.length) throw new Error(`a plain ?chat out of developer mode left ${s.href}, asked the room ${s.opened} times, the PIN box ${s.pin ? "came up" : "didn't"}, the backend for ${page.asked.join(", ") || "nothing"}`);
+  },
+  // With a chat.js from before CHAT.dev (Oct 22's, window.CHAT = {spot, relang}) the W still works: World mode goes off on a Japan spot and
+  // the page goes back to Taiwan, then comes on again. A reload paired this page with that one from the browser's cache (GitHub Pages lets it
+  // keep chat.js 10 minutes, and a reload fetches only the page again) until build-site.sh put chat.js's version in its address.
+  async oldChatJs(open) {
+    const page = await open({ world: true, spot: "shonan", chatJs: "window.CHAT = { spot() {}, relang() {} };" });
+    const mode = () => page.evaluate(() => ({ world: WORLD, cls: document.documentElement.classList.contains("world"), cur: CUR, tw: spotCountry(CUR) === "tw" }));
+    await page.evaluate(() => setWorld(false)); await wait(300); let m = await mode();
+    if (m.world || m.cls || !m.tw) throw new Error(`with the old chat.js, leaving World mode left WORLD ${m.world} on ${m.cur}`);
+    await page.evaluate(() => { sessionStorage.setItem("waveslave-unlock", window.__lockHash); return setWorld(true); }); await wait(300); m = await mode();
+    if (!m.world || !m.cls) throw new Error(`with the old chat.js, World mode didn't come back on (WORLD ${m.world})`);
   },
   // A CHAT_URL with an empty operator's name or email (window.__chatContact) is still off: the privacy note can't go out without them
   // (Bryan, Oct 21).

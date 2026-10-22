@@ -321,7 +321,7 @@ function drawStrip() {
 setInterval(guard(() => { if (document.visibilityState !== "hidden") drawStrip(); }), 60e3);
 
 // The CHAT button: CHAT, how many are online, and a pink dot while there's a message newer than the last one seen. The CSS shows it in
-// Taiwan (html.tw, set by boot()) while the chat is on for this visitor (html.chat-on, set by shown()), on the Forecast view only.
+// Taiwan (html.tw, set by boot()) while the chat is on for this visitor (html.chat-on, set by showChat()), on the Forecast view only.
 const dot = el("i", { class: "chatfab-dot", "aria-hidden": "true" }), word = el("b"), num = el("span", { class: "chatfab-n" });
 const fab = el("button", { type: "button", class: "chatfab" }, dot, word, num);
 fab.addEventListener("click", guard(() => enter({})));

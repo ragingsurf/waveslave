@@ -82,9 +82,15 @@ const SOCKETS_PER_IP = 5;
 // and 30 likes per 10 minutes, a page of older messages a second. A reconnecting client counts from nothing on each new
 // socket, and chat.js starts a new one after 5 minutes in the background. The next frame past it is not answered: the
 // socket is closed with 1008, as for bad frames, which chat.js takes as a drop and opens a new socket after 1 s.
-// Frames that reach the socket after that, ones a client sent in a burst before the close reached it, are dropped
-// without being counted (webSocketMessage()), so one socket adds at most 1,001 to the day's count: its 1,000 and the
-// one that closed it. Bryan's sockets (role "admin") aren't counted, so his tools always work.
+// Bryan's sockets (role "admin") aren't counted, so his tools always work.
+//
+// The cap holds one socket to 1,001 room requests (its 1,000 frames and the one that closes it) only when its client
+// stops sending at the close, as chat.js does. A client that ignores the close can keep sending until it drops the
+// connection itself, and the runtime still hands the room every frame: a test client under wrangler dev kept one
+// closed socket sending about 4,000 frames a second for 45 s, fast enough to spend the day's 100,000 in about 25 s.
+// Nothing in the room can stop those calls, and Cloudflare may count each one against the day's limit, so the room
+// counts them too (webSocketMessage()). Such a client can still put the chat to rest for the day, but rest() then
+// stops it at 90%, before Cloudflare's own limit would make the chat fail with errors.
 const FRAMES_PER_SOCKET = 1000;
 const OLDER_PAGE = 50; // messages in each page of older ones
 const OLDER_EVERY = SECOND; // one page of older messages a second per socket
@@ -992,8 +998,9 @@ export class Room extends DurableObject {
   // it from ordinary races (a double tap, a like on a message hidden just as it was tapped). A frame over 4 KB closes
   // it with 1009. A socket that has sent 1,000 frames of any kind is closed with 1008 at the next one, unanswered
   // (FRAMES_PER_SOCKET); Bryan's never are. A frame that reaches a socket after the room has closed it, whatever the
-  // close, is dropped: not answered and not counted. Each address may hold 5 sockets. The room's own close codes: 4401
-  // signed out everywhere (or the account is deleted), 4403 banned, 4426 reload for the new chat, and 4429 resting.
+  // close, isn't answered, but it is still counted against the day's budget (FRAMES_PER_SOCKET says why). Each address
+  // may hold 5 sockets. The room's own close codes: 4401 signed out everywhere (or the account is deleted), 4403
+  // banned, 4426 reload for the new chat, and 4429 resting.
 
   // GET /ws, once the Worker has checked the Origin: a new socket, unless the visitor's address already holds 5. The
   // address is kept only as a tag on its sockets, and only as its HMAC under SUB_PEPPER, so the room never holds an IP
@@ -1029,15 +1036,16 @@ export class Room extends DurableObject {
   // chat rests, a frame isn't answered: the socket is closed with 4429, with every other open one (rest()). A frame past
   // the socket's 1,000 isn't answered either: the socket is closed with 1008 (overFrames()).
   //
-  // A frame that reaches a socket the room has already closed (1008, 1009, 4429 or any other close) is dropped before
-  // anything else: not answered and not counted. A client that sends a burst without waiting has frames on their way
-  // when the close comes, and the runtime still hands them over; counting them would let one socket spend the day's
-  // budget after all, past the cap that closed it.
+  // A frame that reaches a socket the room has already closed (1008, 1009, 4429 or any other close) is counted, and
+  // rest() asked, like any other frame, and then dropped: not answered. The runtime hands the room every frame a
+  // client sends after the close for as long as the client keeps the connection, and a client that ignores the close
+  // can send without limit (see FRAMES_PER_SOCKET). Each of those calls may count against Cloudflare's daily limit,
+  // and counting them here is what lets rest() put the chat to rest at 90% instead of letting that limit make it fail.
   async webSocketMessage(ws, message) {
-    if (ws.readyState !== WebSocket.OPEN) return;
     this.usage("req");
     await this.ensureAlarm();
     if (this.rest()) return;
+    if (ws.readyState !== WebSocket.OPEN) return;
     if (this.overFrames(ws)) return;
     if (frameBytes(message) > FRAME_MAX) {
       this.send(ws, errorFrame("size"));

@@ -357,7 +357,8 @@ describe("frames", () => {
 describe("frames per socket", { timeout: 60_000 }, () => {
   // FRAMES_PER_SOCKET in room.js: one socket may send 1,000 frames, 1% of the free plan's 100,000 requests a day, counting
   // every frame the room's code sees (hello, and refused and invalid ones too). The next one closes it with 1008,
-  // unanswered. Frames that reach it once it is closed are neither answered nor counted. Bryan's sockets aren't counted.
+  // unanswered. Frames that reach it once it is closed aren't answered, but they are still counted, so rest() still guards
+  // the day's limit against a client that ignores the close. Bryan's sockets aren't counted.
   const CAP = 1000;
   const requests = (r) => r.inRoom((room) => room.usage("req", 0).req);
   // The room's answers to older {before_id: 1} on c so far: a page (empty: nothing is older than id 1), or slow:1 while the
@@ -405,18 +406,26 @@ describe("frames per socket", { timeout: 60_000 }, () => {
   });
 
   // Sends hello and then `frames` on a new socket of r's in one go, before the room's close can reach this end, so frames
-  // after the one that closes it are already on their way when it comes, and the runtime still hands them to the room.
-  // Waits for the close and until the room stops being handed frames. Returns the close code, how many frames the
-  // room's code was handed (counted or not) and how many room requests the socket added.
-  async function burst(r, frames) {
+  // after the one that closes it are already on their way when it comes, and the runtime still hands them to the room, as
+  // it would a client's that ignores the close. With `startAt`, the day's request count is set to it first. Waits for the
+  // close and until the room stops being handed frames. Returns the close code, how many frames the room's code was
+  // handed, how many answers it sent and how many room requests the socket added.
+  async function burst(r, frames, startAt) {
     const c = await connect(r);
     await r.inRoom((room) => {
       const handle = room.webSocketMessage.bind(room);
+      const send = room.send.bind(room);
       room.handed = 0;
+      room.answered = 0;
       room.webSocketMessage = (ws, message) => {
         room.handed += 1;
         return handle(ws, message);
       };
+      room.send = (ws, frame) => {
+        room.answered += 1;
+        return send(ws, frame);
+      };
+      if (startAt !== undefined) room.usage("req", startAt - room.usage("req", 0).req);
     });
     const handed = () => r.inRoom((room) => room.handed);
     const before = await requests(r);
@@ -429,30 +438,53 @@ describe("frames per socket", { timeout: 60_000 }, () => {
       if (now === last) break;
       last = now;
     }
-    return { closed: c.closed, handed: await handed(), added: (await requests(r)) - before };
+    const answered = await r.inRoom((room) => room.answered);
+    return { closed: c.closed, handed: await handed(), answered, added: (await requests(r)) - before };
   }
+  const olders = (n) => Array.from({ length: n }, () => ({ type: "older", before_id: 1 }));
 
-  it("doesn't count frames that reach it closed: a burst of 3,000 sent without waiting adds at most 1,001", async () => {
+  it("answers none of the frames that reach it closed, but counts each one: a burst of 3,000 sent without waiting", async () => {
     const r = await freshRoom(T);
-    const sent = await burst(r, Array.from({ length: 3 * CAP }, () => ({ type: "older", before_id: 1 })));
+    const sent = await burst(r, olders(3 * CAP));
     expect(sent.closed).toBe(1008);
     // Some of the burst did reach the closed socket, so this checks something.
     expect(sent.handed).toBeGreaterThan(CAP + 1);
-    // Its 1,000 frames and the one that closed it.
-    expect(sent.added).toBeLessThanOrEqual(CAP + 1);
+    // Answered: hello, with the history, and the 999 older frames after it. The one that closed it went unanswered, and so
+    // did every later one.
+    expect(sent.answered).toBe(CAP);
+    // Every frame the room was handed is a room request, the ones that reached it closed too.
+    expect(sent.added).toBe(sent.handed);
     expect(await r.inRoom((room) => room.online())).toBe(0);
   });
 
-  it("nor after the fifth bad frame (1008) or a frame over 4 KB (1009)", async () => {
+  it("nor after the fifth bad frame (1008) or a frame over 4 KB (1009), and counts those too", async () => {
     const bad = await burst(await freshRoom(T), Array.from({ length: CAP }, () => "not json"));
     expect(bad.closed).toBe(1008);
     expect(bad.handed).toBeGreaterThan(6);
-    expect(bad.added).toBeLessThanOrEqual(6); // hello and the five bad frames
+    expect(bad.answered).toBe(6); // hello's history and the five invalid answers
+    expect(bad.added).toBe(bad.handed);
     const big = JSON.stringify({ type: "say", text: "x".repeat(4096) });
-    const tooBig = await burst(await freshRoom(T), [big, ...Array.from({ length: CAP }, () => ({ type: "older", before_id: 1 }))]);
+    const tooBig = await burst(await freshRoom(T), [big, ...olders(CAP)]);
     expect(tooBig.closed).toBe(1009);
     expect(tooBig.handed).toBeGreaterThan(2);
-    expect(tooBig.added).toBeLessThanOrEqual(2); // hello and the frame over 4 KB
+    expect(tooBig.answered).toBe(2); // hello's history and error size
+    expect(tooBig.added).toBe(tooBig.handed);
+  });
+
+  it("still rests at 90% when a client keeps sending past the close: what reaches it closed counts", async () => {
+    const r = await freshRoom(T);
+    const reader = await join(r);
+    // The day's count stands where the burst's 1,000 frames and the one that closes it take it to 90,000 exactly, the
+    // most the chat answers at; only a frame that reaches the closed socket can take it past, and rest() then trips.
+    const sent = await burst(r, olders(3 * CAP), 90_000 - (CAP + 1));
+    expect(sent.closed).toBe(1008);
+    expect(sent.handed).toBeGreaterThan(CAP + 1);
+    expect(sent.answered).toBe(CAP);
+    await until(() => reader.closed !== null, "the reader's socket to close");
+    expect(reader.closed).toBe(4429);
+    expect(await requests(r)).toBe(90_000 + sent.handed - (CAP + 1));
+    const res = await r.stub.fetch("https://room/r/reports?spot=jinshan");
+    expect([res.status, await res.json()]).toEqual([503, { resting: true }]);
   });
 
   it("counts a signed-in socket's refused writes too", async () => {

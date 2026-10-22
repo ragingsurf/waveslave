@@ -352,8 +352,9 @@ All `/me/*` and `/admin/*` routes use `Authorization: Bearer` and run inside the
   is 1% of the day's request budget (see Free-plan budget). The next one goes unanswered and closes the socket with 1008, which
   `chat.js` treats as a drop: a new socket, which counts from nothing. Bryan's sockets aren't counted.
 - **Frames that reach a closed socket:** a client that sends without waiting still has frames on their way when the room closes
-  its socket, for any reason (1008, 1009, 4429 or another), and the runtime still hands them to the room. The room drops each one
-  before anything else: it is not answered and not counted.
+  its socket, for any reason (1008, 1009, 4429 or another), and the runtime still hands them to the room. A client that ignores
+  the close can go on sending, with no limit, until it drops the connection itself. The room answers none of them, but counts
+  each one as a room request, like any other frame (see Free-plan budget).
 - **What public frames carry:** only `{id, ts, nick, role, kind, spot, body, reply_to, likes}`. Hidden messages go only to
   Bryan's sockets. No uid or LINE data is ever sent.
 - **Every change is broadcast,** so a delete or hide disappears from every open screen.
@@ -499,10 +500,15 @@ What each action costs:
   seeded with a year of data.
 - **Keepalive:** about 1,920 room requests a day, only while someone has the room open.
 - **Each message:** 1 room request and a few rows written.
-- **One socket** adds at most 1,001 room requests to the room's count, about 1% of the daily limit: its 1,000 frames and the one
-  that closes it (Socket protocol, "Frames per socket"). Frames that reach it after the room has closed it, ones it sent before
-  the close reached it, are dropped and not counted. Without the cap, or with those counted, one socket could spend the whole
-  day's budget on refused frames.
+- **One socket** adds at most 1,001 room requests, about 1% of the daily limit, when its client stops sending at the close, as
+  `chat.js` does: its 1,000 frames and the one that closes it (Socket protocol, "Frames per socket"). Without the cap one socket
+  could spend the whole day's budget on refused frames.
+- **A client that ignores the close** isn't held to that. The runtime keeps handing the room its frames for as long as it keeps
+  the connection open: about 4,000 a second for 45 s in a test under `wrangler dev`, enough for the day's 100,000 in about 25 s.
+  Nothing in the room can stop those calls. Cloudflare bills incoming WebSocket messages as requests (20 to 1 for billing), and
+  its pricing page doesn't say whether that ratio applies to the free plan's 100,000 a day, so the room counts each one as a room
+  request, like every other frame. Such a client can still put the chat to rest for the day, but the chat then rests at 90% and
+  says so, instead of failing with Cloudflare's errors once the daily limit is passed.
 
 At launch (a few hundred Taiwan page views and a few hundred messages a day) that is under 5% of every limit.
 

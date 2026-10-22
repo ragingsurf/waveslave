@@ -327,8 +327,9 @@ All `/me/*` and `/admin/*` routes use `Authorization: Bearer` and run inside the
 - `sessions(id, uid, spot, start, end, stars, board, note, cond JSON, shared_msg)`, indexed on `(uid, start)`.
 - `logins`, `handoffs`: as in Login.
 - **LINE's raw `sub` is never stored,** in any table, even for a moment: the room makes `sub_hash` from it and keeps only that
-  (ruling R22). `handoffs` had a `sub` column that was written and never read; it was taken out of schema version 1 itself, with
-  no migration step, because nothing had been deployed yet.
+  (ruling R22). Schema version 1, as merged in PR #97, had a `sub` column in `handoffs`, written and never read. Version 2 drops
+  it (`ALTER TABLE handoffs DROP COLUMN sub`, which keeps the rows), so LINE's raw ID is gone from every table after `migrate()`,
+  in a new room and in one that version 1 made.
 - `limits(key PK, n, window_end)`, keyed by `sub_hash` and kind.
 - `holds(msg_id, body, uid, sub_hash, reason, ts)`, visible to Bryan only, kept 180 days (see Moderation).
 - `meta(key, value)`, for: lock state, `admin_uid`, admin-claim failure counts, `next_retention`, `schema_ver` and the

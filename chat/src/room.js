@@ -2,7 +2,7 @@
 // SQLite storage. The design is in docs/superpowers/specs/2026-10-21-taiwan-chat-design.md, "Data (room
 // SQLite)", "Alarm", "Retention (daily)", "Moderation" and "Free-plan budget".
 //
-//   migrate()                  creates the tables, once per schema version, before the room does anything else
+//   migrate()                  creates the tables, or brings an older room's up to date, before anything else
 //   history(beforeId, limit)   a page of the room, as the public frames readers get
 //   reportsFor(spot, nowMs)    the spot card's reports, from a memory copy kept for 60 s per spot
 //   messagesChanged(spot)      called by every write to messages, so the memory copies follow
@@ -33,9 +33,11 @@ const MINUTE = 60 * SECOND;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-// The schema this code expects. A change to the tables bumps it and adds a step to migrate(). (One change was made in
-// version 1 itself, before any room was deployed: see handoffs.)
-const SCHEMA_VER = 1;
+// The schema this code expects. A change to the tables bumps it and adds a step to migrate(), which brings a room up
+// from whatever version it has. Version 1 is the tables as merged in PR #97 (SCHEMA_V1), and it had a sub column in
+// handoffs: LINE's raw ID. Version 2 drops that column (SCHEMA_V2), so LINE's raw ID is gone from every table after
+// migrate().
+const SCHEMA_VER = 2;
 
 const PAGE_MAX = 100; // the room opens with the last 100 messages
 const REPORT_WINDOW = 4 * HOUR; // a report shows on its spot's card for 4 hours
@@ -265,14 +267,14 @@ const SCHEMA_V1 = [
     h TEXT NOT NULL,
     created INTEGER NOT NULL
   )`,
-  // A finished LINE sign-in waiting to be redeemed (spec "Login", step 3), for 10 minutes. Like every other table, it
-  // keeps the LINE account only as its sub_hash: LINE's raw ID (sub) is never stored anywhere (ruling R22). Until Oct 22
-  // this table also had a sub column, written and never read; it was taken out here, in schema version 1 itself, with no
-  // migration step, because no room had been deployed yet.
+  // A finished LINE sign-in waiting to be redeemed (spec "Login", step 3), for 10 minutes. Version 1, as merged in
+  // PR #97, had a sub column here too: LINE's raw ID, written and never read. Version 2 drops it (SCHEMA_V2), so after
+  // migrate() this table, like every other, keeps the LINE account only as its sub_hash (ruling R22).
   `CREATE TABLE handoffs (
     code_hash TEXT PRIMARY KEY,
     h TEXT NOT NULL,
     sub_hash TEXT NOT NULL,
+    sub TEXT NOT NULL,
     line_name TEXT,
     pin TEXT NOT NULL,
     created INTEGER NOT NULL,
@@ -283,6 +285,11 @@ const SCHEMA_V1 = [
   // Copies Bryan keeps (child-safety hides, "Keep as evidence"), for 180 days whatever else is deleted.
   "CREATE TABLE holds (msg_id INTEGER, body TEXT, uid TEXT, sub_hash TEXT, reason TEXT, ts INTEGER NOT NULL)",
 ];
+
+// Version 2 (Oct 22): handoffs loses its sub column, so LINE's raw ID is gone from every table after migrate() (ruling
+// R22). The room never read it, and no longer writes it. DROP COLUMN rewrites each row without it and keeps the rows,
+// so a sign-in still waiting to be redeemed when this version arrives goes on working.
+const SCHEMA_V2 = ["ALTER TABLE handoffs DROP COLUMN sub"];
 
 // The first 19:00 UTC after t (19:00 itself counts as past).
 function retentionTimeAfter(t) {
@@ -450,14 +457,17 @@ export class Room extends DurableObject {
     this.all("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", key, value);
   }
 
-  // Creates the tables. meta.schema_ver records what is done, so this runs once per version and changes nothing
-  // after that. The constructor calls it before the room takes any request.
+  // Creates the tables, or brings them up to SCHEMA_VER: each version's step runs in turn, so a new room runs version 1
+  // then version 2, and a version-1 room only version 2. meta.schema_ver records what is done, so each step runs once
+  // and nothing changes after that. The steps and the new schema_ver are written in one transaction, so a step that
+  // fails undoes them all. The constructor calls it before the room takes any request.
   migrate() {
     this.all("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value)");
     const ver = this.getMeta("schema_ver") ?? 0;
     if (ver >= SCHEMA_VER) return;
     this.ctx.storage.transactionSync(() => {
       if (ver < 1) for (const statement of SCHEMA_V1) this.all(statement);
+      if (ver < 2) for (const statement of SCHEMA_V2) this.all(statement);
       this.setMeta("schema_ver", SCHEMA_VER);
     });
   }

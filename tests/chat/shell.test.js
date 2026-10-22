@@ -81,26 +81,34 @@ const CHECKS = {
     await page.evaluate(() => document.querySelector(".chatfab").click()); await wait(200);
     if (!await page.evaluate(() => document.documentElement.classList.contains("chat-open"))) throw new Error("the CHAT button didn't open the room");
     await page.evaluate(() => setWorld(false)); await wait(300); let l = await look(page);
-    const off = await page.evaluate(() => ({ open: document.documentElement.classList.contains("chat-open"), credits: document.getElementById("chatCredits").hidden }));
-    if (off.open || l.fab || l.strip || !off.credits) throw new Error(`out of developer mode the room is ${off.open ? "open" : "shut"}, the button ${l.fab ? "there" : "gone"}, the strip ${l.strip ? "shows" : "is hidden"}, the credits line ${off.credits ? "hidden" : "shows"}`);
+    const off = await page.evaluate(() => ({ open: document.documentElement.classList.contains("chat-open"), room: document.querySelector(".chatroom").hidden, credits: document.getElementById("chatCredits").hidden }));
+    if (off.open || !off.room || l.fab || l.strip || !off.credits) throw new Error(`out of developer mode the room is ${off.open ? "open" : "shut"} and ${off.room ? "hidden" : "showing"}, the button ${l.fab ? "there" : "gone"}, the strip ${l.strip ? "shows" : "is hidden"}, the credits line ${off.credits ? "hidden" : "shows"}`);
     const before = page.asked.length;
     await page.evaluate(() => { sessionStorage.setItem("waveslave-unlock", window.__lockHash); return setWorld(true); }); await wait(300); l = await look(page);
-    if (!l.fab || !l.strip || page.asked.length !== before + 1) throw new Error(`back in developer mode the button is ${l.fab ? "there" : "gone"}, the strip ${l.strip ? "shows" : "is hidden"} and the page asked ${page.asked.length - before} times`);
+    const credits = await page.evaluate(() => document.getElementById("chatCredits").hidden);
+    if (!l.fab || !l.strip || credits || page.asked.length !== before + 1) throw new Error(`back in developer mode the button is ${l.fab ? "there" : "gone"}, the strip ${l.strip ? "shows" : "is hidden"}, the credits line ${credits ? "is hidden" : "shows"} and the page asked ${page.asked.length - before} times`);
   },
-  // Back from LINE with developer mode off (the page forgets the PIN when it's left): the address is cleaned at once and the PIN box comes
-  // up before anything else; the room opens with the sign-in once the PIN is in, and a cancelled PIN drops the sign-in. A plain ?chat
+  // Back from LINE with developer mode off (the page forgets the PIN when it's left), with a code or an error: the address is cleaned at once
+  // and the PIN box comes up before anything else; the room opens with the sign-in once the PIN is in, and a cancelled PIN drops the sign-in.
+  // With the PIN still in for this visit there's no PIN box: developer mode comes on and the room opens with the sign-in. A plain ?chat
   // link does nothing out of developer mode.
   async devSignin(open) {
-    for (const ok of [true, false]) {
-      const page = await open({ pub: false, pin: true, unlocked: false, spot: "c=abc123&p=482913", query: "?chat", session: { "waveslave-chat-return": "wushi" } }); await wait(200);
+    const want = { "c=abc123&p=482913": { code: "abc123", pin: "482913" }, "e=access_denied": { error: "access_denied" } };
+    for (const frag of Object.keys(want)) for (const ok of [true, false]) {
+      const page = await open({ pub: false, pin: true, unlocked: false, spot: frag, query: "?chat", session: { "waveslave-chat-return": "wushi" } }); await wait(200);
       let s = await page.evaluate(() => ({ href: location.href, cur: CUR, opened: window.CHAT._opened.length, pin: !!window.__pinAsked }));
-      if (/[?&#](c|e|p)=|\?chat/.test(s.href) || s.cur !== "wushi") throw new Error(`the address is ${s.href} on ${s.cur}, want #wushi`);
-      if (!s.pin || s.opened || page.asked.length) throw new Error(`before the PIN: PIN box ${s.pin ? "asked" : "not asked"}, room asked ${s.opened} times, backend asked for ${page.asked.join(", ") || "nothing"}`);
+      if (/[?&#](c|e|p)=|\?chat/.test(s.href) || s.cur !== "wushi") throw new Error(`#${frag}: the address is ${s.href} on ${s.cur}, want #wushi`);
+      if (!s.pin || s.opened || page.asked.length) throw new Error(`#${frag} before the PIN: PIN box ${s.pin ? "asked" : "not asked"}, room asked ${s.opened} times, backend asked for ${page.asked.join(", ") || "nothing"}`);
       await page.evaluate(ok => { if (ok) { sessionStorage.setItem("waveslave-unlock", window.__lockHash); window.__pinAsked.done(); } else window.__pinAsked.cancel(); }, ok); await wait(300);
       if (!ok) await page.evaluate(() => { sessionStorage.setItem("waveslave-unlock", window.__lockHash); return setWorld(true); });
       await wait(300); s = await page.evaluate(() => ({ opened: window.CHAT._opened }));
-      if (ok && (s.opened.length !== 1 || !eq(s.opened[0].signin, { code: "abc123", pin: "482913" }))) throw new Error(`with the PIN in the room was asked ${JSON.stringify(s.opened)}, want once with the sign-in`);
-      if (!ok && s.opened.length) throw new Error(`after a cancelled PIN, developer mode opened the room ${JSON.stringify(s.opened)}`);
+      if (ok && (s.opened.length !== 1 || !eq(s.opened[0].signin, want[frag]))) throw new Error(`#${frag}: with the PIN in the room was asked ${JSON.stringify(s.opened)}, want once with ${JSON.stringify(want[frag])}`);
+      if (!ok && s.opened.length) throw new Error(`#${frag}: after a cancelled PIN, developer mode opened the room ${JSON.stringify(s.opened)}`);
+    }
+    {
+      const page = await open({ pub: false, pin: true, unlocked: true, spot: "c=abc123&p=482913", query: "?chat", session: { "waveslave-chat-return": "wushi" } }); await wait(600);
+      const s = await page.evaluate(() => ({ world: WORLD, opened: window.CHAT._opened, pin: !!window.__pinAsked }));
+      if (s.pin || !s.world || s.opened.length !== 1 || !eq(s.opened[0].signin, want["c=abc123&p=482913"])) throw new Error(`with the PIN in for this visit: PIN box ${s.pin ? "asked" : "not asked"}, WORLD ${s.world}, the room was asked ${JSON.stringify(s.opened)}`);
     }
     const page = await open({ pub: false, pin: true, unlocked: false, spot: "jinshan", query: "?chat" }); await wait(200);
     const s = await page.evaluate(() => ({ href: location.href, opened: window.CHAT._opened.length, pin: !!window.__pinAsked }));

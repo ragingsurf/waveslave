@@ -357,7 +357,7 @@ describe("frames", () => {
 describe("frames per socket", { timeout: 60_000 }, () => {
   // FRAMES_PER_SOCKET in room.js: one socket may send 1,000 frames, 1% of the free plan's 100,000 requests a day, counting
   // every frame the room's code sees (hello, and refused and invalid ones too). The next one closes it with 1008,
-  // unanswered. Bryan's sockets aren't counted.
+  // unanswered. Frames that reach it once it is closed are neither answered nor counted. Bryan's sockets aren't counted.
   const CAP = 1000;
   const requests = (r) => r.inRoom((room) => room.usage("req", 0).req);
   // The room's answers to older {before_id: 1} on c so far: a page (empty: nothing is older than id 1), or slow:1 while the
@@ -390,7 +390,8 @@ describe("frames per socket", { timeout: 60_000 }, () => {
     expect(c.closed).toBe(1008);
     expect(c.frames.length).toBe(answered);
     expect(await requests(r)).toBe(before + 1);
-    // Whatever it tries to send now never reaches the room, so the day's budget stops growing from it.
+    // Whatever it tries to send now never reaches the room, so the day's budget stops growing from it. (Its own end won't
+    // send once it has seen the close; frames already on their way when the close came are the next test's.)
     for (let k = 0; k < 20; k++) {
       try {
         c.send({ type: "older", before_id: 1 });
@@ -401,6 +402,57 @@ describe("frames per socket", { timeout: 60_000 }, () => {
     await settle();
     expect(await requests(r)).toBe(before + 1);
     expect(await r.inRoom((room) => room.online())).toBe(0);
+  });
+
+  // Sends hello and then `frames` on a new socket of r's in one go, before the room's close can reach this end, so frames
+  // after the one that closes it are already on their way when it comes, and the runtime still hands them to the room.
+  // Waits for the close and until the room stops being handed frames. Returns the close code, how many frames the
+  // room's code was handed (counted or not) and how many room requests the socket added.
+  async function burst(r, frames) {
+    const c = await connect(r);
+    await r.inRoom((room) => {
+      const handle = room.webSocketMessage.bind(room);
+      room.handed = 0;
+      room.webSocketMessage = (ws, message) => {
+        room.handed += 1;
+        return handle(ws, message);
+      };
+    });
+    const handed = () => r.inRoom((room) => room.handed);
+    const before = await requests(r);
+    c.send({ type: "hello", v: 1 });
+    for (const frame of frames) c.send(frame);
+    await until(() => c.closed !== null, "the close", 30_000);
+    for (let last = -1; ; ) {
+      await settle();
+      const now = await handed();
+      if (now === last) break;
+      last = now;
+    }
+    return { closed: c.closed, handed: await handed(), added: (await requests(r)) - before };
+  }
+
+  it("doesn't count frames that reach it closed: a burst of 3,000 sent without waiting adds at most 1,001", async () => {
+    const r = await freshRoom(T);
+    const sent = await burst(r, Array.from({ length: 3 * CAP }, () => ({ type: "older", before_id: 1 })));
+    expect(sent.closed).toBe(1008);
+    // Some of the burst did reach the closed socket, so this checks something.
+    expect(sent.handed).toBeGreaterThan(CAP + 1);
+    // Its 1,000 frames and the one that closed it.
+    expect(sent.added).toBeLessThanOrEqual(CAP + 1);
+    expect(await r.inRoom((room) => room.online())).toBe(0);
+  });
+
+  it("nor after the fifth bad frame (1008) or a frame over 4 KB (1009)", async () => {
+    const bad = await burst(await freshRoom(T), Array.from({ length: CAP }, () => "not json"));
+    expect(bad.closed).toBe(1008);
+    expect(bad.handed).toBeGreaterThan(6);
+    expect(bad.added).toBeLessThanOrEqual(6); // hello and the five bad frames
+    const big = JSON.stringify({ type: "say", text: "x".repeat(4096) });
+    const tooBig = await burst(await freshRoom(T), [big, ...Array.from({ length: CAP }, () => ({ type: "older", before_id: 1 }))]);
+    expect(tooBig.closed).toBe(1009);
+    expect(tooBig.handed).toBeGreaterThan(2);
+    expect(tooBig.added).toBeLessThanOrEqual(2); // hello and the frame over 4 KB
   });
 
   it("counts a signed-in socket's refused writes too", async () => {

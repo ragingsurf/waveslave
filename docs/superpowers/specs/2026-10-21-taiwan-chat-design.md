@@ -351,6 +351,9 @@ All `/me/*` and `/admin/*` routes use `Authorization: Bearer` and run inside the
 - **Frames per socket (ruling R22):** one socket may send at most 1,000 frames of any kind, refused and invalid ones included, which
   is 1% of the day's request budget (see Free-plan budget). The next one goes unanswered and closes the socket with 1008, which
   `chat.js` treats as a drop: a new socket, which counts from nothing. Bryan's sockets aren't counted.
+- **Frames that reach a closed socket:** a client that sends without waiting still has frames on their way when the room closes
+  its socket, for any reason (1008, 1009, 4429 or another), and the runtime still hands them to the room. The room drops each one
+  before anything else: it is not answered and not counted.
 - **What public frames carry:** only `{id, ts, nick, role, kind, spot, body, reply_to, likes}`. Hidden messages go only to
   Bryan's sockets. No uid or LINE data is ever sent.
 - **Every change is broadcast,** so a delete or hide disappears from every open screen.
@@ -496,8 +499,10 @@ What each action costs:
   seeded with a year of data.
 - **Keepalive:** about 1,920 room requests a day, only while someone has the room open.
 - **Each message:** 1 room request and a few rows written.
-- **One socket** can spend at most 1,000 room requests, 1% of the daily limit, however many frames it sends (Socket protocol,
-  "Frames per socket"). Without that cap one socket could spend the whole day's budget on refused frames.
+- **One socket** adds at most 1,001 room requests to the room's count, about 1% of the daily limit: its 1,000 frames and the one
+  that closes it (Socket protocol, "Frames per socket"). Frames that reach it after the room has closed it, ones it sent before
+  the close reached it, are dropped and not counted. Without the cap, or with those counted, one socket could spend the whole
+  day's budget on refused frames.
 
 At launch (a few hundred Taiwan page views and a few hundred messages a day) that is under 5% of every limit.
 

@@ -82,7 +82,9 @@ const SOCKETS_PER_IP = 5;
 // and 30 likes per 10 minutes, a page of older messages a second. A reconnecting client counts from nothing on each new
 // socket, and chat.js starts a new one after 5 minutes in the background. The next frame past it is not answered: the
 // socket is closed with 1008, as for bad frames, which chat.js takes as a drop and opens a new socket after 1 s.
-// Bryan's sockets (role "admin") aren't counted, so his tools always work.
+// Frames that reach the socket after that, ones a client sent in a burst before the close reached it, are dropped
+// without being counted (webSocketMessage()), so one socket adds at most 1,001 to the day's count: its 1,000 and the
+// one that closed it. Bryan's sockets (role "admin") aren't counted, so his tools always work.
 const FRAMES_PER_SOCKET = 1000;
 const OLDER_PAGE = 50; // messages in each page of older ones
 const OLDER_EVERY = SECOND; // one page of older messages a second per socket
@@ -989,8 +991,9 @@ export class Room extends DurableObject {
   // frames (invalid ones, or writes before signing in) is closed with 1008. gone is not a bad frame: a working app gets
   // it from ordinary races (a double tap, a like on a message hidden just as it was tapped). A frame over 4 KB closes
   // it with 1009. A socket that has sent 1,000 frames of any kind is closed with 1008 at the next one, unanswered
-  // (FRAMES_PER_SOCKET); Bryan's never are. Each address may hold 5 sockets. The room's own close codes: 4401 signed out
-  // everywhere (or the account is deleted), 4403 banned, 4426 reload for the new chat, and 4429 resting.
+  // (FRAMES_PER_SOCKET); Bryan's never are. A frame that reaches a socket after the room has closed it, whatever the
+  // close, is dropped: not answered and not counted. Each address may hold 5 sockets. The room's own close codes: 4401
+  // signed out everywhere (or the account is deleted), 4403 banned, 4426 reload for the new chat, and 4429 resting.
 
   // GET /ws, once the Worker has checked the Origin: a new socket, unless the visitor's address already holds 5. The
   // address is kept only as a tag on its sockets, and only as its HMAC under SUB_PEPPER, so the room never holds an IP
@@ -1025,7 +1028,13 @@ export class Room extends DurableObject {
   // Every frame from a socket but "ping". Each one is a room request against the free plan's daily limit. While the
   // chat rests, a frame isn't answered: the socket is closed with 4429, with every other open one (rest()). A frame past
   // the socket's 1,000 isn't answered either: the socket is closed with 1008 (overFrames()).
+  //
+  // A frame that reaches a socket the room has already closed (1008, 1009, 4429 or any other close) is dropped before
+  // anything else: not answered and not counted. A client that sends a burst without waiting has frames on their way
+  // when the close comes, and the runtime still hands them over; counting them would let one socket spend the day's
+  // budget after all, past the cap that closed it.
   async webSocketMessage(ws, message) {
+    if (ws.readyState !== WebSocket.OPEN) return;
     this.usage("req");
     await this.ensureAlarm();
     if (this.rest()) return;

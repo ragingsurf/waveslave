@@ -923,7 +923,7 @@ const CHECKS = {
         try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", "fc"); localStorage.setItem("waveslave-lang", "en"); localStorage.setItem("waveslave-world", "0");
           if (o.token && !sessionStorage.getItem("signed")) { localStorage.setItem("waveslave-chat-token", o.token); sessionStorage.setItem("signed", "1"); }
           if (lock) sessionStorage.setItem("waveslave-unlock", lock); } catch (e) {}
-        window.__chatUrl = o.url; window.__chatContact = o.contact; }, [{ token: as ? token("u-" + as) : null, url: url || CHAT(), contact: CONTACT }, LOCK]);
+        window.__chatUrl = o.url; window.__chatContact = o.contact; window.__chatPublic = true; }, [{ token: as ? token("u-" + as) : null, url: url || CHAT(), contact: CONTACT }, LOCK]);
     }
     const page = await ctx.newPage(); page.sockets = []; page.dialogs = [];
     if (ws) await page.routeWebSocket(/\/ws$/, ws);

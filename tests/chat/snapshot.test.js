@@ -198,7 +198,7 @@ const CHECKS = {
     await ctx.addInitScript(([o, lock]) => {
       try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", "fc"); localStorage.setItem("waveslave-lang", "en"); localStorage.setItem("waveslave-world", "0");
         if (o.signedIn) localStorage.setItem("waveslave-chat-token", "test-token"); if (lock) sessionStorage.setItem("waveslave-unlock", lock); } catch (e) {}
-      window.__chatUrl = o.url; window.__chatContact = o.contact; window.__chatTest = true; }, [{ url: CHAT, contact: CONTACT, signedIn }, LOCK]);
+      window.__chatUrl = o.url; window.__chatContact = o.contact; window.__chatTest = true; window.__chatPublic = true; }, [{ url: CHAT, contact: CONTACT, signedIn }, LOCK]);
     const page = await ctx.newPage(); page.on("pageerror", e => errs.push(String(e)));
     await page.clock.setFixedTime(time);
     await page.routeWebSocket(/\/ws$/, ws => ws.onMessage(m => { const f = JSON.parse(m);

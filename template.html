@@ -656,7 +656,7 @@ function langOpen(on){ document.getElementById("langWrap").classList.toggle("ope
 let WORLD = document.documentElement.classList.contains("world");
 // The World passcode (web/head.html): until the code is in for this visit, World mode opens the PIN box first (wsPin) and comes on once it's right.
 const worldLocked = () => !!window.__worldLock && !(window.wsUnlocked && wsUnlocked());
-function keepWorld(on){ WORLD = on; if(!on && window.wsRelock) wsRelock(); document.documentElement.classList.toggle("world", on); try{ localStorage.setItem("waveslave-world", on ? "1" : "0"); }catch(e){} }
+function keepWorld(on){ WORLD = on; if(!on && window.wsRelock) wsRelock(); document.documentElement.classList.toggle("world", on); try{ localStorage.setItem("waveslave-world", on ? "1" : "0"); }catch(e){} window.CHAT&&CHAT.dev(); }
 // Spot comes from the link (#nanwan) or the last one picked on this device; Donghe otherwise. In Taiwan mode the last one is the last Taiwan
 // spot; a link to another country's spot turns World mode on, so it still opens.
 let SPOT_PEND = null;   // a link to another country's spot while World mode waits for the passcode: opened once it's in
@@ -2219,8 +2219,8 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
     : (zh ? "離岸風（氣象署預報）" : ja ? "オフショア（台湾気象署予報）" : "Offshore wind (CWA forecast)");
   // Live cams list only the viewed country's spots, and the panel hides in a country with no cam yet rather than show a column of "No cam found yet".
   document.querySelector("section.spots").hidden = !ids.some(id => (ALL.spots[id].cams||[]).length);
-  // The Taiwan chat (web/chat.js) shows for a Taiwan spot, in Taiwan mode and in World mode alike: its button keys off the class "tw",
-  // and the spot's surfer reports go under "Right now".
+  // The Taiwan chat (web/chat.js) shows for a Taiwan spot, only in World (developer) mode until Bryan opens it to everyone (keepWorld()
+  // tells it when the mode changes): its button keys off the class "tw", and the spot's surfer reports go under "Right now".
   document.documentElement.classList.toggle("tw", spotCountry(SPOT)==="tw"); window.CHAT&&CHAT.spot(SPOT);
   document.getElementById("spotList").innerHTML = ids.map(id => { const s=ALL.spots[id];
     return `<li${id===SPOT?' aria-current="true"':""}><b>${SPT(s,"name")}</b><span class="links">${(s.cams||[]).length ? s.cams.map((c,i)=>`<a href="${c[1]}" target="_blank" rel="noopener">${camName(s,i)}</a>`).join("") : `<span class="where">${zh?"還沒找到攝影機":ja?"カメラはまだ見つかっていません":"No cam found yet"}</span>`}</span></li>`; }).join("");

@@ -583,16 +583,28 @@ const CHECKS = {
     const sign = await page.evaluate(() => document.querySelector(".ptr").textContent);
     if (sign !== "LET GO ▲") throw new Error(`on the Forecast page the drag leaves the sign saying ${sign}, want LET GO ▲`);
   },
-  // A finger dragging the map sideways and still down: the map is drawn again as it goes, so the edge it slides away from never shows blank (Oct 22).
+  // The map dragged or zoomed out and still moving: it is drawn again as it goes, so no edge it slides or shrinks away from shows blank (Oct 22).
+  // A finger on a phone (upright and on its side) and a tablet, a mouse drag and a run of wheel notches out on a laptop.
   async dragFillsEdges(open) {
-    const page = await open(home("tw")), b = await page.locator("#wsFx").boundingBox(), s = await page.context().newCDPSession(page), x = b.x + b.width*.8, y = b.y + b.height/2;
-    await s.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
-    for (let i = 1; i <= 12; i++) { await s.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x - b.width*.6*i/12, y }] }); await page.waitForTimeout(16); }
-    await page.waitForTimeout(50); // under the 120 ms rest that draws it anyway
-    const t = await page.evaluate(() => document.getElementById("wsBase").style.transform);
-    await s.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-    const m = /translate\((-?[\d.e-]+)px, ?(-?[\d.e-]+)px\) scale\(([\d.e-]+)\)/.exec(t), [dx, , k] = m ? m.slice(1).map(Number) : [0, 0, 1];
-    if (dx + b.width*k < b.width - 1) throw new Error(`mid-drag the map's right ${Math.round(b.width - dx - b.width*k)} px are blank (${t})`);
+    const blank = async (page, b) => { await page.waitForTimeout(50); // under the 120 ms rest that draws it anyway
+      const t = await page.evaluate(() => document.getElementById("wsBase").style.transform);
+      const m = /translate\((-?[\d.e-]+)px, ?(-?[\d.e-]+)px\) scale\(([\d.e-]+)\)/.exec(t), [x, y, k] = m ? m.slice(1).map(Number) : [0, 0, 1];
+      const gap = Math.max(x, y, b.width - x - b.width*k, b.height - y - b.height*k); return gap > 1 ? `${Math.round(gap)} px blank (${t})` : ""; };
+    const bad = [];
+    for (const [name, size] of [["phone", null], ["phone on its side", { width: 844, height: 390 }], ["tablet", { width: 820, height: 1180 }]]) {
+      const page = await open({ ...home("tw"), size }), b = await page.locator("#wsFx").boundingBox(), s = await page.context().newCDPSession(page), x = b.x + b.width*.8, y = b.y + b.height/2;
+      await s.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+      for (let i = 1; i <= 12; i++) { await s.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x - b.width*.6*i/12, y }] }); await page.waitForTimeout(16); }
+      const r = await blank(page, b); await s.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }); if (r) bad.push(`${name} finger drag: ${r}`); }
+    const laptop = { width: 1440, height: 900 };
+    { const page = await open({ ...home("tw"), size: laptop }), b = await page.locator("#wsFx").boundingBox(), x = b.x + b.width*.8, y = b.y + b.height/2;
+      await page.mouse.move(x, y); await page.mouse.down();
+      for (let i = 1; i <= 12; i++) { await page.mouse.move(x - b.width*.6*i/12, y + b.height*.2*i/12); await page.waitForTimeout(16); }
+      const r = await blank(page, b); await page.mouse.up(); if (r) bad.push(`laptop mouse drag: ${r}`); }
+    { const page = await open({ ...home("tw"), size: laptop }), b = await page.locator("#wsFx").boundingBox(); await page.mouse.move(b.x + b.width/2, b.y + b.height/2);
+      for (let i = 0; i < 6; i++) { await page.mouse.wheel(0, 100); await page.waitForTimeout(16); }
+      const r = await blank(page, b); if (r) bad.push(`laptop wheel zoom out: ${r}`); }
+    if (bad.length) throw new Error(bad.join("; "));
   },
   // With the map open, changing country keeps the view being left under its own key, as the reload between countries used to.
   async countryKeepsView(open) {

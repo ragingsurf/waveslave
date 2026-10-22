@@ -51,6 +51,8 @@ conditions of each session, and share a session to the room to get tips from oth
    sign-in. Plans so far said "nothing personal goes to any service". This feature has to break that, and the privacy note will
    say so.
 2. The name and email to show as the person running the chat, for the privacy note, takedown requests and questions.
+   **Decided:** on Oct 22 Bryan chose to show "WaveSlave" and waveslave050@gmail.com, so he stays anonymous. Both are built
+   into `web/chat.js`.
 
 ## What you see
 
@@ -472,7 +474,8 @@ note says so.
 ### Privacy note (zh-TW, en, ja; shown at first sign-in, full text behind "More")
 
 It covers what Taiwan's Personal Data Protection Act, Article 8, asks for:
-- who runs the chat (Bryan to confirm);
+- who runs the chat: "WaveSlave", with waveslave050@gmail.com for questions and takedown requests (Bryan's choice on Oct 22, so
+  he stays anonymous; built into `web/chat.js`);
 - why: running the chat;
 - what: nickname, a one-way code of the LINE ID, messages, reports, session logs, and IP addresses seen by Cloudflare;
 - where and who:

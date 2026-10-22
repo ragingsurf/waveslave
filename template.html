@@ -91,6 +91,77 @@ html.dousing header .brand .w::after{animation:flickOff .4s both}
 header{position:relative}
 .hdtools{position:absolute;top:0;right:0;z-index:20;display:flex;flex-direction:column;align-items:flex-end;gap:12px}
 .langwrap{position:relative}
+/* Add to home screen (Bryan, Oct 22): the round download button beside the language button, and the sheet it opens with a looping how-to on a little phone. */
+.hdrow{display:flex;align-items:center;gap:8px}
+.instbtn{display:inline-flex;align-items:center;justify-content:center;width:33px;height:33px;padding:0;border-radius:50%;background:var(--panel);border:1px solid var(--line);color:var(--muted);font:600 13px/1 var(--body);white-space:nowrap;cursor:pointer}
+.instbtn[hidden]{display:none}
+.inst{position:fixed;inset:0;z-index:60;display:flex;align-items:flex-end;justify-content:center;background:rgba(3,14,18,.55);opacity:0;transition:opacity .2s}
+.inst.on{opacity:1}
+.inst .card{position:relative;width:min(440px,100%);max-height:92vh;overflow:auto;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:22px 22px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -12px 40px rgba(0,0,0,.35);transform:translateY(30px);transition:transform .25s cubic-bezier(.2,.8,.2,1);font-family:var(--body)}
+.inst.on .card{transform:none}
+@media (min-width:600px){.inst{align-items:center}.inst .card{border-radius:22px}}
+.inst h2{margin:0 34px 4px 0;font:800 20px/1.2 var(--display)}
+.inst .sub{margin:0 0 12px;color:var(--muted);font-size:14px;line-height:1.4}
+.inst .x{position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:50%;border:1px solid var(--line);background:none;color:var(--muted);font-size:18px;line-height:1;cursor:pointer}
+.inst .seg{display:flex;gap:4px;padding:3px;border-radius:99px;background:var(--bg);border:1px solid var(--line);margin-bottom:12px}
+.inst .seg button{flex:1;border:0;border-radius:99px;padding:8px;background:none;color:var(--muted);font:600 14px/1 var(--body);cursor:pointer}
+.inst .seg button[aria-pressed="true"]{background:var(--sea);color:#fff}
+.inst .note{margin:0 0 12px;padding:10px 12px;border-radius:12px;background:rgba(226,87,30,.12);border:1px solid rgba(226,87,30,.4);font-size:14px;line-height:1.4}
+.inst .go{display:block;width:100%;margin:0 0 12px;padding:12px;border:0;border-radius:14px;background:var(--sea);color:#fff;font:700 16px/1 var(--body);text-align:center;text-decoration:none;cursor:pointer}
+.inst .demo{display:flex;gap:14px;align-items:center}
+.inst ol{flex:1;margin:0;padding:0;list-style:none;counter-reset:s;font-size:14px;line-height:1.35}
+.inst li{counter-increment:s;position:relative;padding:8px 8px 8px 34px;border-radius:12px;color:var(--muted);animation:9s linear infinite}
+.inst li::before{content:counter(s);position:absolute;left:8px;top:7px;width:20px;height:20px;border-radius:50%;background:var(--line);color:var(--ink);font:700 12px/20px var(--body);text-align:center}
+.inst li b{color:var(--ink)}
+.inst li:nth-child(1){animation-name:instS1}.inst li:nth-child(2){animation-name:instS2}.inst li:nth-child(3){animation-name:instS3}
+@keyframes instS1{0%,31%{background:var(--bg);color:var(--ink)}32%,100%{background:none}}
+@keyframes instS2{0%,31%{background:none}32%,45%{background:var(--bg);color:var(--ink)}46%,100%{background:none}}
+@keyframes instS3{0%,45%{background:none}46%,92%{background:var(--bg);color:var(--ink)}93%,100%{background:none}}
+.inst .small{margin:10px 0 0;color:var(--muted);font-size:12.5px;line-height:1.4}
+/* The little phone: 150 x 300 screen; every layer runs on the same 9 s loop. */
+.ph{flex:none;position:relative;width:150px;height:300px;border:6px solid #111;border-radius:26px;overflow:hidden;background:#f4f7f7;color:#111;font:500 9px/1.2 -apple-system,system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+.ph *{position:absolute;box-sizing:border-box}
+.ph .pg{inset:0;background:#eef4f3}
+.ph .pg .lg{left:10px;top:22px;font:800 13px/1 "Anybody","Arial Narrow",sans-serif;color:#0d2a33}
+.ph .pg .bk{left:10px;right:10px;height:26px;border-radius:6px;background:#fff}
+.ph .pg .bk.c{height:60px;background:linear-gradient(135deg,#1f6f86,#4fb3c8)}
+.ph .tb{left:0;right:0;bottom:0;height:46px;background:#fbfbfb;border-top:1px solid #ddd}
+.ph .tb .url{left:10px;right:10px;top:5px;height:16px;border-radius:8px;background:#e6e6e6;font-size:7px;line-height:16px;text-align:center;color:#555}
+.ph .tb span{top:26px;width:16px;height:14px;font-size:11px;line-height:14px;text-align:center;color:#2a7cf6}
+.ph .ab{left:0;right:0;top:0;height:40px;background:#fbfbfb;border-bottom:1px solid #ddd}
+.ph .ab .url{left:8px;right:28px;top:16px;height:17px;border-radius:9px;background:#ececec;font-size:7px;line-height:17px;padding-left:8px;color:#555}
+.ph .ab .dots{right:8px;top:16px;width:14px;height:17px;font:900 12px/17px sans-serif;text-align:center;color:#444}
+.ph .sh{background:#fff;opacity:0;animation:9s infinite}
+.ph .row{left:0;right:0;height:26px;padding:0 10px;line-height:26px;border-bottom:1px solid #eee;white-space:nowrap}
+.ph .row.hl{animation:instHl 9s infinite}
+.ph .dlg{background:#fff;opacity:0;animation:instDlg 9s infinite}
+.ph .dlg img{width:36px;height:36px;border-radius:9px}
+.ph .home{inset:0;background:linear-gradient(160deg,#2b5876,#4e4376);opacity:0;animation:instHome 9s infinite}
+.ph .home i{width:28px;height:28px;border-radius:7px;background:rgba(255,255,255,.35)}
+.ph .home .new{width:28px;height:28px;border-radius:7px;transform:scale(0);animation:instPop 9s infinite}
+.ph .home .nm{width:40px;font-size:6.5px;color:#fff;text-align:center;opacity:0;animation:instHome 9s infinite}
+.ph .fg{width:24px;height:24px;margin:-12px 0 0 -12px;border-radius:50%;background:rgba(255,255,255,.55);border:2px solid rgba(0,0,0,.45);box-shadow:0 2px 6px rgba(0,0,0,.3);animation:9s ease-in-out infinite;z-index:5}
+/* iPhone: Share in Safari's bottom bar -> the share sheet slides up -> Add to Home Screen -> Add. */
+.ph.ios .sh{left:0;right:0;bottom:0;height:150px;border-radius:12px 12px 0 0;box-shadow:0 -4px 14px rgba(0,0,0,.2);animation-name:instSheet}
+.ph.ios .dlg .top{left:0;right:0;top:14px;height:24px;border-bottom:1px solid #eee;font-size:7px;font-weight:700;text-align:center;line-height:24px}
+.ph.ios .dlg .top em{font-style:normal;color:#2a7cf6;top:0}
+.ph.ios .fg{animation-name:instFgIos}
+/* Android Chrome: the menu up top -> Add to home screen / Install app -> Install. */
+.ph.and .sh{right:4px;top:6px;width:104px;height:132px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);transform-origin:top right;animation-name:instMenu}
+.ph.and .dlg{left:12px;right:12px;top:100px;height:96px;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.35)}
+.ph.and .dim{inset:0;background:rgba(0,0,0,.35);opacity:0;animation:instDlg 9s infinite}
+.ph.and .fg{animation-name:instFgAnd}
+@keyframes instSheet{0%,19%{opacity:1;transform:translateY(100%)}22%,34%{opacity:1;transform:none}35%,100%{opacity:0;transform:none}}
+@keyframes instMenu{0%,19%{opacity:0;transform:scale(.6)}21%,34%{opacity:1;transform:none}35%,100%{opacity:0}}
+@keyframes instHl{0%,30%{background:#fff}31%,35%{background:#dde9ff}36%,100%{background:#fff}}
+@keyframes instDlg{0%,34%{opacity:0}35%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes instHome{0%,49%{opacity:0}51%,93%{opacity:1}97%,100%{opacity:0}}
+@keyframes instPop{0%,53%{transform:scale(0)}57%{transform:scale(1.25)}60%,93%{transform:scale(1)}97%,100%{transform:scale(0)}}
+@keyframes instFgIos{0%,6%{left:120px;top:330px;transform:none}15%{left:75px;top:283px;transform:none}17%{transform:scale(.7)}19%{transform:none}
+  28%{left:75px;top:244px;transform:none}30%{transform:scale(.7)}32%{transform:none}42%{left:134px;top:26px;transform:none}44%{transform:scale(.7)}46%{transform:none;opacity:1}50%,100%{left:134px;top:26px;opacity:0}}
+@keyframes instFgAnd{0%,6%{left:120px;top:330px;transform:none}15%{left:139px;top:24px;transform:none}17%{transform:scale(.7)}19%{transform:none}
+  28%{left:80px;top:97px;transform:none}30%{transform:scale(.7)}32%{transform:none}42%{left:108px;top:180px;transform:none}44%{transform:scale(.7)}46%{transform:none;opacity:1}50%,100%{left:108px;top:180px;opacity:0}}
+@media (prefers-reduced-motion:reduce){.inst li,.ph *{animation:none!important}.ph .home,.ph .home .nm{opacity:1}.ph .home .new{transform:none}.ph .fg{display:none}}
 .langbtn{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:99px;background:var(--panel);border:1px solid var(--line);color:var(--muted);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP","Microsoft JhengHei",sans-serif;white-space:nowrap;cursor:pointer}
 .lang{position:absolute;top:calc(100% + 6px);right:0;display:flex;flex-direction:column;gap:2px;min-width:128px;padding:6px;border-radius:14px;background:var(--panel);border:1px solid var(--line);box-shadow:0 14px 34px rgba(0,0,0,.45);transition:opacity .16s,transform .16s,visibility .16s}
 .langwrap:not(.open) .lang{visibility:hidden;opacity:0;transform:translateY(-4px);pointer-events:none}
@@ -500,8 +571,9 @@ html.android .wsmap.fs .sh-scroll th{-webkit-backdrop-filter:none;backdrop-filte
       <h1 class="brand" aria-label="WaveSlave"><span class="w">W</span>aveSlave</h1>
     </div>
     <div class="hdtools">
+    <div class="hdrow"><button class="instbtn" id="instBtn" aria-label="Add to home screen" data-zh-aria-label="加到主畫面" title="Add to home screen" data-zh-title="加到主畫面"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></button>
     <div class="langwrap" id="langWrap"><button class="langbtn" id="langBtn" aria-haspopup="true" aria-expanded="false" aria-controls="lang" aria-label="Language / 語言 / 言語"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 2.6 15.4 0 18M12 3c-2.6 2.6-2.6 15.4 0 18"/></svg><span id="langName">EN</span></button>
-    <div class="lang" id="lang" role="group" aria-label="Language / 語言 / 言語"><button data-l="en" aria-pressed="true" lang="en">English</button><button data-l="zh" aria-pressed="false" lang="zh-Hant-TW">中文</button><button data-l="ja" aria-pressed="false" lang="ja" hidden>日本語</button></div></div>
+    <div class="lang" id="lang" role="group" aria-label="Language / 語言 / 言語"><button data-l="en" aria-pressed="true" lang="en">English</button><button data-l="zh" aria-pressed="false" lang="zh-Hant-TW">中文</button><button data-l="ja" aria-pressed="false" lang="ja" hidden>日本語</button></div></div></div>
     <span class="fresh" id="fresh">Data snapshot</span></div>
   </header>
   <div class="ctl">
@@ -2276,6 +2348,58 @@ applyLang();
   btn.onclick = () => langOpen(!w.classList.contains("open"));
   document.addEventListener("pointerdown", e => { if(w.classList.contains("open") && !w.contains(e.target)) langOpen(false); });
   document.addEventListener("keydown", e => { if(e.key==="Escape" && w.classList.contains("open")){ langOpen(false); btn.focus(); } }); }
+// ---- Add to home screen (Bryan, Oct 22): the round download button opens a sheet with a looping how-to for this phone (iPhone or Android, either one a tap
+// away). When Chrome offers its own install prompt, an Install button runs it. In LINE / Instagram / Facebook's browsers, which can't add to the
+// home screen, it first sends people out to Safari or Chrome. The button hides once the site runs from the home screen.
+(() => { const btn = document.getElementById("instBtn"), ua = navigator.userAgent;
+  if (matchMedia("(display-mode: standalone)").matches || navigator.standalone) { btn.hidden = true; return; }
+  const IOS = /iPhone|iPad|iPod/.test(ua) || /Macintosh/.test(ua) && navigator.maxTouchPoints > 1, LINE = /\bLine\//i.test(ua), INAPP = LINE || /FBAN|FBAV|Instagram|MicroMessenger/i.test(ua);
+  let ask = null, box = null, os = IOS ? "ios" : "and";
+  addEventListener("beforeinstallprompt", e => { e.preventDefault(); ask = e; if (box) paint(); });
+  addEventListener("appinstalled", () => { btn.hidden = true; shut(); });
+  const S = { en: { t: "Put WaveSlave on your home screen", sub: "It opens full screen like an app, one tap away. Free, nothing to download from a store.",
+      go: "Install now", inapp: LINE ? "You're in LINE's browser, which can't do this. Open the page in your phone's browser first:" : "This app's browser can't do this. Tap ⋯ and choose <b>Open in browser</b>, then come back to this button.",
+      out: "Open in browser", ios: ["Tap <b>Share</b> at the bottom of Safari (on newer iPhones tap <b>⋯</b> first)", "Choose <b>Add to Home Screen</b>", "Tap <b>Add</b>"],
+      and: ["Tap <b>⋮</b> at the top right of Chrome", "Choose <b>Add to home screen</b> or <b>Install app</b>", "Tap <b>Install</b>"],
+      sam: "Samsung Internet: tap ≡, then <b>Add page to</b> → <b>Home screen</b>.", ipad: "Chrome on iPhone works too: the Share button is in the address bar.",
+      ph: { share: ["Copy", "Add to Reading List", "Add to Home Screen ⊞", "Find on Page"], top: "Add to Home Screen", cancel: "Cancel", add: "Add",
+        menu: ["New tab", "History", "Bookmarks", "Add to home screen", "Settings"], dlg: "Install app", inst: "Install" } },
+    zh: { t: "把 WaveSlave 加到主畫面", sub: "像 App 一樣全螢幕開啟，一點就到。免費，不用到商店下載。",
+      go: "立即安裝", inapp: LINE ? "你正在用 LINE 內建的瀏覽器，無法加到主畫面。請先用手機的瀏覽器開啟：" : "這個 App 的內建瀏覽器無法加到主畫面。請點 ⋯ 選<b>用瀏覽器開啟</b>，再回來按這個按鈕。",
+      out: "用瀏覽器開啟", ios: ["點 Safari 下方的<b>分享</b>（新款 iPhone 先點 <b>⋯</b>）", "選<b>加入主畫面</b>", "點<b>新增</b>"],
+      and: ["點 Chrome 右上角的 <b>⋮</b>", "選<b>加到主畫面</b>或<b>安裝應用程式</b>", "點<b>安裝</b>"],
+      sam: "三星網際網路：點 ≡ →<b>新增頁面至</b>→<b>主畫面</b>。", ipad: "iPhone 上的 Chrome 也可以：分享按鈕在網址列裡。",
+      ph: { share: ["拷貝", "加入閱讀列表", "加入主畫面 ⊞", "在頁面上尋找"], top: "加入主畫面", cancel: "取消", add: "新增",
+        menu: ["新分頁", "歷史記錄", "書籤", "加到主畫面", "設定"], dlg: "安裝應用程式", inst: "安裝" } } };
+  const phone = (o, p) => { const home = Array.from({length: 11}, (_, i) => `<i style="left:${12+(i%4)*34}px;top:${30+Math.floor(i/4)*44}px"></i>`).join("")
+      + `<img class="new" src="icon-192.png" alt="" style="left:114px;top:118px"><span class="nm" style="left:108px;top:149px">WaveSlave</span>`;
+    const page = `<div class="pg"><b class="lg" style="top:${o==="ios"?22:52}px">WaveSlave</b><div class="bk c" style="top:${o==="ios"?42:72}px"></div>`
+      + [0,1,2,3].map(i => `<div class="bk" style="top:${(o==="ios"?110:140)+i*32}px"></div>`).join("") + `</div>`;
+    if (o === "ios") return `<div class="ph ios" aria-hidden="true">${page}<div class="tb"><div class="url">waveslave.tw</div>`
+      + ["‹","›","⇪","⧉","⧠"].map((c, i) => `<span style="left:${11+i*28}px">${c}</span>`).join("") + `</div>`
+      + `<div class="sh"><div class="row" style="top:0;font-weight:700;color:#555">waveslave.tw</div>`
+      + p.share.map((r, i) => `<div class="row${i===2?" hl":""}" style="top:${30+i*26}px">${r}</div>`).join("") + `</div>`
+      + `<div class="dlg" style="inset:0"><div class="top">${p.top}<em style="left:8px;font-weight:400">${p.cancel}</em><em style="right:8px">${p.add}</em></div>`
+      + `<img src="icon-192.png" alt="" style="left:12px;top:52px"><span style="left:56px;top:58px;font-size:10px;font-weight:700">WaveSlave</span><span style="left:56px;top:72px;color:#888;font-size:7px">waveslave.tw</span></div>`
+      + `<div class="home">${home}</div><span class="fg"></span></div>`;
+    return `<div class="ph and" aria-hidden="true">${page}<div class="ab"><div class="url">waveslave.tw</div><div class="dots">⋮</div></div>`
+      + `<div class="sh">` + p.menu.map((r, i) => `<div class="row${i===3?" hl":""}" style="top:${i*26}px">${r}</div>`).join("") + `</div>`
+      + `<div class="dim"></div><div class="dlg"><b style="left:12px;top:10px;font-size:10px">${p.dlg}</b><img src="icon-192.png" alt="" style="left:12px;top:30px;width:28px;height:28px"><span style="left:48px;top:38px;font-weight:700">WaveSlave</span>`
+      + `<span style="right:52px;bottom:10px;color:#1a73e8">${p.cancel}</span><span style="right:10px;bottom:6px;padding:3px 7px;border-radius:9px;background:#1a73e8;color:#fff">${p.inst}</span></div>`
+      + `<div class="home">${home}</div><span class="fg"></span></div>`; };
+  function paint(){ const s = S[LANG==="zh" ? "zh" : "en"], out = location.href.replace(/[?#].*$/, "") + "?openExternalBrowser=1";
+    box.querySelector(".card").innerHTML = `<button class="x" aria-label="${LANG==="zh" ? "關閉" : "Close"}">✕</button><h2 id="instT">${s.t}</h2><p class="sub">${s.sub}</p>`
+      + (INAPP ? `<p class="note">${s.inapp}</p>` + (LINE ? `<a class="go" href="${out}">${s.out}</a>` : "") : "")
+      + `<div class="seg" role="group"><button data-o="ios" aria-pressed="${os==="ios"}">iPhone</button><button data-o="and" aria-pressed="${os==="and"}">Android</button></div>`
+      + (ask && os==="and" ? `<button class="go" id="instGo">${s.go}</button>` : "")
+      + `<div class="demo">${phone(os, s.ph)}<ol>${s[os].map(t => `<li>${t}</li>`).join("")}</ol></div><p class="small">${os==="ios" ? s.ipad : s.sam}</p>`;
+    box.querySelector(".x").onclick = shut;
+    box.querySelectorAll(".seg button").forEach(b => b.onclick = () => { os = b.dataset.o; paint(); });
+    const go = box.querySelector("#instGo"); if (go) go.onclick = async () => { const a = ask; ask = null; a.prompt(); const r = await a.userChoice.catch(() => ({})); if (r.outcome==="accepted") shut(); else paint(); }; }
+  function shut(){ if (!box) return; const b = box; box = null; b.classList.remove("on"); setTimeout(() => b.remove(), 250); btn.focus(); }
+  btn.onclick = () => { box = document.createElement("div"); box.className = "inst"; box.innerHTML = `<div class="card" role="dialog" aria-modal="true" aria-labelledby="instT"></div>`;
+    box.onclick = e => { if (e.target === box) shut(); }; document.body.append(box); paint(); requestAnimationFrame(() => box.classList.add("on")); box.querySelector(".x").focus(); };
+  document.addEventListener("keydown", e => { if (e.key==="Escape" && box) shut(); }); })();
 document.querySelector("header .brand .w").addEventListener("click", () => setWorld(!WORLD));
 { const later = afterGlide(), bs = document.querySelectorAll("#ctry button"); bs.forEach(b=>b.onclick=()=>{ pressOnly(bs, b); const g = worldGen; later(()=>{ if(g===worldGen) switchCountry(b.dataset.c); }); }); }
 for(const [box, sel] of [["#lang", 'button[aria-pressed="true"]'], ["#ctry", 'button[aria-pressed="true"]'], [".tabs", 'button[aria-selected="true"]'], ["#picker", "a[aria-current]"],

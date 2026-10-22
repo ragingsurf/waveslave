@@ -58,11 +58,14 @@ const CHECKS = {
     if (!page.tried.includes(want)) throw new Error(`the page asked ${page.tried.join(", ") || "nothing"}, not ${want}`);
   },
   // Developer mode only (Bryan, Oct 22): in Taiwan mode, as everyone sees the site, there's no CHAT button, no strip and no credits line,
-  // and nothing is asked of the backend.
+  // and nothing is asked of the backend, at load or on coming back to the page later (straight away, and again a minute on).
   async devOnly(open) {
     const page = await open({ pub: false }); await wait(300); const l = await look(page);
     const credits = await page.evaluate(() => document.getElementById("chatCredits").hidden);
     if (l.fab || l.strip || !credits || page.asked.length) throw new Error(`in Taiwan mode the button is ${l.fab ? "there" : "gone"}, the strip ${l.strip ? "shows" : "is hidden"}, the credits line ${credits ? "is hidden" : "shows"} and the page asked for ${page.asked.join(", ") || "nothing"}`);
+    const back = () => page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await back(); await wait(300); await page.evaluate(() => window.__skew(61e3)); await back(); await wait(300);
+    if (page.asked.length) throw new Error(`back on the page in Taiwan mode, it asked for ${page.asked.join(", ")}`);
   },
   // In developer mode (World mode, its PIN in for this visit) the chat is there on a Taiwan spot, asking for the spot's reports once.
   async devOn(open) {
@@ -102,6 +105,17 @@ const CHECKS = {
     const page = await open({ pub: false, pin: true, unlocked: false, spot: "jinshan", query: "?chat" }); await wait(200);
     const s = await page.evaluate(() => ({ href: location.href, opened: window.CHAT._opened.length, pin: !!window.__pinAsked }));
     if (/\?chat/.test(s.href) || s.opened || s.pin || page.asked.length) throw new Error(`a plain ?chat out of developer mode left ${s.href}, asked the room ${s.opened} times, the PIN box ${s.pin ? "came up" : "didn't"}, the backend for ${page.asked.join(", ") || "nothing"}`);
+  },
+  // With a chat.js from before CHAT.dev (Oct 22's, window.CHAT = {spot, relang}) the W still works: World mode goes off on a Japan spot and
+  // the page goes back to Taiwan, then comes on again. A reload paired this page with that one from the browser's cache (GitHub Pages lets it
+  // keep chat.js 10 minutes, and a reload fetches only the page again) until build-site.sh put chat.js's version in its address.
+  async oldChatJs(open) {
+    const page = await open({ world: true, spot: "shonan", chatJs: "window.CHAT = { spot() {}, relang() {} };" });
+    const mode = () => page.evaluate(() => ({ world: WORLD, cls: document.documentElement.classList.contains("world"), cur: CUR, tw: spotCountry(CUR) === "tw" }));
+    await page.evaluate(() => setWorld(false)); await wait(300); let m = await mode();
+    if (m.world || m.cls || !m.tw) throw new Error(`with the old chat.js, leaving World mode left WORLD ${m.world} on ${m.cur}`);
+    await page.evaluate(() => { sessionStorage.setItem("waveslave-unlock", window.__lockHash); return setWorld(true); }); await wait(300); m = await mode();
+    if (!m.world || !m.cls) throw new Error(`with the old chat.js, World mode didn't come back on (WORLD ${m.world})`);
   },
   // A CHAT_URL with an empty operator's name or email (window.__chatContact) is still off: the privacy note can't go out without them
   // (Bryan, Oct 21).

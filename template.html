@@ -656,7 +656,8 @@ function langOpen(on){ document.getElementById("langWrap").classList.toggle("ope
 let WORLD = document.documentElement.classList.contains("world");
 // The World passcode (web/head.html): until the code is in for this visit, World mode opens the PIN box first (wsPin) and comes on once it's right.
 const worldLocked = () => !!window.__worldLock && !(window.wsUnlocked && wsUnlocked());
-function keepWorld(on){ WORLD = on; if(!on && window.wsRelock) wsRelock(); document.documentElement.classList.toggle("world", on); try{ localStorage.setItem("waveslave-world", on ? "1" : "0"); }catch(e){} window.CHAT&&CHAT.dev(); }
+// The chat (web/chat.js) hears of each change through CHAT.dev, if it has one: a chat.js from before it (Oct 22's) has none, and the W must still work with that.
+function keepWorld(on){ WORLD = on; if(!on && window.wsRelock) wsRelock(); document.documentElement.classList.toggle("world", on); try{ localStorage.setItem("waveslave-world", on ? "1" : "0"); }catch(e){} window.CHAT&&typeof CHAT.dev==="function"&&CHAT.dev(); }
 // Spot comes from the link (#nanwan) or the last one picked on this device; Donghe otherwise. In Taiwan mode the last one is the last Taiwan
 // spot; a link to another country's spot turns World mode on, so it still opens.
 let SPOT_PEND = null;   // a link to another country's spot while World mode waits for the passcode: opened once it's in
@@ -2358,5 +2359,6 @@ if(VIEW!=="fc") setView(VIEW, true);
   Promise.race([font, new Promise(r => setTimeout(r, 700))]).then(start);
 })();
 </script>
-<!-- The Taiwan chat: its report strip, button and room (web/chat.js, next to this page). The page runs the same without it. -->
+<!-- The Taiwan chat: its report strip, button and room (web/chat.js, next to this page; build-site.sh puts its version in the address, so a
+     reload never pairs this page with an older chat.js from the browser's cache). The page runs the same without it. -->
 <script src="chat.js" defer></script>

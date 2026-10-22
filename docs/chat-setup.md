@@ -3,10 +3,10 @@
 This is Bryan's step-by-step for switching on the WaveSlave chat. It takes about 30 minutes and costs nothing: Cloudflare's
 free plan needs no card, and LINE sign-in is free.
 
-You can do steps 1 to 10 at any time, even before Claude's chat pull request is merged: they set up Cloudflare and LINE, make
-the three random values and put the secrets in GitHub. Only step 11 onward waits for the merge, because step 11 runs the
-Deploy chat workflow from `main`. Once it's merged, the chat code is on the site, switched off. Nothing changes on
-waveslave.tw until the very last step, so you can stop at any point and carry on later.
+Claude's chat pull request is already merged, so the chat code is on the site, switched off, and you can do all the steps
+below now. Steps 1 to 10 set up Cloudflare and LINE, make the three random values and put the secrets in GitHub; step 11
+runs the Deploy chat workflow from `main`. Nothing changes on waveslave.tw until the very last step, so you can stop at any
+point and carry on later.
 
 **What you need:** a computer, your phone with LINE on it, and your GitHub account (the one that owns `ragingsurf/waveslave`).
 
@@ -19,11 +19,10 @@ screenshot or the repo. Claude never needs them.
 1. **Make a free Cloudflare account.** Go to https://dash.cloudflare.com/sign-up and sign up with your email and a password. It
    asks for no card. Cloudflare then emails you a link: open it to confirm your email address.
 
-2. **Pick the chat's web address.** In the Cloudflare dashboard, go to **Workers & Pages** (it's in the menu on the left, or open
+2. **Check the chat's web address.** In the Cloudflare dashboard, go to **Workers & Pages** (it's in the menu on the left, or open
    https://dash.cloudflare.com/?to=/:account/workers-and-pages).
-   - Find **Your subdomain**. Select **Change** next to it, type `waveslave` (or something close if that's taken), and save.
-   - Write the subdomain down: it's not a secret. With `waveslave`, the chat's address will be
-     `https://waveslave-chat.waveslave.workers.dev`.
+   - Find **Your subdomain**. Yours is `waveslave050`: leave it as it is.
+   - The chat's address will be `https://waveslave-chat.waveslave050.workers.dev`. It's not a secret.
 
 3. **Copy the account ID.** On the same **Workers & Pages** page, find the **Account Details** section and select the copy
    button next to **Account ID**. Paste it into your note as `CLOUDFLARE_ACCOUNT_ID`.
@@ -59,6 +58,7 @@ screenshot or the repo. Claude never needs them.
    | **Channel name** | `WaveSlave` (LINE doesn't allow the word "LINE" in it) |
    | **Channel description** | `Sign in to post in the WaveSlave surf chat.` |
    | **App types** | **Web app** only |
+   | **Require two-factor authentication** | **Off**. LINE turns it on by default. While it's on, anyone signing in to the chat with their LINE email and password, or with a QR code, also has to type a code into LINE on their phone, and again on each new phone or browser. The chat keeps nothing sensitive, so that only costs sign-ups. You can turn it on later in the channel's settings. |
    | **Email address** | Your email. LINE sends notices about the channel here. |
    | **Privacy policy URL** and **Terms of use URL** | Leave empty. |
 
@@ -120,7 +120,7 @@ screenshot or the repo. Claude never needs them.
     - It takes a few minutes. A green tick means the chat is on Cloudflare. From now on this runs by itself whenever the chat's
       backend changes.
     - Open the finished run and its **Deploy** step: near the end it shows the chat's address,
-      `https://waveslave-chat.<your subdomain>.workers.dev`.
+      `https://waveslave-chat.waveslave050.workers.dev`.
     - If the run says "Chat not deployed" and lists missing secrets, add those (step 10) and run it again.
     - If it shows a red cross, send Claude a screenshot of the step that failed. That's safe: GitHub shows every secret in the
       log as `***`.
@@ -128,14 +128,12 @@ screenshot or the repo. Claude never needs them.
 ## Part 5: Back to LINE
 
 12. **Tell LINE where to send people back after they sign in.** In the LINE Developers Console, open the WaveSlave provider and
-    the WaveSlave channel, and go to its **LINE Login** tab. Under **Callback URL**, select **Edit**, paste this address with
-    your own subdomain from step 2, and select **Update**:
+    the WaveSlave channel, and go to its **LINE Login** tab. Under **Callback URL**, select **Edit**, paste this address, and
+    select **Update**:
 
     ```
-    https://waveslave-chat.<your subdomain>.workers.dev/auth/line/callback
+    https://waveslave-chat.waveslave050.workers.dev/auth/line/callback
     ```
-
-    With the subdomain `waveslave`, that's `https://waveslave-chat.waveslave.workers.dev/auth/line/callback`.
 
 13. **Open sign-in to everyone.** A new channel starts as **Developing**, which lets only you sign in. At the top of the channel
     page, select **Developing** and confirm that you want to publish it. It then shows **Published**. (It can't be switched back
@@ -144,15 +142,15 @@ screenshot or the repo. Claude never needs them.
 14. **Leave email off.** Check that the **Email address permission** on the **Basic settings** tab still hasn't been applied
     for. That's how it should stay.
 
-## Part 6: Send Claude two things
+## Part 6: Tell Claude
 
-15. **Send Claude, in the project chat:**
-    - **the workers.dev subdomain** from step 2 (for example `waveslave`). It's not a secret.
-    - **the name and email to show as the person running the chat.** They appear in the chat's privacy note, which everyone can
-      read, and are where people send questions and takedown requests. A separate email just for the chat is fine.
+15. **Tell Claude, in the chat thread, once steps 11 to 14 are done.** Claude then checks that the chat answers at
+    `https://waveslave-chat.waveslave050.workers.dev` and switches it on, with a small pull request that puts that address in
+    the chat's code. Once you merge it, the site rebuilds by itself, and a few minutes later the chat shows on the Taiwan spots.
 
-    Nothing else: no tokens, no secrets. Claude then makes a small pull request that switches the chat on with your address,
-    name and email. Once you merge it, the site rebuilds by itself, and a few minutes later the chat shows on the Taiwan spots.
+    Nothing else: no tokens, no secrets, no passwords. The name and email for the chat's privacy note are already in: it shows
+    "WaveSlave" and waveslave050@gmail.com, as you chose on Oct 22, and that's where people send questions and takedown
+    requests, so check that inbox now and then.
 
 ## When the chat is live
 

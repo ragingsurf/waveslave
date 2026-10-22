@@ -2,7 +2,7 @@
 // SQLite storage. The design is in docs/superpowers/specs/2026-10-21-taiwan-chat-design.md, "Data (room
 // SQLite)", "Alarm", "Retention (daily)", "Moderation" and "Free-plan budget".
 //
-//   migrate()                  creates the tables, once per schema version, before the room does anything else
+//   migrate()                  creates the tables, or brings an older room's up to date, before anything else
 //   history(beforeId, limit)   a page of the room, as the public frames readers get
 //   reportsFor(spot, nowMs)    the spot card's reports, from a memory copy kept for 60 s per spot
 //   messagesChanged(spot)      called by every write to messages, so the memory copies follow
@@ -33,8 +33,16 @@ const MINUTE = 60 * SECOND;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-// The schema this code expects. A change to the tables bumps it and adds a step to migrate().
-const SCHEMA_VER = 1;
+// The schema this code expects. A change to the tables bumps it and adds a step to migrate(), which brings a room up
+// from whatever version it has. Version 1 is the tables as merged in PR #97 (SCHEMA_V1), and it had a sub column in
+// handoffs: LINE's raw ID. Version 2 drops that column (SCHEMA_V2), so LINE's raw ID is gone from every table after
+// migrate().
+//
+// The steps only go forward, so never roll the chat back past a version that bumped this (a rollback in Cloudflare's
+// dashboard, or the Deploy chat workflow run on an older branch or tag). The older code takes the higher schema_ver as
+// done and uses tables it doesn't know: version-1 code still writes handoffs.sub, so every sign-in would fail. To undo
+// a change, deploy a fix on top instead.
+const SCHEMA_VER = 2;
 
 const PAGE_MAX = 100; // the room opens with the last 100 messages
 const REPORT_WINDOW = 4 * HOUR; // a report shows on its spot's card for 4 hours
@@ -75,11 +83,29 @@ const PROTO_OLDEST = Math.max(1, PROTO - 1); // the room takes the current versi
 const FRAME_MAX = 4096; // bytes of UTF-8 in one frame; a bigger one closes the socket
 const BAD_FRAMES = 5; // bad frames that close a socket
 const SOCKETS_PER_IP = 5;
+// Frames one socket may send, of any kind (ruling R22). Every frame the room's code sees is a room request against the
+// free plan's 100,000 a day (DAILY_LIMITS), refused or not, so without this one connection could spend the whole day's
+// budget and put the chat to rest. 1,000 is 1% of it. The room's own limits keep a person far below that: 20 messages
+// and 30 likes per 10 minutes, a page of older messages a second. A reconnecting client counts from nothing on each new
+// socket, and chat.js starts a new one after 5 minutes in the background. The next frame past it is not answered: the
+// socket is closed with 1008, as for bad frames, which chat.js takes as a drop and opens a new socket after 1 s.
+// Bryan's sockets (role "admin") aren't counted, so his tools always work.
+//
+// The cap holds one socket to 1,001 room requests (its 1,000 frames and the one that closes it) only when its client
+// stops sending at the close, as chat.js does. A client that ignores the close can keep sending until it drops the
+// connection itself, and the runtime still hands the room every frame: a test client under wrangler dev kept one
+// closed socket sending about 4,000 frames a second for 45 s, fast enough to spend the day's 100,000 in about 25 s.
+// Nothing in the room can stop those calls, and Cloudflare may count each one against the day's limit, so the room
+// counts them too (webSocketMessage()). The chat rests at 90% (rest()) and tells the open screens it is resting first,
+// but nothing stops a client that keeps sending after its close: rest() closes only open sockets, and one already
+// closing goes on being handed frames, each still counted. Such a client can still take the count past the daily
+// limit within seconds, and new visitors may then see "offline" instead of "resting".
+const FRAMES_PER_SOCKET = 1000;
 const OLDER_PAGE = 50; // messages in each page of older ones
 const OLDER_EVERY = SECOND; // one page of older messages a second per socket
 const TEXT_MAX = 500; // characters in a text message
 // Close codes. 1008 and 1009 are the standard ones; the 44xx ones are the chat's own, for chat.js to read.
-const CLOSE_BAD = 1008; // five bad frames
+const CLOSE_BAD = 1008; // five bad frames, or more than FRAMES_PER_SOCKET
 const CLOSE_TOO_BIG = 1009; // a frame over 4 KB
 const CLOSE_SIGNED_OUT = 4401; // the account signed out everywhere, or was deleted: its tokens no longer work
 const CLOSE_BANNED = 4403; // Bryan banned the account: "This LINE account can't post here"
@@ -88,8 +114,8 @@ const CLOSE_RESTING = 4429; // the chat is resting (rest()): "Chat is resting un
 
 // What a socket's attachment holds (it lives with the socket, through hibernation): uid, tv and role once it has said
 // hello with a good token, and null for a reader; v, its protocol version, once it has said hello; bad, the bad frames
-// it has sent; and olderAt, when it last got a page of older messages.
-const NEW_SOCKET = Object.freeze({ uid: null, tv: null, role: null, v: null, bad: 0, olderAt: 0 });
+// it has sent; olderAt, when it last got a page of older messages; and frames, every frame it has sent (but "ping").
+const NEW_SOCKET = Object.freeze({ uid: null, tv: null, role: null, v: null, bad: 0, olderAt: 0, frames: 0 });
 
 // The frames a socket may send, and the method that answers each. Reading needs no sign-in (Bryan, Oct 21: sign in
 // with LINE to post), so hello and older work for everyone; the writes need a socket that said hello signed in, and
@@ -248,8 +274,9 @@ const SCHEMA_V1 = [
     h TEXT NOT NULL,
     created INTEGER NOT NULL
   )`,
-  // A finished LINE sign-in waiting to be redeemed (spec "Login", step 3), for 10 minutes. This is the only row
-  // that ever holds a raw LINE ID (sub).
+  // A finished LINE sign-in waiting to be redeemed (spec "Login", step 3), for 10 minutes. Version 1, as merged in
+  // PR #97, had a sub column here too: LINE's raw ID, written and never read. Version 2 drops it (SCHEMA_V2), so after
+  // migrate() this table, like every other, keeps the LINE account only as its sub_hash (ruling R22).
   `CREATE TABLE handoffs (
     code_hash TEXT PRIMARY KEY,
     h TEXT NOT NULL,
@@ -265,6 +292,11 @@ const SCHEMA_V1 = [
   // Copies Bryan keeps (child-safety hides, "Keep as evidence"), for 180 days whatever else is deleted.
   "CREATE TABLE holds (msg_id INTEGER, body TEXT, uid TEXT, sub_hash TEXT, reason TEXT, ts INTEGER NOT NULL)",
 ];
+
+// Version 2 (Oct 22): handoffs loses its sub column, so LINE's raw ID is gone from every table after migrate() (ruling
+// R22). The room never read it, and no longer writes it. DROP COLUMN rewrites each row without it and keeps the rows,
+// so a sign-in still waiting to be redeemed when this version arrives goes on working.
+const SCHEMA_V2 = ["ALTER TABLE handoffs DROP COLUMN sub"];
 
 // The first 19:00 UTC after t (19:00 itself counts as past).
 function retentionTimeAfter(t) {
@@ -432,14 +464,17 @@ export class Room extends DurableObject {
     this.all("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", key, value);
   }
 
-  // Creates the tables. meta.schema_ver records what is done, so this runs once per version and changes nothing
-  // after that. The constructor calls it before the room takes any request.
+  // Creates the tables, or brings them up to SCHEMA_VER: each version's step runs in turn, so a new room runs version 1
+  // then version 2, and a version-1 room only version 2. meta.schema_ver records what is done, so each step runs once
+  // and nothing changes after that. The steps and the new schema_ver are written in one transaction, so a step that
+  // fails undoes them all. The constructor calls it before the room takes any request.
   migrate() {
     this.all("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value)");
     const ver = this.getMeta("schema_ver") ?? 0;
     if (ver >= SCHEMA_VER) return;
     this.ctx.storage.transactionSync(() => {
       if (ver < 1) for (const statement of SCHEMA_V1) this.all(statement);
+      if (ver < 2) for (const statement of SCHEMA_V2) this.all(statement);
       this.setMeta("schema_ver", SCHEMA_VER);
     });
   }
@@ -689,9 +724,9 @@ export class Room extends DurableObject {
     return Response.json({ nonce: row.nonce, pkce_verifier: row.pkce_verifier, h: row.h });
   }
 
-  // Steps 3.4 and 3.5: LINE has said who this is (sub, checked by the Worker). The account code is made here, a banned
-  // account stops here, and otherwise the handoff is stored for 10 minutes: the one row that holds a raw LINE sub. The
-  // app gets the code, which is kept only as its SHA-256, and the pin.
+  // Steps 3.4 and 3.5: LINE has said who this is (sub, checked by the Worker). The account code (sub_hash) is made here,
+  // and the sub itself goes no further: it is never stored. A banned account stops here, and otherwise the handoff is
+  // stored for 10 minutes. The app gets the code, which is kept only as its SHA-256, and the pin.
   async createHandoff(body) {
     if (!isText(body?.h, B64U_32) || typeof body.sub !== "string" || body.sub === "" || body.sub.length > LINE_SUB_MAX) {
       return refuse(400, "invalid");
@@ -704,10 +739,10 @@ export class Room extends DurableObject {
     if (this.isBanned(account)) return refuse(403, "banned");
     const created = this.now();
     this.all(
-      `INSERT INTO handoffs (code_hash, h, sub_hash, sub, line_name, pin, created, tries) VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
-      codeHash, body.h, account, body.sub, lineName, pin, created,
+      `INSERT INTO handoffs (code_hash, h, sub_hash, line_name, pin, created, tries) VALUES (?, ?, ?, ?, ?, ?, 0)`,
+      codeHash, body.h, account, lineName, pin, created,
     );
-    // The raw sub must not outlive its 10 minutes, even in a room nobody visits, so the alarm comes back for it.
+    // The LINE name must not outlive its 10 minutes, even in a room nobody visits, so the alarm comes back for it.
     await this.alarmBy(created + LOGIN_TTL + LOGIN_GRACE);
     return Response.json({ code, pin });
   }
@@ -725,8 +760,8 @@ export class Room extends DurableObject {
   }
 
   // Step 6: a new person signs up with the same proof, a nickname and the tick (consent "v1"). The account is made only
-  // then, with when and to which version they agreed. The LINE name only prefilled the nickname box and is not kept,
-  // and the handoff goes, with LINE's raw sub. A LINE account that already has an account is just signed in.
+  // then, with when and to which version they agreed. The LINE name only prefilled the nickname box and is not kept:
+  // the handoff goes, with it. A LINE account that already has an account is just signed in.
   async signup(body) {
     const proof = await this.proof(body);
     if (!proof) return refuse(400, "invalid");
@@ -978,8 +1013,11 @@ export class Room extends DurableObject {
   // why a message was hidden, and the LINE account code (sub_hash) that unban takes. A socket that sends five bad
   // frames (invalid ones, or writes before signing in) is closed with 1008. gone is not a bad frame: a working app gets
   // it from ordinary races (a double tap, a like on a message hidden just as it was tapped). A frame over 4 KB closes
-  // it with 1009. Each address may hold 5 sockets. The room's own close codes: 4401 signed out everywhere (or the
-  // account is deleted), 4403 banned, 4426 reload for the new chat, and 4429 resting.
+  // it with 1009. A socket that has sent 1,000 frames of any kind is closed with 1008 at the next one, unanswered
+  // (FRAMES_PER_SOCKET); Bryan's never are. A frame that reaches a socket after the room has closed it, whatever the
+  // close, isn't answered, but it is still counted against the day's budget (FRAMES_PER_SOCKET says why). Each address
+  // may hold 5 sockets. The room's own close codes: 4401 signed out everywhere (or the account is deleted), 4403
+  // banned, 4426 reload for the new chat, and 4429 resting.
 
   // GET /ws, once the Worker has checked the Origin: a new socket, unless the visitor's address already holds 5. The
   // address is kept only as a tag on its sockets, and only as its HMAC under SUB_PEPPER, so the room never holds an IP
@@ -1012,11 +1050,21 @@ export class Room extends DurableObject {
   }
 
   // Every frame from a socket but "ping". Each one is a room request against the free plan's daily limit. While the
-  // chat rests, a frame isn't answered: the socket is closed with 4429, with every other open one (rest()).
+  // chat rests, a frame isn't answered: the socket is closed with 4429, with every other open one (rest()). A frame past
+  // the socket's 1,000 isn't answered either: the socket is closed with 1008 (overFrames()).
+  //
+  // A frame that reaches a socket the room has already closed (1008, 1009, 4429 or any other close) is counted, and
+  // rest() asked, like any other frame, and then dropped: not answered. The runtime hands the room every frame a
+  // client sends after the close for as long as the client keeps the connection, and a client that ignores the close
+  // can send without limit (see FRAMES_PER_SOCKET). Each of those calls may count against Cloudflare's daily limit, so
+  // the room counts them, and rests at 90% (rest()); but resting doesn't stop such a client either: its frames go on
+  // coming and being counted, and can take the count past the daily limit (FRAMES_PER_SOCKET says what then).
   async webSocketMessage(ws, message) {
     this.usage("req");
     await this.ensureAlarm();
     if (this.rest()) return;
+    if (ws.readyState !== WebSocket.OPEN) return;
+    if (this.overFrames(ws)) return;
     if (frameBytes(message) > FRAME_MAX) {
       this.send(ws, errorFrame("size"));
       ws.close(CLOSE_TOO_BIG, "frame too big");
@@ -1046,6 +1094,21 @@ export class Room extends DurableObject {
       if (at.bad + 1 >= BAD_FRAMES) ws.close(CLOSE_BAD, "bad frames");
       else ws.serializeAttachment({ ...at, bad: at.bad + 1 });
     }
+  }
+
+  // Counts one more frame from ws, in its attachment, so the count lives through hibernation. Past FRAMES_PER_SOCKET the
+  // socket is closed with 1008 and this says so: the frame goes unanswered. Bryan's sockets aren't counted.
+  overFrames(ws) {
+    const at = { ...NEW_SOCKET, ...ws.deserializeAttachment() };
+    if (at.role === "admin") return false;
+    ws.serializeAttachment({ ...at, frames: at.frames + 1 });
+    if (at.frames + 1 <= FRAMES_PER_SOCKET) return false;
+    try {
+      ws.close(CLOSE_BAD, "too many frames");
+    } catch {
+      // It closed in the meantime.
+    }
+    return true;
   }
 
   // A socket closed (the runtime has already answered its close, as the compatibility date asks): everyone left hears
@@ -1710,7 +1773,7 @@ export class Room extends DurableObject {
   //   - their likes go, and the counts of the messages they liked come down;
   //   - their flags go, and nothing they helped hide comes back;
   //   - their logs go, and so do their LINE account's rate-limit counts and held nicknames, and any sign-in of theirs
-  //     still waiting to be redeemed (with LINE's raw sub);
+  //     still waiting to be redeemed (with their LINE name);
   //   - if it is Bryan's account, meta admin_uid goes, so he can claim the role again from a new account;
   //   - their count of wrong /admin codes goes from meta admin_claims, which then no longer names their LINE account;
   //     the total stays, so the 10 in all still count them;
@@ -1871,8 +1934,8 @@ export class Room extends DurableObject {
     let handoffsDue = Infinity;
     try {
       // Expired sign-ins go on every alarm, not only at 19:00, and before anything that might fail: a handoff holds
-      // a raw LINE ID. The handoffs still waiting are read here too, so a retention run that fails can't leave one
-      // waiting for tomorrow's run.
+      // the person's LINE name. The handoffs still waiting are read here too, so a retention run that fails can't leave
+      // one waiting for tomorrow's run.
       this.dropExpiredLogins(now);
       handoffsDue = this.handoffsDue();
       if (now >= this.nextRetention()) {

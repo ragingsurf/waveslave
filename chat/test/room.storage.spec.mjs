@@ -1,12 +1,13 @@
-// Tests for chat/src/room.js: the room's tables, the two read paths (history and the spot-card reports) and
-// what they cost in rows, the usage counters, the alarm and the daily retention. They run inside the Workers
-// runtime (see vitest.config.mjs). Run from chat/: npx vitest run test/room.storage.spec.mjs
+// Tests for chat/src/room.js: the room's tables and their upgrade from schema version 1, the two read paths (history
+// and the spot-card reports) and what they cost in rows, the usage counters, the alarm and the daily retention. They
+// run inside the Workers runtime (see vitest.config.mjs). Run from chat/: npx vitest run test/room.storage.spec.mjs
 //
 // Each test uses its own room, so no test sees another's rows. The room's clock is room.now(); tests that
 // need a fixed time replace it.
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject, SELF } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
+import { randomB64u, sha256b64u, subHash } from "../src/auth.js";
 import { CONDS, CROWDS, SIZES, SPOTS } from "../src/mod.js";
 
 const MIN = 60_000;
@@ -110,7 +111,7 @@ const TABLES = {
   flags: ["msg_id", "sub_hash", "reason", "ts", "rejected"],
   sessions: ["id", "uid", "spot", "start", "end", "stars", "board", "note", "cond", "shared_msg"],
   logins: ["state", "nonce", "pkce_verifier", "h", "created"],
-  handoffs: ["code_hash", "h", "sub_hash", "sub", "line_name", "pin", "created", "tries"],
+  handoffs: ["code_hash", "h", "sub_hash", "line_name", "pin", "created", "tries"],
   limits: ["key", "n", "window_end"],
   holds: ["msg_id", "body", "uid", "sub_hash", "reason", "ts"],
   meta: ["key", "value"],
@@ -131,7 +132,7 @@ describe("schema", () => {
       for (const [table, columns] of Object.entries(TABLES)) {
         expect(rows(room, "SELECT name FROM pragma_table_info(?)", table).map((r) => r.name), table).toEqual(columns);
       }
-      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(1);
+      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(2);
     });
   });
 
@@ -166,6 +167,26 @@ describe("schema", () => {
     });
   });
 
+  it("makes a new room's tables all at once: when the last write fails, the room is left with only meta", async () => {
+    await runInDurableObject(freshRoom(), (room) => {
+      // Back to empty storage, as for a room that has never run.
+      for (const name of ownTables(room)) room.sql.exec(`DROP TABLE "${name}"`);
+      const atFailure = failSchemaVer(room);
+      expect(() => room.migrate()).toThrow("schema_ver write failed");
+      delete room.setMeta;
+      // Versions 1 and 2 had both run when schema_ver failed...
+      expect(atFailure.tables).toEqual(Object.keys(TABLES).sort());
+      expect(atFailure.handoffs).toEqual(TABLES.handoffs);
+      // ...and the transaction undid them. meta is made before it, so it stays, with no schema_ver.
+      expect(ownTables(room)).toEqual(["meta"]);
+      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBeUndefined();
+      // So the next migrate() makes them all again.
+      room.migrate();
+      expect(ownTables(room)).toEqual(Object.keys(TABLES).sort());
+      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(2);
+    });
+  });
+
   it("keeps the rules later writes rely on: one like per person, unique sign-ins and nicknames, known kinds", async () => {
     await runInDurableObject(freshRoom(), (room) => {
       addUser(room, { id: "a", nick: "Leo", lastSeen: T });
@@ -187,6 +208,260 @@ describe("schema", () => {
       const first = addMessage(room, { ts: T });
       room.sql.exec("DELETE FROM messages WHERE id = ?", first);
       expect(addMessage(room, { ts: T })).toBeGreaterThan(first);
+    });
+  });
+});
+
+// ---- Upgrading a version-1 room -------------------------------------------------------------------------
+
+// Schema version 1 as merged in PR #97 (main at a09fbd4), which is what the "Deploy chat" workflow creates when it is
+// run from that main: the statements of its SCHEMA_V1, in their order. They are copied here, not imported from room.js,
+// so this list keeps describing what was really deployed whatever room.js says later. Its handoffs table has LINE's
+// raw sub; version 2 drops it.
+const MERGED_V1 = [
+  `CREATE TABLE users (
+    id TEXT PRIMARY KEY,
+    sub_hash TEXT NOT NULL UNIQUE,
+    nick TEXT NOT NULL,
+    nick_key TEXT NOT NULL UNIQUE,
+    role TEXT NOT NULL DEFAULT 'user',
+    tv INTEGER NOT NULL DEFAULT 0,
+    created INTEGER NOT NULL,
+    last_seen INTEGER NOT NULL,
+    nick_changed INTEGER,
+    consent_at INTEGER NOT NULL,
+    consent_ver TEXT NOT NULL
+  )`,
+  `CREATE TABLE subs (
+    sub_hash TEXT PRIMARY KEY,
+    banned INTEGER NOT NULL DEFAULT 0,
+    deleted_at INTEGER
+  )`,
+  "CREATE INDEX subs_banned ON subs (sub_hash) WHERE banned = 1",
+  `CREATE TABLE messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    uid TEXT,
+    kind TEXT NOT NULL CHECK (kind IN ('text', 'report', 'session')),
+    spot TEXT,
+    body TEXT NOT NULL,
+    reply_to INTEGER,
+    likes INTEGER NOT NULL DEFAULT 0,
+    hidden_by TEXT CHECK (hidden_by IN ('flags', 'ban', 'admin')),
+    flag_immune INTEGER NOT NULL DEFAULT 0
+  )`,
+  "CREATE INDEX messages_ts ON messages (ts)",
+  "CREATE INDEX messages_spot_ts ON messages (spot, ts)",
+  "CREATE INDEX messages_uid_ts ON messages (uid, ts)",
+  "CREATE INDEX messages_reports ON messages (spot, ts) WHERE kind = 'report' AND hidden_by IS NULL",
+  "CREATE INDEX messages_hidden ON messages (id) WHERE hidden_by IS NOT NULL",
+  "CREATE TABLE likes (msg_id INTEGER NOT NULL, uid TEXT NOT NULL, PRIMARY KEY (msg_id, uid)) WITHOUT ROWID",
+  `CREATE TABLE flags (
+    msg_id INTEGER NOT NULL,
+    sub_hash TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    rejected INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (msg_id, sub_hash)
+  )`,
+  "CREATE INDEX flags_sub ON flags (sub_hash, rejected)",
+  `CREATE TABLE sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uid TEXT NOT NULL,
+    spot TEXT NOT NULL,
+    start INTEGER NOT NULL,
+    end INTEGER NOT NULL,
+    stars INTEGER NOT NULL,
+    board TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    cond TEXT,
+    shared_msg INTEGER
+  )`,
+  "CREATE INDEX sessions_uid_start ON sessions (uid, start)",
+  `CREATE TABLE logins (
+    state TEXT PRIMARY KEY,
+    nonce TEXT NOT NULL,
+    pkce_verifier TEXT NOT NULL,
+    h TEXT NOT NULL,
+    created INTEGER NOT NULL
+  )`,
+  `CREATE TABLE handoffs (
+    code_hash TEXT PRIMARY KEY,
+    h TEXT NOT NULL,
+    sub_hash TEXT NOT NULL,
+    sub TEXT NOT NULL,
+    line_name TEXT,
+    pin TEXT NOT NULL,
+    created INTEGER NOT NULL,
+    tries INTEGER NOT NULL DEFAULT 0
+  )`,
+  "CREATE TABLE limits (key TEXT PRIMARY KEY, n INTEGER NOT NULL, window_end INTEGER NOT NULL)",
+  "CREATE TABLE holds (msg_id INTEGER, body TEXT, uid TEXT, sub_hash TEXT, reason TEXT, ts INTEGER NOT NULL)",
+];
+
+// The names of the room's own tables, leaving out SQLite's and Cloudflare's.
+const ownTables = (room) =>
+  rows(room, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name")
+    .map(({ name }) => name);
+
+// Every value in every table of the room's own, as text.
+const everyValue = (room) =>
+  ownTables(room).flatMap((name) => rows(room, `SELECT * FROM "${name}"`).flatMap((row) => Object.values(row).map(String)));
+
+// Makes migrate()'s last write, the new schema_ver, fail: this room's setMeta() throws once every step has run. Returns
+// what the room had at that moment (its tables, and the columns of handoffs if it had one). The test deletes
+// room.setMeta afterwards to give the room its own back.
+function failSchemaVer(room) {
+  const atFailure = {};
+  room.setMeta = (key) => {
+    atFailure.tables = ownTables(room);
+    atFailure.handoffs = rows(room, "SELECT name FROM pragma_table_info('handoffs')").map((r) => r.name);
+    throw new Error(`${key} write failed`);
+  };
+  return atFailure;
+}
+
+// Every table of the room's own with its columns as SQLite has them (name, type, NOT NULL, default, primary key) and
+// its indexes, so two rooms' tables can be compared.
+const shape = (room) =>
+  Object.fromEntries(
+    rows(room, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name")
+      .map(({ name }) => [name, {
+        columns: rows(room, `SELECT name, type, "notnull", dflt_value, pk FROM pragma_table_info(?) ORDER BY cid`, name),
+        indexes: rows(room, "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? ORDER BY name", name),
+      }]),
+  );
+
+const lineSub = () => `U${[...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+
+// A room as main's code left it, with someone's sign-in waiting to be redeemed: this room's own tables are dropped,
+// then main's migrate() is done by hand (meta, its SCHEMA_V1 and schema_ver 1). The waiting handoff is written the way
+// main's createHandoff() wrote one, with LINE's raw sub in it, a minute ago on the real clock. The room also has an
+// account and a message, which the upgrade must leave as they are. Returns the room and the person: their verifier v,
+// LINE sub and its sub_hash, LINE name, handoff code and pin.
+async function mergedV1Room() {
+  const stub = freshRoom();
+  const who = { v: randomB64u(32), sub: lineSub(), name: "Kai", code: randomB64u(16), pin: "482913" };
+  who.subHash = await subHash(who.sub, env.SUB_PEPPER);
+  const h = await sha256b64u(who.v);
+  const codeHash = await sha256b64u(who.code);
+  await runInDurableObject(stub, (room) => {
+    const own = rows(room, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'");
+    for (const { name } of own) room.sql.exec(`DROP TABLE "${name}"`);
+    room.sql.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value)");
+    for (const statement of MERGED_V1) room.sql.exec(statement);
+    room.sql.exec("INSERT INTO meta (key, value) VALUES ('schema_ver', 1)");
+    room.sql.exec(
+      "INSERT INTO handoffs (code_hash, h, sub_hash, sub, line_name, pin, created, tries) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+      codeHash, h, who.subHash, who.sub, who.name, who.pin, Date.now() - MIN,
+    );
+    addUser(room, { id: "u1", nick: "Leo_88", lastSeen: T });
+    addMessage(room, { ts: T, uid: "u1", body: { text: "Clean sets at the point" } });
+  });
+  return { stub, who, h, codeHash };
+}
+
+// The room's sign-in routes, called as the Worker calls them.
+async function roomPost(stub, route, body) {
+  const res = await stub.fetch(`https://room/r/${route}`, { method: "POST", body: JSON.stringify(body) });
+  return { status: res.status, body: await res.json() };
+}
+
+describe("a room made by schema version 1, as merged in PR #97", () => {
+  it("is what main's code made: handoffs has a sub column, with a raw LINE sub in it, and schema_ver is 1", async () => {
+    const { stub, who } = await mergedV1Room();
+    await runInDurableObject(stub, (room) => {
+      expect(rows(room, "SELECT name FROM pragma_table_info('handoffs')").map((r) => r.name)).toEqual(
+        ["code_hash", "h", "sub_hash", "sub", "line_name", "pin", "created", "tries"],
+      );
+      expect(value(room, "SELECT sub FROM handoffs")).toBe(who.sub);
+      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(1);
+    });
+  });
+
+  it("migrate() makes it version 2: handoffs loses sub, its live row stays with its sub_hash, and the raw sub is gone", async () => {
+    const { stub, who, h, codeHash } = await mergedV1Room();
+    const fresh = await runInDurableObject(freshRoom(), (room) => shape(room));
+    await runInDurableObject(stub, (room) => {
+      const before = { users: rows(room, "SELECT * FROM users"), messages: rows(room, "SELECT * FROM messages") };
+      room.migrate();
+      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(2);
+      expect(rows(room, "SELECT name FROM pragma_table_info('handoffs')").map((r) => r.name)).toEqual(TABLES.handoffs);
+      expect(rows(room, "SELECT * FROM handoffs")).toEqual([
+        { code_hash: codeHash, h, sub_hash: who.subHash, line_name: who.name, pin: who.pin, created: expect.any(Number), tries: 0 },
+      ]);
+      expect(everyValue(room).filter((v) => v.includes(who.sub))).toEqual([]);
+      // Every table now has the same columns and indexes as in a room made new by this code.
+      expect(shape(room)).toEqual(fresh);
+      // The rest is as it was.
+      expect({ users: rows(room, "SELECT * FROM users"), messages: rows(room, "SELECT * FROM messages") }).toEqual(before);
+    });
+  });
+
+  it("running migrate() again on the upgraded room changes nothing", async () => {
+    const { stub } = await mergedV1Room();
+    await runInDurableObject(stub, (room) => {
+      room.migrate();
+      const state = () => ({
+        schema: rows(room, "SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY name"),
+        values: everyValue(room).sort(),
+      });
+      const before = state();
+      const { written } = cost(room, () => room.migrate());
+      expect(written).toBe(0);
+      expect(state()).toEqual(before);
+    });
+  });
+
+  it("migrate() makes version 2 all at once: when the last write fails, the dropped column comes back and it stays at 1", async () => {
+    const { stub, who } = await mergedV1Room();
+    await runInDurableObject(stub, (room) => {
+      const before = { shape: shape(room), handoffs: rows(room, "SELECT * FROM handoffs") };
+      const atFailure = failSchemaVer(room);
+      expect(() => room.migrate()).toThrow("schema_ver write failed");
+      delete room.setMeta;
+      // The version-2 step had run when schema_ver failed...
+      expect(atFailure.handoffs).toEqual(TABLES.handoffs);
+      // ...and the transaction undid it: the room is version 1 again, raw sub and all.
+      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(1);
+      expect({ shape: shape(room), handoffs: rows(room, "SELECT * FROM handoffs") }).toEqual(before);
+      expect(value(room, "SELECT sub FROM handoffs")).toBe(who.sub);
+      // So the next migrate() runs the step again, and this time it holds.
+      room.migrate();
+      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(2);
+      expect(rows(room, "SELECT name FROM pragma_table_info('handoffs')").map((r) => r.name)).toEqual(TABLES.handoffs);
+    });
+  });
+
+  it("takes sign-ins once this code runs on it: a new handoff is made and redeemed, and so is the one left waiting", async () => {
+    const { stub, who } = await mergedV1Room();
+    // The new code starts on the old room's storage, as after a deploy: the constructor's migrate() upgrades it.
+    await evictDurableObject(stub);
+    const next = { v: randomB64u(32), sub: lineSub(), name: "Nami" };
+    const made = await roomPost(stub, "handoffs", { h: await sha256b64u(next.v), sub: next.sub, line_name: next.name });
+    expect(made.status).toBe(200);
+    expect(Object.keys(made.body).sort()).toEqual(["code", "pin"]);
+    const { code, pin } = made.body;
+    // A new person: redeeming by code, and by pin, finds the handoff and asks for a nickname; the handoff stays.
+    expect(await roomPost(stub, "redeem", { v: next.v, code })).toEqual({ status: 200, body: { needs_signup: true, line_name: "Nami" } });
+    expect(await roomPost(stub, "redeem", { v: next.v, pin })).toEqual({ status: 200, body: { needs_signup: true, line_name: "Nami" } });
+    const signed = await roomPost(stub, "signup", { v: next.v, code, nick: "Nami_01", consent: "v1" });
+    expect(signed.status).toBe(200);
+    expect(typeof signed.body.token).toBe("string");
+    // The handoff written before the upgrade still works, by its code and by its pin.
+    expect(await roomPost(stub, "redeem", { v: who.v, code: who.code })).toEqual({ status: 200, body: { needs_signup: true, line_name: "Kai" } });
+    expect(await roomPost(stub, "redeem", { v: who.v, pin: who.pin })).toEqual({ status: 200, body: { needs_signup: true, line_name: "Kai" } });
+    const old = await roomPost(stub, "signup", { v: who.v, pin: who.pin, nick: "Kai_01", consent: "v1" });
+    expect(old.status).toBe(200);
+    await runInDurableObject(stub, async (room) => {
+      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(2);
+      expect(rows(room, "SELECT nick, sub_hash FROM users WHERE nick IN ('Nami_01', 'Kai_01') ORDER BY nick")).toEqual([
+        { nick: "Kai_01", sub_hash: who.subHash },
+        { nick: "Nami_01", sub_hash: await subHash(next.sub, env.SUB_PEPPER) },
+      ]);
+      expect(rows(room, "SELECT * FROM handoffs")).toEqual([]);
+      const values = everyValue(room);
+      expect(values.filter((v) => v.includes(who.sub) || v.includes(next.sub))).toEqual([]);
     });
   });
 });
@@ -576,12 +851,12 @@ describe("alarm()", () => {
     });
   });
 
-  it("drops expired sign-ins on every run, since a handoff holds a raw LINE ID", async () => {
+  it("drops expired sign-ins on every run, since a handoff holds the person's LINE name", async () => {
     await runInDurableObject(freshRoom(), async (room) => {
       room.now = () => T - HOUR;
       for (const [code, created] of [["expired", T - HOUR - 11 * MIN], ["live", T - HOUR - 9 * MIN]]) {
         room.sql.exec(
-          "INSERT INTO handoffs (code_hash, h, sub_hash, sub, line_name, pin, created, tries) VALUES (?, 'h', 'sub-x', 'U-raw', 'Kai', '123456', ?, 0)",
+          "INSERT INTO handoffs (code_hash, h, sub_hash, line_name, pin, created, tries) VALUES (?, 'h', 'sub-x', 'Kai', '123456', ?, 0)",
           code, created,
         );
         room.sql.exec("INSERT INTO logins (state, nonce, pkce_verifier, h, created) VALUES (?, 'n', 'p', 'h', ?)", code, created);
@@ -641,7 +916,7 @@ describe("retention, run by the alarm at 19:00 UTC", () => {
       for (const [state, created] of [["stale", T - 11 * MIN], ["fresh", T - 9 * MIN]]) {
         room.sql.exec("INSERT INTO logins (state, nonce, pkce_verifier, h, created) VALUES (?, 'n', 'p', 'h', ?)", state, created);
         room.sql.exec(
-          "INSERT INTO handoffs (code_hash, h, sub_hash, sub, line_name, pin, created, tries) VALUES (?, 'h', 'sub-x', 'U-raw', 'Kai', '123456', ?, 0)",
+          "INSERT INTO handoffs (code_hash, h, sub_hash, line_name, pin, created, tries) VALUES (?, 'h', 'sub-x', 'Kai', '123456', ?, 0)",
           state, created,
         );
       }
@@ -758,7 +1033,7 @@ describe("retention, run by the alarm at 19:00 UTC", () => {
     check(async (room, state) => {
       expect(value(room, "SELECT value FROM meta WHERE key = 'next_retention'")).toBe(T + DAY);
       // The "fresh" handoff, made 9 minutes before the run, runs out first: the alarm comes back just after that to
-      // delete it (its raw LINE sub must not wait for tomorrow's run). Then it goes back to 19:00, as login.spec.mjs
+      // delete it (the LINE name in it must not wait for tomorrow's run). Then it goes back to 19:00, as login.spec.mjs
       // checks.
       const alarm = await state.storage.getAlarm();
       expect(alarm).toBeGreaterThan(T + MIN);

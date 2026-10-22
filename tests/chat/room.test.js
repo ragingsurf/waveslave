@@ -506,7 +506,7 @@ const CHECKS = {
     await page.waitForFunction(() => !document.querySelector(".chatroom .cr-shade").hidden);
     const s = await page.evaluate(() => ({ title: document.querySelector("#chatSheetTitle").textContent, body: document.querySelector(".chatroom .cr-sheet-b").textContent,
       mail: document.querySelector('.chatroom .cr-sheet-b a[href^="mailto:"]')?.getAttribute("href"), credits: !document.getElementById("chatCredits").hidden, href: location.href }));
-    if (s.title !== "House rules" || !/No ads or selling/.test(s.body) || !/Privacy note/.test(s.body) || !s.body.includes("Test Operator runs the Taiwan chat") || s.mail !== "mailto:chat@example.com")
+    if (s.title !== "House rules" || !/No ads or selling/.test(s.body) || !/Privacy note/.test(s.body) || !s.body.includes("Test Operator runs this chat. Questions and takedown requests: chat@example.com.") || s.mail !== "mailto:chat@example.com")
       throw new Error(`the sheet reads ${JSON.stringify(s).slice(0, 300)}`);
     if (!s.credits || /chat=/.test(s.href)) throw new Error(`the credits' chat line is ${s.credits ? "shown" : "hidden"}, the address ${s.href}`);
     await page.keyboard.press("Escape");
@@ -866,6 +866,44 @@ const CHECKS = {
     await page.waitForFunction(() => /^Links can't be posted here/.test(document.querySelector(".chatroom .cr-note").textContent), null, { timeout: 5e3 })
       .catch(async () => { throw new Error(`the refusal: ${JSON.stringify(await look())}`); });
     if ((await look()).box !== "The third one") throw new Error(`the refusal put ${JSON.stringify((await look()).box)} back in the box`);
+  },
+  // A socket the room closes with 1008 (five bad frames, or a frame past its 1,000: FRAMES_PER_SOCKET in chat/src/room.js, ruling R22) is
+  // a drop like any other: a new socket opens by itself, and a text the closed one never answered goes back in the box with a line to say
+  // so. A stand-in room that closes the first socket, unanswered, when a text comes.
+  async frameCap(open) {
+    let n = 0;
+    const page = await open({ as: "p1", ws: route => { const k = ++n; route.onMessage(m => { if (m === "ping") return route.send("pong");
+      const f = JSON.parse(m);
+      if (f.type === "hello") { route.send(JSON.stringify({ type: "me", nick: "Poster1", role: "user" })); route.send(JSON.stringify({ type: "history", messages: [standIn(1)] })); }
+      if (f.type === "say" && k === 1) route.close({ code: 1008, reason: "too many frames" }); }); } });
+    await openRoom(page);
+    const look = () => page.evaluate(() => ({ status: document.querySelector(".chatroom .cr-status").hidden ? null : document.querySelector(".chatroom .cr-status").textContent,
+      box: document.querySelector(".chatroom .cr-in").value, note: document.querySelector(".chatroom .cr-note").textContent }));
+    await page.fill(".chatroom .cr-in", "One frame too many"); await page.press(".chatroom .cr-in", "Enter");
+    for (let i = 0; i < 50 && n < 2; i++) await wait(100);
+    if (n !== 2) throw new Error(`5 s after a 1008 close the page has opened ${n - 1} new sockets, want 1`);
+    await page.waitForFunction(() => document.querySelector(".chatroom .cr-status").hidden && document.querySelector(".chatroom .cr-in").value === "One frame too many", null, { timeout: 5e3 })
+      .catch(async () => { throw new Error(`after the 1008 close: ${JSON.stringify(await look())}`); });
+    if ((await look()).note !== "That didn't go through. Try again.") throw new Error(`the text came back, but the line says ${JSON.stringify((await look()).note)}`);
+  },
+  // A text sent just before the room closes the socket with 4401 (signed out everywhere, or the account deleted) or 4403 (banned) isn't
+  // lost: the page signs out quietly, and the text is back in the box for when they sign in again. A stand-in room that closes the
+  // socket, unanswered, when a text comes.
+  async pendingSignedOut(open) {
+    for (const code of [4401, 4403]) {
+      const text = `Sent as it closed (${code})`;
+      const page = await open({ as: "p1", ws: route => { route.onMessage(m => { if (m === "ping") return route.send("pong");
+        const f = JSON.parse(m);
+        if (f.type === "hello") { if (f.token) route.send(JSON.stringify({ type: "me", nick: "Poster1", role: "user" })); route.send(JSON.stringify({ type: "history", messages: [standIn(1)] })); }
+        if (f.type === "say") route.close({ code, reason: "signed out" }); }); } });
+      await openRoom(page);
+      await page.fill(".chatroom .cr-in", text); await page.press(".chatroom .cr-in", "Enter");
+      await page.waitForFunction(() => document.querySelector(".chatroom .cr-line").getClientRects().length > 0 && !localStorage.getItem("waveslave-chat-token"), null, { timeout: 5e3 })
+        .catch(() => { throw new Error(`after a ${code} close the page didn't sign out`); });
+      await wait(300);
+      const box = await page.evaluate(() => document.querySelector(".chatroom .cr-in").value);
+      if (box !== text) throw new Error(`after a ${code} close the box holds ${JSON.stringify(box)}, want the text sent just before`);
+    }
   },
 };
 

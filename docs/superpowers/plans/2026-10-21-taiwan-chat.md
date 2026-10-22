@@ -32,8 +32,9 @@ below that isn't spelled out is in the spec.
 - **Escaping:** no `innerHTML` or `insertAdjacentHTML` with network data anywhere in `chat.js`, and no `data-zh` or `data-ja` on
   chat elements.
 - **Languages:** every user-facing string in en, zh (Traditional, Taiwan usage) and ja.
-- **Stored data:** only `sub_hash`, never the raw LINE `sub`, outside the 10-minute `handoffs` row. No email, no picture, and no
-  LINE name stored.
+- **Stored data:** only `sub_hash`, never the raw LINE `sub`, not even in the 10-minute `handoffs` row (ruling R22). Schema
+  version 1, as merged in PR #97, had a `sub` column there; version 2 drops it. No email, no picture, and no LINE name stored
+  outside that row.
 - **Versions:** pin exact npm versions released before 2026-10-07 in `chat/package.json`, with a lockfile committed.
   `compatibility_date = "2026-10-21"`.
 - **Secrets:** never in the repo, the page or logs. The five Worker secrets are `LINE_CHANNEL_ID`, `LINE_CHANNEL_SECRET`,
@@ -181,8 +182,8 @@ below that isn't spelled out is in the spec.
 **Interfaces:**
 - Consumes: `mod.js` constants.
 - Produces, in `class Room extends DurableObject`:
-  - `migrate()`: creates the spec's tables and indexes, guarded by `meta.schema_ver`, and is called in the constructor through
-    `ctx.blockConcurrencyWhile`.
+  - `migrate()`: creates the spec's tables and indexes, or brings an older room up to date (version 2 drops `handoffs.sub`),
+    guarded by `meta.schema_ver`, and is called in the constructor through `ctx.blockConcurrencyWhile`.
   - `ensureAlarm()`.
   - `alarm()`: retention, then the keepalive tick, then reschedule in `finally`.
   - `history(beforeId?: number, limit = 100) -> Msg[]`, where a public `Msg` is `{id, ts, nick, role, kind, spot, body, reply_to,
@@ -197,7 +198,8 @@ below that isn't spelled out is in the spec.
   - `vitest run --no-isolate --max-workers=1` is used for socket tests.
 
 - [ ] **Step 2: Write failing tests.** Use `runInDurableObject` and `runDurableObjectAlarm`.
-  - **Schema:** all tables exist after the first `get`, and running `migrate()` again changes nothing.
+  - **Schema:** all tables exist after the first `get`, a version-1 room (as merged in PR #97) comes up to version 2 with its
+    rows, and running `migrate()` again changes nothing.
   - **Read costs**, seeded with 365 days × 100 messages and 2,000 reports:
     - `history()` returns 100 messages in ascending id order, with `cursor.rowsRead <= 110`;
     - `reportsFor("jinshan")` returns only reports from the last 4 hours, newest first, at most 20, with `rowsRead <= 20`;

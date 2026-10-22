@@ -548,7 +548,7 @@ describe("DELETE /me", () => {
       room.sql.exec("INSERT INTO flags (msg_id, sub_hash, reason, ts) VALUES (?, ?, 'harass', ?)", vHidden, u.sub, T - HOUR);
       room.sql.exec("INSERT INTO limits (key, n, window_end) VALUES (?, 1, ?), (?, 1, ?)", `held:kaiold:${u.sub}`, T + 9 * DAY, heldV, T + 9 * DAY);
       room.sql.exec(
-        "INSERT INTO handoffs (code_hash, h, sub_hash, sub, line_name, pin, created) VALUES ('code', 'h', ?, 'U-their-line', 'Kai', '123456', ?)",
+        "INSERT INTO handoffs (code_hash, h, sub_hash, line_name, pin, created) VALUES ('code', 'h', ?, 'Kai', '123456', ?)",
         u.sub, T - MIN,
       );
       room.sql.exec("INSERT INTO holds (msg_id, body, uid, sub_hash, reason, ts) VALUES (?, '{}', ?, ?, 'keep', ?)", hiddenText, u.id, u.sub, T - MIN);

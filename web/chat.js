@@ -14,9 +14,10 @@
 // done. Until then the chat shows nothing, so this can go live first (Bryan, Oct 21). Tests set window.__chatUrl. Only a string counts, so
 // an element that happens to be called __chatUrl (an id in the page makes one) can't switch the chat on or point it somewhere.
 const CHAT_URL = typeof window.__chatUrl === "string" ? window.__chatUrl : "";
-// Who runs the chat, for the privacy note, takedown requests and questions. Bryan sends the name and email; the chat stays switched off
-// until both are here. Tests set window.__chatContact.
-const CONTACT = window.__chatContact || { name: "", email: "" };
+// Who runs the chat, for the privacy note, takedown requests and questions. Bryan stays anonymous: the note names "WaveSlave" and the
+// chat's own address (Bryan, Oct 22). The chat stays switched off while either is empty, and while CHAT_URL is. Tests set
+// window.__chatContact in place of these.
+const CONTACT = window.__chatContact || { name: "WaveSlave", email: "waveslave050@gmail.com" };
 const PAGE = typeof ALL === "object" && !!ALL && typeof LANG === "string" && typeof CUR === "string" && typeof VIEW === "string" && typeof SPT === "function"
   && typeof countrySpots === "function" && typeof switchSpot === "function" && typeof setView === "function";
 if (!/^https?:\/\/./i.test(CHAT_URL) || !CONTACT || typeof CONTACT.name !== "string" || typeof CONTACT.email !== "string" || !CONTACT.name || !CONTACT.email || !PAGE) return;
@@ -101,7 +102,7 @@ const STR = {
     privacyHead: "Privacy note", contactHead: "Contact",
     privacyShort: "To post, the chat keeps your nickname, a one-way code made from your LINE ID and what you post. Cloudflare stores it outside Taiwan, and LINE (LY Corp) handles sign-in. Posts are public. The full privacy note is under More.",
     privacy: c => [
-      ["Who runs the chat", `${c.name} runs the Taiwan chat on WaveSlave. Questions and takedown requests: ${c.email}.`],
+      ["Who runs the chat", `${c.name} runs this chat. Questions and takedown requests: ${c.email}.`],
       ["Why", "Your data is used only to run the chat."],
       ["What is kept", "Your nickname, a one-way code made from your LINE ID (never the ID itself), your messages, reports and session logs. Cloudflare also sees your IP address when you connect."],
       ["Where, and who handles it", "Cloudflare stores the chat on servers outside Taiwan. LINE (LY Corp) handles sign-in. Messages, reports and shared sessions are public, under your nickname."],
@@ -407,7 +408,8 @@ function validBody(kind, b) {
 // after 12 s, or 100 s without a frame, counts as a drop; back in the foreground it sends "ping" (the room answers "pong" without
 // waking), or starts again if the socket is still trying to open; after 5 minutes in the background it closes until the page is back.
 // The room's own close codes: 4401 the account signed out everywhere or was deleted, 4403 banned, 4426 this page is too old, 4429 the
-// chat is resting until 00:00 UTC (08:00 in Taiwan).
+// chat is resting until 00:00 UTC (08:00 in Taiwan). Any other close is a drop, the room's 1008 included (five bad frames, or a frame
+// past the 1,000 one socket may send): a new socket starts it all again.
 function connect() {
   stopSocket();
   if (R.state !== "offline") setState("connecting");
@@ -432,8 +434,10 @@ function retry(ms) { clearTimeout(sock.retryT); sock.retryT = setTimeout(guard((
 function lost(code) {
   sock.ready = false; R.older = false; clearTimeout(sock.openT); clearTimeout(sock.deadT); clearTimeout(sock.pongT);
   // Texts still waiting stay on the list for the next socket's history to settle (settlePending()); resting or too old, none comes soon.
+  // Signed out, deleted or banned (4401, 4403), the next socket says hello as a reader, or as whoever another tab signed in as, so their
+  // history can't settle them: the text goes back in the box first, before the quiet sign-out empties the list.
   if (!R.open) return;
-  if (code === 4429 || code === 4426) restorePending(true);
+  if (code === 4429 || code === 4426 || code === 4401 || code === 4403) restorePending(true);
   if (code === 4429) { setState("resting"); const now = Date.now(); return retry(Math.ceil((now + 1) / DAY) * DAY - now + Math.random() * 60e3); }
   if (code === 4426) return setState("update");
   if (code === 4401 || code === 4403) { if (code === 4403) note(S("banned"), true); return tokenRefused(true); }

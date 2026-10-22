@@ -246,18 +246,32 @@ describe("GET /auth/line/callback", () => {
     expect(res.headers.get("Location").startsWith(`${env.APP_URL}?chat#`)).toBe(true);
     expect(await inRoom((room) => rows(room, "SELECT * FROM logins WHERE state = ?", state))).toEqual([]);
     const handoff = await handoffByCode(c);
-    expect(handoff).toMatchObject({
+    expect(handoff).toEqual({
+      code_hash: await sha256b64u(c),
       h: await sha256b64u(who.v),
       sub_hash: await subHash(who.sub, env.SUB_PEPPER),
-      sub: who.sub,
       line_name: who.name,
       pin: p,
+      created: expect.any(Number),
       tries: 0,
     });
     expect(Date.now() - handoff.created).toBeLessThan(MIN);
-    // The code itself is never stored, only its SHA-256.
-    expect(await everyValue()).not.toContain(c);
+    // The code itself is never stored, only its SHA-256; and LINE's raw sub never is, only its sub_hash (ruling R22).
+    const values = await everyValue();
+    expect(values).not.toContain(c);
+    expect(values.filter((value) => value.includes(who.sub))).toEqual([]);
     expect(await userBySub(who.sub)).toBeNull();
+  });
+
+  it("stores LINE's raw sub nowhere when someone who has an account signs in again, by code or by pin", async () => {
+    const someone = await member();
+    for (const by of ["code", "pin"]) {
+      const { c, p } = await signIn(someone);
+      expect((await everyValue()).filter((value) => value.includes(someone.sub)), `after the callback (${by})`).toEqual([]);
+      const res = await redeem(by === "code" ? { v: someone.v, code: c } : { v: someone.v, pin: p });
+      expect(res.status, by).toBe(200);
+      expect((await everyValue()).filter((value) => value.includes(someone.sub)), `after redeem (${by})`).toEqual([]);
+    }
   });
 
   it("exchanges LINE's code with the spec's fields, including the PKCE verifier, at LINE_TOKEN_URL", async () => {
@@ -588,7 +602,7 @@ describe("a sign-in link someone else started (spec Login step 5)", () => {
     }
     expect(await redeem({ v: attacker.v, pin: p })).toEqual({ status: 410, body: { error: "expired" } });
     expect(await redeem({ v: attacker.v, code: c })).toEqual({ status: 410, body: { error: "expired" } });
-    // Void means gone, and the victim's raw LINE sub with it.
+    // Void means gone, and the victim's LINE name with it.
     expect(await handoffByCode(c)).toBeNull();
   });
 
@@ -729,7 +743,7 @@ describe("Room.closeUser(uid, code)", () => {
 
 // ---- The handoff's 10 minutes -------------------------------------------------------------------------------
 
-describe("a handoff's raw LINE sub lasts its 10 minutes and no longer", () => {
+describe("a handoff, with its LINE name, lasts its 10 minutes and no longer", () => {
   // A weekday at 12:00 UTC, years ahead, so the daily retention (19:00 UTC) is 7 hours away.
   const T = Date.UTC(2030, 5, 3, 12, 0);
   const handoff = (room, h) =>

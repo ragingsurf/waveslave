@@ -51,6 +51,8 @@ conditions of each session, and share a session to the room to get tips from oth
    sign-in. Plans so far said "nothing personal goes to any service". This feature has to break that, and the privacy note will
    say so.
 2. The name and email to show as the person running the chat, for the privacy note, takedown requests and questions.
+   **Decided:** on Oct 22 Bryan chose to show "WaveSlave" and waveslave050@gmail.com, so he stays anonymous. Both are built
+   into `web/chat.js`.
 
 ## What you see
 
@@ -287,8 +289,8 @@ All `/me/*` and `/admin/*` routes use `Authorization: Bearer` and run inside the
         - check the HMAC-SHA256 signature with the channel secret, using `crypto.subtle`;
         - require `iss = "https://access.line.me"`, `aud = LINE_CHANNEL_ID`, `exp > now`, and `nonce` equal to the stored one.
      4. Compute `sub_hash = HMAC-SHA256(SUB_PEPPER, sub)`. If `subs.banned` is set, redirect with `#e=banned`.
-     5. Store `handoffs(code_hash PK, h, sub_hash, sub, line_name, pin, created, tries)` for 10 minutes. `code` is 128 random bits
-        and `pin` is 6 digits.
+     5. Store `handoffs(code_hash PK, h, sub_hash, line_name, pin, created, tries)` for 10 minutes. `code` is 128 random bits
+        and `pin` is 6 digits. LINE's raw `sub` is not stored here or anywhere else, only `sub_hash` (ruling R22).
      6. Redirect to `APP_URL?chat#c=<code>&p=<pin>`.
 4. **Back in the app.**
    - `chat.js` strips the fragment at once.
@@ -326,6 +328,10 @@ All `/me/*` and `/admin/*` routes use `Authorization: Bearer` and run inside the
 - `flags(msg_id, sub_hash, reason, ts, rejected, PRIMARY KEY(msg_id, sub_hash))`.
 - `sessions(id, uid, spot, start, end, stars, board, note, cond JSON, shared_msg)`, indexed on `(uid, start)`.
 - `logins`, `handoffs`: as in Login.
+- **LINE's raw `sub` is never stored,** in any table, even for a moment: the room makes `sub_hash` from it and keeps only that
+  (ruling R22). Schema version 1, as merged in PR #97, had a `sub` column in `handoffs`, written and never read. Version 2 drops
+  it (`ALTER TABLE handoffs DROP COLUMN sub`, which keeps the rows), so LINE's raw ID is gone from every table after `migrate()`,
+  in a new room and in one that version 1 made.
 - `limits(key PK, n, window_end)`, keyed by `sub_hash` and kind.
 - `holds(msg_id, body, uid, sub_hash, reason, ts)`, visible to Bryan only, kept 180 days (see Moderation).
 - `meta(key, value)`, for: lock state, `admin_uid`, admin-claim failure counts, `next_retention`, `schema_ver` and the
@@ -345,6 +351,13 @@ All `/me/*` and `/admin/*` routes use `Authorization: Bearer` and run inside the
 - **Room to clients:** `history`, `msg`, `update` (likes, hide, delete), `online`, `tick`, `error {code}`.
 - **Before signing in,** a socket may send only `hello` and `older`. Five bad frames close it. Each IP may hold at most 5 sockets,
   counted in memory only.
+- **Frames per socket (ruling R22):** one socket may send at most 1,000 frames of any kind, refused and invalid ones included, which
+  is 1% of the day's request budget (see Free-plan budget). The next one goes unanswered and closes the socket with 1008, which
+  `chat.js` treats as a drop: a new socket, which counts from nothing. Bryan's sockets aren't counted.
+- **Frames that reach a closed socket:** a client that sends without waiting still has frames on their way when the room closes
+  its socket, for any reason (1008, 1009, 4429 or another), and the runtime still hands them to the room. A client that ignores
+  the close can go on sending, with no limit, until it drops the connection itself. The room answers none of them, but counts
+  each one as a room request, like any other frame (see Free-plan budget).
 - **What public frames carry:** only `{id, ts, nick, role, kind, spot, body, reply_to, likes}`. Hidden messages go only to
   Bryan's sockets. No uid or LINE data is ever sent.
 - **Every change is broadcast,** so a delete or hide disappears from every open screen.
@@ -461,7 +474,8 @@ note says so.
 ### Privacy note (zh-TW, en, ja; shown at first sign-in, full text behind "More")
 
 It covers what Taiwan's Personal Data Protection Act, Article 8, asks for:
-- who runs the chat (Bryan to confirm);
+- who runs the chat: "WaveSlave", with waveslave050@gmail.com for questions and takedown requests (Bryan's choice on Oct 22, so
+  he stays anonymous; built into `web/chat.js`);
 - why: running the chat;
 - what: nickname, a one-way code of the LINE ID, messages, reports, session logs, and IP addresses seen by Cloudflare;
 - where and who:
@@ -490,6 +504,16 @@ What each action costs:
   seeded with a year of data.
 - **Keepalive:** about 1,920 room requests a day, only while someone has the room open.
 - **Each message:** 1 room request and a few rows written.
+- **One socket** adds at most 1,001 room requests, about 1% of the daily limit, when its client stops sending at the close, as
+  `chat.js` does: its 1,000 frames and the one that closes it (Socket protocol, "Frames per socket"). Without the cap one socket
+  could spend the whole day's budget on refused frames.
+- **A client that ignores the close** isn't held to that. The runtime keeps handing the room its frames for as long as it keeps
+  the connection open: about 4,000 a second for 45 s in a test under `wrangler dev`, enough for the day's 100,000 in about 25 s.
+  Nothing in the room can stop those calls. Cloudflare bills incoming WebSocket messages as requests (20 to 1 for billing), and
+  its pricing page doesn't say whether that ratio applies to the free plan's 100,000 a day, so the room counts each one as a room
+  request, like every other frame. The chat rests at 90% and tells the open screens it is resting first, but nothing stops a
+  client that keeps sending after its close: it can still take the count past the daily limit within seconds, and new visitors
+  may then see "offline" instead of "resting".
 
 At launch (a few hundred Taiwan page views and a few hundred messages a day) that is under 5% of every limit.
 

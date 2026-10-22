@@ -222,8 +222,9 @@ async function lineCallback(env, url) {
       })
     : null;
   if (!claims) return backToApp(env, "e=token");
-  // 3.4 and 3.5: the room makes the account code, stops a banned account, and stores the handoff. The LINE name goes
-  // only into the handoff, to prefill the nickname box.
+  // 3.4 and 3.5: the room makes the account code, stops a banned account, and stores the handoff. LINE's sub goes to the
+  // room only to be made into the account code (sub_hash), and is never stored. The LINE name goes only into the
+  // handoff, to prefill the nickname box.
   const handoff = await roomJson(env, "/r/handoffs", { h: login.data.h, sub: claims.sub, line_name: claims.name ?? null });
   if (!handoff) return backToApp(env, "e=resting");
   if (handoff.data.error === "banned") return backToApp(env, "e=banned");

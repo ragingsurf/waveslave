@@ -14,9 +14,10 @@
 // done. Until then the chat shows nothing, so this can go live first (Bryan, Oct 21). Tests set window.__chatUrl. Only a string counts, so
 // an element that happens to be called __chatUrl (an id in the page makes one) can't switch the chat on or point it somewhere.
 const CHAT_URL = typeof window.__chatUrl === "string" ? window.__chatUrl : "";
-// Who runs the chat, for the privacy note, takedown requests and questions. Bryan sends the name and email; the chat stays switched off
-// until both are here. Tests set window.__chatContact.
-const CONTACT = window.__chatContact || { name: "", email: "" };
+// Who runs the chat, for the privacy note, takedown requests and questions. Bryan stays anonymous: the note names "WaveSlave" and the
+// chat's own address (Bryan, Oct 22). The chat stays switched off while either is empty, and while CHAT_URL is. Tests set
+// window.__chatContact in place of these.
+const CONTACT = window.__chatContact || { name: "WaveSlave", email: "waveslave050@gmail.com" };
 const PAGE = typeof ALL === "object" && !!ALL && typeof LANG === "string" && typeof CUR === "string" && typeof VIEW === "string" && typeof SPT === "function"
   && typeof countrySpots === "function" && typeof switchSpot === "function" && typeof setView === "function";
 if (!/^https?:\/\/./i.test(CHAT_URL) || !CONTACT || typeof CONTACT.name !== "string" || typeof CONTACT.email !== "string" || !CONTACT.name || !CONTACT.email || !PAGE) return;

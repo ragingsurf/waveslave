@@ -39,17 +39,33 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 class Skip extends Error {}
 
 const CHECKS = {
-  // Switched off (no CHAT_URL): no page error, no button, the strip stays hidden, and nothing is asked of any backend.
+  // Switched off (no CHAT_URL), as the live site is until Bryan's setup is done: neither window.__chatUrl nor window.__chatContact, so
+  // the built-in CONTACT is there and only the empty CHAT_URL keeps it off. No page error, no button, the strip stays hidden, and nothing
+  // is asked of any backend.
   async chatOff(open) {
-    const page = await open({ chat: false }), l = await look(page);
+    const page = await open({ chat: false, contact: false }), l = await look(page);
     if (await page.evaluate(() => !!document.querySelector(".chatfab"))) throw new Error("there's a CHAT button with the chat switched off");
     if (l.strip) throw new Error("#nowReports shows with the chat switched off");
     if (page.asked.length) throw new Error(`the page asked the backend for ${page.asked.join(", ")}`);
   },
-  // A CHAT_URL but no operator's name and email (CONTACT) is still off: the privacy note can't go out without them (Bryan, Oct 21).
+  // A CHAT_URL with an empty operator's name or email (window.__chatContact) is still off: the privacy note can't go out without them
+  // (Bryan, Oct 21).
   async needsContact(open) {
-    const page = await open({ contact: false }); await wait(300); const l = await look(page);
-    if (await page.evaluate(() => !!document.querySelector(".chatfab")) || l.strip || page.asked.length) throw new Error(`with no CONTACT the button is ${l.fab ? "there" : "gone"}, the strip ${l.strip ? "shows" : "is hidden"} and the page asked for ${page.asked.join(", ") || "nothing"}`);
+    for (const contactV of [{ name: "", email: "" }, { name: "WaveSlave", email: "" }, { name: "", email: "chat@example.com" }]) {
+      const page = await open({ contactV }); await wait(300); const l = await look(page);
+      if (await page.evaluate(() => !!document.querySelector(".chatfab")) || l.strip || page.asked.length) throw new Error(`with CONTACT ${JSON.stringify(contactV)} the button is ${l.fab ? "there" : "gone"}, the strip ${l.strip ? "shows" : "is hidden"} and the page asked for ${page.asked.join(", ") || "nothing"}`);
+    }
+  },
+  // The operator's name and email are built in (Bryan, Oct 22): he stays anonymous, as "WaveSlave" with waveslave050@gmail.com. With a
+  // CHAT_URL and no window.__chatContact the chat comes on, and the privacy note and contact behind More (?chat=privacy) name them.
+  async builtInContact(open) {
+    const page = await open({ contact: false, query: "?chat=privacy" });
+    await page.waitForFunction(() => { const s = document.querySelector(".chatroom .cr-shade"); return !!s && !s.hidden; }, null, { timeout: 5e3 })
+      .catch(() => { throw new Error("with no window.__chatContact the chat didn't come on"); });
+    const s = await page.evaluate(() => ({ body: document.querySelector(".chatroom .cr-sheet-b").textContent,
+      mail: [...document.querySelectorAll('.chatroom .cr-sheet-b a[href^="mailto:"]')].map(a => [a.getAttribute("href"), a.textContent]) }));
+    if (!s.body.includes("WaveSlave runs the Taiwan chat") || !s.body.includes("Questions and takedown requests: waveslave050@gmail.com.")
+      || !eq(s.mail, [["mailto:waveslave050@gmail.com", "waveslave050@gmail.com"]])) throw new Error(`the note reads ${JSON.stringify(s).slice(0, 400)}`);
   },
   // On a Taiwan spot: two chips in the order given with the dots coloured by conditions, "Post a report", and the button reading CHAT and
   // 3 online with the pink dot while waveslave-chat-seen is under last_id 9. No chat element carries data-zh or data-ja.
@@ -270,7 +286,7 @@ const CHECKS = {
   const browser = await chromium.launch(); let bad = false, ctxs = [], errs = [];
   // A fresh context for every page. The page and chat.js load from here; the fake backend answers what backend(url) gives back (null:
   // the network fails); everything else is cut off. page.asked lists the backend calls, page.dialogs any alert.
-  async function open({ spot = "donghe", query = "", chat = true, contact = true, backend = reports, store = {}, session = {}, world = false, view = "fc", test = true, chatJs = CHAT_JS }) {
+  async function open({ spot = "donghe", query = "", chat = true, contact = true, contactV = CONTACT, backend = reports, store = {}, session = {}, world = false, view = "fc", test = true, chatJs = CHAT_JS }) {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block" });
     ctxs.push(ctx); const asked = [], dialogs = [];
     await ctx.route("**/*", r => { const u = r.request().url();
@@ -283,7 +299,7 @@ const CHECKS = {
       try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", o.view); localStorage.setItem("waveslave-lang", "en"); localStorage.setItem("waveslave-world", o.world ? "1" : "0");
         for (const k in o.store) localStorage.setItem(k, o.store[k]); for (const k in o.session) sessionStorage.setItem(k, o.session[k]); if (lock) sessionStorage.setItem("waveslave-unlock", lock); } catch (e) {}
       if (o.chat) window.__chatUrl = o.url; if (o.contact) window.__chatContact = o.contactV; if (o.test) window.__chatTest = true; },
-      [{ view, world, store, session, chat, contact, test, url: CHAT, contactV: CONTACT }, NOW, LOCK]);
+      [{ view, world, store, session, chat, contact, test, url: CHAT, contactV }, NOW, LOCK]);
     const page = await ctx.newPage(); page.on("pageerror", e => errs.push(String(e))); page.on("dialog", d => { dialogs.push(d.message()); d.dismiss().catch(() => {}); });
     await page.goto(PAGE + query + "#" + spot, { waitUntil: "load" }); await settle(page);
     page.asked = asked; page.dialogs = dialogs; return page;

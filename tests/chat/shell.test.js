@@ -2,8 +2,8 @@
 // chat.js, and its hooks in template.html (the report strip under "Right now", the CHAT button, the ?chat link and the chat-open guards).
 // Usage: node tests/chat/shell.test.js <page.html>
 // Prints ok / FAIL for each check, and exits 1 on any FAIL or page error.
-// Every page opens in its own fresh browser context, offline: only the page and chat.js load, and a fake backend at https://chat.test
-// answers /reports the way each check sets it (two reports, 3 online and last_id 9 unless it says otherwise). A phone 390x844, dpr 2,
+// Every page opens in its own fresh browser context, offline: only the page and chat.js load (page.tried lists the other web addresses
+// it asked for), and a fake backend at https://chat.test answers /reports the way each check sets it (two reports, 3 online and last_id 9 unless it says otherwise). A phone 390x844, dpr 2,
 // touch, reduced motion, the intro done, English, Taiwan mode and the Forecast view, unless a check says otherwise. The chat is switched
 // on the way the tests do it (window.__chatUrl and window.__chatContact), and window.__chatTest lets chat.js note each time the room is
 // asked to open (CHAT._opened). The page's Date.now() holds still at the moment the run starts, unless a check moves it on (__skew).
@@ -39,14 +39,22 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 class Skip extends Error {}
 
 const CHECKS = {
-  // Switched off (no CHAT_URL), as the live site is until Bryan's setup is done: neither window.__chatUrl nor window.__chatContact, so
-  // the built-in CONTACT is there and only the empty CHAT_URL keeps it off. No page error, no button, the strip stays hidden, and nothing
-  // is asked of any backend.
+  // Switched off (an empty CHAT_URL, from window.__chatUrl) with the built-in CONTACT: no page error, no button, the strip stays hidden,
+  // and nothing is asked of any backend.
   async chatOff(open) {
-    const page = await open({ chat: false, contact: false }), l = await look(page);
+    const page = await open({ url: "", contact: false }), l = await look(page);
+    if (page.tried.some(u => u.includes("workers.dev"))) throw new Error(`the page asked ${page.tried.filter(u => u.includes("workers.dev")).join(", ")}`);
     if (await page.evaluate(() => !!document.querySelector(".chatfab"))) throw new Error("there's a CHAT button with the chat switched off");
     if (l.strip) throw new Error("#nowReports shows with the chat switched off");
     if (page.asked.length) throw new Error(`the page asked the backend for ${page.asked.join(", ")}`);
+  },
+  // Switched on for real (Bryan, Oct 22): with neither window.__chatUrl nor window.__chatContact, as on the live site, the chat comes on
+  // and asks Bryan's backend, https://waveslave-chat.waveslave050.workers.dev, for the spot's reports.
+  async liveUrl(open) {
+    const page = await open({ chat: false, contact: false }); await wait(300);
+    if (!await page.evaluate(() => !!document.querySelector(".chatfab"))) throw new Error("with no overrides there's no CHAT button");
+    const want = "https://waveslave-chat.waveslave050.workers.dev/reports?spot=donghe";
+    if (!page.tried.includes(want)) throw new Error(`the page asked ${page.tried.join(", ") || "nothing"}, not ${want}`);
   },
   // A CHAT_URL with an empty operator's name or email (window.__chatContact) is still off: the privacy note can't go out without them
   // (Bryan, Oct 21).
@@ -286,23 +294,24 @@ const CHECKS = {
   const browser = await chromium.launch(); let bad = false, ctxs = [], errs = [];
   // A fresh context for every page. The page and chat.js load from here; the fake backend answers what backend(url) gives back (null:
   // the network fails); everything else is cut off. page.asked lists the backend calls, page.dialogs any alert.
-  async function open({ spot = "donghe", query = "", chat = true, contact = true, contactV = CONTACT, backend = reports, store = {}, session = {}, world = false, view = "fc", test = true, chatJs = CHAT_JS }) {
+  async function open({ spot = "donghe", query = "", chat = true, url = CHAT, contact = true, contactV = CONTACT, backend = reports, store = {}, session = {}, world = false, view = "fc", test = true, chatJs = CHAT_JS }) {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block" });
-    ctxs.push(ctx); const asked = [], dialogs = [];
+    ctxs.push(ctx); const asked = [], tried = [], dialogs = [];
     await ctx.route("**/*", r => { const u = r.request().url();
       if (u.split(/[?#]/)[0] === PAGE) return r.continue();
       if (u.startsWith("file:") && u.split(/[?#]/)[0].endsWith("/chat.js")) return r.fulfill({ contentType: "text/javascript", body: chatJs });
       if (u.startsWith(CHAT + "/")) { const q = new URL(u); asked.push(q.pathname + q.search); const a = backend(q);
         return a ? r.fulfill({ status: a.status || 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(a.body) }) : r.abort(); }
+      if (u.startsWith("https:") || u.startsWith("http:") || u.startsWith("wss:")) tried.push(u);
       return r.abort(); });
     await ctx.addInitScript(([o, now, lock]) => { let skew = 0; Date.now = () => now + skew; window.__skew = ms => { skew += ms; };
       try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", o.view); localStorage.setItem("waveslave-lang", "en"); localStorage.setItem("waveslave-world", o.world ? "1" : "0");
         for (const k in o.store) localStorage.setItem(k, o.store[k]); for (const k in o.session) sessionStorage.setItem(k, o.session[k]); if (lock) sessionStorage.setItem("waveslave-unlock", lock); } catch (e) {}
       if (o.chat) window.__chatUrl = o.url; if (o.contact) window.__chatContact = o.contactV; if (o.test) window.__chatTest = true; },
-      [{ view, world, store, session, chat, contact, test, url: CHAT, contactV }, NOW, LOCK]);
+      [{ view, world, store, session, chat, contact, test, url, contactV }, NOW, LOCK]);
     const page = await ctx.newPage(); page.on("pageerror", e => errs.push(String(e))); page.on("dialog", d => { dialogs.push(d.message()); d.dismiss().catch(() => {}); });
     await page.goto(PAGE + query + "#" + spot, { waitUntil: "load" }); await settle(page);
-    page.asked = asked; page.dialogs = dialogs; return page;
+    page.asked = asked; page.tried = tried; page.dialogs = dialogs; return page;
   }
   // Runs one check and prints `ok <name>` or `FAIL <name>: why`; a page error during it fails it.
   async function step(name, run) {

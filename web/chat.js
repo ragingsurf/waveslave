@@ -10,10 +10,10 @@
 //   element carries data-zh or data-ja (applyLang() rewrites those as HTML); relang() redraws in the new language instead.
 (() => { "use strict"; try {
 
-// Where the backend runs: https://waveslave-chat.<subdomain>.workers.dev, filled in by a small PR once Bryan's Cloudflare and LINE setup is
-// done. Until then the chat shows nothing, so this can go live first (Bryan, Oct 21). Tests set window.__chatUrl. Only a string counts, so
-// an element that happens to be called __chatUrl (an id in the page makes one) can't switch the chat on or point it somewhere.
-const CHAT_URL = typeof window.__chatUrl === "string" ? window.__chatUrl : "";
+// Where the backend runs: Bryan's Cloudflare Worker, on his workers.dev subdomain waveslave050 (switched on Oct 22, once his Cloudflare
+// and LINE setup was done). Tests set window.__chatUrl in its place, and an empty one switches the chat off. Only a string counts, so an
+// element that happens to be called __chatUrl (an id in the page makes one) can't switch the chat off or point it somewhere.
+const CHAT_URL = typeof window.__chatUrl === "string" ? window.__chatUrl : "https://waveslave-chat.waveslave050.workers.dev";
 // Who runs the chat, for the privacy note, takedown requests and questions. Bryan stays anonymous: the note names "WaveSlave" and the
 // chat's own address (Bryan, Oct 22). The chat stays switched off while either is empty, and while CHAT_URL is. Tests set
 // window.__chatContact in place of these.

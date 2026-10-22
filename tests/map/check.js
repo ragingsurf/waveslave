@@ -739,7 +739,7 @@ const CHECKS = {
   async chatOff(open) {
     if (!CHAT_JS) skip("no web/chat.js");
     const at = { spot: "donghe", world: false, store: { "waveslave-view": "fc" } };
-    let page = await open({ ...at, chat: {} });
+    let page = await open({ ...at, chat: { url: "" } });
     if (!await page.evaluate(() => !!document.getElementById("nowReports"))) skip("the page has no chat mount (#nowReports): build it from this branch's template");
     const off = await page.evaluate(() => ({ fab: !!document.querySelector(".chatfab"), strip: !document.getElementById("nowReports").hidden }));
     if (off.fab || off.strip) throw new Error(`with CHAT_URL empty the CHAT button is ${off.fab ? "there" : "gone"} and the strip ${off.strip ? "shows" : "is hidden"}`);
@@ -767,8 +767,8 @@ const CHECKS = {
   fs.mkdirSync(outdir, { recursive: true });
   const browser = await chromium.launch(); let bad = false, ctxs = [], errs = [];
   // A fresh context for every page, so saved views and storage never carry over; the page itself is the only request let through.
-  // chat: serve the real web/chat.js for the page's chat.js (cut off like everything else otherwise), switched on (window.__chatUrl and
-  // __chatContact) when it gives a url.
+  // chat: serve the real web/chat.js for the page's chat.js (cut off like everything else otherwise), with window.__chatUrl and
+  // __chatContact set when it gives a url ("" switches the chat off).
   async function open({ spot, saved, hook = true, size, world = true, store = null, chat = null }) {
     const ctx = await browser.newContext({ viewport: size || (land ? { width: 844, height: 390 } : { width: 390, height: 844 }), deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block" });
     ctxs.push(ctx);
@@ -778,7 +778,7 @@ const CHECKS = {
     await ctx.addInitScript(([saved, now, lock, world, store, chat]) => { Date.now = () => now; try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", "ws"); localStorage.setItem("waveslave-lang", "en");
       if (world) localStorage.setItem("waveslave-world", "1"); for (const k in store || {}) localStorage.setItem(k, store[k]);
       if (lock) sessionStorage.setItem("waveslave-unlock", lock); if (saved) localStorage.setItem(saved.key, JSON.stringify(saved.view)); } catch (e) {}
-      if (chat && chat.url) { window.__chatUrl = chat.url; window.__chatContact = { name: "Test Operator", email: "chat@example.com" }; } }, [saved, NOW, LOCK, world, store, chat]);
+      if (chat && typeof chat.url === "string") { window.__chatUrl = chat.url; window.__chatContact = { name: "Test Operator", email: "chat@example.com" }; } }, [saved, NOW, LOCK, world, store, chat]);
     const page = await ctx.newPage(); page.on("pageerror", e => errs.push(String(e)));
     await page.goto(PAGE + "#" + spot, { waitUntil: "load" });
     await page.waitForFunction(() => (document.getElementById("wsTime") || {}).textContent); // the map has drawn once

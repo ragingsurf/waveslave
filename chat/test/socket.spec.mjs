@@ -965,7 +965,7 @@ describe("nick", () => {
     const [h, codeHash] = await Promise.all([sha256b64u(v), sha256b64u(code)]);
     await r.inRoom((room) =>
       room.sql.exec(
-        "INSERT INTO handoffs (code_hash, h, sub_hash, sub, line_name, pin, created, tries) VALUES (?, ?, 'sub-new', 'U-new', 'Nami', '123456', ?, 0)",
+        "INSERT INTO handoffs (code_hash, h, sub_hash, line_name, pin, created, tries) VALUES (?, ?, 'sub-new', 'Nami', '123456', ?, 0)",
         codeHash, h, T,
       ),
     );

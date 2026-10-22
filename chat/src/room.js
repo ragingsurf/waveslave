@@ -33,7 +33,8 @@ const MINUTE = 60 * SECOND;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-// The schema this code expects. A change to the tables bumps it and adds a step to migrate().
+// The schema this code expects. A change to the tables bumps it and adds a step to migrate(). (One change was made in
+// version 1 itself, before any room was deployed: see handoffs.)
 const SCHEMA_VER = 1;
 
 const PAGE_MAX = 100; // the room opens with the last 100 messages
@@ -256,13 +257,14 @@ const SCHEMA_V1 = [
     h TEXT NOT NULL,
     created INTEGER NOT NULL
   )`,
-  // A finished LINE sign-in waiting to be redeemed (spec "Login", step 3), for 10 minutes. This is the only row
-  // that ever holds a raw LINE ID (sub).
+  // A finished LINE sign-in waiting to be redeemed (spec "Login", step 3), for 10 minutes. Like every other table, it
+  // keeps the LINE account only as its sub_hash: LINE's raw ID (sub) is never stored anywhere (ruling R22). Until Oct 22
+  // this table also had a sub column, written and never read; it was taken out here, in schema version 1 itself, with no
+  // migration step, because no room had been deployed yet.
   `CREATE TABLE handoffs (
     code_hash TEXT PRIMARY KEY,
     h TEXT NOT NULL,
     sub_hash TEXT NOT NULL,
-    sub TEXT NOT NULL,
     line_name TEXT,
     pin TEXT NOT NULL,
     created INTEGER NOT NULL,
@@ -697,9 +699,9 @@ export class Room extends DurableObject {
     return Response.json({ nonce: row.nonce, pkce_verifier: row.pkce_verifier, h: row.h });
   }
 
-  // Steps 3.4 and 3.5: LINE has said who this is (sub, checked by the Worker). The account code is made here, a banned
-  // account stops here, and otherwise the handoff is stored for 10 minutes: the one row that holds a raw LINE sub. The
-  // app gets the code, which is kept only as its SHA-256, and the pin.
+  // Steps 3.4 and 3.5: LINE has said who this is (sub, checked by the Worker). The account code (sub_hash) is made here,
+  // and the sub itself goes no further: it is never stored. A banned account stops here, and otherwise the handoff is
+  // stored for 10 minutes. The app gets the code, which is kept only as its SHA-256, and the pin.
   async createHandoff(body) {
     if (!isText(body?.h, B64U_32) || typeof body.sub !== "string" || body.sub === "" || body.sub.length > LINE_SUB_MAX) {
       return refuse(400, "invalid");
@@ -712,10 +714,10 @@ export class Room extends DurableObject {
     if (this.isBanned(account)) return refuse(403, "banned");
     const created = this.now();
     this.all(
-      `INSERT INTO handoffs (code_hash, h, sub_hash, sub, line_name, pin, created, tries) VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
-      codeHash, body.h, account, body.sub, lineName, pin, created,
+      `INSERT INTO handoffs (code_hash, h, sub_hash, line_name, pin, created, tries) VALUES (?, ?, ?, ?, ?, ?, 0)`,
+      codeHash, body.h, account, lineName, pin, created,
     );
-    // The raw sub must not outlive its 10 minutes, even in a room nobody visits, so the alarm comes back for it.
+    // The LINE name must not outlive its 10 minutes, even in a room nobody visits, so the alarm comes back for it.
     await this.alarmBy(created + LOGIN_TTL + LOGIN_GRACE);
     return Response.json({ code, pin });
   }
@@ -733,8 +735,8 @@ export class Room extends DurableObject {
   }
 
   // Step 6: a new person signs up with the same proof, a nickname and the tick (consent "v1"). The account is made only
-  // then, with when and to which version they agreed. The LINE name only prefilled the nickname box and is not kept,
-  // and the handoff goes, with LINE's raw sub. A LINE account that already has an account is just signed in.
+  // then, with when and to which version they agreed. The LINE name only prefilled the nickname box and is not kept:
+  // the handoff goes, with it. A LINE account that already has an account is just signed in.
   async signup(body) {
     const proof = await this.proof(body);
     if (!proof) return refuse(400, "invalid");
@@ -1736,7 +1738,7 @@ export class Room extends DurableObject {
   //   - their likes go, and the counts of the messages they liked come down;
   //   - their flags go, and nothing they helped hide comes back;
   //   - their logs go, and so do their LINE account's rate-limit counts and held nicknames, and any sign-in of theirs
-  //     still waiting to be redeemed (with LINE's raw sub);
+  //     still waiting to be redeemed (with their LINE name);
   //   - if it is Bryan's account, meta admin_uid goes, so he can claim the role again from a new account;
   //   - their count of wrong /admin codes goes from meta admin_claims, which then no longer names their LINE account;
   //     the total stays, so the 10 in all still count them;
@@ -1897,8 +1899,8 @@ export class Room extends DurableObject {
     let handoffsDue = Infinity;
     try {
       // Expired sign-ins go on every alarm, not only at 19:00, and before anything that might fail: a handoff holds
-      // a raw LINE ID. The handoffs still waiting are read here too, so a retention run that fails can't leave one
-      // waiting for tomorrow's run.
+      // the person's LINE name. The handoffs still waiting are read here too, so a retention run that fails can't leave
+      // one waiting for tomorrow's run.
       this.dropExpiredLogins(now);
       handoffsDue = this.handoffsDue();
       if (now >= this.nextRetention()) {

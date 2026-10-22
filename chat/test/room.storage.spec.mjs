@@ -110,7 +110,7 @@ const TABLES = {
   flags: ["msg_id", "sub_hash", "reason", "ts", "rejected"],
   sessions: ["id", "uid", "spot", "start", "end", "stars", "board", "note", "cond", "shared_msg"],
   logins: ["state", "nonce", "pkce_verifier", "h", "created"],
-  handoffs: ["code_hash", "h", "sub_hash", "sub", "line_name", "pin", "created", "tries"],
+  handoffs: ["code_hash", "h", "sub_hash", "line_name", "pin", "created", "tries"],
   limits: ["key", "n", "window_end"],
   holds: ["msg_id", "body", "uid", "sub_hash", "reason", "ts"],
   meta: ["key", "value"],
@@ -576,12 +576,12 @@ describe("alarm()", () => {
     });
   });
 
-  it("drops expired sign-ins on every run, since a handoff holds a raw LINE ID", async () => {
+  it("drops expired sign-ins on every run, since a handoff holds the person's LINE name", async () => {
     await runInDurableObject(freshRoom(), async (room) => {
       room.now = () => T - HOUR;
       for (const [code, created] of [["expired", T - HOUR - 11 * MIN], ["live", T - HOUR - 9 * MIN]]) {
         room.sql.exec(
-          "INSERT INTO handoffs (code_hash, h, sub_hash, sub, line_name, pin, created, tries) VALUES (?, 'h', 'sub-x', 'U-raw', 'Kai', '123456', ?, 0)",
+          "INSERT INTO handoffs (code_hash, h, sub_hash, line_name, pin, created, tries) VALUES (?, 'h', 'sub-x', 'Kai', '123456', ?, 0)",
           code, created,
         );
         room.sql.exec("INSERT INTO logins (state, nonce, pkce_verifier, h, created) VALUES (?, 'n', 'p', 'h', ?)", code, created);
@@ -641,7 +641,7 @@ describe("retention, run by the alarm at 19:00 UTC", () => {
       for (const [state, created] of [["stale", T - 11 * MIN], ["fresh", T - 9 * MIN]]) {
         room.sql.exec("INSERT INTO logins (state, nonce, pkce_verifier, h, created) VALUES (?, 'n', 'p', 'h', ?)", state, created);
         room.sql.exec(
-          "INSERT INTO handoffs (code_hash, h, sub_hash, sub, line_name, pin, created, tries) VALUES (?, 'h', 'sub-x', 'U-raw', 'Kai', '123456', ?, 0)",
+          "INSERT INTO handoffs (code_hash, h, sub_hash, line_name, pin, created, tries) VALUES (?, 'h', 'sub-x', 'Kai', '123456', ?, 0)",
           state, created,
         );
       }
@@ -758,7 +758,7 @@ describe("retention, run by the alarm at 19:00 UTC", () => {
     check(async (room, state) => {
       expect(value(room, "SELECT value FROM meta WHERE key = 'next_retention'")).toBe(T + DAY);
       // The "fresh" handoff, made 9 minutes before the run, runs out first: the alarm comes back just after that to
-      // delete it (its raw LINE sub must not wait for tomorrow's run). Then it goes back to 19:00, as login.spec.mjs
+      // delete it (the LINE name in it must not wait for tomorrow's run). Then it goes back to 19:00, as login.spec.mjs
       // checks.
       const alarm = await state.storage.getAlarm();
       expect(alarm).toBeGreaterThan(T + MIN);

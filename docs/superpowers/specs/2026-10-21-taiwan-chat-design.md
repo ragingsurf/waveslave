@@ -287,8 +287,8 @@ All `/me/*` and `/admin/*` routes use `Authorization: Bearer` and run inside the
         - check the HMAC-SHA256 signature with the channel secret, using `crypto.subtle`;
         - require `iss = "https://access.line.me"`, `aud = LINE_CHANNEL_ID`, `exp > now`, and `nonce` equal to the stored one.
      4. Compute `sub_hash = HMAC-SHA256(SUB_PEPPER, sub)`. If `subs.banned` is set, redirect with `#e=banned`.
-     5. Store `handoffs(code_hash PK, h, sub_hash, sub, line_name, pin, created, tries)` for 10 minutes. `code` is 128 random bits
-        and `pin` is 6 digits.
+     5. Store `handoffs(code_hash PK, h, sub_hash, line_name, pin, created, tries)` for 10 minutes. `code` is 128 random bits
+        and `pin` is 6 digits. LINE's raw `sub` is not stored here or anywhere else, only `sub_hash` (ruling R22).
      6. Redirect to `APP_URL?chat#c=<code>&p=<pin>`.
 4. **Back in the app.**
    - `chat.js` strips the fragment at once.
@@ -326,6 +326,9 @@ All `/me/*` and `/admin/*` routes use `Authorization: Bearer` and run inside the
 - `flags(msg_id, sub_hash, reason, ts, rejected, PRIMARY KEY(msg_id, sub_hash))`.
 - `sessions(id, uid, spot, start, end, stars, board, note, cond JSON, shared_msg)`, indexed on `(uid, start)`.
 - `logins`, `handoffs`: as in Login.
+- **LINE's raw `sub` is never stored,** in any table, even for a moment: the room makes `sub_hash` from it and keeps only that
+  (ruling R22). `handoffs` had a `sub` column that was written and never read; it was taken out of schema version 1 itself, with
+  no migration step, because nothing had been deployed yet.
 - `limits(key PK, n, window_end)`, keyed by `sub_hash` and kind.
 - `holds(msg_id, body, uid, sub_hash, reason, ts)`, visible to Bryan only, kept 180 days (see Moderation).
 - `meta(key, value)`, for: lock state, `admin_uid`, admin-claim failure counts, `next_retention`, `schema_ver` and the

@@ -32,8 +32,8 @@ below that isn't spelled out is in the spec.
 - **Escaping:** no `innerHTML` or `insertAdjacentHTML` with network data anywhere in `chat.js`, and no `data-zh` or `data-ja` on
   chat elements.
 - **Languages:** every user-facing string in en, zh (Traditional, Taiwan usage) and ja.
-- **Stored data:** only `sub_hash`, never the raw LINE `sub`, outside the 10-minute `handoffs` row. No email, no picture, and no
-  LINE name stored.
+- **Stored data:** only `sub_hash`, never the raw LINE `sub`, not even in the 10-minute `handoffs` row (ruling R22). No email, no
+  picture, and no LINE name stored outside that row.
 - **Versions:** pin exact npm versions released before 2026-10-07 in `chat/package.json`, with a lockfile committed.
   `compatibility_date = "2026-10-21"`.
 - **Secrets:** never in the repo, the page or logs. The five Worker secrets are `LINE_CHANNEL_ID`, `LINE_CHANNEL_SECRET`,

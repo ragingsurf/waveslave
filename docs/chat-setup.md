@@ -144,15 +144,14 @@ screenshot or the repo. Claude never needs them.
 14. **Leave email off.** Check that the **Email address permission** on the **Basic settings** tab still hasn't been applied
     for. That's how it should stay.
 
-## Part 6: Send Claude two things
+## Part 6: Send Claude one thing
 
-15. **Send Claude, in the project chat:**
-    - **the workers.dev subdomain** from step 2 (for example `waveslave`). It's not a secret.
-    - **the name and email to show as the person running the chat.** They appear in the chat's privacy note, which everyone can
-      read, and are where people send questions and takedown requests. A separate email just for the chat is fine.
+15. **Send Claude, in the project chat, the workers.dev subdomain** from step 2 (for example `waveslave`). It's not a secret.
 
-    Nothing else: no tokens, no secrets. Claude then makes a small pull request that switches the chat on with your address,
-    name and email. Once you merge it, the site rebuilds by itself, and a few minutes later the chat shows on the Taiwan spots.
+    Nothing else: no tokens, no secrets, no passwords. The name and email for the chat's privacy note are already in: it shows
+    "WaveSlave" and waveslave050@gmail.com, as you chose on Oct 22, and that's where people send questions and takedown
+    requests, so check that inbox now and then. Claude then makes a small pull request that switches the chat on with your
+    address. Once you merge it, the site rebuilds by itself, and a few minutes later the chat shows on the Taiwan spots.
 
 ## When the chat is live
 

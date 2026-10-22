@@ -1,0 +1,27 @@
+# Taiwan chat backend: one Worker in front of one Durable Object. The design is in
+# docs/superpowers/specs/2026-10-21-taiwan-chat-design.md.
+name = "waveslave-chat"
+main = "src/index.js"
+# Pinned on purpose: a newer date could change how the runtime behaves under us.
+compatibility_date = "2026-10-21"
+# A free workers.dev address, so waveslave.tw's DNS stays at Dynadot (Bryan, Oct 21).
+workers_dev = true
+
+# The single room. Every route reaches it through env.ROOM.getByName("taiwan", {locationHint: "apac-ne"}).
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
+
+# SQLite storage is the only kind on the free plan. Later class changes add new [[migrations]] entries.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
+# The five secrets (LINE_CHANNEL_ID, LINE_CHANNEL_SECRET, SESSION_SECRET, SUB_PEPPER, ADMIN_CODE) are
+# never listed here. The deploy workflow sets them; `wrangler dev` reads them from .dev.vars, which is not committed,
+# and the Vitest tests use stand-in values from vitest.config.mjs.
+[vars]
+APP_URL = "https://waveslave.tw/"
+ALLOWED_ORIGINS = "https://waveslave.tw"
+LINE_AUTH_URL = "https://access.line.me/oauth2/v2.1/authorize"
+LINE_TOKEN_URL = "https://api.line.me/oauth2/v2.1/token"

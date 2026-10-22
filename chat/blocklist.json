@@ -1,0 +1,26 @@
+{
+  "phrases": {
+    "scam": [
+      "飆股", "飙股", "帶單", "带单", "喊單", "保證獲利", "保证获利", "穩賺不賠", "稳赚不赔", "日賺",
+      "刷單", "刷单", "兼職日領", "兼职日领", "娛樂城", "娱乐城", "百家樂", "百家乐",
+      "投資群", "投资群", "股票群", "內線消息", "内线消息", "USDT"
+    ],
+    "vape": [
+      "電子煙", "电子烟", "煙彈", "烟弹", "vape", "vapes", "vaper", "vapers", "vaping", "juul"
+    ],
+    "slur": [
+      "nigger", "niggers", "nigga", "niggas", "faggot", "faggots", "kike", "kikes", "chink", "chinks",
+      "retard", "retards", "retarded", "黑鬼", "支那人", "支那豬", "死同性戀"
+    ]
+  },
+  "line": [
+    "加賴", "加赖", "加我賴", "加我赖", "私賴", "私赖", "賴ID", "赖ID",
+    "加LINE", "加我LINE", "加入LINE", "LINE群", "LINE ID", "LINEID", "LINE交換", "ライン交換"
+  ],
+  "short": [
+    "bit.ly", "tinyurl.com", "goo.gl", "t.co", "is.gd", "ow.ly", "buff.ly", "tiny.cc", "cutt.ly", "rebrand.ly",
+    "shorturl.at", "rb.gy", "s.id", "v.gd", "t.ly", "lnkd.in", "youtu.be", "amzn.to", "fb.me", "tr.ee",
+    "reurl.cc", "pse.is", "ppt.cc", "0rz.tw", "lihi.cc", "lihi1.com", "lihi2.com", "lihi3.com"
+  ],
+  "allowHosts": []
+}

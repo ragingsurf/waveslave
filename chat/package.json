@@ -1,0 +1,16 @@
+{
+  "name": "waveslave-chat",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Taiwan chat backend for waveslave.tw: a Cloudflare Worker and one Durable Object",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs && vitest run",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.22.0",
+    "vitest": "4.1.11",
+    "wrangler": "4.148.0"
+  }
+}

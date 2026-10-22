@@ -6,6 +6,6 @@ HERE=$(cd "$(dirname "$0")" && pwd); OUT=${1:-_site}; W=${RUNNER_TEMP:-/tmp}/sur
 sh "$HERE/refresh.sh" "$W"
 mkdir -p "$OUT"
 cat "$HERE/web/head.html" "$W/taitung-surf.html" > "$OUT/index.html"
-cp "$HERE/web/manifest.webmanifest" "$HERE/web/sw.js" "$HERE"/web/*.png "$OUT/"
+cp "$HERE/web/manifest.webmanifest" "$HERE/web/sw.js" "$HERE/web/chat.js" "$HERE"/web/*.png "$OUT/"
 touch "$OUT/.nojekyll"
 echo "site ready in $OUT"

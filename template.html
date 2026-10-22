@@ -44,10 +44,13 @@ a{color:var(--sea)}
 a:focus-visible,button:focus-visible{outline:2px solid var(--buoy);outline-offset:2px}
 
 header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:10px}
-/* 90s flame wordmark: Metal Mania, yellow-to-red fire fill, dark outline, red-hot glow. One look in both themes. */
+/* 90s flame wordmark: Metal Mania, yellow-to-red fire fill, dark outline, red-hot glow. One look in both themes.
+   The fire is a small SVG picture, not a CSS gradient (Oct 22): an Android browser's own dark mode (Samsung Internet's, on a friend's phone)
+   darkens a page's light background colours, gradients included, which turned the yellow top of the letters brown and the logo red.
+   Those dark modes leave pictures alone, so the same yellow-to-red fire shows everywhere. */
 .brand{font-family:"Metal Mania","Impact","Arial Black",serif;font-weight:400;font-size:clamp(42px,12vw,72px);line-height:1;letter-spacing:.01em;white-space:nowrap;
   display:inline-block;padding:2px 6px;transform:rotate(-7deg) skewX(-14deg);transform-origin:left bottom;margin:26px 0 4px 4px;
-  background:linear-gradient(180deg,#fff7b0 0%,#ffd400 28%,#ff8a00 55%,#ff3d00 78%,#b80000 100%);
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='100' preserveAspectRatio='none'%3E%3ClinearGradient id='f' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23fff7b0'/%3E%3Cstop offset='.28' stop-color='%23ffd400'/%3E%3Cstop offset='.55' stop-color='%23ff8a00'/%3E%3Cstop offset='.78' stop-color='%23ff3d00'/%3E%3Cstop offset='1' stop-color='%23b80000'/%3E%3C/linearGradient%3E%3Crect width='10' height='100' fill='url(%23f)'/%3E%3C/svg%3E") 0 0/100% 100% no-repeat;
   -webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;
   -webkit-text-stroke:1px #200300;
   filter:drop-shadow(0 0 8px rgba(255,60,0,.7)) drop-shadow(2px 3px 0 #200300);will-change:transform}

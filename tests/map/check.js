@@ -583,6 +583,17 @@ const CHECKS = {
     const sign = await page.evaluate(() => document.querySelector(".ptr").textContent);
     if (sign !== "LET GO ▲") throw new Error(`on the Forecast page the drag leaves the sign saying ${sign}, want LET GO ▲`);
   },
+  // A finger dragging the map sideways and still down: the map is drawn again as it goes, so the edge it slides away from never shows blank (Oct 22).
+  async dragFillsEdges(open) {
+    const page = await open(home("tw")), b = await page.locator("#wsFx").boundingBox(), s = await page.context().newCDPSession(page), x = b.x + b.width*.8, y = b.y + b.height/2;
+    await s.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    for (let i = 1; i <= 12; i++) { await s.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x - b.width*.6*i/12, y }] }); await page.waitForTimeout(16); }
+    await page.waitForTimeout(50); // under the 120 ms rest that draws it anyway
+    const t = await page.evaluate(() => document.getElementById("wsBase").style.transform);
+    await s.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    const m = /translate\((-?[\d.e-]+)px, ?(-?[\d.e-]+)px\) scale\(([\d.e-]+)\)/.exec(t), [dx, , k] = m ? m.slice(1).map(Number) : [0, 0, 1];
+    if (dx + b.width*k < b.width - 1) throw new Error(`mid-drag the map's right ${Math.round(b.width - dx - b.width*k)} px are blank (${t})`);
+  },
   // With the map open, changing country keeps the view being left under its own key, as the reload between countries used to.
   async countryKeepsView(open) {
     const page = await open(home("tw")); await page.evaluate(() => window.__ws.zoom(0.5)); await settle(page);

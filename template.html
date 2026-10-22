@@ -1625,9 +1625,16 @@ const WS = (() => {
     if (raf) dirty = true; else if (!mvRaf) mvRaf = requestAnimationFrame(() => { mvRaf = 0; drawBase(); }); }
   // Fingers (and the wheel) move the map as it was last drawn, stretched and slid into place, which the phone does at once, and the map is drawn
   // afresh once they rest a moment or let go (Oct 22): drawing it on every move lagged badly on Android phones. The streaks wait meanwhile.
-  let drawn = null, settle = 0;
-  function liveMoved() { clampView(); if (!drawn) return moved(); stretch(); clearTimeout(settle); settle = setTimeout(settled, 120); }
-  function stretch() { const k = z/drawn.z; base.style.transform = `translate(${W/2*(1-k) + (drawn.cx-cx)*z}px,${H/2*(1-k) - (drawn.y-my(cy))*z}px) scale(${k})`; }
+  // A drag or zoom out that slides the picture off an edge of the map would leave that edge blank till the fingers rest, so then it's drawn again the
+  // quick way on the next frame (Bryan, Oct 22: "why is it not loading the sides?"). After one such draw the next waits twice as long as it took,
+  // so a slow phone still mostly slides.
+  let drawn = null, settle = 0, fill = 0, cost = 0;
+  function liveMoved() { clampView(); if (!drawn) return moved(); stretch(); clearTimeout(settle); settle = setTimeout(settled, 120);
+    if (!fill && bare() && performance.now() - drawn.at > 2*cost) fill = requestAnimationFrame(() => { fill = 0; if (!settle || !bare()) return;
+      const t = performance.now(), f = FAST; FAST = true; drawBase(); FAST = f; cost = performance.now() - t; }); }
+  function slid() { const k = z/drawn.z; return [W/2*(1-k) + (drawn.cx-cx)*z, H/2*(1-k) - (drawn.y-my(cy))*z, k]; }
+  function stretch() { const [x, y, k] = slid(); base.style.transform = `translate(${x}px,${y}px) scale(${k})`; }
+  const bare = () => { const [x, y, k] = slid(); return x > .5 || y > .5 || x + W*k < W - .5 || y + H*k < H - .5; }; // part of the map not covered
   function settled() { clearTimeout(settle); settle = 0; moved(); }
   // The home button's move: 700 ms eased in and out, the centre straight across in longitude and Mercator y, the zoom by the same factor each moment; with reduced motion, a jump.
   // A finger or the mouse on the map, any zoom, a change of country or the next glide (or flight, below) stops it.

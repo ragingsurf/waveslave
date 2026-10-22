@@ -15,7 +15,9 @@ for s in S:
   for x in (s[f] if isinstance(s[f],list) else [s[f]]):
     if f in ('lat','lon') or x not in v: v.append(x)
 print(','.join(u.quote(str(x),safe='') for x in v))" "$HERE/spots.json" "$1"; }
-get(){ curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -m 120 -o "$W/dl/$1.json" "$2"; }
+# --retry-max-time: a busy server can answer 503 with "Retry-After: 600", which curl obeys over --retry-delay, so one
+# NOWPHAS outage held every build for 30 minutes (Oct 22). Past 3 minutes curl gives up instead of sleeping.
+get(){ curl -fsSL --retry 3 --retry-max-time 180 --retry-all-errors --retry-delay 5 -m 120 -o "$W/dl/$1.json" "$2"; }
 # Coastal forecast for all townships (wind, sky). Only served as a file, ~6 MB.
 get coastal "https://opendata.cwa.gov.tw/fileapi/v1/opendataapi/F-D0047-095?Authorization=$K&downloadType=WEB&format=JSON"
 get tide "$A/F-A0021-001?Authorization=$K&LocationId=$(ids tide)&timeFrom=${TODAY}T00:00:00"
@@ -33,7 +35,7 @@ python3 -I "$HERE/wx.py" "$W/dl/openwx.json" "$W/snap.json"
 get openmodels "https://marine-api.open-meteo.com/v1/marine?latitude=$(ids lat)&longitude=$(ids lon)&hourly=wave_height,wave_period,wave_direction&models=ecmwf_wam,ncep_gfswave016,dwd_gwam&timezone=Asia%2FTaipei&forecast_days=5" || echo "openmodels fetch failed" >&2
 rm -f "$W/dl"/jtwc-*.txt
 { get jtwc "https://www.metoc.navy.mil/jtwc/rss/jtwc.rss" && for u in $(grep -o 'https://www.metoc.navy.mil/jtwc/products/wp[0-9]*web.txt' "$W/dl/jtwc.json" | sort -u); do
-  curl -fsSL --retry 2 -m 60 -o "$W/dl/jtwc-$(basename "$u" web.txt).txt" "$u" || true; done; } || echo "jtwc fetch failed" >&2
+  curl -fsSL --retry 2 --retry-max-time 180 -m 60 -o "$W/dl/jtwc-$(basename "$u" web.txt).txt" "$u" || true; done; } || echo "jtwc fetch failed" >&2
 python3 -I "$HERE/more.py" "$W/dl" "$W/snap.json" "$HERE/spots.json" || echo "extras skipped" >&2
 # Japan spots (optional, never block the build): NOWPHAS wave gauges, JMA AMeDAS wind, JMA forecasters' wave heights, JMA MSM wind
 # via Open-Meteo, JMA tide tables (one file per point and year, kept in cache/); jp.py writes them under the same keys as CWA's.
@@ -44,13 +46,13 @@ G="$HERE/cache"; mkdir -p "$G"
 if [ -n "$(jpids lat)" ]; then
   rm -f "$W/dl/nowphas.xml" "$W/dl/amedas_time.txt"
   get nowphas "https://nowphas.mlit.go.jp/mapxml/$(date +%s)" && mv "$W/dl/nowphas.json" "$W/dl/nowphas.xml" || echo "nowphas fetch failed" >&2
-  { curl -fsSL --retry 2 -m 30 -o "$W/dl/amedas_time.txt" "https://www.jma.go.jp/bosai/amedas/data/latest_time.txt" &&
+  { curl -fsSL --retry 2 --retry-max-time 180 -m 30 -o "$W/dl/amedas_time.txt" "https://www.jma.go.jp/bosai/amedas/data/latest_time.txt" &&
     get amedas "https://www.jma.go.jp/bosai/amedas/data/map/$(TZ=Asia/Tokyo date -d "$(cat "$W/dl/amedas_time.txt")" +%Y%m%d%H%M%S).json"; } || echo "amedas fetch failed" >&2
   for o in $(jpids jmaArea | tr ',' ' '); do get "jmafc-$o" "https://www.jma.go.jp/bosai/forecast/data/forecast/$o.json" || echo "jma forecast $o fetch failed" >&2; done
   JQ="latitude=$(jpids lat)&longitude=$(jpids lon)&hourly=wind_speed_10m,wind_direction_10m,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=4"
   get openjma "https://api.open-meteo.com/v1/forecast?$JQ&models=jma_msm" || get openjma "https://api.open-meteo.com/v1/forecast?$JQ&models=jma_seamless" || echo "openjma fetch failed" >&2
   for y in $(TZ=Asia/Taipei date +%Y) $(TZ=Asia/Taipei date -d '+10 days' +%Y); do for p in $(jpids tidePoint | tr ',' ' '); do
-    [ -s "$G/jp-tide-$p-$y.txt" ] || curl -fsSL --retry 2 -m 60 -o "$G/jp-tide-$p-$y.txt" "https://www.data.jma.go.jp/kaiyou/data/db/tide/suisan/txt/$y/$p.txt" || { rm -f "$G/jp-tide-$p-$y.txt"; echo "tide $p $y fetch failed" >&2; }
+    [ -s "$G/jp-tide-$p-$y.txt" ] || curl -fsSL --retry 2 --retry-max-time 180 -m 60 -o "$G/jp-tide-$p-$y.txt" "https://www.data.jma.go.jp/kaiyou/data/db/tide/suisan/txt/$y/$p.txt" || { rm -f "$G/jp-tide-$p-$y.txt"; echo "tide $p $y fetch failed" >&2; }
   done; done
   python3 -I "$HERE/jp.py" "$W/dl" "$W/snap.json" "$HERE/spots.json" "$G" || echo "japan skipped" >&2
 fi
@@ -72,16 +74,16 @@ rm -f "$W/dl"/ndbc-*.txt "$W/dl"/ndbc-*.drift "$W/dl"/nws-*.json "$W/dl"/eccc-*.
 for C in ca hi nw ak; do
   [ -n "$(noaaids $C lat)" ] || continue
   ZONE=America/Los_Angeles; [ $C = hi ] && ZONE=Pacific/Honolulu; [ $C = ak ] && ZONE=America/Anchorage
-  for b in $(noaaids $C ndbc | tr ',' ' '); do [ -s "$W/dl/ndbc-$b.txt" ] || curl -fsSL --retry 2 -m 60 -o "$W/dl/ndbc-$b.txt" "https://www.ndbc.noaa.gov/data/realtime2/$b.txt" || echo "ndbc $b fetch failed" >&2; done
+  for b in $(noaaids $C ndbc | tr ',' ' '); do [ -s "$W/dl/ndbc-$b.txt" ] || curl -fsSL --retry 2 --retry-max-time 180 -m 60 -o "$W/dl/ndbc-$b.txt" "https://www.ndbc.noaa.gov/data/realtime2/$b.txt" || echo "ndbc $b fetch failed" >&2; done
   # the last few reports, since airport stations often leave the wind speed out of one
-  for s in $(noaaids $C nws | tr ',' ' '); do curl -fsSL --retry 2 -m 60 -A "waveslave.tw" -o "$W/dl/nws-$s.json" "https://api.weather.gov/stations/$s/observations?limit=6" || echo "nws $s fetch failed" >&2; done
+  for s in $(noaaids $C nws | tr ',' ' '); do curl -fsSL --retry 2 --retry-max-time 180 -m 60 -A "waveslave.tw" -o "$W/dl/nws-$s.json" "https://api.weather.gov/stations/$s/observations?limit=6" || echo "nws $s fetch failed" >&2; done
   # BC: Environment Canada station reports from the last 3 hours, newest first (ca.py skips a reading over 3 hours old). The Canadian
   # fetches get one quick retry each, so a slow server costs a run its reading, never half an hour.
-  for s in $(noaaids $C eccc | tr ',' ' '); do curl -fsSL --retry 1 -m 30 -o "$W/dl/eccc-$s.json" "https://api.weather.gc.ca/collections/swob-realtime/items?f=json&msc_id-value=$s&datetime=$(date -u -d '-3 hours' +%FT%TZ)/$(date -u +%FT%TZ)&sortby=-date_tm-value&limit=6" || echo "eccc $s fetch failed" >&2; done
+  for s in $(noaaids $C eccc | tr ',' ' '); do curl -fsSL --retry 1 --retry-max-time 180 -m 30 -o "$W/dl/eccc-$s.json" "https://api.weather.gc.ca/collections/swob-realtime/items?f=json&msc_id-value=$s&datetime=$(date -u -d '-3 hours' +%FT%TZ)/$(date -u +%FT%TZ)&sortby=-date_tm-value&limit=6" || echo "eccc $s fetch failed" >&2; done
   # BC: Canadian Hydrographic Service highs and lows (UTC times) for the same 15 local days as NOAA's; the API takes the station's id, looked up by its code
   for c in $(noaaids $C chs | tr ',' ' '); do
-    { id=$(curl -fsSL --retry 1 -m 30 "https://api-iwls.dfo-mpo.gc.ca/api/v1/stations?code=$c" | python3 -I -c "import json,sys;print(json.load(sys.stdin)[0]['id'])" 2>/dev/null) &&
-      curl -fsSL --retry 1 -m 30 -o "$W/dl/chs-$c.json" "https://api-iwls.dfo-mpo.gc.ca/api/v1/stations/$id/data?time-series-code=wlp-hilo&from=$(mid '-5 days')&to=$(mid '+10 days')"; } || echo "chs $c fetch failed" >&2
+    { id=$(curl -fsSL --retry 1 --retry-max-time 180 -m 30 "https://api-iwls.dfo-mpo.gc.ca/api/v1/stations?code=$c" | python3 -I -c "import json,sys;print(json.load(sys.stdin)[0]['id'])" 2>/dev/null) &&
+      curl -fsSL --retry 1 --retry-max-time 180 -m 30 -o "$W/dl/chs-$c.json" "https://api-iwls.dfo-mpo.gc.ca/api/v1/stations/$id/data?time-series-code=wlp-hilo&from=$(mid '-5 days')&to=$(mid '+10 days')"; } || echo "chs $c fetch failed" >&2
   done
   for t in $(noaaids $C tideStation | tr ',' ' '); do get "tide-$t" "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?product=predictions&station=$t&begin_date=$(TZ=$ZONE date -d '-5 days' +%Y%m%d)&range=360&datum=MLLW&interval=hilo&units=metric&time_zone=lst_ldt&format=json&application=waveslave.tw" || echo "tide $t fetch failed" >&2; done
   CQ="latitude=$(noaaids $C lat)&longitude=$(noaaids $C lon)&hourly=wind_speed_10m,wind_direction_10m,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=4"
@@ -97,8 +99,8 @@ print('|'.join(v if f in ('lat','lon') else dict.fromkeys(v)))" "$HERE/spots.jso
 if [ -n "$(auids lat)" ]; then
   rm -f "$W/dl"/aodn-*.csv "$W/dl"/bom-*.json
   OLDIFS=$IFS; IFS='|'
-  for b in $(auids aodn); do curl -fsSL --retry 2 -m 60 -G -o "$W/dl/aodn-$(echo "$b" | tr ' ' _).csv" "https://geoserver-123.aodn.org.au/geoserver/ows" --data-urlencode "service=WFS" --data-urlencode "version=1.1.0" --data-urlencode "request=GetFeature" --data-urlencode "typeName=aodn:aodn_wave_nrt_v2_timeseries_data" --data-urlencode "outputFormat=csv" --data-urlencode "maxFeatures=48" --data-urlencode "sortBy=TIME D" --data-urlencode "CQL_FILTER=site_name='$b'" || echo "aodn $b fetch failed" >&2; done
-  for s in $(auids bomStation); do curl -fsSL --retry 2 -m 60 -A "waveslave.tw" -o "$W/dl/bom-$s.json" "https://www.bom.gov.au/fwo/${s%%.*}/$s.json" || echo "bom $s fetch failed" >&2; done
+  for b in $(auids aodn); do curl -fsSL --retry 2 --retry-max-time 180 -m 60 -G -o "$W/dl/aodn-$(echo "$b" | tr ' ' _).csv" "https://geoserver-123.aodn.org.au/geoserver/ows" --data-urlencode "service=WFS" --data-urlencode "version=1.1.0" --data-urlencode "request=GetFeature" --data-urlencode "typeName=aodn:aodn_wave_nrt_v2_timeseries_data" --data-urlencode "outputFormat=csv" --data-urlencode "maxFeatures=48" --data-urlencode "sortBy=TIME D" --data-urlencode "CQL_FILTER=site_name='$b'" || echo "aodn $b fetch failed" >&2; done
+  for s in $(auids bomStation); do curl -fsSL --retry 2 --retry-max-time 180 -m 60 -A "waveslave.tw" -o "$W/dl/bom-$s.json" "https://www.bom.gov.au/fwo/${s%%.*}/$s.json" || echo "bom $s fetch failed" >&2; done
   IFS=$OLDIFS
   AQ="latitude=$(auids lat | tr '|' ,)&longitude=$(auids lon | tr '|' ,)"
   # Open-Meteo's BoM ACCESS feed returns no data, so the wind forecast is its default blend.
@@ -123,8 +125,8 @@ print(','.join(v if f in ('lat','lon') else dict.fromkeys(v)))" "$HERE/spots.jso
 for C in kr ph id hn vn; do
   [ -n "$(krids $C lat)" ] || continue
   M=jma_msm M2=jma_seamless; [ $C = kr ] || M=ecmwf_ifs M2=best_match; CS=; case $C in hn|vn) CS="&cell_selection=sea";; esac
-  for b in $(krids $C ndbc | tr ',' ' '); do curl -fsSL --retry 2 -m 60 -o "$W/dl/ndbc-$b.drift" "https://www.ndbc.noaa.gov/data/realtime2/$b.drift" || echo "ndbc $b fetch failed" >&2; done
-  [ -z "$(krids $C metar)" ] || curl -fsSL --retry 2 -m 60 -A "waveslave.tw" -o "$W/dl/metar-$C.json" "https://aviationweather.gov/api/data/metar?ids=$(krids $C metar)&format=json&hours=3" || echo "metar $C fetch failed" >&2
+  for b in $(krids $C ndbc | tr ',' ' '); do curl -fsSL --retry 2 --retry-max-time 180 -m 60 -o "$W/dl/ndbc-$b.drift" "https://www.ndbc.noaa.gov/data/realtime2/$b.drift" || echo "ndbc $b fetch failed" >&2; done
+  [ -z "$(krids $C metar)" ] || curl -fsSL --retry 2 --retry-max-time 180 -m 60 -A "waveslave.tw" -o "$W/dl/metar-$C.json" "https://aviationweather.gov/api/data/metar?ids=$(krids $C metar)&format=json&hours=3" || echo "metar $C fetch failed" >&2
   KQ="latitude=$(krids $C lat)&longitude=$(krids $C lon)"
   get open$C "https://api.open-meteo.com/v1/forecast?$KQ&hourly=wind_speed_10m,wind_direction_10m,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=4$CS&models=$M" ||
     get open$C "https://api.open-meteo.com/v1/forecast?$KQ&hourly=wind_speed_10m,wind_direction_10m,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=4$CS&models=$M2" || echo "open$C fetch failed" >&2
@@ -145,15 +147,15 @@ v=[w[6:] for w in W if w.startswith('metar:')] if f=='metar' else [str(s[f]) for
 print(','.join(v if f in ('lat','lon') else dict.fromkeys(v)))" "$HERE/spots.json" "$1"; }
 if [ -n "$(hkids lat)" ]; then
   rm -f "$W/dl/hko-wind.csv"
-  curl -fsSL --retry 2 -m 60 -A "waveslave.tw" -o "$W/dl/hko-wind.csv" "https://data.weather.gov.hk/weatherAPI/hko_data/regional-weather/latest_10min_wind.csv" || echo "hko wind fetch failed" >&2
-  [ -z "$(hkids metar)" ] || curl -fsSL --retry 2 -m 60 -A "waveslave.tw" -o "$W/dl/metar-hk.json" "https://aviationweather.gov/api/data/metar?ids=$(hkids metar)&format=json&hours=3" || echo "metar hk fetch failed" >&2
+  curl -fsSL --retry 2 --retry-max-time 180 -m 60 -A "waveslave.tw" -o "$W/dl/hko-wind.csv" "https://data.weather.gov.hk/weatherAPI/hko_data/regional-weather/latest_10min_wind.csv" || echo "hko wind fetch failed" >&2
+  [ -z "$(hkids metar)" ] || curl -fsSL --retry 2 --retry-max-time 180 -m 60 -A "waveslave.tw" -o "$W/dl/metar-hk.json" "https://aviationweather.gov/api/data/metar?ids=$(hkids metar)&format=json&hours=3" || echo "metar hk fetch failed" >&2
   HQ="latitude=$(hkids lat)&longitude=$(hkids lon)&hourly=wind_speed_10m,wind_direction_10m,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=4&cell_selection=sea"
   get openhk "https://api.open-meteo.com/v1/forecast?$HQ&models=ecmwf_ifs" || get openhk "https://api.open-meteo.com/v1/forecast?$HQ" || echo "openhk fetch failed" >&2
   Y0=$(TZ=Asia/Hong_Kong date -d '-7 days' +%Y); Y1=$(TZ=Asia/Hong_Kong date -d '+12 days' +%Y); [ "$Y1" != "$Y0" ] || Y1=; HKO=up
   for y in $Y0 $Y1; do for s in $(hkids tideStation | tr ',' ' '); do
     f="$G/hk-tide-$s-$y.json"; e=0
     [ ! -s "$f" ] && [ -n "$HKO" ] || continue
-    curl -fsSL --retry 1 -m 30 -A "waveslave.tw" -o "$f.new" "https://data.weather.gov.hk/weatherAPI/opendata/opendata.php?dataType=HLT&station=$s&year=$y&rformat=json" || e=$?
+    curl -fsSL --retry 1 --retry-max-time 180 -m 30 -A "waveslave.tw" -o "$f.new" "https://data.weather.gov.hk/weatherAPI/opendata/opendata.php?dataType=HLT&station=$s&year=$y&rformat=json" || e=$?
     # a whole year of rows, or the reply isn't kept (exit 28 is a timeout: the rest wait for the next run, as for LINZ)
     [ $e = 0 ] && python3 -I -c "import json,sys;sys.exit(len(json.load(open(sys.argv[1]))['data'])<365)" "$f.new" 2>/dev/null && mv "$f.new" "$f" || { rm -f "$f.new"; echo "hko tide $s $y fetch failed" >&2; [ $e != 28 ] || HKO=; }
   done; done
@@ -174,15 +176,15 @@ v=[w[6:] for w in W if w.startswith('metar:')] if f=='metar' else [b for s in S 
 print(','.join(v if f in ('lat','lon') else dict.fromkeys(v)))" "$HERE/spots.json" "$1"; }
 if [ -n "$(nzids lat)" ]; then
   rm -f "$W/dl"/siw-*.csv
-  for b in $(nzids siw | tr ',' ' '); do curl -fsSL --retry 2 -m 60 -A "waveslave.tw" -o "$W/dl/siw-$b.csv" "https://southislandwaves.co.nz/wp-admin/admin-ajax.php?action=waf_rest_list_buoy_datapoints_csv&id=$b&start=$(date -u -d '-26 hours' +%s)&end=$(date -u +%s)" || echo "siw $b fetch failed" >&2; done
-  [ -z "$(nzids metar)" ] || curl -fsSL --retry 2 -m 60 -A "waveslave.tw" -o "$W/dl/metar-nz.json" "https://aviationweather.gov/api/data/metar?ids=$(nzids metar)&format=json&hours=3" || echo "metar nz fetch failed" >&2
+  for b in $(nzids siw | tr ',' ' '); do curl -fsSL --retry 2 --retry-max-time 180 -m 60 -A "waveslave.tw" -o "$W/dl/siw-$b.csv" "https://southislandwaves.co.nz/wp-admin/admin-ajax.php?action=waf_rest_list_buoy_datapoints_csv&id=$b&start=$(date -u -d '-26 hours' +%s)&end=$(date -u +%s)" || echo "siw $b fetch failed" >&2; done
+  [ -z "$(nzids metar)" ] || curl -fsSL --retry 2 --retry-max-time 180 -m 60 -A "waveslave.tw" -o "$W/dl/metar-nz.json" "https://aviationweather.gov/api/data/metar?ids=$(nzids metar)&format=json&hours=3" || echo "metar nz fetch failed" >&2
   NQ="latitude=$(nzids lat)&longitude=$(nzids lon)&hourly=wind_speed_10m,wind_direction_10m,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=4"
   get opennz "https://api.open-meteo.com/v1/forecast?$NQ&models=ecmwf_ifs" || get opennz "https://api.open-meteo.com/v1/forecast?$NQ" || echo "opennz fetch failed" >&2
   Y0=$(TZ=Pacific/Auckland date -d '-7 days' +%Y); Y1=$(TZ=Pacific/Auckland date -d '+12 days' +%Y); [ "$Y1" != "$Y0" ] || Y1=; LINZ=up
   for y in $Y0 $Y1; do for p in $(nzids tidePort | tr ',' ' '); do
     f="$G/nz-tide-$p-$y.csv"; e=0
     [ -z "$(find "$f" -mtime -30 2>/dev/null)" ] && [ -n "$LINZ" ] || continue
-    curl -fsSL --retry 1 -m 30 -A "waveslave.tw" -o "$f.new" "https://static.charts.linz.govt.nz/tide-tables/maj-ports/csv/$p%20$y.csv" || e=$?
+    curl -fsSL --retry 1 --retry-max-time 180 -m 30 -A "waveslave.tw" -o "$f.new" "https://static.charts.linz.govt.nz/tide-tables/maj-ports/csv/$p%20$y.csv" || e=$?
     # a table has rows of day, weekday, month, year: one of those for this year, or the reply isn't kept (exit 28 is a timeout)
     [ $e = 0 ] && grep -qE "^[0-9]+,[A-Za-z]+,[0-9]+,$y," "$f.new" && mv "$f.new" "$f" || { rm -f "$f.new"; echo "linz tide $p $y fetch failed" >&2; [ $e != 28 ] || LINZ=; }
   done; done
@@ -207,8 +209,8 @@ print(','.join(v if f in ('lat','lon','mlat','mlon') else dict.fromkeys(v)))" "$
 for C in pi mi pg vu bj; do
   [ -n "$(piids $C lat)" ] || continue
   CS=; case $C in mi|pg|vu|bj) CS="&cell_selection=sea";; esac
-  for b in $(piids $C ndbc | tr ',' ' '); do [ -s "$W/dl/ndbc-$b.txt" ] || curl -fsSL --retry 2 -m 60 -o "$W/dl/ndbc-$b.txt" "https://www.ndbc.noaa.gov/data/realtime2/$b.txt" || echo "ndbc $b fetch failed" >&2; done
-  [ -z "$(piids $C metar)" ] || curl -fsSL --retry 2 -m 60 -A "waveslave.tw" -o "$W/dl/metar-$C.json" "https://aviationweather.gov/api/data/metar?ids=$(piids $C metar)&format=json&hours=3" || echo "metar $C fetch failed" >&2
+  for b in $(piids $C ndbc | tr ',' ' '); do [ -s "$W/dl/ndbc-$b.txt" ] || curl -fsSL --retry 2 --retry-max-time 180 -m 60 -o "$W/dl/ndbc-$b.txt" "https://www.ndbc.noaa.gov/data/realtime2/$b.txt" || echo "ndbc $b fetch failed" >&2; done
+  [ -z "$(piids $C metar)" ] || curl -fsSL --retry 2 --retry-max-time 180 -m 60 -A "waveslave.tw" -o "$W/dl/metar-$C.json" "https://aviationweather.gov/api/data/metar?ids=$(piids $C metar)&format=json&hours=3" || echo "metar $C fetch failed" >&2
   PQ="latitude=$(piids $C lat)&longitude=$(piids $C lon)&hourly=wind_speed_10m,wind_direction_10m,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=4$CS"
   get open$C "https://api.open-meteo.com/v1/forecast?$PQ&models=ecmwf_ifs" || get open$C "https://api.open-meteo.com/v1/forecast?$PQ" || echo "open$C fetch failed" >&2
   for t in $(piids $C tideStation | tr ',' ' '); do get "tide$C-$t" "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?product=predictions&station=$t&begin_date=$(date -u -d '-6 days' +%Y%m%d)&range=408&datum=MLLW&interval=hilo&units=metric&time_zone=gmt&format=json&application=waveslave.tw" || echo "tide $t fetch failed" >&2; done
@@ -220,8 +222,8 @@ WPNEW=
 if [ -z "$(find "$G/grid.json" -mmin -170 2>/dev/null)" ]; then
   GLA=$(python3 -I -c "print(','.join(str(a) for a in range(0,46,3) for o in range(100,161,3)))")
   GLO=$(python3 -I -c "print(','.join(str(o) for a in range(0,46,3) for o in range(100,161,3)))")
-  { curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwind.json" "https://api.open-meteo.com/v1/forecast?latitude=$GLA&longitude=$GLO&hourly=wind_speed_10m,wind_direction_10m,pressure_msl,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
-    curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwave.json" "https://marine-api.open-meteo.com/v1/marine?latitude=$GLA&longitude=$GLO&hourly=wave_height,wave_direction,swell_wave_height,swell_wave_direction,swell_wave_period&models=meteofrance_wave&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
+  { curl -fsSL --retry 3 --retry-max-time 180 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwind.json" "https://api.open-meteo.com/v1/forecast?latitude=$GLA&longitude=$GLO&hourly=wind_speed_10m,wind_direction_10m,pressure_msl,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
+    curl -fsSL --retry 3 --retry-max-time 180 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwave.json" "https://marine-api.open-meteo.com/v1/marine?latitude=$GLA&longitude=$GLO&hourly=wave_height,wave_direction,swell_wave_height,swell_wave_direction,swell_wave_period&models=meteofrance_wave&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
     python3 -I "$HERE/grid.py" "$G/gwind.json" "$G/gwave.json" "$G/grid.new" 0 3 16 100 3 21 && mv "$G/grid.new" "$G/grid.json" && WPNEW=1; } || echo "grid fetch failed, keeping last grid" >&2
 fi
 # Wind + wave grids for the other map regions, the same way; only when the country has spots. regrid <country> <minutes> <grid>.
@@ -241,8 +243,8 @@ regrid(){ C=$1; AGE=$2; shift 2
   [ -n "$(python3 -I -c "import json,sys;print(any(s.get('country')==sys.argv[2] for s in json.load(open(sys.argv[1]))) or '')" "$HERE/spots.json" $C)" ] && [ -z "$(find "$G/grid-$C.json" -mmin -$AGE 2>/dev/null)" ] || return 0
   LA=$(python3 -I -c "import sys;a0,da,na,o0,do,no=map(float,sys.argv[1:]);print(','.join(str(round(a0+i*da,4)) for i in range(int(na)) for j in range(int(no))))" "$@") || return 0
   LO=$(python3 -I -c "import sys;a0,da,na,o0,do,no=map(float,sys.argv[1:]);print(','.join(str(round((o0+j*do+180)%360-180,4)) for i in range(int(na)) for j in range(int(no))))" "$@") || return 0
-  { curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwind-$C.json" "https://api.open-meteo.com/v1/forecast?latitude=$LA&longitude=$LO&hourly=wind_speed_10m,wind_direction_10m,pressure_msl,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
-    curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwave-$C.json" "https://marine-api.open-meteo.com/v1/marine?latitude=$LA&longitude=$LO&hourly=wave_height,wave_direction,swell_wave_height,swell_wave_direction,swell_wave_period&models=meteofrance_wave&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
+  { curl -fsSL --retry 3 --retry-max-time 180 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwind-$C.json" "https://api.open-meteo.com/v1/forecast?latitude=$LA&longitude=$LO&hourly=wind_speed_10m,wind_direction_10m,pressure_msl,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
+    curl -fsSL --retry 3 --retry-max-time 180 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwave-$C.json" "https://marine-api.open-meteo.com/v1/marine?latitude=$LA&longitude=$LO&hourly=wave_height,wave_direction,swell_wave_height,swell_wave_direction,swell_wave_period&models=meteofrance_wave&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
     python3 -I "$HERE/grid.py" "$G/gwind-$C.json" "$G/gwave-$C.json" "$G/grid-$C.new" "$@" && mv "$G/grid-$C.new" "$G/grid-$C.json"; } || echo "$C grid fetch failed, keeping last grid" >&2; }
 regrid ca 170 30 1 13 -128 1 13
 regrid hi 170 15 1 12 -162 1 11

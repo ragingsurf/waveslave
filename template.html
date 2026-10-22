@@ -385,6 +385,10 @@ html{overscroll-behavior-y:none}
 .wsmap .box{position:relative}
 .wsmap canvas{display:block;width:100%;border-radius:12px}
 .wsmap #wsFx{position:absolute;inset:0;touch-action:pan-y;cursor:grab}
+/* Full screen there's no page to scroll under the map, so the phone takes no part of a gesture on it (Oct 22): with pan-y, Android's browsers
+   took over any pinch or drag that set off up or down, and the map stopped following the fingers. */
+.wsmap.fs #wsFx{touch-action:none}
+.wsmap #wsBase{transform-origin:0 0}
 .wsmap .zoom{position:absolute;top:8px;right:8px;display:grid;gap:6px}
 .wsmap .zoom button,.wsmap .wsctry button{touch-action:manipulation;width:34px;height:34px;border-radius:10px;border:1px solid #ff2bd6;background:rgba(28,19,64,.9);color:#ff9ef0;font:600 18px/1 "Public Sans",system-ui,sans-serif;cursor:pointer}
 .wsmap .time{display:flex;align-items:center;gap:10px;margin-top:10px}
@@ -1342,7 +1346,7 @@ const WS = (() => {
   // The home view worked out again whenever the map takes its size, another country (or the other part of one) or language is picked
   // or the tags' font arrives: a map sitting on the old home view moves to the new one.
   const refit = () => { const at = z0 > 1 && z === z0 && cx === HV.cx && cy === HV.cy, f = fitHome(); HV = {cx: f.cx, cy: f.cy}; z0 = f.z; if (at) { cx = HV.cx; cy = HV.cy; z = z0; } };
-  function drawBase() { if (hold) return; const g = base.getContext("2d"), t = times[ti], S = sample(t), cell = Math.max(6, Math.round(Math.sqrt(W*H/40000))), close = z >= z0*0.6;
+  function drawBase() { if (hold) return; base.style.transform = ""; drawn = {cx, y: my(cy), z}; const g = base.getContext("2d"), t = times[ti], S = sample(t), cell = Math.max(6, Math.round(Math.sqrt(W*H/40000))), close = z >= z0*0.6;
     g.fillStyle = "#0e0824"; g.fillRect(0, 0, W, H);
     // The map's own layers (colours, swell arrows, land, pressure lines, typhoon tracks) are drawn only inside the Pacific box: zoomed out on a phone held upright, plain dark sea above and below it.
     // The overlays drawn after them (spot markers, tags, towns, the open spot's dial and the pin) are not clipped and may cross the box's edge: cut off there, they would look broken.
@@ -1507,6 +1511,7 @@ const WS = (() => {
   function spawn(p) { p.x = Math.random()*W; p.y = Math.random()*H; p.age = Math.random()*80|0; }
   let lastT = 0, lastV = null;
   function frame(now) { const g = fx.getContext("2d"), dt = lastT ? Math.min(3, (now-lastT)/16.7) : 1; lastT = now;
+    if (settle) { g.clearRect(0, 0, W, H); raf = requestAnimationFrame(frame); return; } // fingers moving the map (liveMoved): no streaks till it's drawn again
     if (dirty) { dirty = false; drawBase();
       if (lastV && lastV.z === z) { const dx = (lastV.cx-cx)*z, dy = (my(cy)-my(lastV.cy))*z; g.save(); g.setTransform(1,0,0,1,0,0); g.globalCompositeOperation = "copy"; g.drawImage(fx, dx*FXR, dy*FXR); g.restore();
         for (const p of parts) { p.x += dx; p.y += dy; if (p.x < 0 || p.y < 0 || p.x > W || p.y > H) spawn(p); } }
@@ -1527,6 +1532,13 @@ const WS = (() => {
     raf = requestAnimationFrame(frame); }
   let mvRaf = 0; // without streaks running, moves still redraw at most once per screen frame
   function moved() { clampView(); if (raf) dirty = true; else if (!mvRaf) mvRaf = requestAnimationFrame(() => { mvRaf = 0; drawBase(); }); }
+  // Fingers (and the wheel) move the map as it was last drawn, stretched and slid into place, which the phone does at once, and the map is drawn
+  // afresh once they rest a moment or let go (Oct 22): drawing it on every move lagged badly on Android phones. The streaks wait meanwhile.
+  let drawn = null, settle = 0;
+  function liveMoved() { clampView(); if (!drawn) return moved(); const k = z/drawn.z;
+    base.style.transform = `translate(${W/2*(1-k) + (drawn.cx-cx)*z}px,${H/2*(1-k) - (drawn.y-my(cy))*z}px) scale(${k})`;
+    clearTimeout(settle); settle = setTimeout(settled, 120); }
+  function settled() { clearTimeout(settle); settle = 0; moved(); }
   // The home button's move: 700 ms eased in and out, the centre straight across in longitude and Mercator y, the zoom by the same factor each moment; with reduced motion, a jump.
   // A finger or the mouse on the map, any zoom, a change of country or the next glide (or flight, below) stops it.
   let gl = 0; const unglide = () => { cancelAnimationFrame(gl); gl = 0; };
@@ -1559,7 +1571,7 @@ const WS = (() => {
     const step = now => { const p = Math.min(1, Math.max(0, now - t0)/300), e = 1 - Math.pow(1 - p, 3);
       z = zs*Math.pow(to/zs, e); moved(); gl = p < 1 ? requestAnimationFrame(step) : (zt = 0); };
     gl = requestAnimationFrame(step); }
-  function zoomAt(f, x, y) { unglide(); const [lon,lat] = ll(x, y); z *= f; clampView(); const [nx,ny] = px(lon, lat); cx += (nx-x)/z; cy = iy(my(cy) - (ny-y)/z); moved(); }
+  function zoomAt(f, x, y, live) { unglide(); const [lon,lat] = ll(x, y); z *= f; clampView(); const [nx,ny] = px(lon, lat); cx += (nx-x)/z; cy = iy(my(cy) - (ny-y)/z); live ? liveMoved() : moved(); }
   function legend() { const L = LAY[layer], el = document.getElementById("wsLegend");
     el.innerHTML = `<i style="background:linear-gradient(90deg,${PAL[layer].map(([f,c])=>`${c} ${f*100}%`).join(",")})"></i>` + L.ticks.map(v=>`<span style="left:${lf(v, L)*100}%">${v}${v===L.max?"+ "+L.unit:""}</span>`).join(""); }
   // Day-by-day time bar (like Windy): one section per day, tap or drag anywhere on it.
@@ -1622,10 +1634,10 @@ const WS = (() => {
       if (drag && P.size === 1) { if (!drag.moved && Math.hypot(cur[0]-downAt[0], cur[1]-downAt[1]) < 6) return; drag.moved = true;
         // A dragged pin stops at the Pacific box's edge.
         const B = MAPM.PBOX, [ln, lt] = ll(cur[0]-drag.ox, cur[1]-drag.oy), lon = Math.max(B.l, Math.min(B.r, ln)), lat = Math.max(B.s, Math.min(B.n, lt)); PIN.lon = lon; PIN.lat = lat; PIN.cols = pinFromGrid(lat, lon); PIN.src = "map model"; PIN.live = false; if (raf) dirty = true; else drawBase(); }
-      else if (P.size === 1) { cx -= (cur[0]-prev[0])/z; cy = iy(my(cy) + (cur[1]-prev[1])/z); moved(); }
+      else if (P.size === 1) { cx -= (cur[0]-prev[0])/z; cy = iy(my(cy) + (cur[1]-prev[1])/z); liveMoved(); }
       else if (P.size === 2) { const [a, b] = [...P.values()], d = Math.hypot(a[0]-b[0], a[1]-b[1]), m = [(a[0]+b[0])/2, (a[1]+b[1])/2];
-        if (pinch) { cx -= (m[0]-pinch.m[0])/z; cy = iy(my(cy) + (m[1]-pinch.m[1])/z); zoomAt(d/pinch.d, m[0], m[1]); } pinch = {d, m}; } };
-    const up = e => { const was = P.get(e.pointerId); P.delete(e.pointerId); pinch = null;
+        if (pinch) { cx -= (m[0]-pinch.m[0])/z; cy = iy(my(cy) + (m[1]-pinch.m[1])/z); zoomAt(d/pinch.d, m[0], m[1], true); } pinch = {d, m}; } };
+    const up = e => { const was = P.get(e.pointerId); P.delete(e.pointerId); pinch = null; if (settle && !P.size) settled();
       if (drag && drag.moved) { drag = null; downAt = null; dropPin(PIN.lon, PIN.lat); return; } drag = null;
       if (downAt && was && e.type === "pointerup" && Math.hypot(was[0]-downAt[0], was[1]-downAt[1]) < 14) { let best = null, bd = 44;
         if (PIN && PINX && Math.hypot(was[0]-PINX[0], was[1]-PINX[1]) < 16) { PIN = null; PINBTN = PINX = null; document.getElementById("wsSheet").hidden = true; drawBase(); if (!P.size) downAt = null; return; }
@@ -1638,10 +1650,10 @@ const WS = (() => {
     fx.onpointerup = up; fx.onpointercancel = up;
     // Wheel and trackpad: a mouse notch zooms about a fifth; a trackpad pinch (sent as ctrl+wheel with small steps) follows the fingers.
     fx.addEventListener("wheel", e => { e.preventDefault(); const [x,y] = rel(e), d = e.deltaY*(e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
-      zoomAt(Math.exp(-d*(e.ctrlKey ? 0.012 : 0.0025)), x, y); }, {passive: false});
+      zoomAt(Math.exp(-d*(e.ctrlKey ? 0.012 : 0.0025)), x, y, true); }, {passive: false});
     // Safari on a Mac sends trackpad pinches as gesture events instead.
     let gsc = 1; fx.addEventListener("gesturestart", e => { e.preventDefault(); gsc = 1; });
-    fx.addEventListener("gesturechange", e => { e.preventDefault(); const [x,y] = rel(e); zoomAt(e.scale/gsc, x, y); gsc = e.scale; });
+    fx.addEventListener("gesturechange", e => { e.preventDefault(); const [x,y] = rel(e); zoomAt(e.scale/gsc, x, y, true); gsc = e.scale; });
     document.getElementById("wsIn").onclick = () => zoomBy(1.6);
     document.getElementById("wsOut").onclick = () => zoomBy(1/1.6);
     document.getElementById("wsFs").onclick = () => setView("fc"); // ✕ leaves the map for Forecast (the map is only ever full screen)

@@ -118,39 +118,39 @@ header{position:relative}
 @keyframes instS2{0%,31%{background:none}32%,45%{background:var(--bg);color:var(--ink)}46%,100%{background:none}}
 @keyframes instS3{0%,45%{background:none}46%,92%{background:var(--bg);color:var(--ink)}93%,100%{background:none}}
 .inst .small{margin:10px 0 0;color:var(--muted);font-size:12.5px;line-height:1.4}
-/* The little phone: 150 x 300 screen; every layer runs on the same 9 s loop. */
-.ph{flex:none;position:relative;width:150px;height:300px;border:6px solid #111;border-radius:26px;overflow:hidden;background:#f4f7f7;color:#111;font:500 9px/1.2 -apple-system,system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.25)}
-.ph *{position:absolute;box-sizing:border-box}
-.ph .pg{inset:0;background:#eef4f3}
-.ph .pg .lg{left:10px;top:22px;font:800 13px/1 "Anybody","Arial Narrow",sans-serif;color:#0d2a33}
-.ph .pg .bk{left:10px;right:10px;height:26px;border-radius:6px;background:#fff}
-.ph .pg .bk.c{height:60px;background:linear-gradient(135deg,#1f6f86,#4fb3c8)}
-.ph .tb{left:0;right:0;bottom:0;height:46px;background:#fbfbfb;border-top:1px solid #ddd}
-.ph .tb .url{left:10px;right:10px;top:5px;height:16px;border-radius:8px;background:#e6e6e6;font-size:7px;line-height:16px;text-align:center;color:#555}
-.ph .tb span{top:26px;width:16px;height:14px;font-size:11px;line-height:14px;text-align:center;color:#2a7cf6}
-.ph .ab{left:0;right:0;top:0;height:40px;background:#fbfbfb;border-bottom:1px solid #ddd}
-.ph .ab .url{left:8px;right:28px;top:16px;height:17px;border-radius:9px;background:#ececec;font-size:7px;line-height:17px;padding-left:8px;color:#555}
-.ph .ab .dots{right:8px;top:16px;width:14px;height:17px;font:900 12px/17px sans-serif;text-align:center;color:#444}
-.ph .sh{background:#fff;opacity:0;animation:9s infinite}
-.ph .row{left:0;right:0;height:26px;padding:0 10px;line-height:26px;border-bottom:1px solid #eee;white-space:nowrap}
-.ph .row.hl{animation:instHl 9s infinite}
-.ph .dlg{background:#fff;opacity:0;animation:instDlg 9s infinite}
-.ph .dlg img{width:36px;height:36px;border-radius:9px}
-.ph .home{inset:0;background:linear-gradient(160deg,#2b5876,#4e4376);opacity:0;animation:instHome 9s infinite}
-.ph .home i{width:28px;height:28px;border-radius:7px;background:rgba(255,255,255,.35)}
-.ph .home .new{width:28px;height:28px;border-radius:7px;transform:scale(0);animation:instPop 9s infinite}
-.ph .home .nm{width:40px;font-size:6.5px;color:#fff;text-align:center;opacity:0;animation:instHome 9s infinite}
-.ph .fg{width:24px;height:24px;margin:-12px 0 0 -12px;border-radius:50%;background:rgba(255,255,255,.55);border:2px solid rgba(0,0,0,.45);box-shadow:0 2px 6px rgba(0,0,0,.3);animation:9s ease-in-out infinite;z-index:5}
+/* The little phone (.iph; .ph is the day panel): 150 x 300 screen; every layer runs on the same 9 s loop. */
+.iph{flex:none;position:relative;width:150px;height:300px;border:6px solid #111;border-radius:26px;overflow:hidden;background:#f4f7f7;color:#111;font:500 9px/1.2 -apple-system,system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+.iph *{position:absolute;box-sizing:border-box}
+.iph .pg{inset:0;background:#eef4f3}
+.iph .pg .lg{left:10px;top:22px;font:800 13px/1 "Anybody","Arial Narrow",sans-serif;color:#0d2a33}
+.iph .pg .bk{left:10px;right:10px;height:26px;border-radius:6px;background:#fff}
+.iph .pg .bk.c{height:60px;background:linear-gradient(135deg,#1f6f86,#4fb3c8)}
+.iph .tb{left:0;right:0;bottom:0;height:46px;background:#fbfbfb;border-top:1px solid #ddd}
+.iph .tb .url{left:10px;right:10px;top:5px;height:16px;border-radius:8px;background:#e6e6e6;font-size:7px;line-height:16px;text-align:center;color:#555}
+.iph .tb span{top:26px;width:16px;height:14px;font-size:11px;line-height:14px;text-align:center;color:#2a7cf6}
+.iph .ab{left:0;right:0;top:0;height:40px;background:#fbfbfb;border-bottom:1px solid #ddd}
+.iph .ab .url{left:8px;right:28px;top:16px;height:17px;border-radius:9px;background:#ececec;font-size:7px;line-height:17px;padding-left:8px;color:#555}
+.iph .ab .kb{right:8px;top:16px;width:14px;height:17px;font:900 12px/17px sans-serif;text-align:center;color:#444}
+.iph .sh{background:#fff;opacity:0;animation:9s infinite}
+.iph .row{left:0;right:0;height:26px;padding:0 10px;line-height:26px;border-bottom:1px solid #eee;white-space:nowrap}
+.iph .row.hl{animation:instHl 9s infinite}
+.iph .dlg{background:#fff;opacity:0;animation:instDlg 9s infinite}
+.iph .dlg img{width:36px;height:36px;border-radius:9px}
+.iph .home{inset:0;background:linear-gradient(160deg,#2b5876,#4e4376);opacity:0;animation:instHome 9s infinite}
+.iph .home i{width:28px;height:28px;border-radius:7px;background:rgba(255,255,255,.35)}
+.iph .home .new{width:28px;height:28px;border-radius:7px;transform:scale(0);animation:instPop 9s infinite}
+.iph .home .nm{width:40px;font-size:6.5px;color:#fff;text-align:center;opacity:0;animation:instHome 9s infinite}
+.iph .fg{width:24px;height:24px;margin:-12px 0 0 -12px;border-radius:50%;background:rgba(255,255,255,.55);border:2px solid rgba(0,0,0,.45);box-shadow:0 2px 6px rgba(0,0,0,.3);animation:9s ease-in-out infinite;z-index:5}
 /* iPhone: Share in Safari's bottom bar -> the share sheet slides up -> Add to Home Screen -> Add. */
-.ph.ios .sh{left:0;right:0;bottom:0;height:150px;border-radius:12px 12px 0 0;box-shadow:0 -4px 14px rgba(0,0,0,.2);animation-name:instSheet}
-.ph.ios .dlg .top{left:0;right:0;top:14px;height:24px;border-bottom:1px solid #eee;font-size:7px;font-weight:700;text-align:center;line-height:24px}
-.ph.ios .dlg .top em{font-style:normal;color:#2a7cf6;top:0}
-.ph.ios .fg{animation-name:instFgIos}
+.iph.ios .sh{left:0;right:0;bottom:0;height:150px;border-radius:12px 12px 0 0;box-shadow:0 -4px 14px rgba(0,0,0,.2);animation-name:instSheet}
+.iph.ios .dlg .top{left:0;right:0;top:14px;height:24px;border-bottom:1px solid #eee;font-size:7px;font-weight:700;text-align:center;line-height:24px}
+.iph.ios .dlg .top em{font-style:normal;color:#2a7cf6;top:0}
+.iph.ios .fg{animation-name:instFgIos}
 /* Android Chrome: the menu up top -> Add to home screen / Install app -> Install. */
-.ph.and .sh{right:4px;top:6px;width:104px;height:132px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);transform-origin:top right;animation-name:instMenu}
-.ph.and .dlg{left:12px;right:12px;top:100px;height:96px;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.35)}
-.ph.and .dim{inset:0;background:rgba(0,0,0,.35);opacity:0;animation:instDlg 9s infinite}
-.ph.and .fg{animation-name:instFgAnd}
+.iph.and .sh{right:4px;top:6px;width:104px;height:132px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);transform-origin:top right;animation-name:instMenu}
+.iph.and .dlg{left:12px;right:12px;top:100px;height:96px;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.35)}
+.iph.and .dim{inset:0;background:rgba(0,0,0,.35);opacity:0;animation:instDlg 9s infinite}
+.iph.and .fg{animation-name:instFgAnd}
 @keyframes instSheet{0%,19%{opacity:1;transform:translateY(100%)}22%,34%{opacity:1;transform:none}35%,100%{opacity:0;transform:none}}
 @keyframes instMenu{0%,19%{opacity:0;transform:scale(.6)}21%,34%{opacity:1;transform:none}35%,100%{opacity:0}}
 @keyframes instHl{0%,30%{background:#fff}31%,35%{background:#dde9ff}36%,100%{background:#fff}}
@@ -161,7 +161,7 @@ header{position:relative}
   28%{left:75px;top:244px;transform:none}30%{transform:scale(.7)}32%{transform:none}42%{left:134px;top:26px;transform:none}44%{transform:scale(.7)}46%{transform:none;opacity:1}50%,100%{left:134px;top:26px;opacity:0}}
 @keyframes instFgAnd{0%,6%{left:120px;top:330px;transform:none}15%{left:139px;top:24px;transform:none}17%{transform:scale(.7)}19%{transform:none}
   28%{left:80px;top:97px;transform:none}30%{transform:scale(.7)}32%{transform:none}42%{left:108px;top:180px;transform:none}44%{transform:scale(.7)}46%{transform:none;opacity:1}50%,100%{left:108px;top:180px;opacity:0}}
-@media (prefers-reduced-motion:reduce){.inst li,.ph *{animation:none!important}.ph .home,.ph .home .nm{opacity:1}.ph .home .new{transform:none}.ph .fg{display:none}}
+@media (prefers-reduced-motion:reduce){.inst li,.iph *{animation:none!important}.iph .home,.iph .home .nm{opacity:1}.iph .home .new{transform:none}.iph .fg{display:none}}
 .langbtn{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:99px;background:var(--panel);border:1px solid var(--line);color:var(--muted);font:600 13px/1 "Public Sans",system-ui,"PingFang TC","Noto Sans TC","Hiragino Sans","Noto Sans JP","Microsoft JhengHei",sans-serif;white-space:nowrap;cursor:pointer}
 .lang{position:absolute;top:calc(100% + 6px);right:0;display:flex;flex-direction:column;gap:2px;min-width:128px;padding:6px;border-radius:14px;background:var(--panel);border:1px solid var(--line);box-shadow:0 14px 34px rgba(0,0,0,.45);transition:opacity .16s,transform .16s,visibility .16s}
 .langwrap:not(.open) .lang{visibility:hidden;opacity:0;transform:translateY(-4px);pointer-events:none}
@@ -2375,14 +2375,14 @@ applyLang();
       + `<img class="new" src="icon-192.png" alt="" style="left:114px;top:118px"><span class="nm" style="left:108px;top:149px">WaveSlave</span>`;
     const page = `<div class="pg"><b class="lg" style="top:${o==="ios"?22:52}px">WaveSlave</b><div class="bk c" style="top:${o==="ios"?42:72}px"></div>`
       + [0,1,2,3].map(i => `<div class="bk" style="top:${(o==="ios"?110:140)+i*32}px"></div>`).join("") + `</div>`;
-    if (o === "ios") return `<div class="ph ios" aria-hidden="true">${page}<div class="tb"><div class="url">waveslave.tw</div>`
+    if (o === "ios") return `<div class="iph ios" aria-hidden="true">${page}<div class="tb"><div class="url">waveslave.tw</div>`
       + ["‹","›","⇪","⧉","⧠"].map((c, i) => `<span style="left:${11+i*28}px">${c}</span>`).join("") + `</div>`
       + `<div class="sh"><div class="row" style="top:0;font-weight:700;color:#555">waveslave.tw</div>`
       + p.share.map((r, i) => `<div class="row${i===2?" hl":""}" style="top:${30+i*26}px">${r}</div>`).join("") + `</div>`
       + `<div class="dlg" style="inset:0"><div class="top">${p.top}<em style="left:8px;font-weight:400">${p.cancel}</em><em style="right:8px">${p.add}</em></div>`
       + `<img src="icon-192.png" alt="" style="left:12px;top:52px"><span style="left:56px;top:58px;font-size:10px;font-weight:700">WaveSlave</span><span style="left:56px;top:72px;color:#888;font-size:7px">waveslave.tw</span></div>`
       + `<div class="home">${home}</div><span class="fg"></span></div>`;
-    return `<div class="ph and" aria-hidden="true">${page}<div class="ab"><div class="url">waveslave.tw</div><div class="dots">⋮</div></div>`
+    return `<div class="iph and" aria-hidden="true">${page}<div class="ab"><div class="url">waveslave.tw</div><div class="kb">⋮</div></div>`
       + `<div class="sh">` + p.menu.map((r, i) => `<div class="row${i===3?" hl":""}" style="top:${i*26}px">${r}</div>`).join("") + `</div>`
       + `<div class="dim"></div><div class="dlg"><b style="left:12px;top:10px;font-size:10px">${p.dlg}</b><img src="icon-192.png" alt="" style="left:12px;top:30px;width:28px;height:28px"><span style="left:48px;top:38px;font-weight:700">WaveSlave</span>`
       + `<span style="right:52px;bottom:10px;color:#1a73e8">${p.cancel}</span><span style="right:10px;bottom:6px;padding:3px 7px;border-radius:9px;background:#1a73e8;color:#fff">${p.inst}</span></div>`

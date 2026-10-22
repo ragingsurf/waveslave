@@ -102,7 +102,7 @@ const STR = {
     privacyHead: "Privacy note", contactHead: "Contact",
     privacyShort: "To post, the chat keeps your nickname, a one-way code made from your LINE ID and what you post. Cloudflare stores it outside Taiwan, and LINE (LY Corp) handles sign-in. Posts are public. The full privacy note is under More.",
     privacy: c => [
-      ["Who runs the chat", `${c.name} runs the Taiwan chat on WaveSlave. Questions and takedown requests: ${c.email}.`],
+      ["Who runs the chat", `${c.name} runs this chat. Questions and takedown requests: ${c.email}.`],
       ["Why", "Your data is used only to run the chat."],
       ["What is kept", "Your nickname, a one-way code made from your LINE ID (never the ID itself), your messages, reports and session logs. Cloudflare also sees your IP address when you connect."],
       ["Where, and who handles it", "Cloudflare stores the chat on servers outside Taiwan. LINE (LY Corp) handles sign-in. Messages, reports and shared sessions are public, under your nickname."],

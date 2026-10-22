@@ -506,7 +506,7 @@ const CHECKS = {
     await page.waitForFunction(() => !document.querySelector(".chatroom .cr-shade").hidden);
     const s = await page.evaluate(() => ({ title: document.querySelector("#chatSheetTitle").textContent, body: document.querySelector(".chatroom .cr-sheet-b").textContent,
       mail: document.querySelector('.chatroom .cr-sheet-b a[href^="mailto:"]')?.getAttribute("href"), credits: !document.getElementById("chatCredits").hidden, href: location.href }));
-    if (s.title !== "House rules" || !/No ads or selling/.test(s.body) || !/Privacy note/.test(s.body) || !s.body.includes("Test Operator runs the Taiwan chat") || s.mail !== "mailto:chat@example.com")
+    if (s.title !== "House rules" || !/No ads or selling/.test(s.body) || !/Privacy note/.test(s.body) || !s.body.includes("Test Operator runs this chat. Questions and takedown requests: chat@example.com.") || s.mail !== "mailto:chat@example.com")
       throw new Error(`the sheet reads ${JSON.stringify(s).slice(0, 300)}`);
     if (!s.credits || /chat=/.test(s.href)) throw new Error(`the credits' chat line is ${s.credits ? "shown" : "hidden"}, the address ${s.href}`);
     await page.keyboard.press("Escape");

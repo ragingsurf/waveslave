@@ -64,7 +64,7 @@ const CHECKS = {
       .catch(() => { throw new Error("with no window.__chatContact the chat didn't come on"); });
     const s = await page.evaluate(() => ({ body: document.querySelector(".chatroom .cr-sheet-b").textContent,
       mail: [...document.querySelectorAll('.chatroom .cr-sheet-b a[href^="mailto:"]')].map(a => [a.getAttribute("href"), a.textContent]) }));
-    if (!s.body.includes("WaveSlave runs the Taiwan chat") || !s.body.includes("Questions and takedown requests: waveslave050@gmail.com.")
+    if (!s.body.includes("WaveSlave runs this chat. Questions and takedown requests: waveslave050@gmail.com.")
       || !eq(s.mail, [["mailto:waveslave050@gmail.com", "waveslave050@gmail.com"]])) throw new Error(`the note reads ${JSON.stringify(s).slice(0, 400)}`);
   },
   // On a Taiwan spot: two chips in the order given with the dots coloured by conditions, "Post a report", and the button reading CHAT and

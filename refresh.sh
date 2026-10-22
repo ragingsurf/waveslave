@@ -17,6 +17,10 @@ for s in S:
 print(','.join(u.quote(str(x),safe='') for x in v))" "$HERE/spots.json" "$1"; }
 # --retry-max-time: a busy server can answer 503 with "Retry-After: 600", which curl obeys over --retry-delay, so one
 # NOWPHAS outage held every build for 30 minutes (Oct 22). Past 3 minutes curl gives up instead of sleeping.
+# Taiwan only for now (Bryan, Oct 23): the other countries' buoys, wind, tides and map grids aren't fetched, so a slow or broken feed
+# abroad can't hold up Taiwan's; their spots keep the Open-Meteo forecast only. Each country's id helper (jpids, noaaids, ...) then lists
+# no spots, so its block is skipped. TW_ONLY= sh refresh.sh (empty) fetches them all again.
+TW_ONLY=${TW_ONLY-1}
 get(){ curl -fsSL --retry 3 --retry-max-time 180 --retry-all-errors --retry-delay 5 -m 120 -o "$W/dl/$1.json" "$2"; }
 # Coastal forecast for all townships (wind, sky). Only served as a file, ~6 MB.
 get coastal "https://opendata.cwa.gov.tw/fileapi/v1/opendataapi/F-D0047-095?Authorization=$K&downloadType=WEB&format=JSON"
@@ -42,6 +46,7 @@ python3 -I "$HERE/more.py" "$W/dl" "$W/snap.json" "$HERE/spots.json" || echo "ex
 jpids(){ python3 -I -c "import json,sys;S=[s for s in json.load(open(sys.argv[1])) if s.get('country')=='jp'];f=sys.argv[2]
 v=[str(s[f]) if f in ('lat','lon') else s[f][0] if f=='jmaArea' else s[f] for s in S]
 print(','.join(v if f in ('lat','lon') else dict.fromkeys(v)))" "$HERE/spots.json" "$1"; }
+[ -z "$TW_ONLY" ] || jpids(){ :; }
 G="$HERE/cache"; mkdir -p "$G"
 if [ -n "$(jpids lat)" ]; then
   rm -f "$W/dl/nowphas.xml" "$W/dl/amedas_time.txt"
@@ -68,6 +73,7 @@ elif f in ('nws','eccc'): v=[w[len(f)+1:] for w in W if w.startswith(f+':')]
 elif f in ('tideStation','chs'): v=[t[4:] if f=='chs' else t for t in (s['tideStation'] for s in S) if t.startswith('chs:')==(f=='chs')]
 else: v=[str(s[f]) for s in S]
 print(','.join(v if f in ('lat','lon') else dict.fromkeys(v)))" "$HERE/spots.json" "$1" "$2"; }
+[ -z "$TW_ONLY" ] || noaaids(){ :; }
 # midnight of a day relative to today on BC's clock, in UTC: mid '-5 days'
 mid(){ date -u -d "TZ=\"America/Vancouver\" $(TZ=America/Vancouver date -d "$1" +%F) 00:00" +%FT%TZ; }
 rm -f "$W/dl"/ndbc-*.txt "$W/dl"/ndbc-*.drift "$W/dl"/nws-*.json "$W/dl"/eccc-*.json "$W/dl"/chs-*.json
@@ -96,6 +102,7 @@ done
 auids(){ python3 -I -c "import json,sys;S=[s for s in json.load(open(sys.argv[1])) if s.get('country')=='au'];f=sys.argv[2]
 v=[b for s in S for b in s['aodn']] if f=='aodn' else [str(s[f]) for s in S]
 print('|'.join(v if f in ('lat','lon') else dict.fromkeys(v)))" "$HERE/spots.json" "$1"; }
+[ -z "$TW_ONLY" ] || auids(){ :; }
 if [ -n "$(auids lat)" ]; then
   rm -f "$W/dl"/aodn-*.csv "$W/dl"/bom-*.json
   OLDIFS=$IFS; IFS='|'
@@ -122,6 +129,7 @@ krids(){ python3 -I -c "import json,sys;S=[s for s in json.load(open(sys.argv[1]
 W=[w for s in S for w in (lambda v: v if isinstance(v,list) else [v] if v else [])(s.get('windStation'))]
 v=[w[6:] for w in W if w.startswith('metar:')] if f=='metar' else [b for s in S for b in s.get('ndbc') or []] if f=='ndbc' else [str(s[f]) for s in S]
 print(','.join(v if f in ('lat','lon') else dict.fromkeys(v)))" "$HERE/spots.json" "$1" "$2"; }
+[ -z "$TW_ONLY" ] || krids(){ :; }
 for C in kr ph id hn vn; do
   [ -n "$(krids $C lat)" ] || continue
   M=jma_msm M2=jma_seamless; [ $C = kr ] || M=ecmwf_ifs M2=best_match; CS=; case $C in hn|vn) CS="&cell_selection=sea";; esac
@@ -145,6 +153,7 @@ hkids(){ python3 -I -c "import json,sys;S=[s for s in json.load(open(sys.argv[1]
 W=[w for s in S for w in (lambda v: v if isinstance(v,list) else [v] if v else [])(s.get('windStation'))]
 v=[w[6:] for w in W if w.startswith('metar:')] if f=='metar' else [str(s[f]) for s in S]
 print(','.join(v if f in ('lat','lon') else dict.fromkeys(v)))" "$HERE/spots.json" "$1"; }
+[ -z "$TW_ONLY" ] || hkids(){ :; }
 if [ -n "$(hkids lat)" ]; then
   rm -f "$W/dl/hko-wind.csv"
   curl -fsSL --retry 2 --retry-max-time 180 -m 60 -A "waveslave.tw" -o "$W/dl/hko-wind.csv" "https://data.weather.gov.hk/weatherAPI/hko_data/regional-weather/latest_10min_wind.csv" || echo "hko wind fetch failed" >&2
@@ -174,6 +183,7 @@ nzids(){ python3 -I -c "import json,sys,urllib.parse as u;S=[s for s in json.loa
 W=[w for s in S for w in (lambda v: v if isinstance(v,list) else [v] if v else [])(s.get('windStation'))]
 v=[w[6:] for w in W if w.startswith('metar:')] if f=='metar' else [b for s in S for b in s['siw']] if f=='siw' else [u.quote(s[f]) for s in S] if f=='tidePort' else [str(s[f]) for s in S]
 print(','.join(v if f in ('lat','lon') else dict.fromkeys(v)))" "$HERE/spots.json" "$1"; }
+[ -z "$TW_ONLY" ] || nzids(){ :; }
 if [ -n "$(nzids lat)" ]; then
   rm -f "$W/dl"/siw-*.csv
   for b in $(nzids siw | tr ',' ' '); do curl -fsSL --retry 2 --retry-max-time 180 -m 60 -A "waveslave.tw" -o "$W/dl/siw-$b.csv" "https://southislandwaves.co.nz/wp-admin/admin-ajax.php?action=waf_rest_list_buoy_datapoints_csv&id=$b&start=$(date -u -d '-26 hours' +%s)&end=$(date -u +%s)" || echo "siw $b fetch failed" >&2; done
@@ -206,6 +216,7 @@ piids(){ python3 -I -c "import json,sys;S=[s for s in json.load(open(sys.argv[1]
 W=[w for s in S for w in (lambda v: v if isinstance(v,list) else [v] if v else [])(s.get('windStation'))]
 v=[w[6:] for w in W if w.startswith('metar:')] if f=='metar' else [b for s in S for b in s['ndbc']]+[w[5:] for w in W if w.startswith('ndbc:')] if f=='ndbc' else [s[f] for s in S if s[f]] if f=='tideStation' else [str(s[f[1:]]) for s in S if not s['tideStation']] if f in ('mlat','mlon') else [str(s[f]) for s in S]
 print(','.join(v if f in ('lat','lon','mlat','mlon') else dict.fromkeys(v)))" "$HERE/spots.json" "$1" "$2"; }
+[ -z "$TW_ONLY" ] || piids(){ :; }
 for C in pi mi pg vu bj; do
   [ -n "$(piids $C lat)" ] || continue
   CS=; case $C in mi|pg|vu|bj) CS="&cell_selection=sea";; esac
@@ -240,6 +251,7 @@ fi
 # calls down.
 # Open-Meteo refuses longitudes past 180, so those are asked for as west ones (182 as -178), as pacific.sh does; the grid keeps them east.
 regrid(){ C=$1; AGE=$2; shift 2
+  [ -z "$TW_ONLY" ] || return 0
   [ -n "$(python3 -I -c "import json,sys;print(any(s.get('country')==sys.argv[2] for s in json.load(open(sys.argv[1]))) or '')" "$HERE/spots.json" $C)" ] && [ -z "$(find "$G/grid-$C.json" -mmin -$AGE 2>/dev/null)" ] || return 0
   LA=$(python3 -I -c "import sys;a0,da,na,o0,do,no=map(float,sys.argv[1:]);print(','.join(str(round(a0+i*da,4)) for i in range(int(na)) for j in range(int(no))))" "$@") || return 0
   LO=$(python3 -I -c "import sys;a0,da,na,o0,do,no=map(float,sys.argv[1:]);print(','.join(str(round((o0+j*do+180)%360-180,4)) for i in range(int(na)) for j in range(int(no))))" "$@") || return 0
@@ -260,7 +272,7 @@ regrid pg 350 -10 2 7 136 2 11
 regrid vu 350 -24 2 7 164 2 6
 regrid bj 350 21 1 15 -119 1 12
 # The whole Pacific, 5° apart (50°S–65°N, 100°E–110°W), by pacific.sh: refetched only every ~6 h, and never in a run that refetched the West Pacific grid, so the two biggest requests don't land together.
-[ -n "$WPNEW" ] || [ -n "$(find "$G/grid-pac.json" -mmin -350 2>/dev/null)" ] || sh "$HERE/pacific.sh" "$G" || echo "pacific grid fetch failed, keeping last grid" >&2
+[ -n "$TW_ONLY" ] || [ -n "$WPNEW" ] || [ -n "$(find "$G/grid-pac.json" -mmin -350 2>/dev/null)" ] || sh "$HERE/pacific.sh" "$G" || echo "pacific grid fetch failed, keeping last grid" >&2
 GJ="$G/grid.json"; [ -f "$GJ" ] || { echo null > "$W/gridnull.json"; GJ="$W/gridnull.json"; }
 GC="$G/grid-ca.json"; [ -f "$GC" ] || { echo null > "$W/gridnull.json"; GC="$W/gridnull.json"; }
 GH="$G/grid-hi.json"; [ -f "$GH" ] || { echo null > "$W/gridnull.json"; GH="$W/gridnull.json"; }

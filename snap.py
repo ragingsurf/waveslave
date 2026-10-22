@@ -33,11 +33,12 @@ for s in tcs:
   fx=s['AnalysisData']['Fix']; f=fx[-1] if isinstance(fx,list) else fx; FIX.append((s,f))
 
 def buoyrows(sid):
-  # A reading needs a height and a period; some buoys (OAC005) never send a direction, which the page goes without.
+  # A reading needs a height and a period; some buoys (OAC005) never send a direction, which the page goes without. A buoy that
+  # loses its sensor reports all zeros (Chenggong, 06:00 Oct 23, in 7-9 m seas): such a reading is left out, not shown as flat.
   out=[]
   for x in sorted(BUOY.get(sid,[]),key=lambda x:x['DateTime']):
     w=x['WeatherElements']; r=[x['DateTime'][:16]]+[fnum(w.get(k)) for k in ('WaveHeight','WavePeriod','WaveDirection','SeaTemperature')]
-    if None not in r[1:3]: out.append(r)
+    if None not in r[1:3] and r[1]>0 and r[2]>0: out.append(r)
   return out[-24:]
 
 # A buoy whose last reading is more than STALE_HOURS old has dropped out: the spot's next listed buoy takes over while it reports.

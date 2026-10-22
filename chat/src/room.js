@@ -37,6 +37,11 @@ const DAY = 24 * HOUR;
 // from whatever version it has. Version 1 is the tables as merged in PR #97 (SCHEMA_V1), and it had a sub column in
 // handoffs: LINE's raw ID. Version 2 drops that column (SCHEMA_V2), so LINE's raw ID is gone from every table after
 // migrate().
+//
+// The steps only go forward, so never roll the chat back past a version that bumped this (a rollback in Cloudflare's
+// dashboard, or the Deploy chat workflow run on an older branch or tag). The older code takes the higher schema_ver as
+// done and uses tables it doesn't know: version-1 code still writes handoffs.sub, so every sign-in would fail. To undo
+// a change, deploy a fix on top instead.
 const SCHEMA_VER = 2;
 
 const PAGE_MAX = 100; // the room opens with the last 100 messages

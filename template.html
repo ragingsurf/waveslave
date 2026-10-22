@@ -1,5 +1,6 @@
 <title>WaveSlave</title>
 <script>/* Language before first paint: the saved pick, else the browser's (zh → 中文). 日本語 is switched off for now, so a saved ja reads as English. */try{var l=localStorage.getItem("waveslave-lang")||(/^zh/i.test(navigator.language)?"zh":"en");document.documentElement.lang=l==="zh"?"zh-Hant-TW":"en";}catch(e){}</script>
+<script>/* Android phones get a few of the map's effects made cheaper (html.android: see .wsmap.fs and FXR). */const ANDROID=/Android/i.test(navigator.userAgent);if(ANDROID)document.documentElement.classList.add("android")</script>
 <script>/* World mode (the secret switch, the W in the logo) before first paint, so Taiwan mode never flashes up the country row. Behind the World passcode (web/head.html) it waits for the code each time the page opens. */try{if(localStorage.getItem("waveslave-world")==="1"&&(!window.__worldLock||wsUnlocked()))document.documentElement.classList.add("world")}catch(e){}</script>
 <style>/* Opening animation cover: dark from the first paint until the intro takes over; it lifts by itself after 6 s if the intro never runs. */
 html.intro-on::after{content:"";position:fixed;inset:0;z-index:9997;background:#07050f;animation:introSafe 0s 6s forwards}@keyframes introSafe{to{visibility:hidden}}</style>
@@ -392,6 +393,11 @@ html{overscroll-behavior-y:none}
    whole page on Android, and the time bar slid off the bottom. A spot's forecast table scrolls itself, so it still scrolls. */
 .wsmap.fs{touch-action:none}
 .wsmap #wsBase{transform-origin:0 0}
+/* Android phones blur what's behind a see-through panel afresh on every frame the streaks move, which slows the whole map (Oct 22): there the
+   panels over the map are solid enough to read without the blur. */
+html.android .wsmap.fs .wsbar button,html.android .wsmap.fs .tl{-webkit-backdrop-filter:none;backdrop-filter:none;background-color:rgba(21,13,51,.88)}
+html.android .wsmap.fs .sheet{-webkit-backdrop-filter:none;backdrop-filter:none;background:rgba(14,8,36,.9)}
+html.android .wsmap.fs .sh-scroll th{-webkit-backdrop-filter:none;backdrop-filter:none;background:rgba(21,13,51,.95)}
 .wsmap .zoom{position:absolute;top:8px;right:8px;display:grid;gap:6px}
 .wsmap .zoom button,.wsmap .wsctry button{touch-action:manipulation;width:34px;height:34px;border-radius:10px;border:1px solid #ff2bd6;background:rgba(28,19,64,.9);color:#ff9ef0;font:600 18px/1 "Public Sans",system-ui,sans-serif;cursor:pointer}
 .wsmap .time{display:flex;align-items:center;gap:10px;margin-top:10px}
@@ -1019,7 +1025,7 @@ const WS = (() => {
     x.putImageData(img, 0, 0); return RELIEF[key] = c; }
   // Stretched between its NW and SE corners: over Taiwan's 3.5° of latitude, Mercator puts no row more than 0.6 of a row from where this does.
   function drawRelief(g, P, a0, a1) { const {lon0, lat0, d, nlon, nlat} = ELEV, [x0, y0] = px(lon0-d/2, lat0+(nlat-.5)*d), [x1, y1] = px(lon0+(nlon-.5)*d, lat0-d/2);
-    g.save(); path(g); g.clip(); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "high"; g.drawImage(relief(P, a0, a1), x0, y0, x1-x0, y1-y0); g.restore(); }
+    g.save(); path(g); g.clip(); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = quick() ? "low" : "high"; g.drawImage(relief(P, a0, a1), x0, y0, x1-x0, y1-y0); g.restore(); }
   function drawCont(g, col, w, glow, from = 0) { g.save(); g.lineCap = "round"; CONT.forEach((c, n) => { if (c.L < from) return; const cl = col(n, c.L);
       g.strokeStyle = cl; g.lineWidth = w(n); if (glow) { g.shadowColor = cl; g.shadowBlur = glow; } g.beginPath();
       for (let k = 0; k < c.s.length; k += 4) { const [ax, ay] = px(c.s[k], c.s[k+1]), [bx, by] = px(c.s[k+2], c.s[k+3]); g.moveTo(ax, ay); g.lineTo(bx, by); } g.stroke(); });
@@ -1235,7 +1241,8 @@ const WS = (() => {
   function size() { const box = document.getElementById("wsBox"), was = z0 > 1 ? z/z0 : null, v = screenH(); W = box.clientWidth;
     H = FS ? Math.max(150, box.clientHeight) : Math.round(Math.max(240, v.land ? Math.min(W*0.75, v.h*0.86) : Math.min(W*1.35, v.h*0.7)));
     const dpr = Math.min(2, window.devicePixelRatio||1);
-    FXR = W*H > 1.2e6 ? 1 : Math.min(1.5, dpr); for (const [c, r] of [[base, dpr], [fx, FXR]]) { c.width = W*r; c.height = H*r; c.style.height = H+"px"; c.getContext("2d").setTransform(r,0,0,r,0,0); }
+    // The streaks at the screen's own sharpness only where it's cheap: big screens and Android phones draw them at 1x.
+    FXR = W*H > 1.2e6 || ANDROID ? 1 : Math.min(1.5, dpr); for (const [c, r] of [[base, dpr], [fx, FXR]]) { c.width = W*r; c.height = H*r; c.style.height = H+"px"; c.getContext("2d").setTransform(r,0,0,r,0,0); }
     zmin = MAPM.cover(MAPM.PBOX, W, H); refit(); // zoomed all the way out, the Pacific box fills the screen: upright its whole height, sideways its whole width
     // First open: the saved view, else the country's old map filling the screen (Australia no further out than its home view), slid
     // sideways inside it so its dots clear the buttons (offButtons), else (the South Pacific, Alaska, Micronesia, Hong Kong, Hainan,
@@ -1271,7 +1278,7 @@ const WS = (() => {
       og.putImageData(img, 0, 0); HC = {key, off, l, t, r: l + gw*cell/z, b: t - gh*cell/z, z, cell, lite};
       HCS.delete(key); HCS.set(key, HC); if (HCS.size > 24) HCS.delete(HCS.keys().next().value); }
     else if (HC.z !== z) { clearTimeout(hcTo); hcTo = setTimeout(() => { hcTo = 0; HC.key = ""; if (raf) dirty = true; else drawBase(); }, 180); }
-    const x0 = W/2 + (HC.l-cx)*z, y0 = H/2 - (HC.t-my(cy))*z, k = z/HC.z; g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "high"; g.drawImage(HC.off, x0, y0, HC.off.width*HC.cell*k, HC.off.height*HC.cell*k); }
+    const x0 = W/2 + (HC.l-cx)*z, y0 = H/2 - (HC.t-my(cy))*z, k = z/HC.z; g.imageSmoothingEnabled = true; g.imageSmoothingQuality = quick() ? "low" : "high"; g.drawImage(HC.off, x0, y0, HC.off.width*HC.cell*k, HC.off.height*HC.cell*k); }
   // Sea over the land, the land style and the neon coast don't change with the time, so once the view sits still they're kept as one picture
   // and reused: dragging the time bar then only redraws the weather.
   let LC = null, LK = "";
@@ -1351,7 +1358,7 @@ const WS = (() => {
   // The home view worked out again whenever the map takes its size, another country (or the other part of one) or language is picked
   // or the tags' font arrives: a map sitting on the old home view moves to the new one.
   const refit = () => { const at = z0 > 1 && z === z0 && cx === HV.cx && cy === HV.cy, f = fitHome(); HV = {cx: f.cx, cy: f.cy}; z0 = f.z; if (at) { cx = HV.cx; cy = HV.cy; z = z0; } };
-  function drawBase() { if (hold) return; base.style.transform = ""; drawn = {cx, y: my(cy), z}; const g = base.getContext("2d"), t = times[ti], S = sample(t), cell = Math.max(6, Math.round(Math.sqrt(W*H/40000))), close = z >= z0*0.6;
+  function drawBase() { if (hold) return; base.style.transform = ""; drawn = {cx, y: my(cy), z, at: performance.now()}; const g = base.getContext("2d"), t = times[ti], S = sample(t), cell = Math.max(6, Math.round(Math.sqrt(W*H/40000))), close = z >= z0*0.6;
     g.fillStyle = "#0e0824"; g.fillRect(0, 0, W, H);
     // The map's own layers (colours, swell arrows, land, pressure lines, typhoon tracks) are drawn only inside the Pacific box: zoomed out on a phone held upright, plain dark sea above and below it.
     // The overlays drawn after them (spot markers, tags, towns, the open spot's dial and the pin) are not clipped and may cross the box's edge: cut off there, they would look broken.
@@ -1536,13 +1543,19 @@ const WS = (() => {
       for (let j = 0; j < b.length; j += 4) { g.moveTo(b[j], b[j+1]); g.lineTo(b[j+2], b[j+3]); } g.stroke(); });
     raf = requestAnimationFrame(frame); }
   let mvRaf = 0; // without streaks running, moves still redraw at most once per screen frame
-  function moved() { clampView(); if (raf) dirty = true; else if (!mvRaf) mvRaf = requestAnimationFrame(() => { mvRaf = 0; drawBase(); }); }
+  // A map on the move (a glide, a flight, a run of wheel notches) is drawn the quick way, FAST: the colours stretched plainly and nothing glowing,
+  // as soon as a second move follows the first within 150 ms; 150 ms after the last one it's drawn once more in full (Oct 22). A single jump
+  // (reduced motion, the test hook) is drawn in full straight away. On the move, the last drawing is only stretched and slid (stretch) for up
+  // to 100 ms while it's within a quarter of the zoom it was drawn at, so a big screen isn't drawn afresh on every frame of a flight.
+  let FAST = false, crisp = 0; const quick = () => FAST || TLF != null; // and so is the map while the time bar is dragged
+  function moved() { clampView(); FAST = !!crisp; clearTimeout(crisp); crisp = setTimeout(() => { crisp = 0; if (FAST) { FAST = false; if (raf) dirty = true; else drawBase(); } }, 150);
+    if (FAST && drawn && performance.now() - drawn.at < 100 && z/drawn.z > .8 && z/drawn.z < 1.25) { stretch(); return; }
+    if (raf) dirty = true; else if (!mvRaf) mvRaf = requestAnimationFrame(() => { mvRaf = 0; drawBase(); }); }
   // Fingers (and the wheel) move the map as it was last drawn, stretched and slid into place, which the phone does at once, and the map is drawn
   // afresh once they rest a moment or let go (Oct 22): drawing it on every move lagged badly on Android phones. The streaks wait meanwhile.
   let drawn = null, settle = 0;
-  function liveMoved() { clampView(); if (!drawn) return moved(); const k = z/drawn.z;
-    base.style.transform = `translate(${W/2*(1-k) + (drawn.cx-cx)*z}px,${H/2*(1-k) - (drawn.y-my(cy))*z}px) scale(${k})`;
-    clearTimeout(settle); settle = setTimeout(settled, 120); }
+  function liveMoved() { clampView(); if (!drawn) return moved(); stretch(); clearTimeout(settle); settle = setTimeout(settled, 120); }
+  function stretch() { const k = z/drawn.z; base.style.transform = `translate(${W/2*(1-k) + (drawn.cx-cx)*z}px,${H/2*(1-k) - (drawn.y-my(cy))*z}px) scale(${k})`; }
   function settled() { clearTimeout(settle); settle = 0; moved(); }
   // The home button's move: 700 ms eased in and out, the centre straight across in longitude and Mercator y, the zoom by the same factor each moment; with reduced motion, a jump.
   // A finger or the mouse on the map, any zoom, a change of country or the next glide (or flight, below) stops it.
@@ -1574,7 +1587,7 @@ const WS = (() => {
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) { z = to; moved(); return; }
     const zs = z, t0 = performance.now(); zt = to;
     const step = now => { const p = Math.min(1, Math.max(0, now - t0)/300), e = 1 - Math.pow(1 - p, 3);
-      z = zs*Math.pow(to/zs, e); moved(); gl = p < 1 ? requestAnimationFrame(step) : (zt = 0); };
+      z = zs*Math.pow(to/zs, e); clampView(); if (p < 1) { liveMoved(); gl = requestAnimationFrame(step); } else { gl = zt = 0; settled(); } }; // stretched as fingers stretch it
     gl = requestAnimationFrame(step); }
   function zoomAt(f, x, y, live) { unglide(); const [lon,lat] = ll(x, y); z *= f; clampView(); const [nx,ny] = px(lon, lat); cx += (nx-x)/z; cy = iy(my(cy) - (ny-y)/z); live ? liveMoved() : moved(); }
   function legend() { const L = LAY[layer], el = document.getElementById("wsLegend");
@@ -1601,6 +1614,9 @@ const WS = (() => {
     if (!live) { if (tRaf) { cancelAnimationFrame(tRaf); tRaf = 0; } tDraw(); }
     else if (!same && !tRaf) tRaf = requestAnimationFrame(() => { tRaf = 0; tDraw(); }); }
   function build() { base = document.getElementById("wsBase"); fx = document.getElementById("wsFx"); SP = spots();
+    // Drawn the quick way (quick()), the map's glows (shadowBlur, which phones work out pixel by pixel) are left off.
+    const sb = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, "shadowBlur");
+    Object.defineProperty(base.getContext("2d"), "shadowBlur", {get() { return sb.get.call(this); }, set(v) { sb.set.call(this, quick() ? 0 : v); }});
     const now = Date.now() - Date.now()%36e5, last = tEnd();
     times = []; for (let t = now; t <= last; t += 36e5) times.push(t); if (!times.length) times = [now];
     const sl = document.getElementById("wsSlider"); sl.max = times.length-1; sl.oninput = () => setT(+sl.value, true); timeline();

@@ -33,11 +33,25 @@ for s in tcs:
   fx=s['AnalysisData']['Fix']; f=fx[-1] if isinstance(fx,list) else fx; FIX.append((s,f))
 
 def buoyrows(sid):
+  # A reading needs a height and a period; some buoys (OAC005) never send a direction, which the page goes without.
   out=[]
   for x in sorted(BUOY.get(sid,[]),key=lambda x:x['DateTime']):
     w=x['WeatherElements']; r=[x['DateTime'][:16]]+[fnum(w.get(k)) for k in ('WaveHeight','WavePeriod','WaveDirection','SeaTemperature')]
-    if None not in r[1:4]: out.append(r)
+    if None not in r[1:3]: out.append(r)
   return out[-24:]
+
+# A buoy whose last reading is more than STALE_HOURS old has dropped out: the spot's next listed buoy takes over while it reports.
+STALE_HOURS=3
+NOW=(datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(hours=8)).replace(tzinfo=None)
+def fresh(rows): return bool(rows) and NOW-datetime.datetime.fromisoformat(rows[-1][0])<=datetime.timedelta(hours=STALE_HOURS)
+
+def pickbuoy(ids):
+  # The first listed buoy with a fresh reading; when none is fresh, the one heard from last (a tie keeps the earlier one).
+  # Returns (its place in the list, id, rows).
+  got=[(i,b,buoyrows(b)) for i,b in enumerate(ids)]
+  for g in got:
+    if fresh(g[2]): return g
+  return max(got,key=lambda g:(g[2][-1][0] if g[2] else '',-g[0]))
 
 def cwa_parts(S,DAYS):
   # Wind + sky: CWA coastal forecast F-D0047-095 for the spot's township coast.
@@ -52,17 +66,14 @@ def cwa_parts(S,DAYS):
     if d['Date']<=DAYS[-1]: tides[d['Date']]=[[x['DateTime'][11:16], 'H' if x['Tide']=='滿潮' else 'L', int(x['TideHeights']['AboveTWVD'])] for x in d['Time']]
   # Sun: CWA A-B0062-001 by county.
   sun={x['Date']:{'first':x['BeginCivilTwilightTime'],'rise':x['SunRiseTime'],'set':x['SunSetTime'],'last':x['EndCivilTwilightTime'],'phen':[]} for x in SUN[S['county']] if x['Date'] in DAYS}
-  # Buoy: CWA O-B0075-001, first listed buoy with readings in the last day (later ids are backups).
-  bid=S['buoy'][0]; buoy=buoyrows(bid)
-  for b in S['buoy'][1:]:
-    alt=buoyrows(b)
-    if alt and (not buoy or buoy[-1][0][:10]<alt[-1][0][:10]): bid,buoy=b,alt
+  # Buoy: CWA O-B0075-001, the first listed buoy still reporting (later ids are backups; see pickbuoy).
+  ub,bid,buoy=pickbuoy(S['buoy'])
   # Station wind: CWA O-A0001-001 (m/s -> kt).
   st=OBS.get(S['station']); dwind=[]
   if st:
     we=st['WeatherElement']; ws=fnum(we.get('WindSpeed'))
     if ws is not None and ws>=0: dwind=[[st['ObsTime']['DateTime'][:16], round(ws*1.944,1), float(we['WindDirection'])]]
-  return bid,buoy,wind,tides,sun,dwind
+  return ub,bid,buoy,wind,tides,sun,dwind
 
 spots={}; src={}
 for n,S in enumerate(SPOTS):
@@ -73,9 +84,9 @@ for n,S in enumerate(SPOTS):
   DAYS=sorted({t[:10] for t in o['time']})
   if S.get('country','tw')!='tw':
     # Japan: jp.py fills wind, tides, sun, buoy and station later; only the Open-Meteo parts come from here.
-    bid,buoy,wind,tides,sun,dwind=None,[],[],{},{},[]
+    ub,bid,buoy,wind,tides,sun,dwind=0,None,[],[],{},{},[]
   else:
-    bid,buoy,wind,tides,sun,dwind=cwa_parts(S,DAYS)
+    ub,bid,buoy,wind,tides,sun,dwind=cwa_parts(S,DAYS)
   # Typhoons: distance/bearing from this spot.
   storms=[]
   for s,f in FIX:
@@ -87,6 +98,12 @@ for n,S in enumerate(SPOTS):
   storms.sort(key=lambda s:s['distNm'])
   meta={k:S[k] for k in ('name','full','region','buoyName','stationName','off','lat','lon','blurb','cams')}; meta['zh']=S.get('zh') or {}  # Traditional Chinese names for the 中文 view
   meta.update(country=S.get('country','tw'),tz=S.get('tz',8),buoyKm=S.get('buoyKm'),ja=S.get('ja') or {})  # Japanese names for the 日本語 view
+  if S.get('country','tw')=='tw' and len(S['buoy'])>1:
+    # A Taiwan spot with backup buoys: buoyName (and its zh/ja) may be a list that follows them, and the log learns from the first one only.
+    pick=lambda v: v[min(ub,len(v)-1)] if isinstance(v,list) else v
+    meta['buoyName']=pick(S['buoyName']); meta['buoyMain']=S['buoy'][0]
+    for L in ('zh','ja'):
+      if 'buoyName' in meta[L]: meta[L]=dict(meta[L],buoyName=pick(meta[L]['buoyName']))
   spots[S['id']]=dict(meta,buoyId=bid,buoyAt=buoy[-1][0] if buoy else '',hourly=hourly,wind=wind,tides=tides,sun=sun,buoy=buoy,dwind=dwind,storms=storms,hist={'wave':histwave})
   src[S['id']]=(buoy[-1][0] if buoy else '')+'/'+(dwind[-1][0] if dwind else '')
 

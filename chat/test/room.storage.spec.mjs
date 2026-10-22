@@ -167,6 +167,26 @@ describe("schema", () => {
     });
   });
 
+  it("makes a new room's tables all at once: when the last write fails, the room is left with only meta", async () => {
+    await runInDurableObject(freshRoom(), (room) => {
+      // Back to empty storage, as for a room that has never run.
+      for (const name of ownTables(room)) room.sql.exec(`DROP TABLE "${name}"`);
+      const atFailure = failSchemaVer(room);
+      expect(() => room.migrate()).toThrow("schema_ver write failed");
+      delete room.setMeta;
+      // Versions 1 and 2 had both run when schema_ver failed...
+      expect(atFailure.tables).toEqual(Object.keys(TABLES).sort());
+      expect(atFailure.handoffs).toEqual(TABLES.handoffs);
+      // ...and the transaction undid them. meta is made before it, so it stays, with no schema_ver.
+      expect(ownTables(room)).toEqual(["meta"]);
+      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBeUndefined();
+      // So the next migrate() makes them all again.
+      room.migrate();
+      expect(ownTables(room)).toEqual(Object.keys(TABLES).sort());
+      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(2);
+    });
+  });
+
   it("keeps the rules later writes rely on: one like per person, unique sign-ins and nicknames, known kinds", async () => {
     await runInDurableObject(freshRoom(), (room) => {
       addUser(room, { id: "a", nick: "Leo", lastSeen: T });
@@ -279,10 +299,27 @@ const MERGED_V1 = [
   "CREATE TABLE holds (msg_id INTEGER, body TEXT, uid TEXT, sub_hash TEXT, reason TEXT, ts INTEGER NOT NULL)",
 ];
 
+// The names of the room's own tables, leaving out SQLite's and Cloudflare's.
+const ownTables = (room) =>
+  rows(room, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name")
+    .map(({ name }) => name);
+
 // Every value in every table of the room's own, as text.
 const everyValue = (room) =>
-  rows(room, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'")
-    .flatMap(({ name }) => rows(room, `SELECT * FROM "${name}"`).flatMap((row) => Object.values(row).map(String)));
+  ownTables(room).flatMap((name) => rows(room, `SELECT * FROM "${name}"`).flatMap((row) => Object.values(row).map(String)));
+
+// Makes migrate()'s last write, the new schema_ver, fail: this room's setMeta() throws once every step has run. Returns
+// what the room had at that moment (its tables, and the columns of handoffs if it had one). The test deletes
+// room.setMeta afterwards to give the room its own back.
+function failSchemaVer(room) {
+  const atFailure = {};
+  room.setMeta = (key) => {
+    atFailure.tables = ownTables(room);
+    atFailure.handoffs = rows(room, "SELECT name FROM pragma_table_info('handoffs')").map((r) => r.name);
+    throw new Error(`${key} write failed`);
+  };
+  return atFailure;
+}
 
 // Every table of the room's own with its columns as SQLite has them (name, type, NOT NULL, default, primary key) and
 // its indexes, so two rooms' tables can be compared.
@@ -373,6 +410,26 @@ describe("a room made by schema version 1, as merged in PR #97", () => {
       const { written } = cost(room, () => room.migrate());
       expect(written).toBe(0);
       expect(state()).toEqual(before);
+    });
+  });
+
+  it("migrate() makes version 2 all at once: when the last write fails, the dropped column comes back and it stays at 1", async () => {
+    const { stub, who } = await mergedV1Room();
+    await runInDurableObject(stub, (room) => {
+      const before = { shape: shape(room), handoffs: rows(room, "SELECT * FROM handoffs") };
+      const atFailure = failSchemaVer(room);
+      expect(() => room.migrate()).toThrow("schema_ver write failed");
+      delete room.setMeta;
+      // The version-2 step had run when schema_ver failed...
+      expect(atFailure.handoffs).toEqual(TABLES.handoffs);
+      // ...and the transaction undid it: the room is version 1 again, raw sub and all.
+      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(1);
+      expect({ shape: shape(room), handoffs: rows(room, "SELECT * FROM handoffs") }).toEqual(before);
+      expect(value(room, "SELECT sub FROM handoffs")).toBe(who.sub);
+      // So the next migrate() runs the step again, and this time it holds.
+      room.migrate();
+      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(2);
+      expect(rows(room, "SELECT name FROM pragma_table_info('handoffs')").map((r) => r.name)).toEqual(TABLES.handoffs);
     });
   });
 

@@ -10,6 +10,7 @@
 // mode, its PIN in for this visit) is on unless a check says otherwise, which is how the coach shows until Bryan opens it to everyone;
 // window.__coachPublic and window.__chatPublic stay out unless a check sets them. The chat is switched on the way the tests do it
 // (window.__chatUrl and window.__chatContact), and window.__chatTest lets chat.js note each time its room is asked to open (CHAT._opened).
+// The New review checks give the coach a clip from tests/coach/clips.js (VP9 WebM, ruling R13) and answer its calls from flowBackend().
 // Playwright wherever node finds it (npm install playwright), else the copy this container keeps.
 const { chromium } = (() => { try { return require("playwright"); } catch (e) { return require("/opt/node22/lib/node_modules/playwright"); } })();
 const fs = require("fs"), os = require("os"), path = require("path"), { pathToFileURL } = require("url");
@@ -53,6 +54,94 @@ const me = o => ({ left: 2, sent_left: 4, monthly: 2, month: "2030-11", next_mon
 const coachBackend = (o = {}, status = 200) => q => q.pathname === "/coach/me" ? { status, body: status === 200 ? me(o) : { error: status === 401 ? "auth" : "break" } }
   : { body: { reports: [], online: 0, last_id: 0 } };
 const TOKEN = { "waveslave-chat-token": "test-token" };
+
+// ---- New review (web/coach.js's flow), offline. flowBackend(o, {failFrame}) is a fake coach backend for it: GET /coach/me as me(o) (with a
+// profile, so only the move is asked), POST /coach/reviews {id: ID}, each key frame's POST {ok}, GET /coach/reviews/<id> {status:
+// "uploading", have}, and POST …/send {ok, left: 1}. failFrame {n, times} cuts the network on key frame n's first `times` POSTs. It notes
+// each start's body (st.starts), each key frame POST's n and body or failed (st.frames), the GETs of the review and the sends.
+const ID = "a".repeat(22), PROFILE = { level: "turning_well", board: "shortboard", stance: "regular" };
+function flowBackend(o = {}, { failFrame = null } = {}) {
+  const st = { starts: [], frames: [], gets: 0, sends: 0, have: new Set(), tries: 0 };
+  st.backend = (q, req) => {
+    const p = q.pathname, m = req.method(), frame = /^\/coach\/reviews\/[\w-]{22}\/frames\/(\d+)$/.exec(p);
+    if (p === "/coach/me") return { body: me({ profile: PROFILE, ...o }) };
+    if (p === "/coach/reviews" && m === "POST") { st.starts.push(req.postDataJSON()); st.have.clear(); return { body: { id: ID } }; }
+    if (frame && m === "POST") { const n = +frame[1];
+      if (failFrame && n === failFrame.n && st.tries++ < failFrame.times) { st.frames.push({ n, failed: true }); return null; }
+      st.frames.push({ n, body: req.postData() }); st.have.add(n); return { body: { ok: true } }; }
+    if (/^\/coach\/reviews\/[\w-]{22}$/.test(p) && m === "GET") { st.gets++; return { body: { id: ID, status: "uploading", move: "top_turn", created: 0, have: [...st.have], note: null } }; }
+    if (/^\/coach\/reviews\/[\w-]{22}\/send$/.test(p) && m === "POST") { st.sends++; return { body: { ok: true, left: 1 } }; }
+    return { body: { reports: [], online: 0, last_id: 0 } };
+  };
+  return st;
+}
+const inPanel = (page, what, sel, timeout = 15e3) => page.waitForSelector(".coachpanel " + sel, { timeout }).catch(e => { throw new Error(`waited for ${what}: ${e.message.split("\n")[0]}`); });
+const text = (page, sel) => page.evaluate(s => { const e = document.querySelector(".coachpanel " + s); return e && !e.closest("[hidden]") ? e.textContent : null; }, sel);
+// The video's displayed size, as the coach reads it.
+const shown = page => page.evaluate(() => { const v = document.querySelector(".coachpanel video"); return { w: v.videoWidth, h: v.videoHeight }; });
+// Where (x, y), in the video's displayed pixels, is on the screen in the frame shown for tapping yourself (zoomed or not).
+const onScreen = (page, x, y) => page.evaluate(([x, y]) => { const r = document.querySelector(".coachpanel .co-zoom").getBoundingClientRect(), v = document.querySelector(".coachpanel .co-zoom video");
+  return { x: r.left + x / v.videoWidth * r.width, y: r.top + y / v.videoHeight * r.height }; }, [x, y]);
+// Taps yourself at (x, y) in the frame once it's ready for a tap.
+async function tapAt(page, x, y) { await inPanel(page, "the frame, ready for a tap", ".co-frame[data-ready]"); const p = await onScreen(page, x, y); await page.touchscreen.tap(p.x, p.y); }
+// Runs New review to the check screen (or the key frame it opens first): the Coach tab, New review, the clip, the move (the profile gives
+// the rest), Next, the slider at `at` seconds and Here, and tapping yourself at (x, y) in the video's pixels, where the clip's white box
+// is then. before(page) runs on Tap yourself before the tap.
+async function toCheck(page, clip, { at, x, y, move = "top_turn", before = null }) {
+  await page.tap(TAB); await inPanel(page, "New review", '[data-k="new"]'); await page.click('.coachpanel [data-k="new"]');
+  await page.setInputFiles('.coachpanel input[type="file"]', clip);
+  await inPanel(page, "the questions", `[data-k="move-${move}"]`); await page.click(`.coachpanel [data-k="move-${move}"]`); await page.click('.coachpanel [data-k="next"]');
+  await slideTo(page, at); await page.click('.coachpanel [data-k="here"]');
+  if (before) await before(page);
+  await tapAt(page, x, y);
+  await inPanel(page, "the check screen", '.co-grid, [data-k="notin"]', 30e3);
+}
+// Moves the slider to `at` seconds, as a finger does, and waits for the clip to be there.
+async function slideTo(page, at) {
+  await inPanel(page, "the slider", '[data-k="slider"]:not([disabled])');
+  await page.evaluate(t => { const r = document.querySelector('.coachpanel [data-k="slider"]'); r.value = String(t); r.dispatchEvent(new Event("input", { bubbles: true })); }, at);
+  await page.waitForFunction(t => { const v = document.querySelector(".coachpanel video"); return !!v && !v.seeking && Math.abs(v.currentTime - t) < 0.02; }, at);
+}
+// The draft in IndexedDB (waveslave-coach, draft, "current"), with each key frame's blob as its size: null when there's none, or the error.
+const draft = page => page.evaluate(() => new Promise(ok => { const q = indexedDB.open("waveslave-coach");
+  q.onerror = () => ok({ error: String(q.error) });
+  q.onsuccess = () => { const d = q.result; if (!d.objectStoreNames.contains("draft")) return ok(null);
+    const g = d.transaction("draft").objectStore("draft").get("current");
+    g.onsuccess = () => { const r = g.result; ok(r ? { ...r, frames: r.frames.map(f => ({ ...f, blob: f.blob instanceof Blob ? f.blob.size : null })) } : null); }; g.onerror = () => ok({ error: String(g.error) }); }; }));
+// Each key frame sent (base64 text), decoded in the page: its size, its bytes, and where its white pixels are (their count and centre).
+const decode = (page, bodies) => page.evaluate(async bodies => Promise.all(bodies.map(async b => {
+  const bytes = Uint8Array.from(atob(b), c => c.charCodeAt(0)), bm = await createImageBitmap(new Blob([bytes], { type: "image/jpeg" }));
+  const c = new OffscreenCanvas(bm.width, bm.height), g = c.getContext("2d"); g.drawImage(bm, 0, 0);
+  const d = g.getImageData(0, 0, bm.width, bm.height).data; let n = 0, sx = 0, sy = 0;
+  for (let i = 0; i < d.length; i += 4) if (d[i] > 200 && d[i + 1] > 200 && d[i + 2] > 200) { n++; sx += (i / 4) % bm.width; sy += Math.floor(i / 4 / bm.width); }
+  return { w: bm.width, h: bm.height, bytes: bytes.length, white: n, cx: n ? sx / n : null, cy: n ? sy / n : null }; })), bodies);
+// An init script noting every size given to a canvas (window.__canvases) and every drawImage of a video: the canvas's size and the
+// numbers it was given (window.__draws).
+function watchCanvas() {
+  window.__canvases = []; window.__draws = [];
+  for (const k of ["width", "height"]) { const d = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, k);
+    Object.defineProperty(HTMLCanvasElement.prototype, k, { configurable: true, get: d.get, set(v) { d.set.call(this, v); window.__canvases.push([this.width, this.height]); } }); }
+  const draw = CanvasRenderingContext2D.prototype.drawImage;
+  CanvasRenderingContext2D.prototype.drawImage = function (src, ...a) { if (src instanceof HTMLVideoElement) window.__draws.push({ cw: this.canvas.width, ch: this.canvas.height, a }); return draw.call(this, src, ...a); };
+}
+// An init script noting each play() and pause() of a video (window.__media).
+function watchMedia() { window.__media = []; for (const k of ["play", "pause"]) { const f = HTMLMediaElement.prototype[k];
+  HTMLMediaElement.prototype[k] = function () { window.__media.push(k); return f.apply(this, arguments); }; } }
+// The white box's centre at t seconds in a clips.js clip w x h of secs seconds (before any turn): it slides left to right, halfway down.
+const boxAt = (w, h, secs, t) => ({ x: (w - Math.floor(w / 14)) * t / secs + Math.floor(w / 14) / 2, y: h / 2 });
+const SENT = "Sent. Your feedback comes within a day.", NEED8 = "We need you in at least 8 key frames. Try a clip filmed closer.", FAILED = "Couldn't send. Tap to try again.";
+const GETTING = "Getting your clip ready… this can take a minute.", LENGTH = "Pick a clip between 3 seconds and 2 minutes. Slow-motion clips count at their slowed length.";
+const CANT = "This phone can't open that clip. Try another, or open waveslave.tw in your phone's own browser.";
+// Two fingers spread from 60 px apart to 120 px about the middle of the frame shown for tapping yourself: a pinch to 2x. Resolves to its
+// zoom (the frame's transform).
+async function pinch(page) {
+  const m = await page.evaluate(() => { const r = document.querySelector(".coachpanel .co-frame").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  const s = await page.context().newCDPSession(page), at = d => [{ x: m.x - d, y: m.y, id: 1 }, { x: m.x + d, y: m.y, id: 2 }];
+  await s.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: at(30) });
+  for (let i = 1; i <= 10; i++) { await s.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: at(30 + 3 * i) }); await page.waitForTimeout(16); }
+  await s.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }); await s.detach();
+  return page.evaluate(() => document.querySelector(".coachpanel .co-zoom").style.transform);
+}
 
 const CHECKS = {
   // The test clips (tests/coach/clips.js), read the way the coach will read them: picked in an <input type="file"> and played from an
@@ -309,6 +398,175 @@ const CHECKS = {
     const st = await page.evaluate(() => ({ kept: localStorage.getItem("waveslave-chat-token"), signIn: !!document.querySelector(".coachpanel .co-signin"), left: !!document.querySelector(".coachpanel .co-left") }));
     if (st.kept !== null || !st.signIn || st.left) throw new Error(`after a 401: ${JSON.stringify(st)}, want the token gone and Sign in with LINE`);
   },
+  // ---- New review (AI coach spec, "New review"), offline, its calls answered by flowBackend().
+  // Review Focus 1, a portrait clip and one tagged to be shown turned (360x640 as the browser reports both): every box sent lies inside
+  // the reported size, and every close-up is a 784x784 JPEG of at most 100 KB with the white box (the surfer) in its middle. The video is
+  // only ever drawn whole into a canvas of a quarter of its size, or as the box into a 784x784 one, and no canvas is ever given a size over
+  // 784x784 or a quarter of the frame. The turned clip's frame is pinched to 2x before the tap, which still lands on the box.
+  async portrait(open, { tmp }) {
+    const LANDS = 3; // the tap may land this far off (in the video's pixels) once the touch's place is rounded to the screen's
+    for (const [what, clip, at, box, pinched] of [["a 360x640 clip", makeClip(tmp, { w: 360, h: 640, secs: 6 }), 3, boxAt(360, 640, 6, 3), false],
+      ["the rotate: 90 clip", makeClip(tmp, { w: 640, h: 360, secs: 6, rotate: 90 }), 3, { x: 180, y: 639 - boxAt(640, 360, 6, 3).x }, true]]) {
+      const st = flowBackend(), page = await open({ store: TOKEN, backend: st.backend, init: [watchCanvas] });
+      let zoom = null;
+      await toCheck(page, clip, { at, x: box.x, y: box.y, before: pinched ? async p => { zoom = await pinch(p); } : null });
+      if (pinched && !/scale\(2\)/.test(zoom || "")) throw new Error(`${what}: the pinch left the frame at ${JSON.stringify(zoom)}, want scale(2)`);
+      const size = await shown(page), d = await draft(page);
+      if (size.w !== 360 || size.h !== 640) throw new Error(`${what}: the coach reads it as ${size.w}x${size.h}, want 360x640`);
+      if (!d || !d.tap || Math.abs(d.tap.x - box.x) > LANDS || Math.abs(d.tap.y - box.y) > LANDS) throw new Error(`${what}: the tap landed at ${JSON.stringify(d && d.tap)}, want about (${box.x}, ${box.y})`);
+      const lost = d.frames.filter(f => f.lost).map(f => f.n);
+      if (lost.length) throw new Error(`${what}: the tracker lost the box in key frames ${lost}`);
+      await page.click('.coachpanel [data-k="send"]'); await inPanel(page, `"${SENT}"`, ".co-ok");
+      const frames = st.starts.length === 1 ? st.starts[0].frames : [];
+      if (!eq(frames.map(f => f.n), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])) throw new Error(`${what}: the review started with key frames ${JSON.stringify(frames.map(f => f.n))}`);
+      const out = frames.filter(f => !(f.box[0] >= 0 && f.box[1] >= 0 && f.box[2] > 0 && f.box[0] + f.box[2] <= size.w && f.box[1] + f.box[2] <= size.h));
+      if (out.length) throw new Error(`${what}: boxes outside ${size.w}x${size.h}: ${JSON.stringify(out)}`);
+      const crops = await decode(page, st.frames.filter(f => !f.failed).map(f => f.body));
+      const bad = crops.filter(c => c.w !== 784 || c.h !== 784 || c.bytes > 102400 || c.white < 500 || !(c.cx > 157 && c.cx < 627 && c.cy > 157 && c.cy < 627));
+      if (crops.length !== 12 || bad.length) throw new Error(`${what}: ${crops.length} close-ups sent, these not 784x784 within 100 KB with the box in the middle: ${JSON.stringify(bad)}`);
+      const q = { w: Math.round(size.w / 4), h: Math.round(size.h / 4) }, seen = await page.evaluate(() => ({ sizes: window.__canvases, draws: window.__draws }));
+      const big = seen.sizes.filter(([w, h]) => !((w <= 784 && h <= 784) || (w <= q.w && h <= q.h)));
+      if (!seen.sizes.length || big.length) throw new Error(`${what}: canvases sized ${JSON.stringify(big)} (of ${seen.sizes.length})`);
+      const odd = seen.draws.filter(({ cw, ch, a }) => !(a.length === 4 && cw === q.w && ch === q.h && eq(a, [0, 0, q.w, q.h])
+        || a.length === 8 && cw === 784 && ch === 784 && eq(a.slice(4), [0, 0, 784, 784]) && a[2] === a[3] && a[0] >= 0 && a[1] >= 0 && a[0] + a[2] <= size.w && a[1] + a[3] <= size.h));
+      if (seen.draws.length < 24 || odd.length) throw new Error(`${what}: ${seen.draws.length} drawImage calls of the video, these not as they should be: ${JSON.stringify(odd.slice(0, 3))}`);
+    }
+  },
+  // The tracker loses the surfer (the white box) on key frame 9, at 3.0 s, where the clip's box is gone: the check screen opens at that
+  // frame first, asking for a tap; the tap keeps it, with its box round the tap, and as no other was lost the 12 close-ups show. "Not in
+  // this one" on 4 of them leaves 8 and Send on; on a 5th, Send is off with the 8-frame line, and nothing is sent.
+  async lostFirst(open, { tmp }) {
+    const st = flowBackend(), page = await open({ store: TOKEN, backend: st.backend }), b = boxAt(640, 360, 6, 2.5), c = boxAt(640, 360, 6, 3);
+    await toCheck(page, makeClip(tmp, { gap: [2.9, 3.1] }), { at: 2.5, x: b.x, y: b.y });
+    const first = { head: await text(page, '[data-k="fh"]'), line: await text(page, ".co-flow > p"), notIn: await text(page, '[data-k="notin"]'), grid: !!await page.$(".coachpanel .co-grid") };
+    if (!eq(first, { head: "Key frame at 0:03.0", line: "We lost you here. Tap yourself.", notIn: "Not in this one", grid: false })) throw new Error(`the check screen opened at ${JSON.stringify(first)}`);
+    await tapAt(page, c.x, c.y); await inPanel(page, "the 12 close-ups", ".co-grid");
+    const grid = await page.evaluate(() => ({ n: document.querySelectorAll(".coachpanel .co-tile").length, lost: document.querySelectorAll(".coachpanel .co-tile.co-lost").length }));
+    const nine = ((await draft(page)) || { frames: [] }).frames[8], want = [Math.round(c.x) - 60, Math.round(c.y) - 60, 120];
+    if (grid.n !== 12 || grid.lost || !nine || nine.lost || nine.box.some((v, i) => Math.abs(v - want[i]) > 3)) throw new Error(`after the tap: ${JSON.stringify(grid)}, key frame 9 ${JSON.stringify(nine && { box: nine.box, lost: nine.lost })}, want its box about ${want}`);
+    for (const n of [1, 2, 3, 4, 5]) {
+      await page.click(`.coachpanel [data-k="kf-${n}"]`); await inPanel(page, `key frame ${n} opened`, '[data-k="notin"]'); await page.click('.coachpanel [data-k="notin"]'); await inPanel(page, "the 12 close-ups", ".co-grid");
+      const s = await page.evaluate(() => ({ off: document.querySelector('.coachpanel [data-k="send"]').disabled, lines: [...document.querySelectorAll(".coachpanel .co-err")].map(e => e.textContent),
+        out: [...document.querySelectorAll(".coachpanel .co-tile.co-out .co-mark")].map(e => e.textContent) }));
+      const want = n < 5 ? { off: false, lines: [], out: Array(n).fill("Not in this one") } : { off: true, lines: [NEED8], out: Array(n).fill("Not in this one") };
+      if (!eq(s, want)) throw new Error(`with ${n} left out the check screen shows ${JSON.stringify(s)}, want ${JSON.stringify(want)}`);
+    }
+    await page.evaluate(() => document.querySelector('.coachpanel [data-k="send"]').click()); await wait(300);
+    if (st.starts.length || st.frames.length) throw new Error(`with Send off the coach sent ${st.starts.length} starts and ${st.frames.length} key frames`);
+  },
+  // A clip of 2 s or of 125 s gives the length message, back on the picker; a 6 s one goes on to the questions.
+  async clipLength(open, { tmp }) {
+    const page = await open({ store: TOKEN, backend: flowBackend().backend });
+    await page.tap(TAB); await inPanel(page, "New review", '[data-k="new"]'); await page.click('.coachpanel [data-k="new"]');
+    for (const [secs, want] of [[2, LENGTH], [125, LENGTH], [6, null]]) {
+      await page.setInputFiles('.coachpanel input[type="file"]', makeClip(tmp, { w: 160, h: 90, secs }));
+      if (want) await inPanel(page, `the message for a ${secs} s clip`, ".co-flow .co-err"); else await inPanel(page, "the slider", '[data-k="move-popup"]');
+      await wait(300);
+      const got = await text(page, ".co-flow .co-err");
+      if (got !== want) throw new Error(`a ${secs} s clip says ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+      if (want && !await page.$('.coachpanel input[type="file"]')) throw new Error(`after a ${secs} s clip there's no picker`);
+    }
+  },
+  // A file the phone can't play (the <video> errors) says so, back on the picker.
+  async cantOpen(open) {
+    const page = await open({ store: TOKEN, backend: flowBackend().backend });
+    await page.tap(TAB); await inPanel(page, "New review", '[data-k="new"]'); await page.click('.coachpanel [data-k="new"]');
+    await page.setInputFiles('.coachpanel input[type="file"]', { name: "IMG_0001.MOV", mimeType: "video/quicktime", buffer: Buffer.from("this isn't a clip at all") });
+    await inPanel(page, "the message", ".co-flow .co-err");
+    const got = await text(page, ".co-flow .co-err");
+    if (got !== CANT) throw new Error(`a clip the phone can't open says ${JSON.stringify(got)}`);
+  },
+  // While the clip's length and size aren't known (loadedmetadata held back, readyState 0) the questions and Find the move say "Getting
+  // your clip ready… this can take a minute." and Here stays off; once they come it goes. The first tap on the questions screen calls
+  // play() then pause() on the clip, and no other tap does.
+  async gettingReady(open, { tmp }) {
+    const hold = () => { window.__hold = true; const add = EventTarget.prototype.addEventListener, rs = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "readyState");
+      EventTarget.prototype.addEventListener = function (type, fn, o) { if (type !== "loadedmetadata" || !(this instanceof HTMLMediaElement)) return add.call(this, type, fn, o);
+        const el = this; return add.call(this, type, e => { if (window.__hold) window.__held = () => fn.call(el, e); else fn.call(el, e); }, o); };
+      Object.defineProperty(HTMLMediaElement.prototype, "readyState", { configurable: true, get() { return window.__hold ? 0 : rs.get.call(this); } }); };
+    const page = await open({ store: TOKEN, backend: flowBackend().backend, init: [hold, watchMedia] });
+    await page.tap(TAB); await inPanel(page, "New review", '[data-k="new"]'); await page.click('.coachpanel [data-k="new"]');
+    await page.setInputFiles('.coachpanel input[type="file"]', makeClip(tmp, {})); await inPanel(page, "the questions", '[data-k="move-cutback"]');
+    await page.waitForFunction(() => !!window.__held); const notes = () => page.evaluate(() => [...document.querySelectorAll('.coachpanel .co-note[role="status"]')].map(e => e.textContent));
+    if (!eq(await notes(), [GETTING])) throw new Error(`with the clip not ready the questions say ${JSON.stringify(await notes())}`);
+    const media = () => page.evaluate(() => window.__media);
+    if ((await media()).length) throw new Error(`before any tap the clip was asked to ${await media()}`);
+    await page.click('.coachpanel [data-k="move-cutback"]'); if (!eq(await media(), ["play", "pause"])) throw new Error(`the first tap called ${JSON.stringify(await media())}, want play then pause`);
+    await page.click('.coachpanel [data-k="move-popup"]'); await page.click('.coachpanel [data-k="move-cutback"]');
+    if (!eq(await media(), ["play", "pause"])) throw new Error(`later taps called ${JSON.stringify(await media())}`);
+    await page.click('.coachpanel [data-k="next"]'); await inPanel(page, "Find the move", '[data-k="slider"]');
+    const offs = () => page.evaluate(() => ({ slider: document.querySelector('.coachpanel [data-k="slider"]').disabled, here: document.querySelector('.coachpanel [data-k="here"]').disabled }));
+    if (!eq(await notes(), [GETTING]) || !eq(await offs(), { slider: true, here: true })) throw new Error(`Find the move, the clip not ready: ${JSON.stringify(await notes())}, ${JSON.stringify(await offs())}`);
+    await page.evaluate(() => { window.__hold = false; window.__held(); }); await settle(page);
+    if ((await notes()).length || !eq(await offs(), { slider: false, here: false })) throw new Error(`once ready: ${JSON.stringify(await notes())}, ${JSON.stringify(await offs())}`);
+  },
+  // Where IndexedDB throws (a private window), the review still sends.
+  async noIndexedDb(open, { tmp }) {
+    const block = () => { Object.defineProperty(window, "indexedDB", { configurable: true, get() { throw new DOMException("The operation is insecure.", "SecurityError"); } }); };
+    const st = flowBackend(), page = await open({ store: TOKEN, backend: st.backend, init: [block] }), b = boxAt(640, 360, 6, 3);
+    await toCheck(page, makeClip(tmp, {}), { at: 3, x: b.x, y: b.y });
+    await page.click('.coachpanel [data-k="send"]'); await inPanel(page, `"${SENT}"`, ".co-ok");
+    if (await text(page, ".co-ok") !== SENT || st.starts.length !== 1 || st.frames.length !== 12 || st.sends !== 1) throw new Error(`without IndexedDB: ${st.starts.length} starts, ${st.frames.length} key frames, ${st.sends} sends`);
+  },
+  // A key frame's upload failing twice at the network and working the third time: the review sends, with each key frame once.
+  async uploadRetries(open, { tmp }) {
+    const st = flowBackend({}, { failFrame: { n: 3, times: 2 } }), page = await open({ store: TOKEN, backend: st.backend }), b = boxAt(640, 360, 6, 3);
+    await toCheck(page, makeClip(tmp, {}), { at: 3, x: b.x, y: b.y });
+    await page.click('.coachpanel [data-k="send"]'); await inPanel(page, `"${SENT}"`, ".co-ok", 30e3);
+    const ok = st.frames.filter(f => !f.failed).map(f => f.n), failed = st.frames.filter(f => f.failed).map(f => f.n);
+    if (!eq(ok, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) || !eq(failed, [3, 3]) || st.starts.length !== 1 || st.sends !== 1) throw new Error(`sent ${JSON.stringify(ok)}, failed ${JSON.stringify(failed)}, ${st.starts.length} starts, ${st.sends} sends`);
+  },
+  // Three failures of one upload: "Couldn't send. Tap to try again.", and the draft in IndexedDB still has all 12 key frames, the review's
+  // id and the two the server has. Tapping it asks the server which it has and sends only the rest.
+  async threeFailures(open, { tmp }) {
+    const st = flowBackend({}, { failFrame: { n: 3, times: 3 } }), page = await open({ store: TOKEN, backend: st.backend }), b = boxAt(640, 360, 6, 3);
+    await toCheck(page, makeClip(tmp, {}), { at: 3, x: b.x, y: b.y });
+    await page.click('.coachpanel [data-k="send"]'); await inPanel(page, `"${FAILED}"`, '[data-k="retry"]', 30e3);
+    const d = await draft(page), got = await text(page, '[data-k="retry"]');
+    if (got !== FAILED || st.frames.filter(f => f.failed).length !== 3) throw new Error(`after three failures the page says ${JSON.stringify(got)} (${st.frames.filter(f => f.failed).length} failed)`);
+    if (!d || d.step !== "check" || d.frames.length !== 12 || !d.frames.every(f => f.blob > 0) || d.id !== ID || !eq(d.sent, [1, 2])) throw new Error(`the draft kept ${JSON.stringify(d && { step: d.step, frames: d.frames.map(f => f.blob), id: d.id, sent: d.sent })}`);
+    const before = st.frames.length; await page.click('.coachpanel [data-k="retry"]'); await inPanel(page, `"${SENT}"`, ".co-ok", 30e3);
+    const again = st.frames.slice(before).map(f => f.n);
+    if (st.gets !== 1 || st.starts.length !== 1 || !eq(again, [3, 4, 5, 6, 7, 8, 9, 10, 11, 12])) throw new Error(`tapping it: ${st.gets} asks, ${st.starts.length} starts, key frames ${JSON.stringify(again)}`);
+    if (await draft(page) !== null) throw new Error("once sent, the draft is still in IndexedDB");
+  },
+  // In LINE on Android the picker shows "Nothing opens? Open in your browser" under the privacy line, linking to this page with
+  // openExternalBrowser=1 (ruling R19); in LINE on an iPhone, or a browser, it doesn't.
+  async lineAndroid(open) {
+    const LINE_ANDROID = "Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/AP2A.240805.005; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/129.0.6668.100 Mobile Safari/537.36 Line/14.16.0/IAB";
+    const LINE_IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari Line/14.16.0";
+    for (const [what, ua, want] of [["LINE on Android", LINE_ANDROID, true], ["LINE on an iPhone", LINE_IPHONE, false], ["a browser", null, false]]) {
+      const page = await open({ store: TOKEN, backend: flowBackend().backend, ua });
+      await page.tap(TAB); await inPanel(page, "New review", '[data-k="new"]'); await page.click('.coachpanel [data-k="new"]'); await inPanel(page, "the picker", ".co-privacy");
+      const got = await page.evaluate(() => { const p = document.querySelector(".coachpanel .co-outside"), a = p && p.querySelector("a"), pr = document.querySelector(".coachpanel .co-privacy");
+        if (!p) return null; const u = new URL(a.href), flag = u.searchParams.get("openExternalBrowser"); u.searchParams.delete("openExternalBrowser");
+        return { text: p.textContent, flag, same: u.href === location.href, under: p.getBoundingClientRect().top >= pr.getBoundingClientRect().bottom }; });
+      if (want && !eq(got, { text: "Nothing opens? Open in your browser", flag: "1", same: true, under: true })) throw new Error(`${what}: the picker shows ${JSON.stringify(got)}`);
+      if (!want && got) throw new Error(`${what}: the picker shows ${JSON.stringify(got)}`);
+    }
+  },
+  // Switching to 中文 mid-flow keeps the answers and the screen: on Find the move it reads 找到動作 with the move in 中文; back on the
+  // questions the move is still picked, and the line still holds what was typed, cut to 200 characters as the backend counts them (here
+  // emoji, two UTF-16 units each). The profile shows as one line with Change (修改).
+  async zhMidFlow(open, { tmp }) {
+    const page = await open({ store: TOKEN, backend: flowBackend().backend });
+    await page.tap(TAB); await inPanel(page, "New review", '[data-k="new"]'); await page.click('.coachpanel [data-k="new"]');
+    await page.setInputFiles('.coachpanel input[type="file"]', makeClip(tmp, {})); await inPanel(page, "the questions", '[data-k="move-cutback"]');
+    await page.click('.coachpanel [data-k="move-cutback"]'); await page.fill('.coachpanel [data-k="note"]', "Big day 🌊" + "🌊".repeat(250));
+    const typed = "Big day 🌊" + "🌊".repeat(191), noteNow = () => page.evaluate(() => document.querySelector('.coachpanel [data-k="note"]').value);
+    if (await noteNow() !== typed) throw new Error(`the line holds ${[...await noteNow()].length} characters, want 200`);
+    await page.click('.coachpanel [data-k="next"]'); await slideTo(page, 2.5);
+    await page.evaluate(() => setLang("zh")); await settle(page);
+    const find = { head: await text(page, '[data-k="fh"]'), line: await text(page, ".co-flow > p"), at: await page.evaluate(() => +document.querySelector('.coachpanel [data-k="slider"]').value) };
+    if (!eq(find, { head: "找到動作", line: "拖動滑桿到你的回切，再按「這裡」。", at: 2.5 })) throw new Error(`in 中文 Find the move shows ${JSON.stringify(find)}`);
+    await page.click('.coachpanel [data-k="back"]'); await inPanel(page, "the questions", '[data-k="move-cutback"]');
+    const q = await page.evaluate(() => ({ head: document.querySelector('.coachpanel [data-k="fh"]').textContent, move: document.querySelector('.coachpanel [data-k="move-cutback"]').getAttribute("aria-pressed"),
+      moveText: document.querySelector('.coachpanel [data-k="move-cutback"]').textContent, profile: document.querySelector(".coachpanel .co-sum").textContent }));
+    if (!eq(q, { head: "新增講評", move: "true", moveText: "回切", profile: "轉向很熟練 · 短板 · 正腳（左腳在前）修改" }) || await noteNow() !== typed) throw new Error(`in 中文 the questions show ${JSON.stringify(q)}, the line ${[...await noteNow()].length} characters`);
+    await page.evaluate(() => setLang("en")); await settle(page);
+    const d = await draft(page);
+    if (await text(page, '[data-k="move-cutback"]') !== "Cutback" || !d || d.answers.move !== "cutback" || d.answers.note !== typed || d.step !== "find") throw new Error(`back in English: ${JSON.stringify(d && { answers: d.answers, step: d.step })}`);
+  },
   // The page's hooks never throw, whatever they're given, and a spot the page doesn't have leaves the tab as html.tw says.
   async hooksHold(open) {
     const page = await open({}); await wait(300);
@@ -341,10 +599,11 @@ const CHECKS = {
   // backend answers what backend(url) gives back (null: the network fails); everything else is cut off. page.asked lists the backend calls.
   //   world: developer mode (World mode, the PIN in); pub: window.__chatPublic; coachPub: window.__coachPublic; url: window.__chatUrl;
   //   view: the saved view; test: window.__chatTest; store: localStorage entries; clock: the page's fixed time (page.clock); skew: Date.now
-  //   moved on by window.__skew(ms); query: the address's ?… before #<spot>. backend(url, request) answers the fake backend's calls.
+  //   moved on by window.__skew(ms); query: the address's ?… before #<spot>. backend(url, request) answers the fake backend's calls. ua: the
+//   browser's user agent; init: more init scripts, each a function (or [function, its argument]).
   async function open({ spot = "donghe", world = true, pub = false, coachPub = false, url = CHAT, view = "fc", test = true, store = {}, chatJs = CHAT_JS, coachJs = COACH_JS,
-    clock = null, skew = false, query = "", backend = () => ({ body: { reports: [], online: 0, last_id: 0 } }) }) {
-    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block" });
+    clock = null, skew = false, query = "", backend = () => ({ body: { reports: [], online: 0, last_id: 0 } }), ua = null, init = [] }) {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block", ...(ua ? { userAgent: ua } : {}) });
     ctxs.push(ctx); const asked = [], tried = [];
     await ctx.route("**/*", r => { const u = r.request().url(), bare = u.split(/[?#]/)[0];
       if (bare === PAGE) return r.continue();
@@ -360,6 +619,7 @@ const CHECKS = {
       window.__chatUrl = o.url; window.__chatContact = o.contact; if (o.test) window.__chatTest = true; if (o.pub) window.__chatPublic = true; if (o.coachPub) window.__coachPublic = true;
       if (o.skew) { const now = Date.now; let by = 0; Date.now = () => now() + by; window.__skew = ms => { by += ms; }; } },
       [{ view, world, store, url, contact: CONTACT, test, pub, coachPub, skew }, LOCK]);
+    for (const i of init) await (Array.isArray(i) ? ctx.addInitScript(i[0], i[1]) : ctx.addInitScript(i));
     const page = await ctx.newPage(); page.on("pageerror", e => errs.push(String(e)));
     if (clock != null) await page.clock.setFixedTime(clock);
     await page.goto(PAGE + query + "#" + spot, { waitUntil: "load" }); await settle(page);

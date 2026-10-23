@@ -166,7 +166,31 @@ const STR = {
     status: { reviewing: "Coach is reviewing", ready: "Ready", not_reviewed: "Not reviewed" },
     moves: { popup: "Pop-up", bottom_turn: "Bottom turn", top_turn: "Top turn", cutback: "Cutback", down_the_line: "Riding down the line", other: "Other" },
     date: (y, m, d) => `${d} ${MONTHS[m]}${y ? " " + y : ""}`,
-    drafts: "Drafts" },
+    drafts: "Drafts",
+    // New review (AI coach spec, "New review").
+    back: "‹ Back", choose: "Choose a clip", privacy: "Only key frames are sent. Your video never leaves your phone.",
+    sameClip: "Choose the same clip again to pick up where you left off.",
+    nothingOpens: "Nothing opens? ", openBrowser: "Open in your browser",
+    getting: "Getting your clip ready… this can take a minute.",
+    cantOpen: "This phone can't open that clip. Try another, or open waveslave.tw in your phone's own browser.",
+    length: "Pick a clip between 3 seconds and 2 minutes. Slow-motion clips count at their slowed length.",
+    whichMove: "Which move?", otherMove: "Which move is it?", levelHead: "Your level", boardHead: "Your board", stanceHead: "Your stance",
+    levels: { first_waves: "First waves", green_waves: "Riding green waves", starting_turns: "Starting to turn", turning_well: "Turning well" },
+    boards: { shortboard: "Shortboard", midlength: "Mid-length", longboard: "Longboard", foamie: "Foamie" },
+    stances: { regular: "Regular", goofy: "Goofy", unsure: "Not sure" },
+    change: "Change", noteHead: "Anything else?", noteHint: "Optional, up to 200 characters",
+    next: "Next", missing: "Pick an answer for each question.",
+    findHead: "Find the move", slideTo: m => `Slide to ${m} and tap Here.`,
+    slideMoves: { popup: "your pop-up", bottom_turn: "your bottom turn", top_turn: "your top turn", cutback: "your cutback", down_the_line: "where you ride down the line", other: "your move" },
+    slider: "Where the move is in the clip", here: "Here",
+    tapHead: "Tap yourself", tapLine: "Tap yourself in the frame. Pinch to zoom if you're small.",
+    cutting: "Cutting your key frames…",
+    checkHead: "Is this you in each key frame?", checkLine: "Tap a key frame to fix it.",
+    lostMark: "Tap to check", lostLine: "We lost you here. Tap yourself.", fixLine: "Tap yourself in this frame.",
+    notIn: "Not in this one", allFrames: "Back to all key frames", bigger: "Bigger boxes", smaller: "Smaller boxes",
+    need8: "We need you in at least 8 key frames. Try a clip filmed closer.",
+    send: "Send to your coach", sending: "Sending…", sent: "Sent. Your feedback comes within a day.", sendFailed: "Couldn't send. Tap to try again.",
+    resumeHead: "Pick up where you left off?", resumeFrames: "Your key frames are ready.", pickUp: "Pick up", startOver: "Start over" },
   zh: { tab: "教練", title: "教練", close: "關閉", tabReady: "教練：有講評可以看了",
     lead: "教練會逐格拆解你的影片：做得好的地方、一個主要修正，再加一個練習。",
     signIn: "使用LINE帳號登入", example: "教練講評範例 · 頂部轉向",
@@ -192,7 +216,30 @@ const STR = {
     status: { reviewing: "教練講評中", ready: "已完成", not_reviewed: "未能講評" },
     moves: { popup: "起乘", bottom_turn: "底部轉向", top_turn: "頂部轉向", cutback: "回切", down_the_line: "沿浪壁滑行", other: "其他" },
     date: (y, m, d) => `${y ? y + "年" : ""}${m + 1}月${d}日`,
-    drafts: "草稿" },
+    drafts: "草稿",
+    back: "‹ 返回", choose: "選擇影片", privacy: "只會傳送關鍵影格，你的影片不會離開你的手機。",
+    sameClip: "請再選一次同一段影片，從上次中斷的地方繼續。",
+    nothingOpens: "點了沒反應嗎？", openBrowser: "改用手機的瀏覽器開啟",
+    getting: "正在準備你的影片…可能需要一分鐘。",
+    cantOpen: "這支手機無法開啟這段影片。請換一段，或用手機內建的瀏覽器開啟 waveslave.tw。",
+    length: "請選 3 秒到 2 分鐘的影片。慢動作影片以放慢後的長度計算。",
+    whichMove: "哪個動作？", otherMove: "是什麼動作？", levelHead: "你的程度", boardHead: "你的板子", stanceHead: "你的站姿",
+    levels: { first_waves: "剛開始（白浪）", green_waves: "能滑綠浪", starting_turns: "開始學轉向", turning_well: "轉向很熟練" },
+    boards: { shortboard: "短板", midlength: "中長板", longboard: "長板", foamie: "軟板" },
+    stances: { regular: "正腳（左腳在前）", goofy: "反腳（右腳在前）", unsure: "不確定" },
+    change: "修改", noteHead: "還有什麼想說的嗎？", noteHint: "選填，最多 200 字",
+    next: "下一步", missing: "每個問題都要選一個答案。",
+    findHead: "找到動作", slideTo: m => `拖動滑桿到${m}，再按「這裡」。`,
+    slideMoves: { popup: "你的起乘", bottom_turn: "你的底部轉向", top_turn: "你的頂部轉向", cutback: "你的回切", down_the_line: "你沿浪壁滑行的地方", other: "你的動作" },
+    slider: "動作在影片裡的位置", here: "這裡",
+    tapHead: "點一下你自己", tapLine: "在畫面中點一下你自己。人太小的話，可以用兩指放大。",
+    cutting: "正在擷取關鍵影格…",
+    checkHead: "每個關鍵影格裡都是你嗎？", checkLine: "點一下關鍵影格就能修正。",
+    lostMark: "點這裡確認", lostLine: "這格找不到你，請點一下你自己。", fixLine: "在這格裡點一下你自己。",
+    notIn: "這格沒有我", allFrames: "回到全部關鍵影格", bigger: "框放大", smaller: "框縮小",
+    need8: "至少要有 8 個關鍵影格拍到你。試試拍得近一點的影片。",
+    send: "傳送給教練", sending: "傳送中…", sent: "已送出。一天內會收到講評。", sendFailed: "無法傳送，點一下再試一次。",
+    resumeHead: "要從上次中斷的地方繼續嗎？", resumeFrames: "你的關鍵影格已經準備好了。", pickUp: "繼續", startOver: "重新開始" },
 };
 const lang = () => typeof LANG === "string" && LANG === "zh" ? "zh" : "en";
 const S = key => STR[lang()][key];
@@ -258,6 +305,48 @@ button.co-row{cursor:pointer}
 .co-fresh{flex:none;width:8px;height:8px;border-radius:50%;background:#ff3d7f;box-shadow:0 0 8px #ff3d7f}
 .co-drafts{margin-top:24px}
 .co-drafts h3{outline:none}
+.co-back{display:inline-block;margin:0 0 10px;padding:6px 0;border:0;background:none;color:var(--led-amb);font-size:15px;font-weight:700;cursor:pointer}
+.co-fh{margin-bottom:6px!important;font-size:19px;outline:none}
+.co-flow>p{margin-top:8px}
+.co-flow .co-film{margin:10px 0 0}
+.co-note{margin:10px 0 0!important;color:var(--muted)}
+.co-ok{margin:0 0 12px!important;color:var(--good);font-weight:700}
+.co-q{margin-top:16px}
+.co-q h4{margin-bottom:6px;font-size:15px}
+.co-chips{display:flex;flex-wrap:wrap;gap:8px}
+.co-chip{min-height:40px;padding:8px 14px;border:1.5px solid var(--line);border-radius:20px;background:var(--panel);color:var(--ink);font-size:15px;cursor:pointer}
+.co-chip[aria-pressed="true"]{border-color:var(--led-amb);background:var(--led-amb);color:var(--panel);font-weight:700}
+.co-line{display:block;width:100%;box-sizing:border-box;min-height:42px;margin-top:8px;padding:8px 10px;border:1.5px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);font:16px var(--body)}
+.co-sum{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.co-link{padding:4px 0;border:0;background:none;color:var(--led-amb);font-size:15px;font-weight:700;text-decoration:underline;cursor:pointer}
+.co-btn:disabled{opacity:.45;cursor:default}
+.co-btn2{background:none;border:1.5px solid var(--led-amb);color:var(--led-amb)}
+.co-hold{position:fixed;left:0;top:0;width:2px;height:2px;overflow:hidden;opacity:0;pointer-events:none}
+.co-hold video{width:2px;height:2px}
+.co-player{margin-top:12px;border-radius:10px;overflow:hidden;background:#000}
+.co-player video{display:block;width:100%;height:auto;max-height:42vh;object-fit:contain}
+.co-slider{display:block;width:100%;margin:14px 0 0}
+.co-frame{position:relative;margin:12px auto 0;max-width:100%;overflow:hidden;border-radius:10px;background:#000;touch-action:none;user-select:none;-webkit-user-select:none;cursor:crosshair}
+.co-zoom{position:absolute;inset:0;transform-origin:0 0}
+.co-zoom video,.co-zoom img{display:block;width:100%;height:100%;object-fit:fill;pointer-events:none}
+.co-box{position:absolute;box-sizing:border-box;border:2px solid #ffd400;box-shadow:0 0 0 1px rgba(0,0,0,.7);pointer-events:none}
+.co-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:12px}
+.co-tile{position:relative;display:block;width:100%;padding:0;border:2px solid transparent;border-radius:9px;background:var(--line);color:inherit;font:inherit;cursor:pointer;overflow:hidden}
+.co-tile img{display:block;width:100%;height:auto;aspect-ratio:1}
+.co-tile .co-t{position:absolute;left:4px;bottom:3px;padding:0 4px;border-radius:4px;background:rgba(0,0,0,.6);color:#fff;font-size:12px}
+.co-tile .co-mark{position:absolute;inset:auto 0 0;padding:14px 4px 4px;background:linear-gradient(transparent,rgba(0,0,0,.8));color:#fff;font-size:12px;font-weight:700;text-align:center}
+.co-tile.co-lost{border-color:#ffd400}
+.co-tile.co-out img{opacity:.35}
+.co-size{display:flex;justify-content:center;gap:14px;margin-top:12px}
+.co-size button{width:46px;height:46px;border-radius:50%;border:1.5px solid var(--led-amb);background:none;color:var(--led-amb);font-size:24px;font-weight:700;line-height:1;cursor:pointer}
+.co-size button:disabled{opacity:.45;cursor:default}
+.co-prog{display:block;width:100%;height:10px;margin-top:14px;accent-color:var(--led-amb)}
+.co-resume{margin-top:14px;padding:12px 14px;border:1px solid var(--led-amb);border-radius:12px;background:var(--panel)}
+.co-resume p{margin-top:6px}
+.co-choose{position:relative;text-align:center;box-sizing:border-box}
+.co-choose:focus-within{outline:2px solid var(--ink);outline-offset:2px}
+.co-big{display:block;width:100%;height:auto;margin-top:12px;border-radius:10px}
+.co-file{position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;overflow:hidden}
 `;
 
 // What the shell keeps: whether it has started (the page is there, with its Coach tab), an open() asked for before that, the tab, the
@@ -296,7 +385,7 @@ function open() {
 // waiting for GET /coach/me is dropped, so drawing the page again (a new language, a spot) doesn't open the panel again.
 function close() {
   if (!P.open) return;
-  P.open = false; P.el.hidden = true; document.documentElement.classList.remove("coach-open"); V.drafts = false;
+  P.open = false; P.el.hidden = true; document.documentElement.classList.remove("coach-open"); V.drafts = false; V.sent = false;
   const back = P.opener; P.opener = null;
   const to = [back, P.tab].find(e => e && e !== document.body && e.isConnected && e.getClientRects().length);
   if (to) to.focus({ preventScroll: true });
@@ -364,8 +453,9 @@ async function call(path, tok, body) {
 // the newest ask (an answer to an older one is dropped), the token being asked about, and whether the last ask failed.
 const ME = { me: null, token: null, at: -Infinity, n: 0, asking: null, failed: false };
 // What the surfer has done in the panel, kept when it's drawn again: How to film opened or shut by hand (null: as it comes), the 18+ tick,
-// the agreement's lines, an I agree on its way, the control to give the focus to, and a ?coach=drafts link waiting to open at Drafts.
-const V = { film: null, tick: false, adultErr: false, agreeErr: false, busy: false, focus: null, drafts: false };
+// the agreement's lines, an I agree on its way, the control to give the focus to, a ?coach=drafts link waiting to open at Drafts, whether
+// to show the top of the panel (a new screen of New review) and whether a review was just sent ("Sent.", until the panel shuts).
+const V = { film: null, tick: false, adultErr: false, agreeErr: false, busy: false, focus: null, drafts: false, top: false, sent: false };
 // GET /coach/me's answer looks right: whole counts, a "YYYY-MM" month and a list of reviews.
 const meOk = j => !!j && typeof j === "object" && Number.isInteger(j.left) && Number.isInteger(j.monthly) && typeof j.month === "string"
   && /^\d{4}-(0[1-9]|1[0-2])$/.test(j.month) && Array.isArray(j.reviews);
@@ -406,9 +496,11 @@ function drawDot() {
 }
 
 // The panel's content, drawn again from what the coach knows each time something changes. Only while the panel is open, so the example's
-// key frames load only when it shows. It keeps its place, and the focus stays on the same control where it can (each carries a data-k),
-// else on the panel. A ?coach=drafts link scrolls to Drafts and puts the focus on it once GET /coach/me has answered (only the admin has
-// it); once it has answered or failed, the link is done with.
+// key frames load only when it shows. It keeps its place (or goes to the top for a new screen of New review), and the focus stays on the
+// same control where it can (each carries a data-k), else on the panel. Signed in, a New review on its way shows in the panel's place,
+// and the first time the panel shows signed in it reads the draft a reload may have left (loadDraft). A ?coach=drafts link scrolls to
+// Drafts and puts the focus on it once GET /coach/me has answered (only the admin has it); once it has answered or failed, the link is
+// done with.
 function render() {
   if (!P.started || !P.open) return;
   const had = P.body.contains(document.activeElement) ? document.activeElement : null, key = V.focus || (had && had.getAttribute("data-k")), at = P.body.scrollTop;
@@ -416,10 +508,13 @@ function render() {
   const t = tokenNow(), mine = !!t && ME.token === t;
   P.body.textContent = "";
   if (!t) { V.drafts = false; P.body.append(...signedOut()); }
-  else if (mine && ME.me) P.body.append(...signedIn(ME.me));
+  else if (mine && ME.me) {
+    if (!F.loaded) { F.loaded = true; guard(loadDraft)(); }
+    P.body.append(...(F.show && ME.me.agreed === true ? flow(ME.me) : signedIn(ME.me)).filter(Boolean));
+  }
   else if (mine && ME.failed) P.body.append(...failed());
   else P.body.append(el("p", { class: "co-wait" }, S("loading")));
-  P.body.scrollTop = at;
+  P.body.scrollTop = V.top ? 0 : at; V.top = false;
   const to = key && P.body.querySelector(`[data-k="${key}"]`);
   if (to) { to.focus({ preventScroll: true }); reveal(to); } else if (had) P.el.focus({ preventScroll: true });
   if (V.drafts && mine && (ME.me || ME.failed)) {
@@ -462,11 +557,14 @@ function lineIcon() { const ns = "http://www.w3.org/2000/svg", svg = document.cr
   t.setAttribute("font-size", "8.2"); t.setAttribute("font-weight", "800"); t.setAttribute("font-family", "Arial, Helvetica, sans-serif"); t.textContent = "LINE";
   svg.append(p, t); return svg; }
 
-// Signed in: "2 of 2 reviews left in November" (the month is the backend's Taiwan month, whatever the phone's clock says), How to film,
-// the agreement until it's agreed and then New review, their reviews newest first, and Drafts for the admin.
+// Signed in: "Sent. Your feedback comes within a day." just after sending, "2 of 2 reviews left in November" (the month is the backend's
+// Taiwan month, whatever the phone's clock says), How to film, the agreement until it's agreed and then New review (or, with a review
+// left halfway, Pick up where you left off?), their reviews newest first, and Drafts for the admin.
 function signedIn(me) {
   const reviews = me.reviews.filter(r => !!r && typeof r === "object");
-  const out = [el("p", { class: "co-left" }, S("left")(me.left, me.monthly, +me.month.slice(5) - 1)), film(reviews.length > 0), me.agreed === true ? newReview() : agreement()];
+  const out = [V.sent ? el("p", { class: "co-ok", role: "status", tabindex: "-1", "data-k": "sent" }, S("sent")) : null,
+    el("p", { class: "co-left" }, S("left")(me.left, me.monthly, +me.month.slice(5) - 1)), film(reviews.length > 0),
+    me.agreed === true ? (F.draft ? resumeOffer() : newReview()) : agreement()];
   if (reviews.length) out.push(el("h3", { class: "co-h co-yours" }, S("yours")), el("ul", { class: "co-list" }, reviews.map(r => row(r, +me.month.slice(0, 4)))));
   if (me.admin === true) out.push(el("section", { class: "co-drafts" }, el("h3", { class: "co-h", tabindex: "-1" }, S("drafts"))));
   return out;
@@ -484,8 +582,8 @@ function film(folded) {
   d.addEventListener("toggle", guard(() => { V.film = d.open === !folded ? null : d.open; }));
   return d;
 }
-// New review, once the agreement is agreed. The flow it starts comes with the clip picker; for now it's the button in its place.
-const newReview = () => el("button", { type: "button", class: "co-btn co-new", "data-k": "new" }, S("newReview"));
+// New review, once the agreement is agreed: it starts the flow below (startNew).
+function newReview() { const b = el("button", { type: "button", class: "co-btn co-new", "data-k": "new" }, S("newReview")); b.addEventListener("click", guard(startNew)); return b; }
 // The coach agreement, before the first review (the spec's points and the 18+ tick), agreed once for this version.
 function agreement() {
   const tick = el("input", { type: "checkbox", "data-k": "adult" }), err = el("p", { class: "co-err", role: "alert" }, S("adultOnly")), fail = el("p", { class: "co-err", role: "alert" }, S("failed"));
@@ -533,6 +631,492 @@ function day(ms, year) {
 function openReview(r) {
   if (isNew(r)) { seenHere = r.published; save(SEEN, r.published); }
   drawDot(); render();
+}
+
+// ---- New review (AI coach spec, "New review", steps 1-6): pick a clip, the questions, find the move with the slider and Here, tap
+// yourself, the check screen with the 12 close-ups, and sending. The clip is read here and never leaves the phone: only the close-ups the
+// surfer saw on the check screen are sent, as 784 x 784 JPEGs. Each screen is drawn by render() from F, as the rest of the panel is.
+// The surfer's answers as the backend takes them (MOVES, LEVELS, BOARDS and STANCES in chat/src/coach-guide.js).
+const MOVES = ["popup", "bottom_turn", "top_turn", "cutback", "down_the_line", "other"], LEVELS = ["first_waves", "green_waves", "starting_turns", "turning_well"];
+const BOARDS = ["shortboard", "midlength", "longboard", "foamie"], STANCES = ["regular", "goofy", "unsure"];
+const NOTE_MAX = 200, OTHER_MAX = 60; // characters in "Anything else?" and in the line naming an "other" move, counted as the backend does
+const KEPT_MIN = 8; // the surfer must be in at least 8 of the 12 key frames
+const CLIP_MIN = 3, CLIP_MAX = 120; // a clip's length, in seconds
+const SIDE = 784; // every close-up is 784 x 784: a multiple of the 28 px tile the AI counts its cost in
+
+// The review being made. What a reload must not lose is kept in IndexedDB as it goes (saveDraft): the answers, how far it got, Here (s),
+// the tap and the box side (displayed pixels), the 12 key frames {n, ms, box, lost, blob} once cut, the review's id once started and the
+// key frames the server has (sent). The rest lives only in this page: whether the draft was read (loaded) and whether there is one, whether
+// the flow shows (else the panel's main view, which offers to pick it up), the screen, whether the clip has to be chosen again (resumed),
+// the clip (the file input, its <video> and object URL, whether its length and size are known, its first tap, its length and size, the
+// slider's place), and the screen's state: a clip that wouldn't do (err), unanswered questions, the profile opened for changing, the key
+// frame opened on the check screen and its zoom, a seek on its way, work on its way and its progress bar, and a send that failed. run
+// goes up whenever the work on its way is to stop (a new clip, Start over, a new cut or send).
+const noAnswers = p => ({ move: null, move_other: "", note: "", level: p && LEVELS.includes(p.level) ? p.level : null,
+  board: p && BOARDS.includes(p.board) ? p.board : null, stance: p && STANCES.includes(p.stance) ? p.stance : null });
+const F = { loaded: false, draft: false, show: false, screen: null, resumed: false, answers: noAnswers(null), profiled: false, here: null, tap: null, side: null,
+  frames: [], id: null, sent: [], input: null, video: null, url: null, ready: false, unlocked: false, dur: 0, vw: 0, vh: 0, pos: 0,
+  err: null, missing: false, editProfile: false, open: null, zoom: null, seeking: false, seekN: 0, busy: false, progress: [0, 1], bar: null, fail: false, run: 0 };
+// The first max characters of s, counted as the backend counts them (code points, so an emoji is one, and 中文 has the room English has).
+const upTo = (s, max) => [...String(s)].slice(0, max).join("");
+const answered = a => MOVES.includes(a.move) && (a.move !== "other" || a.move_other.trim() !== "") && LEVELS.includes(a.level) && BOARDS.includes(a.board) && STANCES.includes(a.stance);
+const keptFrames = () => F.frames.filter(f => f.box && !f.lost);
+const hasClip = () => !!F.video && F.ready;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+// A key frame: its number (1-12), its time in the clip (ms), the surfer's box (null: "Not in this one"), whether the tracker lost them,
+// and its close-up's JPEG with a blob URL for showing it.
+function newFrame(n, ms, box, lost, blob) { const f = { n, ms, box, lost, blob: null, src: null }; setBlob(f, blob); return f; }
+function setBlob(f, blob) { revoke(f); f.blob = blob; try { f.src = URL.createObjectURL(blob); } catch (e) { f.src = null; } }
+function revoke(f) { if (f.src) try { URL.revokeObjectURL(f.src); } catch (e) {} f.src = null; }
+
+// ---- Storage: the draft in IndexedDB (database waveslave-coach, store draft, key "current"), kept until it's sent or Start over clears
+// it: saved as each answer is given and when the key frames are cut (and when they change, or the server has one more). Every step is in
+// try/catch: where IndexedDB is missing or throws (a private window), the review can still be sent, only not picked up after a reload.
+// Writes go one after another, in order.
+let dbOpen = null, dbQueue = Promise.resolve();
+function idb(mode, op, ...args) {
+  if (!dbOpen) dbOpen = new Promise((ok, no) => { const q = indexedDB.open("waveslave-coach", 1);
+    q.onupgradeneeded = () => { try { q.result.createObjectStore("draft"); } catch (e) { no(e); } };
+    q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error); q.onblocked = () => no(new Error("blocked")); });
+  return dbOpen.then(d => new Promise((ok, no) => { let out;
+    const tx = d.transaction("draft", mode), q = tx.objectStore("draft")[op](...args);
+    q.onsuccess = () => { out = q.result; }; tx.oncomplete = () => ok(out); tx.onerror = tx.onabort = () => no(tx.error || new Error("idb")); }));
+}
+const queued = f => (dbQueue = dbQueue.then(f).catch(() => {}));
+function saveDraft() {
+  F.draft = true;
+  const step = F.frames.length === 12 ? "check" : F.screen === "find" || F.screen === "tap" ? F.screen : F.screen === "cut" ? "tap" : "questions";
+  const rec = { answers: { ...F.answers }, step, here: F.here, tap: F.tap && { x: F.tap.x, y: F.tap.y }, side: F.side,
+    frames: F.frames.map(f => ({ n: f.n, ms: f.ms, box: f.box && [f.box.x, f.box.y, f.box.side], lost: f.lost, blob: f.blob })), id: F.id, sent: [...F.sent] };
+  queued(() => idb("readwrite", "put", rec, "current"));
+}
+function dropDraft() { F.draft = false; queued(() => idb("readwrite", "delete", "current")); }
+// The draft a reload left, read once a page load when the panel first shows signed in. Anything that doesn't look right is left out; with
+// the key frames all there it picks up at the check screen, else the clip is chosen again. Nothing changes if a review has started
+// meanwhile.
+async function loadDraft() {
+  let r = null; await queued(() => idb("readonly", "get", "current").then(v => { r = v; }));
+  const a = r && typeof r === "object" && r.answers && typeof r.answers === "object" ? r.answers : null;
+  if (!a || F.draft || F.show) return;
+  const pick = (v, list) => list.includes(v) ? v : null, str = (v, max) => typeof v === "string" ? upTo(v, max) : "";
+  const isBox = b => Array.isArray(b) && b.length === 3 && b.every(Number.isInteger) && b[0] >= 0 && b[1] >= 0 && b[2] >= 1;
+  F.answers = { move: pick(a.move, MOVES), move_other: str(a.move_other, OTHER_MAX), note: str(a.note, NOTE_MAX), level: pick(a.level, LEVELS), board: pick(a.board, BOARDS), stance: pick(a.stance, STANCES) };
+  F.here = Number.isFinite(r.here) && r.here >= 0 ? r.here : null; F.pos = F.here || 0;
+  F.tap = r.tap && Number.isFinite(r.tap.x) && Number.isFinite(r.tap.y) ? { x: r.tap.x, y: r.tap.y } : null;
+  F.side = Number.isInteger(r.side) && r.side > 0 ? r.side : null;
+  const fs = Array.isArray(r.frames) ? r.frames : [];
+  const good = (f, i) => !!f && f.n === i + 1 && Number.isInteger(f.ms) && f.ms >= 0 && f.blob instanceof Blob && (f.box === null || isBox(f.box));
+  if (r.step === "check" && fs.length === 12 && fs.every(good) && F.side) F.frames = fs.map(f => newFrame(f.n, f.ms, f.box && { x: f.box[0], y: f.box[1], side: f.box[2] }, f.lost === true, f.blob));
+  F.id = F.frames.length && typeof r.id === "string" && /^[A-Za-z0-9_-]{22}$/.test(r.id) ? r.id : null;
+  F.sent = F.id && Array.isArray(r.sent) ? r.sent.filter(n => Number.isInteger(n) && n >= 1 && n <= 12) : [];
+  F.draft = true; F.resumed = true; F.screen = F.frames.length ? "check" : "pick";
+  render();
+}
+
+// ---- Starting, leaving and picking up.
+// New review: a fresh review, the level, board and stance from last time (GET /coach/me's profile) when there are some.
+function startNew() {
+  resetFlow(); const p = ME.me && ME.me.profile;
+  F.answers = noAnswers(p); F.profiled = !!F.answers.level && !!F.answers.board && !!F.answers.stance;
+  F.show = true; F.screen = "pick"; V.sent = false; go();
+}
+// Everything of the review let go: the clip, the key frames' blob URLs, and the work on its way.
+function resetFlow() {
+  F.run++; dropClip(); for (const f of F.frames) revoke(f);
+  Object.assign(F, { draft: false, show: false, screen: null, resumed: false, answers: noAnswers(null), profiled: false, here: null, tap: null, side: null, frames: [],
+    id: null, sent: [], err: null, missing: false, editProfile: false, open: null, zoom: null, seeking: false, busy: false, fail: false });
+}
+// A new screen: drawn from the top, with the focus on its heading.
+function go() { F.zoom = null; V.top = true; V.focus = F.show ? "fh" : F.draft ? "pickup" : "new"; render(); }
+// ‹ Back: from Find the move to the questions, from Tap yourself to Find the move, else out to the panel's main view, which offers to pick
+// the review up (the clip stays while the page does). With nothing answered yet there's nothing to pick up.
+function back() {
+  if (F.busy) return;
+  if (F.screen === "find") F.screen = "questions"; else if (F.screen === "tap") F.screen = "find";
+  else { F.show = false; F.open = null; if (!F.draft) resetFlow(); }
+  go();
+}
+// Pick up where you left off?: back to the screen it was on; once the page has reloaded, the clip is chosen again first (and then straight
+// to Find the move), unless the key frames were cut. Start over clears it and starts afresh.
+function pickUp() { if (!F.video && F.screen !== "check") { F.screen = "pick"; F.resumed = true; } F.show = true; go(); }
+function startOver() { dropDraft(); startNew(); }
+function resumeOffer() {
+  const mv = F.answers.move && S("moves")[F.answers.move];
+  return el("section", { class: "co-resume", "aria-labelledby": "coachResume" }, el("h3", { class: "co-h", id: "coachResume" }, S("resumeHead")),
+    mv ? el("p", null, mv) : null, F.frames.length ? el("p", null, S("resumeFrames")) : null,
+    button("pickup", S("pickUp"), pickUp), button("over", S("startOver"), startOver, "co-btn co-btn2"));
+}
+function button(k, text, f, cls = "co-btn", label = null) {
+  const b = el("button", { type: "button", class: cls, "data-k": k, "aria-label": label }, text); b.addEventListener("click", guard(f)); return b; }
+const heading = t => el("h3", { class: "co-h co-fh", tabindex: "-1", "data-k": "fh" }, t);
+const note = (t, alert) => el("p", alert ? { class: "co-err", role: "alert" } : { class: "co-note", role: "status" }, t);
+function progress() { const b = el("progress", { class: "co-prog", max: String(F.progress[1]), value: String(F.progress[0]) }); F.bar = b; return b; }
+function stepOn() { F.progress[0]++; if (F.bar) F.bar.value = F.progress[0]; }
+
+// The flow's screen, in the panel's place. The clip stays in the page while a screen doesn't show it, in a holder out of sight, so it
+// keeps loading; on the questions screen and Find the move, the first tap readies it (unlock).
+function flow(me) {
+  const s = F.screen, screens = { pick: pickScreen, questions: questionsScreen, find: findScreen, tap: tapScreen, cut: workScreen, send: workScreen, check: checkScreen };
+  const sec = el("section", { class: "co-flow" }, s === "cut" || s === "send" ? null : button("back", S("back"), back, "co-back"), (screens[s] || pickScreen)(me));
+  if (s === "questions" || s === "find") sec.addEventListener("click", guard(unlock), true);
+  if (F.video && !sec.contains(F.video)) sec.append(el("div", { class: "co-hold", "aria-hidden": "true" }, F.video));
+  return [sec];
+}
+
+// ---- Step 1, the picker: "Choose a clip" opens the phone's own picker (<input type="file" accept="video/*">), with the privacy line under
+// it, and the clip goes into a <video muted playsinline> from an object URL. The input stays the same element as the panel is drawn
+// again, so a clip picked meanwhile still comes. iOS hands the clip over after its own "Preparing…" and reads it only once it has been
+// played from a tap: the first tap on the next screen calls play() then pause() (unlock). Until the clip's length and size are known, the
+// screens say "Getting your clip ready… this can take a minute."; it must be 3 s to 2 minutes long.
+function pickScreen(me) {
+  const out = [heading(S("newReview")), film(me.reviews.some(r => !!r && typeof r === "object"))];
+  if (F.resumed) out.push(el("p", { class: "co-note" }, S("sameClip")));
+  if (!F.input) { F.input = el("input", { type: "file", accept: "video/*", class: "co-file", "data-k": "file" });
+    F.input.addEventListener("change", guard(() => { const file = F.input.files && F.input.files[0]; F.input.value = ""; if (file) takeClip(file); })); }
+  out.push(el("label", { class: "co-btn co-choose" }, S("choose"), F.input), el("p", { class: "co-note co-privacy" }, S("privacy")));
+  // In LINE on Android the picker may not open: a line under it offers the page in the phone's own browser (ruling R19), where the surfer
+  // signs in with LINE again.
+  const href = lineAndroid() ? outside() : null;
+  if (href) out.push(el("p", { class: "co-note co-outside" }, S("nothingOpens"), el("a", { href }, S("openBrowser"))));
+  if (F.err) out.push(note(S(F.err), true));
+  return out;
+}
+const lineAndroid = () => { const ua = String((navigator && navigator.userAgent) || ""); return /\bLine\/\d/i.test(ua) && /\bAndroid\b/i.test(ua); };
+// This page's address with openExternalBrowser=1, which LINE opens in the phone's own browser.
+function outside() { try { const u = new URL(location.href); u.searchParams.set("openExternalBrowser", "1"); return u.href; } catch (e) { return null; } }
+function takeClip(file) {
+  F.run++; F.busy = false; F.seeking = false; dropClip();
+  const v = el("video", { muted: "", playsinline: "", preload: "auto" }); v.muted = true; v.playsInline = true;
+  v.addEventListener("loadedmetadata", guard(() => { if (F.video === v) clipReady(); }));
+  v.addEventListener("error", guard(() => { if (F.video === v) clipFailed("cantOpen"); }));
+  F.video = v; F.url = URL.createObjectURL(file); F.unlocked = false; F.err = null; F.missing = false; F.pos = F.here || 0;
+  v.src = F.url;
+  F.screen = F.resumed && answered(F.answers) ? "find" : "questions"; go();
+}
+function clipReady() {
+  const v = F.video, d = v.duration, w = v.videoWidth, h = v.videoHeight;
+  if (!(w > 0 && h > 0)) return clipFailed("cantOpen");
+  if (!(d >= CLIP_MIN && d <= CLIP_MAX)) return clipFailed("length");
+  F.ready = true; F.dur = d; F.vw = w; F.vh = h; F.pos = Math.min(F.pos, d);
+  if (F.screen === "find") v.currentTime = F.pos;
+  render();
+}
+// The clip won't do: back to the picker saying why (the answers stay). With the key frames cut, the check screen goes on without it.
+function clipFailed(why) {
+  F.run++; F.busy = false; F.seeking = false; dropClip(); F.open = null;
+  if (F.frames.length === 12) F.screen = "check"; else { F.err = why; F.screen = "pick"; }
+  go();
+}
+function dropClip() {
+  const v = F.video; F.video = null; F.ready = false; F.zoom = null;
+  if (v) { try { v.pause(); v.removeAttribute("src"); v.load(); } catch (e) {} v.remove(); }
+  if (F.url) { try { URL.revokeObjectURL(F.url); } catch (e) {} F.url = null; }
+}
+function unlock() {
+  const v = F.video; if (!v || F.unlocked) return; F.unlocked = true;
+  try { const p = v.play(); if (p && typeof p.catch === "function") p.catch(() => {}); v.pause(); } catch (e) {}
+}
+
+// ---- Step 2, the questions: the move (an "other" one named in a short line); the level, board and stance the first time, then from last
+// time (GET /coach/me's profile) behind Change; and one optional line. Each answer is kept as it's given.
+function questionsScreen() {
+  const a = F.answers, out = [heading(S("newReview"))];
+  if (!F.ready) out.push(note(S("getting")));
+  const q = (key, title, list, names) => el("div", { class: "co-q" }, el("h4", { id: "coQ-" + key }, title),
+    el("div", { class: "co-chips", role: "group", "aria-labelledby": "coQ-" + key }, list.map(v => {
+      const b = el("button", { type: "button", class: "co-chip", "data-k": key + "-" + v, "aria-pressed": a[key] === v ? "true" : "false" }, names[v]);
+      b.addEventListener("click", guard(() => { a[key] = v; F.missing = false; saveDraft(); render(); })); return b; })));
+  out.push(q("move", S("whichMove"), MOVES, S("moves")));
+  if (a.move === "other") out.push(line("move_other", OTHER_MAX, { "aria-label": S("otherMove"), placeholder: S("otherMove") }));
+  if (F.profiled && !F.editProfile) out.push(el("div", { class: "co-q co-sum" }, el("span", null, [S("levels")[a.level], S("boards")[a.board], S("stances")[a.stance]].join(" · ")),
+    button("profile", S("change"), () => { F.editProfile = true; V.focus = "level-" + a.level; render(); }, "co-link")));
+  else out.push(q("level", S("levelHead"), LEVELS, S("levels")), q("board", S("boardHead"), BOARDS, S("boards")), q("stance", S("stanceHead"), STANCES, S("stances")));
+  out.push(el("div", { class: "co-q" }, el("h4", null, el("label", { for: "coNote" }, S("noteHead"))), line("note", NOTE_MAX, { id: "coNote", placeholder: S("noteHint") })));
+  if (F.missing) out.push(note(S("missing"), true));
+  out.push(button("next", S("next"), () => { if (!answered(F.answers)) { F.missing = true; return render(); }
+    F.screen = "find"; saveDraft(); if (hasClip()) F.video.currentTime = F.pos; go(); }));
+  return out;
+}
+// A one-line answer, cut to max characters as the backend counts them (a textarea's maxlength counts UTF-16 units, which would cut an
+// emoji short), but not while an input method is still composing.
+function line(key, max, attrs) {
+  const i = el("input", { type: "text", class: "co-line", "data-k": key, autocomplete: "off", enterkeyhint: "done", ...attrs });
+  i.value = F.answers[key];
+  const take = () => { if ([...i.value].length > max) i.value = upTo(i.value, max); if (F.answers[key] !== i.value) { F.answers[key] = i.value; saveDraft(); } };
+  i.addEventListener("input", guard(e => { if (!e.isComposing) take(); }));
+  i.addEventListener("compositionend", guard(take)); i.addEventListener("change", guard(take));
+  return i;
+}
+
+// ---- Step 3, Find the move: the clip in a small player with a slider, "Slide to your cutback and tap Here."
+function findScreen() {
+  const a = F.answers, out = [heading(S("findHead")), el("p", null, S("slideTo")(S("slideMoves")[a.move] || S("slideMoves").other))];
+  if (!F.ready) out.push(note(S("getting")));
+  const r = el("input", { type: "range", class: "co-slider", "data-k": "slider", min: "0", max: String(F.ready ? F.dur : 1), step: "0.01", "aria-label": S("slider") });
+  r.value = String(F.pos); r.disabled = !F.ready;
+  r.addEventListener("input", guard(() => { F.pos = Number(r.value); if (hasClip()) F.video.currentTime = F.pos; }));
+  const h = button("here", S("here"), () => { if (!hasClip()) return; F.here = F.pos; F.screen = "tap"; saveDraft(); showAt(F.here); go(); }); h.disabled = !F.ready;
+  out.push(el("div", { class: "co-player" }, F.video), r, h);
+  return out;
+}
+// Seeks the clip to t for a screen that shows it there, and draws again once it's there; taps wait for it.
+function showAt(t) {
+  const v = F.video, n = ++F.seekN;
+  if (!v || (!v.seeking && Math.abs(v.currentTime - t) < 1e-3)) { F.seeking = false; return; }
+  F.seeking = true;
+  seekTo(v, t).then(guard(() => { if (n === F.seekN && F.video === v) { F.seeking = false; render(); } }), guard(() => { if (n === F.seekN && F.video === v) clipFailed("cantOpen"); }));
+}
+
+// ---- Step 4, Tap yourself: the frame at Here, full size, "Tap yourself". The box is a third of the frame's short side round the tap, and
+// cutting starts.
+const tapScreen = () => [heading(S("tapHead")), el("p", null, S("tapLine")), frameView(null, (x, y) => {
+  if (F.seeking || F.busy) return;
+  F.tap = { x: Math.round(x), y: Math.round(y) }; F.side = Math.round(Math.min(F.vw, F.vh) / 3); saveDraft(); guard(cutAll)(); })];
+// A frame of the clip as it stands, full size in a box of its own shape (60% of the screen's height at most), with the surfer's box on it
+// when there is one. Two fingers pinch it to zoom (up to 4 x) and one finger then moves it about; a tap (a touch or click that hardly
+// moves) gives onTap where it landed, in the video's displayed pixels. The zoom stays while the same frame shows.
+function frameView(box, onTap) {
+  const vw = F.vw, vh = F.vh, inner = el("div", { class: "co-zoom" }, F.video), wrap = el("div", { class: "co-frame", "data-ready": F.seeking || F.busy ? null : "1" }, inner);
+  wrap.style.width = `min(100%, ${(60 * vw / vh).toFixed(3)}vh)`; wrap.style.aspectRatio = `${vw} / ${vh}`;
+  if (box) inner.append(el("div", { class: "co-box", style: `left:${100 * box.x / vw}%;top:${100 * box.y / vh}%;width:${100 * box.side / vw}%;height:${100 * box.side / vh}%` }));
+  const z = F.zoom || (F.zoom = { s: 1, x: 0, y: 0 }), pts = new Map();
+  let moved = false, base = null;
+  const show = () => { inner.style.transform = `translate(${z.x}px,${z.y}px) scale(${z.s})`; };
+  // Where a gesture (re)starts: the fingers' midpoint and spread, in the frame's own pixels, and the zoom then.
+  const begin = () => { const r = wrap.getBoundingClientRect(), p = [...pts.values()], two = p.length > 1;
+    base = { mx: (two ? (p[0].x + p[1].x) / 2 : p[0].x) - r.left, my: (two ? (p[0].y + p[1].y) / 2 : p[0].y) - r.top, d: two ? Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) : 0,
+      s: z.s, zx: z.x, zy: z.y }; };
+  wrap.addEventListener("pointerdown", guard(e => { if (e.pointerType === "mouse" && e.button !== 0) return;
+    try { wrap.setPointerCapture(e.pointerId); } catch (err) {}
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY }); moved = pts.size > 1; begin(); }));
+  wrap.addEventListener("pointermove", guard(e => { const p = pts.get(e.pointerId); if (!p) return;
+    p.x = e.clientX; p.y = e.clientY; if (Math.hypot(p.x - p.x0, p.y - p.y0) > 8) moved = true;
+    const r = wrap.getBoundingClientRect(), all = [...pts.values()];
+    if (all.length > 1) { // the point of the frame under the fingers stays under them
+      const mx = (all[0].x + all[1].x) / 2 - r.left, my = (all[0].y + all[1].y) / 2 - r.top, d = Math.hypot(all[0].x - all[1].x, all[0].y - all[1].y);
+      z.s = Math.min(4, Math.max(1, base.s * d / (base.d || 1)));
+      z.x = mx - (base.mx - base.zx) / base.s * z.s; z.y = my - (base.my - base.zy) / base.s * z.s; }
+    else if (moved && z.s > 1) { z.x = base.zx + p.x - r.left - base.mx; z.y = base.zy + p.y - r.top - base.my; }
+    else return;
+    z.x = Math.min(0, Math.max(r.width * (1 - z.s), z.x)); z.y = Math.min(0, Math.max(r.height * (1 - z.s), z.y)); show(); }));
+  const up = e => { const one = pts.size === 1; if (!pts.delete(e.pointerId)) return;
+    if (pts.size) return begin();
+    if (e.type !== "pointerup" || !one || moved) return;
+    const r = inner.getBoundingClientRect();
+    if (r.width && r.height) onTap(Math.min(vw, Math.max(0, (e.clientX - r.left) / r.width * vw)), Math.min(vh, Math.max(0, (e.clientY - r.top) / r.height * vh))); };
+  wrap.addEventListener("pointerup", guard(up)); wrap.addEventListener("pointercancel", guard(up));
+  show(); return wrap;
+}
+
+// ---- Cutting the key frames. For each of the 12 times round Here (COACHM.keyTimes) the clip is sought there, and
+//   1. the tracker's frame is the whole frame drawn at a quarter of its size (Math.round(vw / 4) x Math.round(vh / 4)) into one small canvas
+//      kept for that, read back (getImageData) and made grey (COACHM.grey); COACHM.track then follows the surfer through them from the
+//      frame nearest Here, where they tapped, and each box it gives is moved inside the video (it can be up to 2 px over);
+//   2. then, at each time again, the close-up: only the box, drawn straight from the video into one 784 x 784 canvas kept for that
+//      (drawImage(video, sx, sy, sw, sh, 0, 0, 784, 784)) and made a JPEG at quality 0.85, then lower until it's at most 100 KB
+//      (COACHM.nextQuality); the canvas is cleared after.
+// A whole frame is never drawn into a canvas at its own size (iOS caps canvas memory), so no canvas is bigger than 784 x 784 or a quarter
+// of the frame. Canvas JPEGs carry no location data.
+const CV = { grey: null, crop: null };
+// Seeks the clip to t (s) and resolves once the frame there can be drawn: after seeked, the frame callback (registered before the seek)
+// for at most 0.5 s, else after one more animation frame. On iOS seeked can come before the new frame is drawn, and the frame callback
+// never comes when the frame didn't change. A clip that fails, or doesn't seek within 20 s while the page shows, rejects.
+function seekTo(v, t) {
+  return new Promise((ok, no) => {
+    let seeked = false, framed = false, done = false, id = null, wait = 0, stuck = 0;
+    const end = bad => { if (done) return; done = true; clearTimeout(wait); clearTimeout(stuck); v.removeEventListener("seeked", onSeeked); v.removeEventListener("error", onError);
+      if (id !== null && !framed) try { v.cancelVideoFrameCallback(id); } catch (e) {}
+      if (bad) no(new Error("seek")); else ok(); };
+    const drawn = () => requestAnimationFrame(() => end(false));
+    const onSeeked = () => { seeked = true; clearTimeout(stuck); if (framed) end(false); else if (id === null) drawn(); else wait = setTimeout(drawn, 500); };
+    const onError = () => end(true);
+    const check = () => { if (document.visibilityState === "hidden") stuck = setTimeout(check, 20e3); else onError(); };
+    stuck = setTimeout(check, 20e3);
+    if (typeof v.requestVideoFrameCallback === "function") id = v.requestVideoFrameCallback(() => { framed = true; if (seeked) end(false); });
+    v.addEventListener("seeked", onSeeked); v.addEventListener("error", onError);
+    v.currentTime = t;
+  });
+}
+function greyOf(v) {
+  const w = Math.max(1, Math.round(F.vw / 4)), h = Math.max(1, Math.round(F.vh / 4)), c = CV.grey || (CV.grey = document.createElement("canvas"));
+  if (c.width !== w) c.width = w; if (c.height !== h) c.height = h;
+  const g = c.getContext("2d", { willReadFrequently: true });
+  g.drawImage(v, 0, 0, w, h); const px = g.getImageData(0, 0, w, h).data; g.clearRect(0, 0, w, h);
+  return COACHM.grey(px, w, h);
+}
+async function cropOf(v, b) {
+  const c = CV.crop || (CV.crop = document.createElement("canvas"));
+  if (c.width !== SIDE) c.width = SIDE; if (c.height !== SIDE) c.height = SIDE;
+  const g = c.getContext("2d"); let blob = null;
+  try {
+    g.drawImage(v, b.x, b.y, b.side, b.side, 0, 0, SIDE, SIDE);
+    for (let q = COACHM.nextQuality(); q !== null;) { blob = await new Promise(r => c.toBlob(r, "image/jpeg", q)); q = blob ? COACHM.nextQuality(q, blob.size) : null; }
+  } finally { g.clearRect(0, 0, SIDE, SIDE); }
+  if (!blob) throw new Error("jpeg");
+  return blob;
+}
+// After the tap: the tracker's frames, the tracker, then the close-ups. The check screen opens at the first frame the tracker lost.
+async function cutAll() {
+  const v = F.video, run = ++F.run, vw = F.vw, vh = F.vh, times = COACHM.keyTimes(F.here, F.dur);
+  let from = 0; times.forEach((t, i) => { if (Math.abs(t - F.here) < Math.abs(times[from] - F.here)) from = i; });
+  F.screen = "cut"; F.busy = true; F.progress = [0, 24]; F.open = null; go();
+  const frames = [];
+  try {
+    const greys = [];
+    for (const t of times) { await seekTo(v, t); if (run !== F.run) return; greys.push(greyOf(v)); stepOn(); }
+    const boxes = COACHM.track(greys, from, COACHM.startBox(F.tap.x, F.tap.y, vw, vh));
+    greys.length = 0;
+    for (let i = 0; i < 12; i++) {
+      await seekTo(v, times[i]); if (run !== F.run) return;
+      const box = COACHM.clampBox(boxes[i], vw, vh), blob = await cropOf(v, box); if (run !== F.run) return;
+      frames.push(newFrame(i + 1, Math.round(times[i] * 1000), box, !!boxes[i].lost, blob)); stepOn();
+    }
+  } catch (e) { if (run === F.run) clipFailed("cantOpen"); return; } finally { if (run !== F.run) frames.forEach(revoke); }
+  for (const f of F.frames) revoke(f);
+  F.frames = frames; F.id = null; F.sent = []; F.busy = false; F.fail = false; F.screen = "check"; saveDraft(); nextLost(); go();
+}
+// + / −: every box 1.2 x bigger or smaller about its centre (COACHM.resize), and the close-ups cut again.
+async function resizeAll(dir) {
+  const vw = F.vw, vh = F.vh, side = COACHM.resize({ x: 0, y: 0, side: F.side }, dir, vw, vh).side, v = F.video;
+  if (F.busy || !hasClip() || side === F.side) return;
+  const run = ++F.run, boxes = F.frames.map(f => f.box && COACHM.resize(f.box, dir, vw, vh)), blobs = [];
+  F.screen = "cut"; F.busy = true; F.progress = [0, boxes.filter(Boolean).length]; F.open = null; go();
+  try { for (let i = 0; i < 12; i++) { if (!boxes[i]) continue; await seekTo(v, F.frames[i].ms / 1000); if (run !== F.run) return; blobs[i] = await cropOf(v, boxes[i]); if (run !== F.run) return; stepOn(); } }
+  catch (e) { if (run === F.run) clipFailed("cantOpen"); return; }
+  F.frames.forEach((f, i) => { if (boxes[i]) { f.box = boxes[i]; setBlob(f, blobs[i]); } });
+  F.side = side; changed(); F.busy = false; F.screen = "check"; go();
+}
+// The key frames changed: a review started with the old boxes is started again at the next send.
+function changed() { F.id = null; F.sent = []; F.fail = false; saveDraft(); }
+// The progress of cutting or sending.
+const workScreen = () => [heading(S(F.screen === "cut" ? "cutting" : "sending")), progress(), F.screen === "cut" && F.video ? el("div", { class: "co-player" }, F.video) : null];
+
+// ---- Step 5, the check screen: all 12 close-ups, "Is this you in each key frame?". Tapping one opens its frame, where tapping yourself
+// moves its box there (a box of the side the others have), or "Not in this one" leaves it out; a frame the tracker lost is opened first,
+// asking for a tap, and isn't sent until it's had one. + / − change every box. Send stays off below 8 key frames. Picked up after a
+// reload, the clip isn't there: the close-ups still show and can be left out, and Send works.
+function checkScreen() {
+  if (F.open !== null && F.frames[F.open]) return openFrame(F.open);
+  const n = keptFrames().length, clip = hasClip(), out = [heading(S("checkHead"))];
+  if (clip) out.push(el("p", null, S("checkLine")));
+  out.push(el("div", { class: "co-grid" }, F.frames.map((f, i) => {
+    const t = COACHM.fmtTime(f.ms), mark = f.lost ? S("lostMark") : f.box ? null : S("notIn");
+    const b = el("button", { type: "button", class: "co-tile" + (f.lost ? " co-lost" : f.box ? "" : " co-out"), "data-k": "kf-" + f.n, "aria-label": S("keyFrameAt")(t) + (mark ? " · " + mark : "") },
+      el("img", { src: f.src, alt: "", width: String(SIDE), height: String(SIDE) }), el("span", { class: "co-t", "aria-hidden": "true" }, t), mark ? el("span", { class: "co-mark", "aria-hidden": "true" }, mark) : null);
+    b.addEventListener("click", guard(() => openAt(i))); return b; })));
+  if (clip) { const fits = dir => COACHM.resize({ x: 0, y: 0, side: F.side }, dir, F.vw, F.vh).side !== F.side;
+    const minus = button("smaller", "−", () => resizeAll(-1), "", S("smaller")), plus = button("bigger", "+", () => resizeAll(1), "", S("bigger"));
+    minus.disabled = !fits(-1); plus.disabled = !fits(1); out.push(el("div", { class: "co-size" }, minus, plus)); }
+  if (n < KEPT_MIN) out.push(note(S("need8"), true));
+  if (F.fail) out.push(button("retry", S("sendFailed"), send, "co-btn co-retry"));
+  else { const b = button("send", S("send"), send); b.disabled = n < KEPT_MIN; out.push(b); }
+  return out;
+}
+// Key frame i opened: its frame at its time with its box, or without the clip its close-up.
+function openFrame(i) {
+  const f = F.frames[i], clip = hasClip(), out = [heading(S("keyFrameAt")(COACHM.fmtTime(f.ms)))];
+  if (clip) out.push(el("p", null, S(f.lost ? "lostLine" : "fixLine")), frameView(f.box, (x, y) => guard(fix)(i, x, y)));
+  else out.push(el("img", { class: "co-big", src: f.src, alt: "", width: String(SIDE), height: String(SIDE) }));
+  if (f.box) out.push(button("notin", S("notIn"), () => leaveOut(i), "co-btn co-btn2"));
+  out.push(button("all", S("allFrames"), () => { F.open = null; go(); }, "co-btn co-btn2"));
+  return out;
+}
+function openAt(i) { if (F.busy) return; F.open = i; if (hasClip()) showAt(F.frames[i].ms / 1000); go(); }
+// After a frame the tracker lost is dealt with, the next one it lost opens; else back to all of them.
+function nextLost() { const i = F.frames.findIndex(f => f.lost); F.open = null; if (i >= 0) { F.open = i; if (hasClip()) showAt(F.frames[i].ms / 1000); } }
+async function fix(i, x, y) {
+  if (F.busy || F.seeking || !hasClip()) return;
+  const f = F.frames[i], v = F.video, run = F.run, wasLost = f.lost;
+  const box = COACHM.clampBox({ x: Math.round(x - F.side / 2), y: Math.round(y - F.side / 2), side: F.side }, F.vw, F.vh);
+  F.busy = true; let blob;
+  try { blob = await cropOf(v, box); } catch (e) { if (run === F.run) clipFailed("cantOpen"); return; }
+  if (run !== F.run) return;
+  f.box = box; f.lost = false; setBlob(f, blob); F.busy = false; changed();
+  if (wasLost) nextLost(); else F.open = null;
+  go();
+}
+function leaveOut(i) { const f = F.frames[i], wasLost = f.lost; f.box = null; f.lost = false; changed(); if (wasLost) nextLost(); else F.open = null; go(); }
+
+// ---- Step 6, sending (AI coach spec, "Sending"): POST /coach/reviews with the answers, the language and each kept key frame's number,
+// time and box, for the review's id; then each key frame the server hasn't got, one at a time, as base64 text; then
+// POST /coach/reviews/{id}/send. A review already started is asked about first (GET /coach/reviews/{id}): its have says which key frames
+// are there, and one no longer uploading went through already. bad_frame, too_big, not_uploading and missing_frames go round once more by
+// themselves; a review the server no longer has (not_found: any 404) is started again once without asking, as when another tab of the
+// same account started one (ruling R12). Anything else, or the same again, ends on "Couldn't send. Tap to try again.", with the draft
+// still kept. A refused token (401) goes back to the chat, as everywhere in the coach.
+const AGAIN = new Set(["bad_frame", "too_big", "not_uploading", "missing_frames"]);
+async function send() {
+  const t = tokenNow(), kept = keptFrames();
+  if (F.busy || !t || kept.length < KEPT_MIN || !answered(F.answers)) return;
+  const run = ++F.run; F.busy = true; F.fail = false; F.screen = "send"; F.open = null; F.progress = [0, kept.length + 2]; go();
+  let r = { status: 0, code: null };
+  for (let restarts = 0, again = 0; ;) {
+    try { r = await sendRound(t, kept, run); } catch (e) { r = { status: 0, code: null }; }
+    if (run !== F.run) return;
+    if (r.ok) break;
+    if (r.code === "not_found" && restarts < 1) { restarts++; F.id = null; F.sent = []; saveDraft(); continue; }
+    if (AGAIN.has(r.code) && again < 1) { again++; continue; }
+    break;
+  }
+  F.busy = false;
+  if (r.ok) { dropDraft(); resetFlow(); V.sent = true; if (ME.me && Number.isInteger(r.left)) ME.me.left = r.left; V.top = true; V.focus = "sent"; render(); return ask(); }
+  F.screen = "check"; F.fail = true;
+  if (r.status === 401) { refused(t); ME.me = null; ME.token = null; }
+  go();
+}
+async function sendRound(t, kept, run) {
+  F.progress[0] = 0; if (F.bar) F.bar.value = 0;
+  if (F.id) {
+    const g = await coachReq("GET", `/coach/reviews/${F.id}`, t);
+    if (run !== F.run || g.status !== 200 || !g.json) return g;
+    if (g.json.status !== "uploading") return { ok: true, left: null };
+    const have = Array.isArray(g.json.have) ? g.json.have : [];
+    F.sent = kept.map(f => f.n).filter(n => have.includes(n));
+  } else {
+    const a = F.answers, body = { lang: lang(), move: a.move, move_other: a.move === "other" ? a.move_other.trim() : "", level: a.level, board: a.board, stance: a.stance,
+      note: upTo(a.note.trim(), NOTE_MAX), frames: kept.map(f => ({ n: f.n, ms: f.ms, box: [f.box.x, f.box.y, f.box.side] })) };
+    const s = await coachReq("POST", "/coach/reviews", t, JSON.stringify(body), "application/json");
+    if (run !== F.run || s.status !== 200) return s;
+    if (!s.json || typeof s.json.id !== "string" || !/^[A-Za-z0-9_-]{22}$/.test(s.json.id)) return { status: s.status, code: null };
+    F.id = s.json.id; F.sent = []; saveDraft();
+  }
+  stepOn();
+  for (const f of kept) {
+    if (!F.sent.includes(f.n)) {
+      const b64 = await base64(f.blob); if (run !== F.run) return {};
+      const r = await coachReq("POST", `/coach/reviews/${F.id}/frames/${f.n}`, t, b64, "text/plain");
+      if (run !== F.run || r.status !== 200) return r;
+      F.sent.push(f.n); saveDraft();
+    }
+    stepOn();
+  }
+  const d = await coachReq("POST", `/coach/reviews/${F.id}/send`, t, "{}", "application/json");
+  if (run !== F.run || d.status !== 200) return d;
+  return { ok: true, left: d.json && d.json.left };
+}
+const base64 = blob => new Promise((ok, no) => { const r = new FileReader();
+  r.onload = () => { const s = String(r.result); ok(s.slice(s.indexOf(",") + 1)); }; r.onerror = () => no(r.error || new Error("read")); r.readAsDataURL(blob); });
+// One request of the send, with its own fetch rather than call(): a 60 s timeout, for a weak beach connection, and 3 tries when the network
+// fails or the backend answers 5xx (but money, a rest that trying again won't end). The session token goes as a Bearer header, with no
+// cookies. Resolves to {status, json, code}: status 0 when the network failed, code the backend's error code, and any 404 not_found (the
+// Worker's own 404 too). Nothing goes while the coach is off for this visitor.
+async function coachReq(method, path, tok, body, type) {
+  let r = { status: 0, json: null, code: null };
+  for (let i = 0; i < 3 && can(); i++) {
+    if (i) await sleep(1000 * i);
+    r = await coachOnce(method, path, tok, body, type);
+    if (r.status !== 0 && (r.status < 500 || r.code === "money")) break;
+  }
+  return r;
+}
+async function coachOnce(method, path, tok, body, type) {
+  const ctl = typeof AbortController === "function" ? new AbortController() : null, timer = ctl ? setTimeout(() => ctl.abort(), 60e3) : 0;
+  const headers = { Authorization: "Bearer " + tok }; if (body !== undefined) headers["Content-Type"] = type;
+  try {
+    const res = await fetch(BASE + path, { method, headers, body, credentials: "omit", signal: ctl ? ctl.signal : undefined });
+    let json = null; try { json = await res.json(); } catch (e) {}
+    return { status: res.status, json, code: res.status === 404 ? "not_found" : json && typeof json.error === "string" ? json.error : null };
+  } catch (e) { return { status: 0, json: null, code: null }; } finally { clearTimeout(timer); }
 }
 
 // ---- The page's hooks (template.html). The coach is for the whole of Taiwan, so a spot only matters for html.tw, which boot() sets

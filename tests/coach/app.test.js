@@ -14,7 +14,9 @@
 //   everyone will see them once Bryan opens them (window.__chatPublic and window.__coachPublic). Anything but the page, the backend, the
 //   fake LINE and the fake AI is cut off.
 // - Helpers for the steps: signIn(page) signs a page in with LINE; makeAdmin() makes the seeded account u-bryan the admin, whose session
-//   token is token("u-bryan"); pick(page, clip) gives the coach's clip picker a clip from tests/coach/clips.js (makeClip); coachTrip(page)
+//   token is token("u-bryan"), and seeds the surfers u-ana, u-ben, u-cho and u-dan (token(uid) each), so the New review checks each have
+//   an account of their own, with its 2 reviews a month; pick(page, clip) gives the coach's clip picker a clip from tests/coach/clips.js
+//   (makeClip), and toCheck(page, …) runs New review to the check screen; coachTrip(page)
 //   runs the coach's sign-in (CHAT.signIn("coach"), or the panel's Sign in with LINE) to LINE and back, and landed(page) waits for the
 //   Coach panel with the room shut; coachApi(token, path, …) calls the backend as the page does, and sendReview(token) sends a review
 //   through it.
@@ -22,6 +24,7 @@
 const { chromium } = (() => { try { return require("playwright"); } catch (e) { return require("/opt/node22/lib/node_modules/playwright"); } })();
 const fs = require("fs"), path = require("path"), crypto = require("crypto"), { spawnSync } = require("child_process");
 const { SECRETS, wait, start } = require("../chat/servers.js");
+const { makeClip } = require("./clips.js");
 
 const [file] = process.argv.slice(2);
 if (!file) { console.error("usage: node tests/coach/app.test.js <page.html>"); process.exit(2); }
@@ -50,23 +53,48 @@ async function tearDown() { if (srv) await srv.tearDown(); if (line) await line.
 
 // Makes u-bryan the admin, as Bryan is: wrangler dev stops, the account goes straight into the room's SQLite file (python3's sqlite3) with
 // role admin and the room's meta admin_uid, and wrangler dev starts again on it (tests/chat/room.test.js seeds its room the same way).
-// Its session token is token("u-bryan"). Doing it again changes nothing.
+// Its session token is token("u-bryan"). The New review checks' surfers (SURFERS) go in the same way, with role user. Doing it again
+// changes nothing.
+const SURFERS = ["u-ana", "u-ben", "u-cho", "u-dan"];
 const ADMIN = String.raw`
 import json, sqlite3, sys
 d = json.load(sys.stdin); c = sqlite3.connect(d["db"])
 with c:
-    c.execute("INSERT OR IGNORE INTO users (id, sub_hash, nick, nick_key, role, tv, created, last_seen, nick_changed, consent_at, consent_ver) VALUES (?, ?, ?, ?, 'admin', 0, ?, ?, NULL, ?, 'v1')",
-              (d["id"], d["sub"], d["nick"], d["key"], d["created"], d["now"], d["created"]))
-    c.execute("INSERT OR IGNORE INTO subs (sub_hash, banned) VALUES (?, 0)", (d["sub"],))
-    c.execute("INSERT INTO meta (key, value) VALUES ('admin_uid', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", (d["id"],))
+    for u in d["users"]:
+        c.execute("INSERT OR IGNORE INTO users (id, sub_hash, nick, nick_key, role, tv, created, last_seen, nick_changed, consent_at, consent_ver) VALUES (?, ?, ?, ?, ?, 0, ?, ?, NULL, ?, 'v1')",
+                  (u["id"], u["sub"], u["nick"], u["key"], u["role"], d["created"], d["now"], d["created"]))
+        c.execute("INSERT OR IGNORE INTO subs (sub_hash, banned) VALUES (?, 0)", (u["sub"],))
+    c.execute("INSERT INTO meta (key, value) VALUES ('admin_uid', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", (d["admin"],))
 c.close()
 `;
 async function makeAdmin() {
   await srv.stopWrangler();
-  const now = Date.now(), run = spawnSync("python3", ["-I", "-c", ADMIN], { encoding: "utf8",
-    input: JSON.stringify({ db: srv.roomDb(), id: "u-bryan", sub: "sub-bryan", nick: "Bryan", key: "key-bryan", created: now - 40 * DAY, now }) });
+  const now = Date.now(), users = [{ id: "u-bryan", sub: "sub-bryan", nick: "Bryan", key: "key-bryan", role: "admin" },
+    ...SURFERS.map(id => ({ id, sub: "sub-" + id.slice(2), nick: id.slice(2, 3).toUpperCase() + id.slice(3), key: "key-" + id.slice(2), role: "user" }))];
+  const run = spawnSync("python3", ["-I", "-c", ADMIN], { encoding: "utf8", input: JSON.stringify({ db: srv.roomDb(), users, admin: "u-bryan", created: now - 40 * DAY, now }) });
   if (run.status !== 0) throw new Error("making u-bryan the admin failed: " + run.stderr);
   await srv.startWrangler();
+}
+// The coach's own SQLite file (its Durable Object's), while wrangler dev is stopped; and its meta "today" (the reviews sent this Taiwan
+// day) read, or written when value is given, with wrangler dev stopped and started again round it. Resolves to the value before.
+function coachDb() {
+  const dos = path.join(srv.tmp, "state", "v3", "do"), dir = fs.existsSync(dos) && fs.readdirSync(dos).find(n => /-Coach$/.test(n));
+  const db = dir && fs.readdirSync(path.join(dos, dir)).find(n => /^[0-9a-f]{64}\.sqlite$/.test(n));
+  if (!db) throw new Error("wrangler dev made no coach database"); return path.join(dos, dir, db);
+}
+const TODAY = String.raw`
+import json, sqlite3, sys
+d = json.load(sys.stdin); c = sqlite3.connect(d["db"])
+row = c.execute("SELECT value FROM meta WHERE key = 'today'").fetchone()
+with c:
+    if d["value"] is not None: c.execute("INSERT INTO meta (key, value) VALUES ('today', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", (d["value"],))
+c.close(); print(json.dumps(row[0] if row else None))
+`;
+async function coachToday(value) {
+  await srv.stopWrangler();
+  try { const run = spawnSync("python3", ["-I", "-c", TODAY], { encoding: "utf8", input: JSON.stringify({ db: coachDb(), value }) });
+    if (run.status !== 0) throw new Error("the coach's meta today: " + run.stderr); return JSON.parse(run.stdout); }
+  finally { await srv.startWrangler(); }
 }
 
 // ---- Helpers on a page.
@@ -133,8 +161,97 @@ async function appTrip(s, lineIp) {
   await a.waitForSelector(".chatroom .cr-pin-code", { state: "attached" });
   return { a, b, redeems, pin: await a.textContent(".chatroom .cr-pin-code") };
 }
-// Gives the coach's clip picker a clip (a path from makeClip), as the phone's own picker would. (The picker comes with New review.)
+// Gives the coach's clip picker a clip (a path from makeClip), as the phone's own picker would.
 const pick = (page, clip) => page.setInputFiles('.coachpanel input[type="file"]', clip);
+// ---- New review. The test clip: 640x360, 6 s, its white box (the surfer) sliding left to right halfway down (tests/coach/clips.js), in
+// the scratch folder. Here is at 3.0 s, where the box's centre is at (320, 180) in the video's pixels, and the 12 key frames fall every
+// 0.25 s from 1.5 s to 4.25 s.
+const clip = () => makeClip(path.join(srv.tmp, "clips"), { w: 640, h: 360, secs: 6 });
+const HERE = 3, AT = { x: 320, y: 180 }, TIMES = [1500, 1750, 2000, 2250, 2500, 2750, 3000, 3250, 3500, 3750, 4000, 4250];
+const inPanel = (page, what, sel, timeout = 15e3) => page.waitForSelector(".coachpanel " + sel, { timeout }).catch(e => { throw new Error(`waited for ${what}: ${e.message.split("\n")[0]}`); });
+const text = (page, sel) => page.evaluate(s => { const e = document.querySelector(".coachpanel " + s); return e ? e.textContent : null; }, sel);
+// Runs New review from the panel's main view to the check screen: New review, the clip, the questions (answer()), Find the move and Tap
+// yourself (tapYourself()). Resolves once all 12 close-ups show, none lost; with go: false, on Find the move with the slider at Here.
+async function toCheck(page, { move = "top_turn", note = null, go = true } = {}) {
+  await inPanel(page, "New review", '[data-k="new"]'); await page.click('.coachpanel [data-k="new"]');
+  await pick(page, clip()); await answer(page, { move, note });
+  if (go) await tapYourself(page);
+}
+// The questions: the move, and the level, board and stance unless the profile has them (starting to turn, shortboard, goofy), the note
+// when there is one, and Next; then the slider at Here.
+async function answer(page, { move = "top_turn", note = null } = {}) {
+  await inPanel(page, "the questions", `[data-k="move-${move}"]`); await page.click(`.coachpanel [data-k="move-${move}"]`);
+  if (!await page.$(".coachpanel .co-sum")) for (const k of ["level-starting_turns", "board-shortboard", "stance-goofy"]) await page.click(`.coachpanel [data-k="${k}"]`);
+  if (note !== null) await page.fill('.coachpanel [data-k="note"]', note);
+  await page.click('.coachpanel [data-k="next"]');
+  await inPanel(page, "the slider", '[data-k="slider"]:not([disabled])');
+  await page.evaluate(t => { const r = document.querySelector('.coachpanel [data-k="slider"]'); r.value = String(t); r.dispatchEvent(new Event("input", { bubbles: true })); }, HERE);
+  await page.waitForFunction(t => { const v = document.querySelector(".coachpanel video"); return !!v && !v.seeking && Math.abs(v.currentTime - t) < 0.02; }, HERE);
+}
+// Here, then a tap on the white box in the frame; resolves once the 12 close-ups show, none lost.
+async function tapYourself(page) {
+  await page.click('.coachpanel [data-k="here"]'); await inPanel(page, "the frame, ready for a tap", ".co-frame[data-ready]");
+  const p = await page.evaluate(([x, y]) => { const r = document.querySelector(".coachpanel .co-zoom").getBoundingClientRect(), v = document.querySelector(".coachpanel .co-zoom video");
+    return { x: r.left + x / v.videoWidth * r.width, y: r.top + y / v.videoHeight * r.height }; }, [AT.x, AT.y]);
+  await page.touchscreen.tap(p.x, p.y);
+  await inPanel(page, "the 12 close-ups", ".co-grid", 30e3);
+  const lost = await page.$$eval(".coachpanel .co-tile.co-lost", e => e.length);
+  if (lost) throw new Error(`the tracker lost the white box in ${lost} key frames`);
+}
+// The draft in IndexedDB (waveslave-coach, draft, "current"), each key frame's blob as its size; null when there's none.
+const draft = page => page.evaluate(() => new Promise(ok => { const q = indexedDB.open("waveslave-coach");
+  q.onerror = () => ok({ error: String(q.error) });
+  q.onsuccess = () => { const d = q.result; if (!d.objectStoreNames.contains("draft")) return ok(null);
+    const g = d.transaction("draft").objectStore("draft").get("current");
+    g.onsuccess = () => { const r = g.result; ok(r ? { ...r, frames: r.frames.map(f => ({ ...f, blob: f.blob instanceof Blob ? f.blob.size : null })) } : null); }; g.onerror = () => ok({ error: String(g.error) }); }; }));
+// Notes the coach's calls a page makes (method, path, the body as text, and the answer's status), in s.calls.
+function watchCalls(page) {
+  const calls = [];
+  page.on("requestfinished", async r => { if (!r.url().startsWith(CHAT() + "/coach/reviews")) return; const res = await r.response().catch(() => null);
+    calls.push({ method: r.method(), path: r.url().slice(CHAT().length), body: r.postData(), status: res ? res.status() : 0 }); });
+  page.on("requestfailed", r => { if (r.url().startsWith(CHAT() + "/coach/reviews")) calls.push({ method: r.method(), path: r.url().slice(CHAT().length), body: r.postData(), status: 0 }); });
+  return calls;
+}
+const framesOf = calls => calls.filter(c => c.method === "POST" && /\/frames\/\d+$/.test(c.path)).map(c => ({ n: +c.path.split("/").pop(), status: c.status, body: c.body }));
+const startsOf = calls => calls.filter(c => c.method === "POST" && c.path === "/coach/reviews");
+// Each key frame sent (base64 text), decoded in the page: its size and its bytes.
+const decode = (page, bodies) => page.evaluate(bodies => Promise.all(bodies.map(async b => { const bytes = Uint8Array.from(atob(b), c => c.charCodeAt(0));
+  const bm = await createImageBitmap(new Blob([bytes], { type: "image/jpeg" })); return { w: bm.width, h: bm.height, bytes: bytes.length }; })), bodies);
+// This Taiwan month's name, and its number.
+const twMonth = () => { const d = new Date(Date.now() + 8 * 3600e3); return { name: d.toLocaleString("en", { month: "long", timeZone: "UTC" }), n: d.getUTCMonth() + 1 }; };
+// Holds a page's coach calls matching `match` (method and path) while shut: valve.held is how many wait; release() lets the first go,
+// open() lets them all go and the rest through.
+// drop() aborts the ones waiting (after a reload, so they never reach the backend).
+async function valve(page, match) {
+  const v = { shut: true, held: [] };
+  await page.route(CHAT() + "/coach/reviews/**", r => { const q = r.request(), p = q.url().slice(CHAT().length);
+    if (!match(q.method(), p) || !v.shut) return r.continue();
+    return new Promise(done => v.held.push(how => { done(); return (how === "abort" ? r.abort() : r.continue()).catch(() => {}); })); });
+  v.release = () => { const f = v.held.shift(); if (f) f(); };
+  v.drop = () => { while (v.held.length) v.held.shift()("abort"); };
+  v.open = () => { v.shut = false; while (v.held.length) v.release(); };
+  v.wait = (n, what) => (async () => { for (let i = 0; i < 300 && v.held.length < n; i++) await wait(100); if (v.held.length < n) throw new Error(`waited 30 s for ${what}`); })();
+  return v;
+}
+const isFrame = (m, p) => m === "POST" && /\/frames\/\d+$/.test(p);
+// An init script noting each play() and pause() of a video (window.__media).
+function watchMedia() { window.__media = []; for (const k of ["play", "pause"]) { const f = HTMLMediaElement.prototype[k];
+  HTMLMediaElement.prototype[k] = function () { window.__media.push(k); return f.apply(this, arguments); }; } }
+// Waits up to 10 s for check() to come true (calls the page made, a draft written), and says what it waited for when it doesn't.
+async function soon(what, check) { for (let i = 0; i < 100; i++) { if (await check()) return; await wait(100); } throw new Error(`waited 10 s for ${what}`); }
+// The picker: "Choose a clip", the privacy line just under it, and the phone's picker for videos.
+const picker = page => page.evaluate(() => { const c = document.querySelector(".coachpanel .co-choose"), p = document.querySelector(".coachpanel .co-privacy"), i = c && c.querySelector('input[type="file"]');
+  return { choose: c && c.textContent, privacy: p && p.textContent, under: !!c && !!p && c.nextElementSibling === p && p.getBoundingClientRect().top >= c.getBoundingClientRect().bottom - 1, accept: i && i.accept }; });
+// Signed in on a page of its own: the token in localStorage (and more of store), the Coach panel open, its count shown.
+async function coachPage(s, tok, { store = {}, init = [] } = {}) {
+  const page = await s.open({ store: { "waveslave-chat-token": tok, ...store }, init });
+  await page.tap(TAB); await panelOpen(page);
+  await until(page, "the signed-in panel", () => !!document.querySelector(".coachpanel .co-left"));
+  return page;
+}
+const agreeFor = async tok => { const r = await coachApi(tok, "/coach/agree", { method: "POST", body: { ver: "c1", adult: true } }); if (r.status !== 200) throw new Error(`POST /coach/agree answered ${r.status}`); };
+const twDay = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+const SENT = "Sent. Your feedback comes within a day.", PRIVACY = "Only key frames are sent. Your video never leaves your phone.", FAILED = "Couldn't send. Tap to try again.";
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 // A call to the coach's backend as the page makes it, from the page's origin with tok as the session token: body goes as JSON, text as
 // text/plain (a key frame's base64). Resolves to {status, json}.
@@ -521,6 +638,177 @@ const STEPS = {
       if (!admin && st.text) throw new Error(`the surfer's panel has ${JSON.stringify(st.text)}`);
     }
   },
+  // ---- New review (AI coach spec, "New review", steps 1-6), against the real backend, with the 640x360 test clip. The LINE account
+  // (agreed, both its reviews left): New review shows "Choose a clip" with the privacy line just under it, the phone's picker for videos;
+  // the clip goes into a muted inline <video> and isn't played until the first tap on the questions, which plays it and pauses it at once.
+  // The questions (no profile yet, so the level, board and stance too, and a note), Find the move at Here, a tap on the white box, the 12
+  // close-ups, and Send: POST /coach/reviews with the answers, en, and the 12 key frames' times and boxes (inside the clip), 12 uploads of
+  // a 784x784 JPEG of at most 100 KB each (decoded in the page), then send. "Sent. Your feedback comes within a day.", one review fewer
+  // left, the review in the list, and no draft kept.
+  async flowEn(s) {
+    const m = twMonth(), page = await coachPage(s, await s.surfer.evaluate(() => CHAT.token()), { init: [watchMedia] }), calls = watchCalls(page);
+    const left = await text(page, ".co-left");
+    if (left !== `2 of 2 reviews left in ${m.name}`) throw new Error(`before sending the panel says ${JSON.stringify(left)}`);
+    await page.click('.coachpanel [data-k="new"]'); await inPanel(page, "the picker", ".co-choose");
+    const pk = await picker(page);
+    if (!eq(pk, { choose: "Choose a clip", privacy: PRIVACY, under: true, accept: "video/*" })) throw new Error(`the picker: ${JSON.stringify(pk)}`);
+    await pick(page, clip()); await inPanel(page, "the questions", '[data-k="move-top_turn"]');
+    const v = await page.evaluate(() => { const v = document.querySelector(".coachpanel video"); return v && { muted: v.muted, inline: v.playsInline, blob: v.src.startsWith("blob:"), media: window.__media.slice() }; });
+    if (!eq(v, { muted: true, inline: true, blob: true, media: [] })) throw new Error(`the clip, before a tap: ${JSON.stringify(v)}`);
+    await page.click('.coachpanel [data-k="move-top_turn"]');
+    const media = await page.evaluate(() => window.__media.slice());
+    if (!eq(media, ["play", "pause"])) throw new Error(`the first tap on the questions called ${JSON.stringify(media)}, want play then pause`);
+    await answer(page, { note: "Trying to make my carve better." }); await tapYourself(page);
+    const grid = await page.$$eval(".coachpanel .co-tile", t => t.map(e => e.querySelector(".co-t").textContent));
+    if (grid.length !== 12) throw new Error(`the check screen shows ${grid.length} close-ups`);
+    await page.click('.coachpanel [data-k="send"]');
+    await until(page, "Sent", t => { const e = document.querySelector('.coachpanel [data-k="sent"]'); return !!e && e.textContent === t; }, SENT, 60e3);
+    await soon("the send in the calls", () => calls.some(c => c.method === "POST" && /\/send$/.test(c.path)));
+    await until(page, "one review fewer left", t => { const e = document.querySelector(".coachpanel .co-left"); return !!e && e.textContent === t; }, `1 of 2 reviews left in ${m.name}`);
+    const starts = startsOf(calls), frames = framesOf(calls), sends = calls.filter(c => c.method === "POST" && /\/send$/.test(c.path));
+    if (starts.length !== 1 || starts[0].status !== 200) throw new Error(`POST /coach/reviews went ${starts.length} times: ${JSON.stringify(starts.map(c => c.status))}`);
+    const body = JSON.parse(starts[0].body), { frames: kf, ...rest } = body;
+    if (!eq(rest, { lang: "en", move: "top_turn", move_other: "", level: "starting_turns", board: "shortboard", stance: "goofy", note: "Trying to make my carve better." })) throw new Error(`the start sent ${JSON.stringify(rest)}`);
+    if (!eq(kf.map(f => f.n), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) || !eq(kf.map(f => f.ms), TIMES)) throw new Error(`the start's key frames: ${JSON.stringify(kf.map(f => [f.n, f.ms]))}`);
+    const out = kf.filter(f => !(Array.isArray(f.box) && f.box[2] === 120 && f.box[0] >= 0 && f.box[1] >= 0 && f.box[0] + f.box[2] <= 640 && f.box[1] + f.box[2] <= 360));
+    if (out.length) throw new Error(`boxes outside the 640x360 clip: ${JSON.stringify(out)}`);
+    if (!eq(frames.map(f => [f.n, f.status]), kf.map(f => [f.n, 200]))) throw new Error(`the uploads: ${JSON.stringify(frames.map(f => [f.n, f.status]))}`);
+    const jpegs = await decode(page, frames.map(f => f.body)), bad = jpegs.filter(j => j.w !== 784 || j.h !== 784 || j.bytes > 102400);
+    if (bad.length) throw new Error(`uploads that aren't 784x784 JPEGs of at most 100 KB: ${JSON.stringify(bad)}`);
+    if (sends.length !== 1 || sends[0].status !== 200) throw new Error(`send went ${sends.length} times: ${JSON.stringify(sends.map(c => c.status))}`);
+    const today = new Date(Date.now() + 8 * 3600e3), date = `${today.getUTCDate()} ${m.name}`;
+    await until(page, "the review in the list", () => !!document.querySelector(".coachpanel .co-list li"));
+    const rows = await page.$$eval(".coachpanel .co-list li", ls => ls.map(li => [...li.querySelectorAll(".co-mv, .co-date, .co-st")].map(e => e.textContent)));
+    if (!eq(rows, [["Top turn", date, "Coach is reviewing"]])) throw new Error(`the list shows ${JSON.stringify(rows)}`);
+    await soon("the draft to go", async () => await draft(page) === null);
+  },
+  // The same in 中文 (u-ana's account): the count, the picker with the privacy line under it, Find the move's line naming the move, the
+  // check screen and Send in 中文, "已送出。一天內會收到講評。", and POST /coach/reviews with lang zh; 12 uploads of 784x784 JPEGs of at
+  // most 100 KB.
+  async flowZh(s) {
+    const tok = token("u-ana"), m = twMonth(); await agreeFor(tok);
+    const page = await coachPage(s, tok, { store: { "waveslave-lang": "zh" } }), calls = watchCalls(page);
+    const left = await text(page, ".co-left");
+    if (left !== `${m.n}月還剩 2 次講評（共 2 次）`) throw new Error(`before sending the panel says ${JSON.stringify(left)}`);
+    await page.click('.coachpanel [data-k="new"]'); await inPanel(page, "the picker", ".co-choose");
+    const pk = await picker(page);
+    if (!eq(pk, { choose: "選擇影片", privacy: "只會傳送關鍵影格，你的影片不會離開你的手機。", under: true, accept: "video/*" })) throw new Error(`the picker: ${JSON.stringify(pk)}`);
+    await pick(page, clip()); await answer(page);
+    const find = await page.evaluate(() => [...document.querySelectorAll(".coachpanel .co-flow h3, .coachpanel .co-flow h3 + p, .coachpanel [data-k=\"here\"]")].map(e => e.textContent));
+    if (!eq(find, ["找到動作", "拖動滑桿到你的頂部轉向，再按「這裡」。", "這裡"])) throw new Error(`Find the move in 中文: ${JSON.stringify(find)}`);
+    await tapYourself(page);
+    const check = await page.evaluate(() => [document.querySelector(".coachpanel .co-flow h3").textContent, document.querySelector('.coachpanel [data-k="send"]').textContent]);
+    if (!eq(check, ["每個關鍵影格裡都是你嗎？", "傳送給教練"])) throw new Error(`the check screen in 中文: ${JSON.stringify(check)}`);
+    await page.click('.coachpanel [data-k="send"]');
+    await until(page, "已送出", t => { const e = document.querySelector('.coachpanel [data-k="sent"]'); return !!e && e.textContent === t; }, "已送出。一天內會收到講評。", 60e3);
+    await until(page, "one review fewer left", t => { const e = document.querySelector(".coachpanel .co-left"); return !!e && e.textContent === t; }, `${m.n}月還剩 1 次講評（共 2 次）`);
+    await soon("the send in the calls", () => calls.some(c => c.method === "POST" && /\/send$/.test(c.path)));
+    const starts = startsOf(calls), frames = framesOf(calls);
+    if (starts.length !== 1 || JSON.parse(starts[0].body).lang !== "zh") throw new Error(`the starts: ${JSON.stringify(starts.map(c => c.body))}`);
+    const jpegs = await decode(page, frames.map(f => f.body)), bad = jpegs.filter(j => j.w !== 784 || j.h !== 784 || j.bytes > 102400);
+    if (frames.length !== 12 || bad.length) throw new Error(`${frames.length} uploads, these not 784x784 JPEGs of at most 100 KB: ${JSON.stringify(bad)}`);
+  },
+  // A reload during the slider (u-ben's account): the draft says find, with the answers. The panel then asks "Pick up where you left
+  // off?" naming the move; Pick up asks for the same clip again, which goes straight to Find the move, the questions answered. ‹ Back to
+  // the questions (still answered), ‹ Back to the panel, and Start over clears the draft: a fresh picker.
+  async reloadSlider(s) {
+    const tok = token("u-ben"); await agreeFor(tok);
+    const page = s.ben = await coachPage(s, tok);
+    await toCheck(page, { move: "cutback", note: "Left hand lower", go: false });
+    let d = null; await soon("the draft at Find the move", async () => (d = await draft(page)) && d.step === "find");
+    if (!eq(d.answers, { move: "cutback", move_other: "", note: "Left hand lower", level: "starting_turns", board: "shortboard", stance: "goofy" }) || d.frames.length || d.id !== null)
+      throw new Error(`the draft at Find the move: ${JSON.stringify(d)}`);
+    await page.reload({ waitUntil: "load" }); await page.tap(TAB); await panelOpen(page);
+    await inPanel(page, "Pick up where you left off?", ".co-resume");
+    const offer = await page.$$eval(".coachpanel .co-resume > *", e => e.map(x => x.textContent));
+    if (!eq(offer, ["Pick up where you left off?", "Cutback", "Pick up", "Start over"])) throw new Error(`the offer: ${JSON.stringify(offer)}`);
+    await page.click('.coachpanel [data-k="pickup"]'); await inPanel(page, "the picker", ".co-choose");
+    const again = await page.evaluate(() => [...document.querySelectorAll(".coachpanel .co-flow .co-note")].map(e => e.textContent));
+    if (!again.includes("Choose the same clip again to pick up where you left off.")) throw new Error(`picking up shows ${JSON.stringify(again)}`);
+    await pick(page, clip()); await inPanel(page, "Find the move", '[data-k="slider"]:not([disabled])');
+    const find = await page.evaluate(() => ({ head: document.querySelector(".coachpanel .co-flow h3").textContent, line: document.querySelector(".coachpanel .co-flow h3 + p").textContent, questions: !!document.querySelector('.coachpanel [data-k^="move-"]') }));
+    if (!eq(find, { head: "Find the move", line: "Slide to your cutback and tap Here.", questions: false })) throw new Error(`after the same clip: ${JSON.stringify(find)}`);
+    await page.click('.coachpanel [data-k="back"]'); await inPanel(page, "the questions", '[data-k="move-cutback"]');
+    const q = await page.evaluate(() => ({ move: document.querySelector('.coachpanel [data-k="move-cutback"]').getAttribute("aria-pressed"), note: document.querySelector('.coachpanel [data-k="note"]').value }));
+    if (!eq(q, { move: "true", note: "Left hand lower" })) throw new Error(`‹ Back to the questions: ${JSON.stringify(q)}`);
+    await page.click('.coachpanel [data-k="back"]'); await inPanel(page, "Pick up where you left off?", ".co-resume");
+    await page.click('.coachpanel [data-k="over"]'); await inPanel(page, "the picker", ".co-choose");
+    const fresh = await page.evaluate(() => ({ head: document.querySelector(".coachpanel .co-flow h3").textContent, again: [...document.querySelectorAll(".coachpanel .co-flow .co-note")].some(e => /same clip/.test(e.textContent)) }));
+    if (!eq(fresh, { head: "New review", again: false })) throw new Error(`after Start over: ${JSON.stringify(fresh)}`);
+    await soon("Start over to clear the draft", async () => await draft(page) === null);
+  },
+  // A reload after the key frames are cut, partway through sending: 5 of the 12 are on the server when the page reloads (the 6th never
+  // got there). Pick up where you left off? says the key frames are ready, and Pick up goes straight to the check screen, all 12 there
+  // without the clip (so no + or −). Send asks GET /coach/reviews/{id} first and sends only the 7 the server lacks, then send; no new
+  // start. The review is sent, all 12 key frames on the server.
+  async reloadAfterFrames(s) {
+    const page = s.ben, tok = token("u-ben"), calls = watchCalls(page);
+    await pick(page, clip()); await answer(page, { move: "cutback" }); await tapYourself(page);
+    const v = await valve(page, (m, p) => isFrame(m, p) && +p.split("/").pop() > 5);
+    await page.click('.coachpanel [data-k="send"]'); await v.wait(1, "the 6th key frame's upload");
+    let d = null; await soon("the draft with 5 key frames sent", async () => (d = await draft(page)) && eq(d.sent, [1, 2, 3, 4, 5]));
+    if (d.step !== "check" || d.frames.length !== 12 || d.frames.some(f => !f.blob) || !/^[A-Za-z0-9_-]{22}$/.test(d.id || "")) throw new Error(`the draft partway: ${JSON.stringify({ ...d, frames: d.frames.length })}`);
+    await page.reload({ waitUntil: "load" }); v.drop(); await page.unroute(CHAT() + "/coach/reviews/**");
+    const mark = calls.length;
+    await page.tap(TAB); await panelOpen(page); await inPanel(page, "Pick up where you left off?", ".co-resume");
+    const offer = await page.$$eval(".coachpanel .co-resume > *", e => e.map(x => x.textContent));
+    if (!eq(offer, ["Pick up where you left off?", "Cutback", "Your key frames are ready.", "Pick up", "Start over"])) throw new Error(`the offer: ${JSON.stringify(offer)}`);
+    await page.click('.coachpanel [data-k="pickup"]'); await inPanel(page, "the check screen", ".co-grid");
+    const st = await page.evaluate(() => ({ tiles: document.querySelectorAll(".coachpanel .co-tile").length, size: !!document.querySelector('.coachpanel [data-k="bigger"], .coachpanel [data-k="smaller"]') }));
+    if (!eq(st, { tiles: 12, size: false })) throw new Error(`the check screen after a reload: ${JSON.stringify(st)}`);
+    await page.click('.coachpanel [data-k="send"]');
+    await until(page, "Sent", t => { const e = document.querySelector('.coachpanel [data-k="sent"]'); return !!e && e.textContent === t; }, SENT, 60e3);
+    await soon("the send in the calls", () => calls.slice(mark).some(c => /\/send$/.test(c.path)));
+    const after = calls.slice(mark).map(c => [c.method, c.path.replace(d.id, "{id}"), c.status]);
+    const want = [["GET", "/coach/reviews/{id}", 200], ...[6, 7, 8, 9, 10, 11, 12].map(n => ["POST", `/coach/reviews/{id}/frames/${n}`, 200]), ["POST", "/coach/reviews/{id}/send", 200]];
+    if (!eq(after, want)) throw new Error(`after the reload the page asked ${JSON.stringify(after)}`);
+    const r = await coachApi(tok, `/coach/reviews/${d.id}`);
+    if (r.status !== 200 || r.json.status === "uploading" || !eq(r.json.have, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])) throw new Error(`the server's review: ${r.status} ${JSON.stringify(r.json)}`);
+  },
+  // The day fills up (meta today at the daily limit) between the start and send (u-dan's account): send answers 429 full_today and the
+  // page says "Couldn't send. Tap to try again.", the draft still in IndexedDB with all 12 key frames, the review's id and every frame sent.
+  async fullToday(s) {
+    const tok = token("u-dan"); await agreeFor(tok);
+    const page = await coachPage(s, tok), calls = watchCalls(page);
+    await toCheck(page);
+    const v = await valve(page, (m, p) => m === "POST" && /\/send$/.test(p));
+    await page.click('.coachpanel [data-k="send"]'); await v.wait(1, "send");
+    const old = await coachToday(JSON.stringify({ day: twDay(), n: 10 }));
+    try {
+      v.open();
+      await until(page, "Couldn't send", t => { const e = document.querySelector('.coachpanel [data-k="retry"]'); return !!e && e.textContent === t; }, FAILED, 30e3);
+      const sends = calls.filter(c => /\/send$/.test(c.path)).map(c => c.status);
+      if (!eq(sends, [429])) throw new Error(`send answered ${JSON.stringify(sends)}`);
+      const d = await draft(page);
+      if (!d || d.step !== "check" || d.frames.length !== 12 || d.frames.some(f => !f.blob) || !d.id || !eq(d.sent, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])) throw new Error(`after full_today the draft is ${JSON.stringify(d && { ...d, frames: d.frames.length })}`);
+    } finally { await coachToday(old !== null ? old : JSON.stringify({ day: "2000-01-01", n: 0 })); }
+    const me = await coachApi(tok, "/coach/me");
+    if (me.status !== 200 || me.json.left !== 2) throw new Error(`after full_today u-dan has ${me.json && me.json.left} reviews left, want 2`);
+  },
+  // Review Focus 2: the same account in two tabs (u-cho's). Both get to Send; A starts, then B starts, which drops A's review still
+  // uploading (R12). A's first key frame then meets not_found and A starts again once, silently, dropping B's; B's first key frame meets
+  // not_found too and B starts again and goes through; A's next key frame meets not_found again and A ends on "Couldn't send. Tap to try
+  // again.", its draft kept. One review on the server, one fewer left, and B's draft gone.
+  async twoTabs(s) {
+    const tok = token("u-cho"); await agreeFor(tok);
+    const a = await coachPage(s, tok), b = await coachPage(s, tok), ca = watchCalls(a), cb = watchCalls(b);
+    await toCheck(a); await toCheck(b);
+    const va = await valve(a, isFrame), vb = await valve(b, isFrame);
+    await a.click('.coachpanel [data-k="send"]'); await va.wait(1, "A's first key frame");
+    await b.click('.coachpanel [data-k="send"]'); await vb.wait(1, "B's first key frame");
+    va.release(); await va.wait(1, "A's first key frame after starting again");
+    vb.open();
+    await until(b, "B's Sent", t => { const e = document.querySelector('.coachpanel [data-k="sent"]'); return !!e && e.textContent === t; }, SENT, 60e3);
+    va.open();
+    await until(a, "A's Couldn't send", t => { const e = document.querySelector('.coachpanel [data-k="retry"]'); return !!e && e.textContent === t; }, FAILED, 30e3);
+    await soon("A's calls", () => framesOf(ca).length >= 2);
+    const got = { aStarts: startsOf(ca).map(c => c.status), aFrames: framesOf(ca).map(f => f.status), bStarts: startsOf(cb).map(c => c.status), bFrames: framesOf(cb).map(f => f.status) };
+    if (!eq(got, { aStarts: [200, 200], aFrames: [404, 404], bStarts: [200, 200], bFrames: [404, ...Array(12).fill(200)] })) throw new Error(`the two tabs: ${JSON.stringify(got)}`);
+    const me = await coachApi(tok, "/coach/me");
+    if (me.status !== 200 || me.json.reviews.length !== 1 || me.json.left !== 1) throw new Error(`the server has ${me.json && me.json.reviews.length} reviews for u-cho, ${me.json && me.json.left} left`);
+    const da = await draft(a), db = await draft(b);
+    if (db !== null || !da || da.frames.length !== 12) throw new Error(`the drafts: A's ${da ? "kept" : "gone"}, B's ${db ? "kept" : "gone"}`);
+  },
 };
 
 (async () => {
@@ -530,8 +818,8 @@ const STEPS = {
     // blank page (s.go(page) opens it there). pub: false leaves the chat and the coach to developer mode, which is off; unlocked: false
     // leaves the World PIN out of this visit, and pin: true puts a stand-in for its box (web/head.html's wsPin) that only notes it was
     // asked (window.__pinAsked = {done, cancel}), as tests/chat/shell.test.js does; store is put in localStorage on every load; at is the
-    // address to open, by default /#<spot>.
-    async open({ spot = "jinshan", go = true, pub = true, unlocked = true, pin = false, store = {}, at = null }) {
+    // address to open, by default /#<spot>; init are more init scripts (functions).
+    async open({ spot = "jinshan", go = true, pub = true, unlocked = true, pin = false, store = {}, at = null, init = [] }) {
       const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block", acceptDownloads: true });
       ctxs.push(ctx);
       await ctx.route("**/*", r => { const u = r.request().url(); return [ORIGIN(), CHAT(), line.url, ai.url].some(o => u.startsWith(o + "/")) ? r.continue() : r.abort(); });
@@ -542,6 +830,7 @@ const STEPS = {
         if (o.pin) { const stub = (done, cancel) => { window.__pinAsked = { done, cancel }; };
           Object.defineProperty(window, "wsPin", { configurable: true, get: () => stub, set: () => {} }); } },
         [{ url: CHAT(), contact: CONTACT, pub, unlocked, pin, store }, LOCK]);
+      for (const i of init) await ctx.addInitScript(i);
       const page = await ctx.newPage(); page.on("pageerror", e => errs.push(String(e)));
       page.at = at || `/#${spot}`; page.pub = pub;
       if (go) await s.go(page);

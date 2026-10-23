@@ -50,7 +50,26 @@ function script(name) {
   return body.join("\n");
 }
 
-// Runs a step's script with the secrets in `secrets` (and no others of the seven) in a scratch RUNNER_TEMP. Returns
+// The `env:` lines of the step called `name`, as {NAME: "${{ secrets.NAME }}"}: what GitHub hands the step's script.
+function stepEnv(name) {
+  const lines = WORKFLOW.split("\n");
+  const at = lines.findIndex((line) => line.trim() === `- name: ${name}`);
+  assert.ok(at >= 0, `no step called ${name}`);
+  const start = lines.findIndex((line, i) => i > at && line.trim() === "env:");
+  const run = lines.findIndex((line, i) => i > at && line.trim() === "run: |");
+  assert.ok(start > at && start < run, `${name} has no env: block before its run:`);
+  const indent = lines[start].search(/\S/);
+  const env = {};
+  for (const line of lines.slice(start + 1, run)) {
+    if (line.trim() === "" || line.trim().startsWith("#")) continue;
+    if (line.search(/\S/) <= indent) break;
+    const [key, ...rest] = line.trim().split(": ");
+    env[key] = rest.join(": ");
+  }
+  return env;
+}
+
+// Runs a step's script with the secrets in `secrets` (and no other secrets) in a scratch RUNNER_TEMP. Returns
 // what it wrote to GITHUB_OUTPUT and the secrets file, when there is one.
 function runStep(name, secrets) {
   const dir = mkdtempSync(join(tmpdir(), "chat-deploy-"));
@@ -114,4 +133,56 @@ test("the check names every secret the deploy needs", { skip: NO_BASH }, () => {
     assert.equal(output, "ready=false\n", name);
     assert.match(stdout, new RegExp(`Missing secrets: ${name}\\.`));
   }
+});
+
+// The coach's two secrets (AI coach spec, "Deploy"). They are optional: the chat deploys without them, and the coach
+// then takes a break. GitHub gives a secret that isn't set as an empty string, so an empty one, or one of only spaces
+// and line breaks, is left out of the file. Left out, the Worker keeps whatever it had (`wrangler deploy
+// --secrets-file` keeps secrets it isn't given), and before the first key there is nothing to keep.
+const CHAT_FIVE = {
+  LINE_CHANNEL_ID: SET.LINE_CHANNEL_ID,
+  LINE_CHANNEL_SECRET: SET.LINE_CHANNEL_SECRET,
+  SESSION_SECRET: SET.SESSION_SECRET,
+  SUB_PEPPER: SET.SUB_PEPPER,
+  ADMIN_CODE: SET.ADMIN_CODE,
+};
+
+test("the secrets file step is given both coach secrets from GitHub, and the check is given neither", () => {
+  const file = stepEnv("Write the secrets file");
+  assert.equal(file.ANTHROPIC_API_KEY, "${{ secrets.ANTHROPIC_API_KEY }}");
+  assert.equal(file.RESEND_API_KEY, "${{ secrets.RESEND_API_KEY }}");
+  for (const name of Object.keys(CHAT_FIVE)) assert.equal(file[name], `\${{ secrets.${name} }}`, name);
+  const check = stepEnv("Check the secrets are set");
+  assert.deepEqual(Object.keys(check).sort(), [...NAMES].sort());
+});
+
+test("with both coach secrets empty, as GitHub gives unset ones, the file holds exactly the five chat secrets", { skip: NO_JQ }, () => {
+  const { file } = runStep("Write the secrets file", { ...SET, ANTHROPIC_API_KEY: "", RESEND_API_KEY: "" });
+  assert.deepEqual(JSON.parse(file), CHAT_FIVE);
+});
+
+test("a coach secret of only spaces and line breaks is left out, like an empty one", { skip: NO_JQ }, () => {
+  const { file } = runStep("Write the secrets file", { ...SET, ANTHROPIC_API_KEY: " \n", RESEND_API_KEY: "\t\r\n" });
+  assert.deepEqual(JSON.parse(file), CHAT_FIVE);
+});
+
+test("a coach secret goes in trimmed of the spaces and line breaks a paste brought along", { skip: NO_JQ }, () => {
+  const { file } = runStep("Write the secrets file", { ...SET, ANTHROPIC_API_KEY: "  sk-ant-x \n", RESEND_API_KEY: "" });
+  assert.deepEqual(JSON.parse(file), { ...CHAT_FIVE, ANTHROPIC_API_KEY: "sk-ant-x" });
+});
+
+test("with only the email key set, only it is added", { skip: NO_JQ }, () => {
+  const { file } = runStep("Write the secrets file", { ...SET, ANTHROPIC_API_KEY: "", RESEND_API_KEY: "re_x\n" });
+  assert.deepEqual(JSON.parse(file), { ...CHAT_FIVE, RESEND_API_KEY: "re_x" });
+});
+
+test("with both coach secrets set, both are added, symbols and all", { skip: NO_JQ }, () => {
+  const keys = { ANTHROPIC_API_KEY: "sk-ant-a+b/c=d_e-f", RESEND_API_KEY: "re_a\"b\\c d" };
+  const { file } = runStep("Write the secrets file", { ...SET, ...keys });
+  assert.deepEqual(JSON.parse(file), { ...CHAT_FIVE, ...keys });
+});
+
+test("the check is ready with the coach secrets empty or not given at all: chat deploys never wait on the coach", { skip: NO_BASH }, () => {
+  assert.equal(runStep("Check the secrets are set", { ...SET, ANTHROPIC_API_KEY: "", RESEND_API_KEY: "" }).output, "ready=true\n");
+  assert.equal(runStep("Check the secrets are set", SET).output, "ready=true\n");
 });

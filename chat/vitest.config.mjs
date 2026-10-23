@@ -37,5 +37,7 @@ export default defineConfig({
   ],
   test: {
     include: ["test/**/*.spec.mjs"],
+    // 20 s, not Vitest's 5 s: a money test with many coach calls once ran past 5 s on a loaded machine.
+    testTimeout: 20000,
   },
 });

@@ -7,7 +7,9 @@ credit, with no card anywhere, and the email service is free.
 The coach lives in the same Cloudflare Worker as the chat, so it uses the chat's LINE sign-in and the chat's **Deploy chat**
 workflow. Until the AI key below is in, the coach just says it's taking a break; without the email key it works but sends
 no email. The chat carries on as normal either way. The **Coach** tab shows only in developer mode (the PIN on the W)
-until you say "go live", so nothing here changes waveslave.tw for visitors. You can stop at any point and carry on later.
+until you say "go live", so nothing here changes waveslave.tw for visitors. Once the AI key is in, anyone signed in to the
+chat who finds developer mode can send a review; every draft still waits for you, and the daily and money limits hold. You
+can stop at any point and carry on later.
 
 **What you need:** a computer with a web browser such as Chrome, your phone with LINE on it, your claude.ai account (the one
 with the Max plan), the WaveSlave Gmail (waveslave050@gmail.com), your GitHub account, and your developer PIN.
@@ -69,7 +71,8 @@ for you.
    2. Name it `WaveSlave coach`.
    3. For the expiration, pick **Never**. (A key that expires stops the coach, and you'd get a "Coach stopped" email.)
    4. Leave **Linked account** as yourself.
-   5. Set the workspace to **WaveSlave Coach**. This matters: a key that isn't in that workspace makes every review fail.
+   5. Set the workspace to **WaveSlave Coach**, the workspace whose spend limit you set in step 3. This matters: only keys in
+      this workspace are held to its US$80 limit; a key made anywhere else works, but without that backstop.
    6. Create it. The Console shows the key only once (it starts with `sk-ant-`): copy it and paste it straight into GitHub's
       **New repository secret** page as `ANTHROPIC_API_KEY` (step 8, in Part 3 below).
 

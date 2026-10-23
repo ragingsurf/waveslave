@@ -13,7 +13,7 @@ people a reason to come back to the site. At first Bryan approves every draft; l
 ## Decisions (Bryan, in the project thread, 2026-10-22)
 
 - **What it is:** clip review, on a **Coach** tab next to Forecast and Map.
-- **The standard:** the feedback on Bryan's own clip test. The coach on the site uses the same AI as that test (Claude Opus 5.5)
+- **The standard:** the feedback on Bryan's own clip test. The coach on the site uses the same AI as that test (the model set as COACH_MODEL in chat/wrangler.toml)
   and the same kind of close-up key frames.
 - **Who:** Taiwan only for now. The Coach tab shows only in developer mode (behind the PIN on the W) until Bryan says "go live";
   then one switch shows it to everyone in Taiwan mode.
@@ -89,8 +89,10 @@ people a reason to come back to the site. At first Bryan approves every draft; l
   - the coach is AI, checked by a person at first;
   - "Only key frames are sent. Your video never leaves your phone.";
   - the key frames go to Anthropic (USA), the company that makes the AI, which doesn't train on them and deletes them within
-    30 days, or keeps them up to 2 years if its safety checks flag them; and to Bryan while he checks drafts;
-  - WaveSlave deletes them 30 days after the review, though copies can stay in Cloudflare's backups up to 30 more days;
+    30 days, or keeps them up to 2 years if its safety checks flag them; and to Bryan while he checks drafts; with the key frames go
+    the surfer's answers and note, their earlier reviews of that move, and, without names, edited reviews of other surfers as
+    examples (Ruling P69);
+  - WaveSlave deletes the key frames 30 days after the review, though copies can stay in Cloudflare's backups up to 30 more days;
   - other people may be in the background, but don't send a clip where someone else is close and clear unless they're happy
     with it;
   - surf within your limits; the coach's tips don't replace a lesson or a lifeguard;
@@ -293,7 +295,8 @@ waveslave.tw (GitHub Pages)                        Cloudflare (free plan), worke
 - **Times** show as m:ss.s ("0:07.5") to surfers and m:ss.ss in the AI request.
 - **Service worker:** `sw.js` already leaves non-GET and cross-origin requests alone, so nothing of the coach is cached.
 - **chat.js's texts:** its delete-account warning and privacy note ("What is kept", "How long") add coach reviews and key frames,
-  in every language it carries.
+  in every language it carries. "Where, and who handles it" says the key frames go to Anthropic, with the same clause as the
+  agreement's (Ruling P69), and "How long" says Cloudflare keeps request logs (time, page asked for) for 3 days.
 
 ### Backend: in `chat/`, a second Durable Object class
 
@@ -304,7 +307,7 @@ waveslave.tw (GitHub Pages)                        Cloudflare (free plan), worke
   "./coach.js"` and a `coach(env)` helper, `env.COACH.getByName("taiwan", {locationHint: "apac-ne"})`.
 - **wrangler.toml:** a `COACH` binding for class `Coach`; a migration `tag = "v2"`, `new_sqlite_classes = ["Coach"]`; and new
   `[vars]`:
-  - `COACH_MODEL = "claude-opus-5-5"`; prices in US$ per million tokens, `COACH_PRICE_IN = "4"`, `COACH_PRICE_OUT = "20"`;
+  - `COACH_MODEL`, the model set as COACH_MODEL in chat/wrangler.toml; prices in US$ per million tokens, `COACH_PRICE_IN = "4"`, `COACH_PRICE_OUT = "20"`;
   - `COACH_STOP_USD = "78"`, `COACH_HARD_USD = "80"`, `COACH_EXTRA_USD = "0"`;
   - `COACH_CREDIT_DAY = "16"` (Bryan's Max plan renews on the 16th);
   - `COACH_MONTHLY = "2"`, `COACH_MONTHLY_MAX = "4"`, `COACH_DAILY = "10"`, `COACH_DAILY_AUTO = "40"`;

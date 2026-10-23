@@ -370,9 +370,14 @@ const CHECKS = {
       for (const l of langs) for (const k of Object.keys(T[l])) if (!(k in T.en)) out.push(`${l} has ${k}, en doesn't`);
       const coach = { en: ["coach reviews", "key frames"], zh: ["教練講評", "關鍵影格"], ja: ["コーチのレビュー", "キーフレーム"] }, after = { en: "30 days after the review", zh: "講評後 30 天", ja: "レビューの30日後" };
       const named = { en: "coach", zh: "教練", ja: "コーチ" }, frames = { en: "key frames", zh: "關鍵影格", ja: "キーフレーム" };
+      // With the key frames go the answers and note, the earlier reviews of the move and other surfers' edited reviews without names, and
+      // "How long" has Cloudflare's request logs (ruling P69).
+      const along = { en: ["your answers and note", "your earlier reviews of that move", "without names, edited reviews of other surfers"],
+        zh: ["你的回答和補充說明", "你之前這個動作的講評", "不具名、經過修改的其他衝浪者講評"], ja: ["あなたの回答とメモ", "その技の過去のレビュー", "名前を除いて編集した他のサーファーのレビュー"] };
+      const logs = { en: "cloudflare keeps request logs (time, page asked for) for 3 days", zh: "請求紀錄（時間、要求的頁面）保留 3 天", ja: "リクエストのログ（時刻、要求されたページ）を3日間保存" };
       for (const l of langs) { const p = T[l].privacy(c); // p[1] is "Why", p[2] "What is kept", p[3] "Where, and who handles it", p[4] "How long"
         for (const [k, t, want] of [["deleteWhat", T[l].deleteWhat, coach[l]], [p[1][0], p[1][1], [named[l]]], [p[2][0], p[2][1], coach[l]],
-          [p[3][0], p[3][1], ["anthropic", frames[l], "waveslave"]], [p[4][0], p[4][1], [...coach[l], after[l]]]])
+          [p[3][0], p[3][1], ["anthropic", frames[l], "waveslave", ...along[l]]], [p[4][0], p[4][1], [...coach[l], after[l], logs[l]]]])
           for (const w of want) if (!t.toLowerCase().includes(w)) out.push(`${l}: ${k} doesn't say ${w}`);
         if (/bryan/i.test(JSON.stringify(p))) out.push(`${l}: the privacy note names Bryan`); }
       return out; }, CONTACT);

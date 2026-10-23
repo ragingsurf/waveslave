@@ -662,7 +662,8 @@ const STEPS = {
     if (st.left !== `2 of 2 reviews left in ${month}`) throw new Error(`the panel says ${JSON.stringify(st.left)}, want "2 of 2 reviews left in ${month}"`);
     if (!st.film || !st.film.open || st.film.head !== "How to film" || st.film.n !== 7) throw new Error(`before the first review How to film is ${JSON.stringify(st.film)}, want open with the spec's 7 points`);
     if (!st.agree || st.newReview) throw new Error(`before agreeing the panel has ${st.agree ? "the agreement" : "no agreement"} and ${st.newReview ? "New review" : "no New review"}`);
-    for (const t of ["Only key frames are sent. Your video never leaves your phone.", "Anthropic (USA)", "a person at WaveSlave", "Cloudflare", "I'm 18 or older, and the surfer in every clip I send is me."])
+    for (const t of ["Only key frames are sent. Your video never leaves your phone.", "Anthropic (USA)", "a person at WaveSlave", "Cloudflare",
+      "with them go your answers and note, your earlier reviews of that move, and, without names, edited reviews of other surfers as examples", "I'm 18 or older, and the surfer in every clip I send is me."])
       if (!st.agree.includes(t)) throw new Error(`the agreement doesn't say ${JSON.stringify(t)}: ${st.agree}`);
     if (/bryan/i.test(st.agree)) throw new Error("the agreement names Bryan");
     await page.click('.coachpanel [data-k="agree"]'); await wait(500); st = await look();

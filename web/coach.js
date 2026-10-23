@@ -1,6 +1,6 @@
 // The AI surf coach on the page (docs/superpowers/specs/2026-10-22-ai-coach-design.md, "Front end: web/coach.js"). The surfer picks a
 // clip, finds the move and taps themselves once; the phone cuts 12 close-up key frames and follows the surfer through them, and only those
-// key frames are sent: the video never leaves the phone (Bryan, Oct 22).
+// key frames are sent: the video never leaves the phone (the owner, Oct 22).
 // One classic script, loaded with defer before chat.js, with no dependencies. It reads the page's LANG, CUR, VIEW, WORLD and setView by
 // bare name, as chat.js does, and gives the page only window.COACH = {dev, relang, spot, open}: template.html calls them from keepWorld()
 // (developer mode came on or went off), setLang() (the language changed), boot() (a spot is shown) and the Coach tab. It brings its own
@@ -156,7 +156,7 @@ const COACHM = (() => {
 // the coach off with the chat. Only a string counts, as in chat.js, so an element that happens to be called __chatUrl can't.
 const BACKEND = typeof window.__chatUrl === "string" ? window.__chatUrl : "https://waveslave-chat.waveslave050.workers.dev";
 if (!/^https?:\/\/./i.test(BACKEND)) return;
-// Who sees it (Bryan, Oct 22): only developer mode (the page's World mode, behind the PIN on the W in the logo) until Bryan says "go live";
+// Who sees it (the owner, Oct 22): only developer mode (the page's World mode, behind the PIN on the W in the logo) until the owner says "go live";
 // then PUBLIC goes to true, with or after chat.js's own. Tests set window.__coachPublic to see the coach as everyone will. While neither
 // holds, the tab stays hidden and the coach asks the backend nothing; keepWorld() calls COACH.dev() each time the mode changes.
 const PUBLIC = window.__coachPublic === true;
@@ -199,7 +199,7 @@ const STR = {
     moves: { popup: "Pop-up", bottom_turn: "Bottom turn", top_turn: "Top turn", cutback: "Cutback", down_the_line: "Riding down the line", other: "Other" },
     date: (y, m, d) => `${d} ${MONTHS[m]}${y ? " " + y : ""}`,
     drafts: "Drafts",
-    // Bryan's Drafts list (AI coach spec, "The Drafts list"), which only the admin sees: it may say "you" (ruling P33).
+    // The owner's Drafts list (AI coach spec, "The Drafts list"), which only the admin sees: it may say "you" (ruling P33).
     dr: { none: "No drafts waiting.", check: "Check again", note: t => `Their note: “${t}”`, langs: { en: "English", zh: "中文" },
       wait: ms => { const m = Math.max(1, Math.floor(ms / 60e3)), h = Math.floor(ms / 3600e3), d = Math.floor(ms / 86400e3);
         return d >= 2 ? `waiting ${d} days` : h >= 1 ? `waiting ${h} h` : `waiting ${m} min`; },
@@ -207,7 +207,9 @@ const STR = {
       told: t => `Your note to the surfer: “${t}”`,
       warn: { not_surf: "The coach thinks this isn't a surf clip.", cant_see: "The coach couldn't see the surfer.", unusable: "The coach marked key frames as unusable.",
         words: "It used a word surfers shouldn't see. Find it and change it before you approve.", redo_failed: "Redo failed: this is the draft from before.",
+        late: "Closed after waiting 14 days: the surfer was told we couldn't review it in time, and got the review back.",
         sexual: "Flagged: sexual content.", under_18: "Flagged: the surfer may be under 18.", refusal: "Flagged: the coach declined to review it." },
+      found: ws => ` Found: ${ws.map(w => `“${w}”`).join(", ")}.`,
       flagged: "Its key frames are deleted, and the account can't send another review until you clear it or ban it.",
       hidden: "Its key frames are hidden: the coach thinks this isn't a surf clip.", show: "Show anyway",
       marks: { well: "went well", fix: "main fix", unusable: "unusable" },
@@ -221,8 +223,9 @@ const STR = {
       done: { approve: "Published.", redo: "Sent to the coach for a Redo. Check again in a minute.", reject: "Rejected. The surfer gets your note and the review back.",
         giveback: "Given back.", clear: "Cleared. The account can send reviews again.", ban: "Banned.", withdraw: "Withdrawn. The surfer gets your note and the review back." },
       errs: { redo_limit: "No more Redo: this review has had its 2.", state: "This review changed meanwhile. Here it is as it is now.", not_found: "This review is gone.",
-        changed: "This draft changed. Check it again.",
-        invalid: "Each line needs 1 to 1,000 characters, and a note at most 200.", edit: "Each line needs 1 to 1,000 characters." },
+        changed: "This draft changed. Check it again.", no_frames: "Its key frames are already cleared, so it can't be redone.",
+        invalid: "Each line needs 1 to 1,000 characters (only the heads-up and progress may be empty), and a note at most 200.",
+        edit: "Each line needs 1 to 1,000 characters. Only the heads-up and progress may be left empty." },
       st: { published: d => `Published · ${d}`, auto: d => `Published by autopilot · ${d}`, rejected: d => `Rejected · ${d}`, failed: d => `Failed · ${d}` },
       handled: "Handled lately", settings: "Settings", autopilot: on => `Autopilot: ${on ? "On" : "Off"}`, pause: "Pause the coach",
       paused: "Paused: no new reviews and no AI calls.", start: "Start again", stopped: "Coach stopped: its key or model setting failed",
@@ -261,12 +264,13 @@ const STR = {
     footChecked: "Reviewed by WaveSlave Coach (AI), checked by a person. Surf within your limits.", footAuto: "Reviewed by WaveSlave Coach (AI). Surf within your limits.",
     wrong: "Something wrong?", wrongLine: "What's wrong? (optional)", wrongSend: "Send", cancel: "Cancel", wrongSent: "Thanks. We'll check this review again.",
     del: "Delete", delAsk: "Delete this review? It and its key frames are deleted from WaveSlave.", deleted: "Review deleted.", deleting: "Deleting…",
-    notSurf: "We couldn't review this clip.",
+    notSurf: "We couldn't review this clip.", late: "Sorry, we couldn't review this in time.", failedOurs: "Something went wrong on our side. This one doesn't count.",
+    again: "Choose the clip again",
     // When something goes wrong (the spec's table).
     noneLeft: (of, m, next) => `You've used your ${of} reviews for ${MONTHS[m]}. More on ${MONTHS[next]} 1.`,
     fullToday: "Coach is full today. Try again tomorrow.", resting: d => `Coach is resting until ${d}.`, onBreak: "Coach is taking a break. Try again later.",
     updated: "The coach has been updated. Reload the page to see what's new.",
-    blocked: "This account can't use the coach.", inProgress: "Your last review is still with the coach." },
+    blocked: "This account can't use the coach.", inProgress: "Your last review is still with the coach.", tooMany: "Too many tries today. Try again tomorrow." },
   zh: { tab: "教練", title: "教練", close: "關閉", tabReady: "教練：有講評可以看了",
     lead: "教練會逐格拆解你的影片：做得好的地方、一個主要修正，再加一個練習。",
     signIn: "使用LINE帳號登入", example: "教練講評範例 · 頂部轉向",
@@ -300,7 +304,9 @@ const STR = {
       told: t => `你給對方的留言：「${t}」`,
       warn: { not_surf: "教練認為這不是衝浪影片。", cant_see: "教練看不到衝浪者。", unusable: "教練把部分關鍵影格標為無法使用。",
         words: "用到了不該讓衝浪者看到的字詞，核准前請找出來改掉。", redo_failed: "重寫失敗：這是之前的草稿。",
+        late: "等了 14 天已關閉：衝浪者會看到我們沒能及時講評，次數也已歸還。",
         sexual: "已標記：含有性內容。", under_18: "已標記：衝浪者可能未滿 18 歲。", refusal: "已標記：教練拒絕講評。" },
+      found: ws => `找到：${ws.map(w => `「${w}」`).join("、")}。`,
       flagged: "它的關鍵影格已刪除；在你解除或封鎖之前，這個帳號不能再申請講評。",
       hidden: "關鍵影格已隱藏：教練認為這不是衝浪影片。", show: "仍要顯示",
       marks: { well: "做得好", fix: "主要修正", unusable: "無法使用" },
@@ -314,8 +320,9 @@ const STR = {
       done: { approve: "已發布。", redo: "已請教練重寫，一分鐘後再查一次。", reject: "已退回，衝浪者會收到你的留言，次數也會歸還。",
         giveback: "已歸還次數。", clear: "已解除，這個帳號可以再申請講評。", ban: "已封鎖。", withdraw: "已撤下，衝浪者會收到你的留言，次數也會歸還。" },
       errs: { redo_limit: "不能再重寫了：這份講評已經重寫 2 次。", state: "這份講評剛剛有變動，以下是它現在的樣子。", not_found: "這份講評已經不在了。",
-        changed: "這份草稿有變動，請再看一次。",
-        invalid: "每一行要有 1 到 1,000 個字，留言最多 200 字。", edit: "每一行要有 1 到 1,000 個字。" },
+        changed: "這份草稿有變動，請再看一次。", no_frames: "它的關鍵影格已經清除了，所以不能重寫。",
+        invalid: "每一行要有 1 到 1,000 個字（只有提醒和「和上次相比」可以留空），留言最多 200 字。",
+        edit: "每一行要有 1 到 1,000 個字，只有提醒和「和上次相比」可以留空。" },
       st: { published: d => `已發布 · ${d}`, auto: d => `自動發布 · ${d}`, rejected: d => `已退回 · ${d}`, failed: d => `失敗 · ${d}` },
       handled: "最近處理過的", settings: "設定", autopilot: on => `自動發布：${on ? "開" : "關"}`, pause: "暫停教練",
       paused: "已暫停：不接受新講評，也不呼叫 AI。", start: "重新啟動", stopped: "教練已停止：它的金鑰或模型設定出錯了",
@@ -352,11 +359,12 @@ const STR = {
     footChecked: "由 WaveSlave 教練（AI）講評，並經真人檢查。在自己的能力範圍內衝浪。", footAuto: "由 WaveSlave 教練（AI）講評。在自己的能力範圍內衝浪。",
     wrong: "哪裡不對嗎？", wrongLine: "哪裡不對？（選填）", wrongSend: "送出", cancel: "取消", wrongSent: "謝謝，我們會再檢查一次這份講評。",
     del: "刪除", delAsk: "要刪除這份講評嗎？講評和它的關鍵影格都會從 WaveSlave 刪除。", deleted: "講評已刪除。", deleting: "刪除中…",
-    notSurf: "我們無法講評這段影片。",
+    notSurf: "我們無法講評這段影片。", late: "抱歉，我們沒能及時完成這份講評。", failedOurs: "我們這邊出了問題，這次不算在次數內。",
+    again: "重新選擇影片",
     noneLeft: (of, m, next) => `${m + 1}月的 ${of} 次講評已經用完了，${next + 1}月1日起可以再申請。`,
     fullToday: "教練今天已經額滿了，明天再試試。", resting: d => `教練休息到${d}。`, onBreak: "教練暫時休息中，請稍後再試。",
     updated: "教練已更新，請重新整理頁面。",
-    blocked: "這個帳號無法使用教練。", inProgress: "你的上一份講評，教練還在處理中。" },
+    blocked: "這個帳號無法使用教練。", inProgress: "你的上一份講評，教練還在處理中。", tooMany: "今天嘗試太多次了，請明天再試。" },
 };
 const lang = () => typeof LANG === "string" && LANG === "zh" ? "zh" : "en";
 const S = key => STR[lang()][key];
@@ -371,6 +379,9 @@ function el(tag, attrs, ...kids) { const e = document.createElement(tag);
 
 // The panel covers the whole screen above everything, the full-screen map (z-index 100) and the CHAT button included, like the chat's room.
 const CSS = `
+:root{--co-amb:#9a5c00}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--co-amb:var(--led-amb)}}
+:root[data-theme="dark"]{--co-amb:var(--led-amb)}
 html.coach-open,html.coach-open body{overflow:hidden}
 .coachpanel{position:fixed;inset:0;z-index:110;display:flex;flex-direction:column;background:var(--bg);color:var(--ink);font:15px/1.45 var(--body);overscroll-behavior:contain;outline:none;-webkit-text-size-adjust:100%}
 .coachpanel[hidden],.coachpanel [hidden]{display:none!important}
@@ -378,13 +389,13 @@ html.coach-open,html.coach-open body{overflow:hidden}
 .co-hd,.co-body{width:100%;max-width:760px;margin-inline:auto;box-sizing:border-box}
 .co-hd{flex:none;display:flex;align-items:center;gap:10px;padding:calc(12px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 12px calc(16px + env(safe-area-inset-left));border-bottom:1px solid var(--line)}
 .co-title{margin:0;flex:1;min-width:0;font:400 31px/1 VT323,var(--mono);letter-spacing:.07em;color:var(--led-amb);text-shadow:0 0 calc(10px*var(--led-glow)) rgba(255,170,40,.65);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.co-x{flex:none;width:36px;height:36px;padding:0;display:grid;place-items:center;border-radius:50%;border:1.5px solid var(--led-amb);background:none;color:var(--led-amb);font-size:16px;font-weight:700;line-height:1;cursor:pointer}
+.co-x{flex:none;width:36px;height:36px;padding:0;display:grid;place-items:center;border-radius:50%;border:1.5px solid var(--co-amb);background:none;color:var(--co-amb);font-size:16px;font-weight:700;line-height:1;cursor:pointer}
 .co-body{flex:1;min-height:0;overflow-y:auto;padding:16px calc(16px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left))}
 .tabs button.co-dot::after{content:"";position:absolute;top:2px;right:4px;width:8px;height:8px;border-radius:50%;background:#ff3d7f;box-shadow:0 0 8px #ff3d7f}
 .co-body h3,.co-body h4,.co-body p{margin:0}
 .co-lead{margin-bottom:14px!important;font-size:16px}
 .co-wait{color:var(--muted)}
-.co-btn{display:block;width:100%;min-height:46px;margin:14px 0 0;padding:10px 16px;border:0;border-radius:10px;background:var(--led-amb);color:var(--panel);font-size:16px;font-weight:700;cursor:pointer}
+.co-btn{display:block;width:100%;min-height:46px;margin:14px 0 0;padding:10px 16px;border:0;border-radius:10px;background:var(--co-amb);color:var(--panel);font-size:16px;font-weight:700;cursor:pointer}
 .co-signin{display:flex;align-items:center;width:100%;height:46px;margin:0 0 18px;padding:0;border:0;border-radius:10px;background:#06C755;color:#fff;font-size:15px;font-weight:700;cursor:pointer}
 .co-signin:hover{background:#05b34c}.co-signin:active{background:#048b3b}
 .co-line-ico{flex:none;width:30px;height:30px;margin:0 8px 0 10px}
@@ -393,7 +404,7 @@ html.coach-open,html.coach-open body{overflow:hidden}
 .co-example,.co-film,.co-agree{padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
 .co-example>h3{font-size:14px;font-weight:600;color:var(--muted)}
 .co-part{margin-top:14px}
-.co-part h4{font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:var(--led-amb)}
+.co-part h4{font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:var(--co-amb)}
 .co-part p{margin-top:6px}
 .co-pt{font-size:16px;font-weight:700}
 .co-kfs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:8px}
@@ -414,6 +425,8 @@ html.coach-open,html.coach-open body{overflow:hidden}
 .co-list li{border-top:1px solid var(--line)}
 .co-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;width:100%;padding:12px 2px;border:0;background:none;color:inherit;font:inherit;text-align:left}
 button.co-row{cursor:pointer}
+.co-list .co-rdel{margin:-8px 0 8px 2px;font-size:14px}
+.co-list .co-ask{margin:0 0 12px}
 .co-mv{font-weight:700}
 .co-date{color:var(--muted)}
 .co-st{margin-left:auto;font-weight:600}
@@ -422,7 +435,7 @@ button.co-row{cursor:pointer}
 .co-fresh{flex:none;width:8px;height:8px;border-radius:50%;background:#ff3d7f;box-shadow:0 0 8px #ff3d7f}
 .co-drafts{margin-top:24px}
 .co-drafts h3{outline:none}
-.co-back{display:inline-block;margin:0 0 10px;padding:6px 0;border:0;background:none;color:var(--led-amb);font-size:15px;font-weight:700;cursor:pointer}
+.co-back{display:inline-block;margin:0 0 10px;padding:6px 0;border:0;background:none;color:var(--co-amb);font-size:15px;font-weight:700;cursor:pointer}
 .co-fh{margin-bottom:6px!important;font-size:19px;outline:none}
 .co-flow>p{margin-top:8px}
 .co-flow .co-film{margin:10px 0 0}
@@ -432,17 +445,17 @@ button.co-row{cursor:pointer}
 .co-q h4{margin-bottom:6px;font-size:15px}
 .co-chips{display:flex;flex-wrap:wrap;gap:8px}
 .co-chip{min-height:40px;padding:8px 14px;border:1.5px solid var(--line);border-radius:20px;background:var(--panel);color:var(--ink);font-size:15px;cursor:pointer}
-.co-chip[aria-pressed="true"]{border-color:var(--led-amb);background:var(--led-amb);color:var(--panel);font-weight:700}
+.co-chip[aria-pressed="true"]{border-color:var(--co-amb);background:var(--co-amb);color:var(--panel);font-weight:700}
 .co-line{display:block;width:100%;box-sizing:border-box;min-height:42px;margin-top:8px;padding:8px 10px;border:1.5px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);font:16px var(--body)}
 .co-sum{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.co-link{padding:4px 0;border:0;background:none;color:var(--led-amb);font-size:15px;font-weight:700;text-decoration:underline;cursor:pointer}
+.co-link{padding:4px 0;border:0;background:none;color:var(--co-amb);font-size:15px;font-weight:700;text-decoration:underline;cursor:pointer}
 .co-btn:disabled,.co-btn[aria-disabled="true"]{opacity:.45;cursor:default}
-.co-btn2{background:none;border:1.5px solid var(--led-amb);color:var(--led-amb)}
+.co-btn2{background:none;border:1.5px solid var(--co-amb);color:var(--co-amb)}
 .co-hold{position:fixed;left:0;top:0;width:2px;height:2px;overflow:hidden;opacity:0;pointer-events:none}
 .co-hold video{width:2px;height:2px}
 .co-player{margin-top:12px;border-radius:10px;overflow:hidden;background:#000}
 .co-player video{display:block;width:100%;height:auto;max-height:42vh;object-fit:contain}
-.co-slider{display:block;width:100%;margin:14px 0 0}
+.co-slider{display:block;width:100%;margin:14px 0 0;accent-color:var(--co-amb)}
 .co-frame{position:relative;margin:12px auto 0;max-width:100%;overflow:hidden;border-radius:10px;background:#000;touch-action:none;user-select:none;-webkit-user-select:none;cursor:crosshair}
 .co-zoom{position:absolute;inset:0;transform-origin:0 0}
 .co-zoom video,.co-zoom img{display:block;width:100%;height:100%;object-fit:fill;pointer-events:none}
@@ -455,10 +468,10 @@ button.co-row{cursor:pointer}
 .co-tile.co-lost{border-color:#ffd400}
 .co-tile.co-out img{opacity:.35}
 .co-size{display:flex;justify-content:center;gap:14px;margin-top:12px}
-.co-size button{width:46px;height:46px;border-radius:50%;border:1.5px solid var(--led-amb);background:none;color:var(--led-amb);font-size:24px;font-weight:700;line-height:1;cursor:pointer}
+.co-size button{width:46px;height:46px;border-radius:50%;border:1.5px solid var(--co-amb);background:none;color:var(--co-amb);font-size:24px;font-weight:700;line-height:1;cursor:pointer}
 .co-size button:disabled{opacity:.45;cursor:default}
-.co-prog{display:block;width:100%;height:10px;margin-top:14px;accent-color:var(--led-amb)}
-.co-resume{margin-top:14px;padding:12px 14px;border:1px solid var(--led-amb);border-radius:12px;background:var(--panel)}
+.co-prog{display:block;width:100%;height:10px;margin-top:14px;accent-color:var(--co-amb)}
+.co-resume{margin-top:14px;padding:12px 14px;border:1px solid var(--co-amb);border-radius:12px;background:var(--panel)}
 .co-resume p{margin-top:6px}
 .co-choose{position:relative;text-align:center;box-sizing:border-box}
 .co-choose:focus-within{outline:2px solid var(--ink);outline-offset:2px}
@@ -469,13 +482,13 @@ button.co-row{cursor:pointer}
 .co-again{display:grid;place-items:center;width:100%;padding:6px;border:0;border-radius:8px;color:var(--ink);font:600 13px/1.3 var(--body);text-align:center;cursor:pointer}
 .co-review p,.co-rnote{overflow-wrap:anywhere}
 .co-rdate{margin-bottom:2px!important;color:var(--muted)}
-.co-heads{margin-top:16px;padding:10px 12px 12px;border:1.5px solid var(--led-amb);border-radius:12px}
+.co-heads{margin-top:16px;padding:10px 12px 12px;border:1.5px solid var(--co-amb);border-radius:12px}
 .co-foot{margin-top:18px!important;padding-top:10px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}
 .co-acts{display:flex;gap:10px}.co-acts .co-btn{flex:1;min-width:0}
 .co-ask{margin-top:16px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
 .co-ask label{display:block;font-weight:700}
 .co-rnote{flex-basis:100%;font-size:14px;color:var(--muted)}
-.co-why{margin:-6px 0 12px!important;font-weight:600;color:var(--led-amb)}
+.co-why{margin:-6px 0 12px!important;font-weight:600;color:var(--co-amb)}
 .co-lb{position:fixed;inset:0;z-index:2;display:flex;flex-direction:column;background:rgba(0,0,0,.94);color:#fff}
 .co-lb-hd{flex:none;display:flex;align-items:center;gap:10px;width:100%;max-width:760px;margin-inline:auto;box-sizing:border-box;padding:calc(12px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 12px calc(16px + env(safe-area-inset-left))}
 .co-lb-hd h3{flex:1;min-width:0;margin:0;font-size:16px}
@@ -487,11 +500,11 @@ button.co-row{cursor:pointer}
 .co-dr>p,.co-dset>p{margin-top:6px}
 .co-dr-h{font-size:16px}
 .co-dr-who,.co-dr-wait,.co-dr-st,.co-dr-hid,.co-en,.co-ed label{color:var(--muted)}
-.co-dr-rep,.co-dr-paused{color:var(--led-amb);font-weight:600}
+.co-dr-rep,.co-dr-paused{color:var(--co-amb);font-weight:600}
 .co-warn{margin:8px 0 0;padding-left:20px;color:var(--bad);font-weight:600}
 .co-ed{display:grid;gap:4px;margin-top:8px}
 .co-ed label{font-size:13px}
-.co-ed .co-line{margin-top:0;resize:vertical;line-height:1.4}
+.co-ed .co-line{margin-top:0;resize:vertical;line-height:1.4;max-height:min(60vh,480px);overflow-y:auto}
 .co-en{font-size:14px}
 @media (min-width:600px){.co-ed2{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start}.co-ed2 label{grid-column:1/-1}}
 .co-dr-acts{flex-wrap:wrap;margin-top:12px}.co-dr-acts .co-btn{flex:1 1 40%;margin:0}
@@ -543,7 +556,8 @@ function open() {
 // for again when the panel next opens.
 function close() {
   if (!P.open) return;
-  P.open = false; P.el.hidden = true; document.documentElement.classList.remove("coach-open"); V.drafts = false; V.sent = false; V.said = null; V.headsMove = null; stopWork();
+  P.open = false; P.el.hidden = true; document.documentElement.classList.remove("coach-open"); V.drafts = false; V.sent = false; V.said = null; V.headsMove = null; V.rowDel = null;
+  stopWork();
   dropDrafts();
   if (R.row) { closeReview(); P.body.textContent = ""; } else closeBig(false); // a review's key frames go with it
   const back = P.opener; P.opener = null;
@@ -561,8 +575,8 @@ const SEEN = "waveslave-coach-seen";
 const TW = 8 * 3600e3; // Taiwan is UTC+8 all year: the backend's months and days are Taiwan's
 const STATUS = ["reviewing", "ready", "not_reviewed"]; // a review's status in the surfer's words, as GET /coach/me gives it
 
-// The example the signed-out panel shows: Bryan's trial clip redone as a one-move review of his last turn, a top turn, which he OK'd with
-// no changes (Bryan, Oct 23), in the reply's shape (chat/src/coach-guide.js). Its key frames are web/coach-example/1.jpg to 4.jpg: key
+// The example the signed-out panel shows: the owner's trial clip redone as a one-move review of his last turn, a top turn, which he OK'd with
+// no changes (the owner, Oct 23), in the reply's shape (chat/src/coach-guide.js). Its key frames are web/coach-example/1.jpg to 4.jpg: key
 // frame 6 (what went well), then 7, 8 and 9 (the main fix), each with its time in the clip in ms.
 const EXAMPLE_REVIEW = {
   en: {
@@ -615,7 +629,8 @@ async function call(path, tok, body, { method = body === undefined ? "GET" : "PO
 // What a refusal's code means to the surfer (the spec's table, "When something goes wrong"), in the panel's language, or null for a code
 // with no words of its own (the caller says "Couldn't send. Tap to try again." or "Couldn't reach the coach." then). until is a money
 // rest's end: "Coach is resting until 16 November.", that day on Taiwan's calendar. The month a surfer has used up is the server's.
-const SAYS = { break: "onBreak", full_today: "fullToday", in_progress: "inProgress", blocked: "blocked", banned: "blocked", too_few_frames: "need8" };
+const SAYS = { break: "onBreak", full_today: "fullToday", in_progress: "inProgress", blocked: "blocked", banned: "blocked", too_few_frames: "need8",
+  too_many: "tooMany" };
 function says(code, until) {
   const me = ME.me;
   if (code === "money") return Number.isFinite(until) ? S("resting")(day(until, me ? +me.month.slice(0, 4) : 0)) : S("onBreak");
@@ -623,9 +638,9 @@ function says(code, until) {
   return typeof code === "string" && Object.prototype.hasOwnProperty.call(SAYS, code) ? S(SAYS[code]) : null;
 }
 const noneLeft = me => { const m = +me.month.slice(5) - 1; return S("noneLeft")(me.monthly, m, (m + 1) % 12); };
-// Why GET /coach/me says no review can start now, in the backend's order (stopFor(), then full_today, then none left), or null.
-const why = me => me.stop && me.stop.kind === "money" ? says("money", me.stop.until) : me.stop && me.stop.kind === "break" ? S("onBreak")
-  : me.full_today === true ? S("fullToday") : me.left === 0 ? noneLeft(me) : null;
+// Why GET /coach/me says no review can start now, in the backend's order (blocked, stopFor(), then full_today, then none left), or null.
+const why = me => me.blocked === true ? S("blocked") : me.stop && me.stop.kind === "money" ? says("money", me.stop.until)
+  : me.stop && me.stop.kind === "break" ? S("onBreak") : me.full_today === true ? S("fullToday") : me.left === 0 ? noneLeft(me) : null;
 
 // What the panel knows of the surfer: GET /coach/me's answer (me) and the token it was asked with, when the last ask went, the number of
 // the newest ask (an answer to an older one is dropped), the token being asked about, and whether the last ask failed (false; true; or
@@ -637,9 +652,9 @@ const ME = { me: null, token: null, at: -Infinity, n: 0, asking: null, failed: f
 // about the review just reported or deleted (said: its key in STR, until the panel shuts). agreeErr is false, true or the refusal's code.
 // headsMove is the move of a review's heads-up tapped while a draft was waiting: Start over picks it (ruling P55), and Pick up, the panel
 // shutting, the review shutting or another account forgets it. typing is true while an input method is composing in a line (line()), when
-// the panel isn't drawn again (render).
+// the panel isn't drawn again (render). rowDel is a list row whose Delete is asked about (rowDelete), until the panel shuts.
 const V = { film: null, tick: false, adultErr: false, agreeErr: false, busy: false, focus: null, drafts: false, top: false, sent: false, said: null, headsMove: null,
-  typing: false };
+  typing: false, rowDel: null };
 // GET /coach/me's answer looks right: whole counts, a "YYYY-MM" month, a list of reviews and whose they are (account). Without the account
 // an unsent review can't be kept to its own account (ruling P51), so such an answer is taken as a failure: "Couldn't reach the coach."
 const meOk = j => !!j && typeof j === "object" && Number.isInteger(j.left) && Number.isInteger(j.monthly) && typeof j.month === "string"
@@ -706,6 +721,7 @@ function render() {
   }
   else if (mine && ME.failed) P.body.append(...failed());
   else P.body.append(el("p", { class: "co-wait" }, S("loading")));
+  fit(P.body.querySelectorAll("textarea.co-line"));
   P.body.scrollTop = V.top ? 0 : at; V.top = false;
   const to = key && P.body.querySelector(`[data-k="${key}"]`);
   if (to) { to.focus({ preventScroll: true });
@@ -721,7 +737,7 @@ function render() {
 // runs, each key frame of a review), once for everything that lands together. Not while a finger is on the screen (a tap would land on
 // a control drawn away), and not while a line or edit box has the focus (a Drafts edit box, Something wrong?'s line): drawing it again
 // would drop the iPhone's keyboard and any 中文 still being composed. That waits (held) until the focus leaves it or the input method is
-// done (release), unless the answer moves the focus on purpose (V.focus: the focus was still where Bryan tapped). render() itself never
+// done (release), unless the answer moves the focus on purpose (V.focus: the focus was still where they tapped). render() itself never
 // draws over a composition. What's drawn for someone no longer signed in (gone: signed out, a refused token, another account, no longer
 // the admin, a review of another account) never waits: Sign in shows at once.
 let laterT = 0, held = false, ptrTill = 0;
@@ -754,11 +770,12 @@ function signedOut() {
 }
 // A review's parts, from text in the reply's shape (chat/src/coach-guide.js): what went well with its key frame, the main fix with its key
 // frames, the drill, and only when there's one, the heads-up (with "Get a review of your bottom turn" when it names a move, ruling P12:
-// headsUp(move) starts it) and the progress line. frame(n) gives key frame n's {src, ms} (src null while it's on its way; with again, it
-// didn't load, and again() tries once more), or null to leave it out. Tapping a key frame enlarges it (openBig). Every word goes in as text.
-// With field (the Drafts list), each line of text is field(path, text)'s element in its place, an edit box, and the heads-up and the
-// progress line show even when empty, so a line can be written in.
-function reviewParts(r, frame, headsUp, field) {
+// headsUp(move) starts it; headsUp true only shows it, off, as the surfer will have it, with the data-k hk) and the progress line.
+// frame(n) gives key frame n's {src, ms} (src null while it's on its way; with again, it didn't load, and again() tries once more), or
+// null to leave it out. Tapping a key frame enlarges it (openBig). Every word goes in as text. With field (the Drafts list), each line of
+// text is field(path, text)'s element in its place, an edit box, and the heads-up and the progress line show even when empty, so a line
+// can be written in.
+function reviewParts(r, frame, headsUp, field, hk = "headsup") {
   const shots = (ns, k) => { const fs = ns.map(n => { const f = frame(n); return f && shotFig(f, `${k}${n}`, S("keyFrameAt")(COACHM.fmtTime(f.ms))); }).filter(Boolean);
     return fs.length ? el("div", { class: "co-kfs" }, fs) : null; };
   const ln = (path, text, attrs, lead) => field ? field(path, text) : el("p", attrs, lead ? el("b", null, lead) : null, text);
@@ -770,8 +787,9 @@ function reviewParts(r, frame, headsUp, field) {
     el("section", { class: "co-part" }, el("h4", null, S("drill")), ln("drill.title", r.drill.title, { class: "co-pt" }), ln("drill.how", r.drill.how)),
   ];
   const hu = r.heads_up, mv = hu.move;
-  if (field || hu.text.trim()) out.push(el("section", { class: "co-part co-heads" }, el("h4", null, S("headsUp")), ln("heads_up.text", hu.text),
-    headsUp && Object.prototype.hasOwnProperty.call(S("reviewMoves"), mv) ? button("headsup", S("reviewOf")(S("reviewMoves")[mv]), () => headsUp(mv)) : null));
+  const hb = headsUp && Object.prototype.hasOwnProperty.call(S("reviewMoves"), mv) ? button(hk, S("reviewOf")(S("reviewMoves")[mv]), () => { if (headsUp !== true) headsUp(mv); }) : null;
+  if (hb && headsUp === true) hb.setAttribute("aria-disabled", "true");
+  if (field || hu.text.trim()) out.push(el("section", { class: "co-part co-heads" }, el("h4", null, S("headsUp")), ln("heads_up.text", hu.text), hb));
   if (field || r.progress.trim()) out.push(el("section", { class: "co-part" }, el("h4", null, S("progressHead")), ln("progress", r.progress)));
   return out;
 }
@@ -797,13 +815,13 @@ function lineIcon() { const ns = "http://www.w3.org/2000/svg", svg = document.cr
 // Signed in: "Sent. Your feedback comes within a day." just after sending (or "Review deleted.", or the thanks for a report), "2 of 2
 // reviews left in November" (the month is the backend's Taiwan month, whatever the phone's clock says) and why none can start now when
 // so (why()), How to film, the agreement until it's agreed and then New review (or, with a review left halfway, Pick up where you left
-// off?), their reviews newest first, and Drafts for the admin.
+// off?), none of those three for an account that's blocked (its line says why), their reviews newest first, and Drafts for the admin.
 function signedIn(me) {
   const reviews = me.reviews.filter(r => !!r && typeof r === "object");
   const stop = why(me), out = [V.sent ? el("p", { class: "co-ok", role: "status", tabindex: "-1", "data-k": "sent" }, S("sent"))
       : V.said ? el("p", { class: "co-ok", role: "status", tabindex: "-1", "data-k": "said" }, S(V.said)) : null,
     el("p", { class: "co-left" }, S("left")(me.left, me.monthly, +me.month.slice(5) - 1)), stop ? el("p", { class: "co-why", role: "status" }, stop) : null, film(reviews.length > 0),
-    me.agreed === true ? (F.draft ? resumeOffer() : newReview()) : agreement()];
+    me.blocked === true ? null : me.agreed === true ? (F.draft ? resumeOffer() : newReview()) : agreement()];
   if (reviews.length) out.push(el("h3", { class: "co-h co-yours" }, S("yours")), el("ul", { class: "co-list" }, reviews.map(r => row(r, +me.month.slice(0, 4)))));
   if (me.admin === true) out.push(draftsSection(me));
   return out;
@@ -853,13 +871,17 @@ async function agree() {
   render();
 }
 // A review in the list: its move, the Taiwan day it was sent (year: this year by the server), and its status in the surfer's words. A ready
-// one opens (and one this phone hasn't opened yet carries a dot, as the tab does); one not reviewed says why: "We couldn't review this
-// clip." for a clip held as not surf or flagged, else the note it was given back with.
+// one opens (and one this phone hasn't opened yet carries a dot, as the tab does); one not reviewed says why: the backend's codes in the
+// panel's language (NOTES: "We couldn't review this clip." for a clip held as not surf or flagged, the 14-day close, a failure on our
+// side), else the note it was given back with. Every other one has Delete under it (rowDelete), as the backend deletes a review in any
+// state; a ready one has its own on its page.
+const NOTES = { not_surf: "notSurf", late: "late", failed: "failedOurs" };
 function row(r, year) {
   const st = STATUS.includes(r.status) ? r.status : "reviewing", why = st === "not_reviewed" && typeof r.note === "string" && r.note.trim() ? r.note : null;
-  const kids = [el("span", { class: "co-mv" }, moveName(r.move)), el("span", { class: "co-date" }, day(r.created, year)), el("span", { class: "co-st co-st-" + st }, S("status")[st]),
-    why ? el("span", { class: "co-rnote" }, why === "not_surf" ? S("notSurf") : why) : null];
-  if (st !== "ready" || typeof r.id !== "string" || !REVIEW_ID.test(r.id)) return el("li", null, el("div", { class: "co-row" }, kids));
+  const kids = [el("span", { class: "co-mv" }, moveName(r.move, r.move_other)), el("span", { class: "co-date" }, day(r.created, year)),
+    el("span", { class: "co-st co-st-" + st }, S("status")[st]), why ? el("span", { class: "co-rnote" }, ownKey(NOTES, why) ? S(NOTES[why]) : why) : null];
+  if (typeof r.id !== "string" || !REVIEW_ID.test(r.id)) return el("li", null, el("div", { class: "co-row" }, kids));
+  if (st !== "ready") return el("li", null, el("div", { class: "co-row" }, kids), rowDelete(r.id));
   if (isNew(r)) kids.push(el("i", { class: "co-fresh", "aria-hidden": "true" }));
   const b = el("button", { type: "button", class: "co-row", "data-k": "r-" + r.id }, kids);
   b.addEventListener("click", guard(() => openReview(r)));
@@ -872,8 +894,30 @@ function day(ms, year) {
   const d = new Date(ms + TW), y = d.getUTCFullYear();
   return S("date")(y === year ? 0 : y, d.getUTCMonth(), d.getUTCDate());
 }
-// A move as the list and the review name it.
-const moveName = m => { const moves = S("moves"); return Object.prototype.hasOwnProperty.call(moves, m) ? moves[m] : moves.other; };
+// A move as the list and the review name it: an "other" one by the surfer's own name for it (move_other), when they gave one.
+const moveName = (m, other) => { const moves = S("moves"), own = m === "other" && typeof other === "string" ? other.trim() : "";
+  return own || (Object.prototype.hasOwnProperty.call(moves, m) ? moves[m] : moves.other); };
+// Delete under a row of the list that isn't ready, asked first with the review's own question (delAsk); yes sends DELETE
+// /coach/reviews/{id} (one the backend no longer has is gone already), and the list goes on without it, "Review deleted.". V.rowDel is
+// the row asked about: {id, busy, fail}.
+function rowDelete(id) {
+  const d = V.rowDel && V.rowDel.id === id ? V.rowDel : null;
+  if (!d) return button(`rdel-${id}`, S("del"), () => { V.rowDel = { id, busy: false, fail: false }; V.focus = `rdelno-${id}`; render(); }, "co-link co-rdel");
+  const fail = d.fail ? el("p", { class: "co-err", role: "alert" }, says(d.fail) || S("failed")) : null;
+  return el("div", { class: "co-ask" }, el("p", null, S("delAsk")), fail, button(`rdelyes-${id}`, S(d.busy ? "deleting" : "del"), () => removeRow(id)),
+    button(`rdelno-${id}`, S("cancel"), () => { V.rowDel = null; V.focus = `rdel-${id}`; render(); }, "co-btn co-btn2"));
+}
+async function removeRow(id) {
+  const t = tokenNow(), d = V.rowDel;
+  if (!t || !d || d.id !== id || d.busy) return;
+  d.busy = true; d.fail = false; render();
+  const res = await call(`/coach/reviews/${id}`, t, undefined, { method: "DELETE" });
+  if (V.rowDel !== d) return;
+  d.busy = false;
+  if (res.status === 401) { V.rowDel = null; return signOut(t); }
+  if (res.status !== 200 && res.status !== 404) { d.fail = res.code || true; V.focus = `rdelyes-${id}`; return render(); }
+  V.rowDel = null; return done(id, "deleted", null);
+}
 // A token the backend refused (401): it goes back to the chat, and the panel shows Sign in with LINE. An unsent review stays kept.
 function signOut(t) { refused(t); ME.me = null; ME.token = null; render(); }
 
@@ -944,7 +988,7 @@ function closeReview() {
   Object.assign(R, { row: null, owner: null, view: null, failed: false, shots: new Map(), ask: null, wrongline: "", busy: false, fail: false });
 }
 function reviewScreen(me) {
-  const r = R.row, v = R.view, out = [button("back", S("back"), backToList, "co-back"), heading(moveName(r.move)), el("p", { class: "co-rdate" }, day(r.created, +me.month.slice(0, 4)))];
+  const r = R.row, v = R.view, out = [button("back", S("back"), backToList, "co-back"), heading(moveName(r.move, r.move_other)), el("p", { class: "co-rdate" }, day(r.created, +me.month.slice(0, 4)))];
   const shot = n => { const ms = v.times[n], u = R.shots.get(n);
     return !Number.isInteger(ms) || u === null ? null : u === false ? { src: null, ms, again: () => { R.shots.delete(n); render(); return loadShots([n]); } } : { src: u || null, ms }; };
   if (v) out.push(...reviewParts(v.text, shot, headsUpGo), el("p", { class: "co-foot" }, S(v.checked ? "footChecked" : "footAuto")), reviewActs());
@@ -967,7 +1011,7 @@ function reviewActs() {
   const fail = R.fail, said = fail && fail !== true ? says(fail) : null, err = t => el("p", { class: "co-err", role: "alert" }, t);
   const shut = k => () => { R.ask = null; R.fail = false; V.focus = k; render(); };
   if (R.ask === "wrong") { const i = line("wrongline", REPORT_MAX, { id: "coWrong", enterkeyhint: "send" }, R, () => {});
-    i.addEventListener("keydown", guard(e => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); return report(); } }));
+    i.addEventListener("keydown", guard(e => { if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); return report(); } }));
     return el("div", { class: "co-ask" }, el("label", { class: "co-h", for: "coWrong" }, S("wrongLine")), i, said ? err(said) : null,
       button("wrongsend", R.busy ? S("sending") : fail && !said ? S("sendFailed") : S("wrongSend"), report), button("wrongno", S("cancel"), shut("wrong"), "co-btn co-btn2")); }
   if (R.ask === "del") return el("div", { class: "co-ask" }, el("p", null, S("delAsk")), fail ? err(said || S("failed")) : null,
@@ -1010,7 +1054,7 @@ function done(id, said, change) {
   closeReview(); V.said = said; V.top = true; V.focus = "said"; render(); return ask();
 }
 
-// ---- Bryan's Drafts list (AI coach spec, "The Drafts list"), at the end of the signed-in panel only when GET /coach/me says admin: true.
+// ---- The owner's Drafts list (AI coach spec, "The Drafts list"), at the end of the signed-in panel only when GET /coach/me says admin: true.
 // GET /admin/coach/drafts gives the reviews waiting for him, the one waiting longest first (the drafts, those reported, and the clips held
 // as not surf or flagged), the last handled, and his settings; each action is POST /admin/coach/drafts/{id}, each setting POST
 // /admin/coach/settings, and the list is asked for again after each. Every word from the network, the surfer's and the coach's, goes in
@@ -1025,7 +1069,7 @@ function done(id, said, change) {
 // way (sBusy: its button's data-k) or failed.
 const D = { g: 0, n: 0 };
 const TEXT_PATHS = ["went_well.title", "went_well.detail", "main_fix.title", "main_fix.what", "main_fix.why", "drill.title", "drill.how", "heads_up.text", "progress"];
-const EDIT_MAX = 1_000, NOTED = ["redo", "reject", "withdraw"]; // characters in a line Bryan edits (TEXT_FIELDS and EDIT_MAX in chat/src)
+const EDIT_MAX = 1_000, NOTED = ["redo", "reject", "withdraw"]; // characters in a line the owner edits (TEXT_FIELDS and EDIT_MAX in chat/src)
 // The list let go (the panel shut, signed out, another account): the key frames' blob URLs are revoked, and what's on its way is dropped.
 function dropDrafts() {
   D.g++; if (D.shots) for (const u of D.shots.values()) if (u) try { URL.revokeObjectURL(u); } catch (e) {}
@@ -1034,7 +1078,7 @@ function dropDrafts() {
     busy: Object.create(null), ask: null, need: null, said: null, shots: new Map(), seen: new Set(), io: null, show: new Set(), open: new Set(), where: undefined,
     mail: null, sBusy: false, sErr: false });
 }
-// Bryan's unsent edits kept for the tab (sessionStorage), so a reload, a trip to LINE or a sign-out and back keeps them: {ver, who, f}
+// The owner's unsent edits kept for the tab (sessionStorage), so a reload, a trip to LINE or a sign-out and back keeps them: {ver, who, f}
 // by review, written only while an account is signed in and read back only while the review is as it was (verOf) and for that account.
 // Where the tab won't keep them, they're kept in the panel.
 const ED_KEY = "waveslave-coach-ed-";
@@ -1124,19 +1168,22 @@ const headOf = r => { const o = typeof r.answers.move_other === "string" ? r.ans
   return moveName(r.move) + (r.move === "other" && o ? ` · ${o}` : ""); };
 const stLine = (r, year) => { const st = S("dr").st, pub = r.status === "published";
   return (pub ? (r.checked === 1 ? st.published : st.auto) : ownKey(st, r.status) || st.rejected)(day(pub ? r.published : r.handled_at, year)); };
-// The actions a review takes: a held clip Give back (not surf) or Clear (flagged), a draft Approve, Redo and Reject (Withdraw once it
-// was published and reported), a published one Approve (an edit, or the check) and Withdraw; Ban on any but Bryan's own.
+// The actions a review takes: a held clip Give back (not surf) or Clear (flagged), a draft Approve, Redo (only with at least 8 of its key
+// frames kept, as the backend redoes none with fewer) and Reject (Withdraw once it was published and reported), a published one Approve
+// (an edit, or the check) and Withdraw; Ban on any but the owner's own.
 function actsOf(r) {
+  const redo = r.have.length >= KEPT_MIN ? ["redo"] : [];
   const a = r.hold === 1 ? (r.flags.length ? ["clear", "ban"] : ["giveback", "ban"])
-    : r.status === "drafted" ? ["approve", "redo", r.reported && r.published != null ? "withdraw" : "reject", "ban"]
+    : r.status === "drafted" ? ["approve", ...redo, r.reported && r.published != null ? "withdraw" : "reject", "ban"]
     : r.status === "published" ? ["approve", "withdraw", "ban"] : ["ban"];
   return ME.me && r.uid === ME.me.account ? a.filter(x => x !== "ban") : a;
 }
 // A review's card: its move (and for a handled one, its status), the surfer's level, board, stance and language, their note, how long it
-// has waited, Reported with their line, Bryan's Redo notes, the red warnings (a flagged clip's first, then that its key frames are
-// gone), its key frames with their times (what went well's and the main fix's marked; a not-surf clip's behind Show anyway, none asked
-// for until then), its text in edit boxes while Approve can publish it (else as it is; none for a held clip), the note the surfer got, a
-// red line, and its actions. A handled one's card is only its first lines until it's opened.
+// has waited, Reported with their line, the owner's Redo notes, the red warnings (a flagged clip's first, then that its key frames are
+// gone; the "used a word" one names the words the backend found), its key frames with their times (what went well's and the main fix's
+// marked; a not-surf clip's behind Show anyway, none asked for until then), its text in edit boxes while Approve can publish it (else as
+// it is; none for a held clip), with the heads-up's button as the surfer will have it, off here, the note the surfer got, a red line,
+// and its actions. A handled one's card is only its first lines until it's opened.
 function card(r, old, year) {
   const dr = S("dr"), id = r.id, a = r.answers, base = baseOf(r), flagged = r.flags.length > 0, acts = actsOf(r);
   const out = [el("h4", { class: "co-dr-h" }, headOf(r)), old ? el("p", { class: "co-dr-st" }, stLine(r, year)) : null,
@@ -1147,13 +1194,15 @@ function card(r, old, year) {
   if (r.reported) out.push(el("p", { class: "co-dr-rep" }, dr.reported(typeof r.report === "string" ? r.report.trim() : "")));
   const notes = r.redo_note.filter(x => typeof x === "string" && x.trim());
   if (notes.length) out.push(el("p", { class: "co-dr-redo" }, dr.redoNotes(notes)));
-  const warn = [...r.flags.map(f => ownKey(dr.warn, f)), flagged ? dr.flagged : null, ...r.warnings.map(w => ownKey(dr.warn, w))].filter(Boolean);
+  const words = Array.isArray(r.words) ? r.words.filter(w => typeof w === "string" && w) : [];
+  const warn = [...r.flags.map(f => ownKey(dr.warn, f)), flagged ? dr.flagged : null,
+    ...r.warnings.map(w => w === "words" && words.length ? dr.warn.words + dr.found(words) : ownKey(dr.warn, w))].filter(Boolean);
   if (warn.length) out.push(el("ul", { class: "co-warn" }, warn.map(w => el("li", null, w))));
   const ns = flagged ? [] : r.have.filter(n => isFrame(n) && Number.isInteger(r.times[n])).sort((x, y) => x - y);
   if (ns.length && r.warnings.includes("not_surf") && !D.show.has(id)) out.push(el("p", { class: "co-dr-hid" }, dr.hidden),
     button(`show-${id}`, dr.show, () => { D.show.add(id); V.focus = `act-${id}-${acts[0]}`; render(); }, "co-link"));
   else if (ns.length) { const g = el("div", { class: "co-kfs", "data-v": id }, ns.map(n => dshot(r, n))); if (!D.seen.has(id) && D.io) D.io.observe(g); out.push(g); }
-  if (base && !flagged && r.hold !== 1) out.push(...reviewParts(base, () => null, null, acts.includes("approve") ? fieldFor(r, base) : null));
+  if (base && !flagged && r.hold !== 1) out.push(...reviewParts(base, () => null, true, acts.includes("approve") ? fieldFor(r, base) : null, `headsup-${id}`));
   if (r.status === "rejected" && typeof r.surfer_note === "string" && r.surfer_note.trim()) out.push(el("p", { class: "co-dr-told" }, dr.told(r.surfer_note)));
   const e = D.err[id];
   if (e) out.push(el("p", { class: "co-err co-dr-err", role: "alert" }, ownKey(dr.errs, e.code) || says(e.code, e.until) || S("failed")));
@@ -1196,23 +1245,26 @@ function redrawShot(id, n) {
   if (had) { const b = f && f.querySelector("button"); (b || P.el).focus({ preventScroll: true }); }
 }
 // The edit box of each line, by its path, with the English copy beside it for a 中文 draft. What's typed stays while the review is as it
-// was (verOf), kept for the tab too (keepEd), and is cut at 1,000 characters as the backend counts them.
+// was (verOf), kept for the tab too (keepEd), and is cut at 1,000 characters as the backend counts them. Each box is as tall as its text
+// (fit), two lines at least.
 const verOf = r => [r.status, r.redos, r.waiting_since, r.handled_at].join("|");
 function fieldFor(r, base) {
   let e = D.ed[r.id]; if (!e || e.ver !== verOf(r)) e = D.ed[r.id] = keptEd(r.id, verOf(r)) || { ver: verOf(r), f: Object.create(null) };
   for (const p of TEXT_PATHS) if (typeof e.f[p] !== "string") { const v = atPath(base, p); e.f[p] = typeof v === "string" ? v : ""; }
   const dr = S("dr"), f = e.f;
   return path => { const box = `coE-${r.id}-${path}`, en = isObj(r.english) ? atPath(r.english, path) : null;
-    const i = line(path, EDIT_MAX, { "data-k": `ed-${r.id}-${path}`, id: box, rows: String(Math.min(8, Math.max(2, Math.ceil([...f[path]].length / 40)))) }, f, () => keepEd(r.id, e), "textarea");
+    const i = line(path, EDIT_MAX, { "data-k": `ed-${r.id}-${path}`, id: box, rows: "2" }, f, () => keepEd(r.id, e), "textarea");
     const copy = typeof en === "string" && en.trim() ? el("p", { class: "co-en", "data-p": path }, dr.english(en)) : null;
     return el("div", { class: copy ? "co-ed co-ed2" : "co-ed" }, el("label", { for: box }, dr.fields[path]), i, copy); };
 }
-// The lines Bryan changed, trimmed, by path; null when one is empty or over 1,000 characters (Review Focus 4).
+// The lines the owner changed, trimmed, by path; null when one is over 1,000 characters, or empty but the heads-up and progress lines,
+// whose emptying removes them (Review Focus 4, ruling P64).
+const REMOVABLE = ["heads_up.text", "progress"];
 function edits(r) {
   const base = baseOf(r), e = D.ed[r.id], out = {};
   if (!base || !e || e.ver !== verOf(r)) return out;
   for (const p of TEXT_PATHS) { const v = String(e.f[p] ?? "").trim(); if (v === String(atPath(base, p) ?? "").trim()) continue;
-    const n = [...v].length; if (n < 1 || n > EDIT_MAX) return null; out[p] = v; }
+    const n = [...v].length; if (n < (REMOVABLE.includes(p) ? 0 : 1) || n > EDIT_MAX) return null; out[p] = v; }
   return out;
 }
 // The card's buttons, or the action asked about: Redo, Reject and Withdraw with their note, Ban with its question. While the card's
@@ -1227,10 +1279,10 @@ function actArea(r, acts) {
   const yes = btn(`yes-${id}`, label(ask), () => act(r, ask)), no = btn(`no-${id}`, S("cancel"), () => { D.ask = null; D.need = null; V.focus = `act-${id}-${ask}`; render(); }, "co-btn co-btn2");
   if (ask === "ban") return el("div", { class: "co-ask" }, el("p", null, dr.asks.ban), yes, no);
   const i = line(id, NOTE_MAX, { "data-k": `note-${id}`, id: `coN-${id}`, enterkeyhint: "send" }, D.notes, () => {});
-  i.addEventListener("keydown", guard(e => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); return act(r, ask); } }));
+  i.addEventListener("keydown", guard(e => { if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); return act(r, ask); } }));
   return el("div", { class: "co-ask" }, el("label", { class: "co-h", for: `coN-${id}` }, dr.asks[ask]), i, D.need === id ? el("p", { class: "co-err", role: "alert" }, dr.need) : null, yes, no);
 }
-// One of Bryan's actions on review r: a note first where it needs one, and Approve sends only the lines changed. Done, the list says so
+// One of the owner's actions on review r: a note first where it needs one, and Approve sends only the lines changed. Done, the list says so
 // and is asked for again; refused, the card says why in red, and a review that changed meanwhile (state) or is gone shows as it is now.
 // The answer puts the focus on what it says only while the focus is still where he tapped (or nowhere in the panel); else it stays where
 // he's working, and the panel is drawn again once he leaves the box he's typing in (later()). A card drawn before the list came again
@@ -1254,7 +1306,7 @@ async function act(r, action) {
   if (res.status === 200) { D.busy[id] = { action, done: true }; if (mine) D.ask = null; delete D.notes[id]; delete D.ed[id]; keepEd(id, null);
     D.said = action; if (stay) V.focus = "dsaid"; later(); return loadDrafts(); }
   delete D.busy[id];
-  const code = res.code || true, over = ["state", "not_found", "redo_limit"].includes(code);
+  const code = res.code || true, over = ["state", "not_found", "redo_limit", "no_frames"].includes(code);
   D.err[id] = { code, until: isObj(res.json) ? res.json.until : null };
   if (over && mine) D.ask = null;
   if (stay) V.focus = D.ask && D.ask.id === id ? `yes-${id}` : over ? null : `act-${id}-${action}`;
@@ -1481,11 +1533,14 @@ function resetFlow() {
 }
 // A new screen: drawn from the top, with the focus on its heading.
 function go() { F.zoom = null; V.top = true; V.focus = F.show ? "fh" : F.draft ? "pickup" : "new"; render(); }
-// ‹ Back: from Find the move to the questions, from Tap yourself to Find the move, else out to the panel's main view, which offers to pick
-// the review up (the clip stays while the page does). With nothing answered yet there's nothing to pick up.
+// ‹ Back: from Find the move to the questions, from Tap yourself to Find the move; on the check screen it shuts the key frame open, else,
+// with the clip there, goes back to Find the move at Here (where Here and a tap cut the key frames again); else out to the panel's main
+// view, which offers to pick the review up (the clip stays while the page does). With nothing answered yet there's nothing to pick up.
 function back() {
   if (F.busy) return;
   if (F.screen === "find") F.screen = "questions"; else if (F.screen === "tap") F.screen = "find";
+  else if (F.screen === "check" && F.open !== null) F.open = null;
+  else if (F.screen === "check" && hasClip()) { F.screen = "find"; F.seekN++; F.seeking = false; if (F.here !== null) F.pos = F.here; F.video.currentTime = F.pos; }
   else { F.show = false; F.open = null; if (!F.draft) resetFlow(); }
   go();
 }
@@ -1495,7 +1550,7 @@ function back() {
 function pickUp() { V.headsMove = null; if (!F.video && F.screen !== "check") { F.screen = "pick"; F.resumed = F.picked; } F.show = true; go(); }
 function startOver() { const move = V.headsMove; dropDraft(); startNew(move); }
 function resumeOffer() {
-  const mv = F.answers.move && S("moves")[F.answers.move];
+  const mv = MOVES.includes(F.answers.move) ? moveName(F.answers.move, F.answers.move_other) : null;
   return el("section", { class: "co-resume", "aria-labelledby": "coachResume" }, el("h3", { class: "co-h", id: "coachResume" }, S("resumeHead")),
     mv ? el("p", null, mv) : null, F.frames.length ? el("p", null, S("resumeFrames")) : null,
     button("pickup", S("pickUp"), pickUp), button("over", S("startOver"), startOver, "co-btn co-btn2"));
@@ -1556,12 +1611,16 @@ function clipReady() {
   if (F.screen === "find") v.currentTime = F.pos;
   render();
 }
-// The clip won't do: back to the picker saying why (the answers stay). With the key frames cut, the check screen goes on without it.
+// The clip won't do: back to the picker saying why (the answers stay). With the key frames cut, the check screen goes on without it,
+// saying why under Choose the clip again.
 function clipFailed(why) {
-  F.run++; F.busy = false; F.seeking = false; dropClip(); F.open = null;
-  if (F.frames.length === 12) F.screen = "check"; else { F.err = why; F.screen = "pick"; }
+  F.run++; F.busy = false; F.seeking = false; dropClip(); F.open = null; F.err = why;
+  F.screen = F.frames.length === 12 ? "check" : "pick";
   go();
 }
+// Choose the clip again, on the check screen without the clip (after a reload, or a clip that failed): the picker, which says to choose
+// the same clip; the answers, the move and Here stay, and the clip goes straight to Find the move at Here (takeClip).
+function chooseAgain() { if (F.busy) return; F.open = null; F.resumed = true; F.screen = "pick"; go(); }
 function dropClip() {
   const v = F.video; F.video = null; F.ready = false; F.zoom = null;
   if (v) { try { v.pause(); v.removeAttribute("src"); v.load(); } catch (e) {} v.remove(); }
@@ -1596,11 +1655,21 @@ function questionsScreen() {
 // emoji short), but not while an input method is still composing. It's kept in box[key] (the answers, Something wrong?'s line, a Drafts
 // note or edit box), and then() runs as it changes (the answers are saved). attrs may give it another data-k; tag "textarea" makes it an
 // edit box.
+// Each edit box as tall as its text (F1 of the final review), from two lines up to its CSS max-height (min(60vh, 480px)), past which it
+// scrolls: on every draw, as it's typed in (an input method's composing too), as the panel's width changes and as an Earlier one opens.
+// Every height is cleared, then each read, then each set, so the page lays out once for the lot; one that isn't shown keeps its two rows.
+function fit(boxes) {
+  const bs = [...boxes].filter(b => b.isConnected && b.getClientRects().length), at = P.body.scrollTop, tops = bs.map(b => b.scrollTop);
+  for (const b of bs) b.style.height = "auto";
+  const hs = bs.map(b => { const c = getComputedStyle(b); return b.scrollHeight + parseFloat(c.borderTopWidth) + parseFloat(c.borderBottomWidth); });
+  bs.forEach((b, n) => { b.style.height = `${Math.ceil(hs[n])}px`; b.scrollTop = tops[n]; });
+  P.body.scrollTop = at;
+}
 function line(key, max, attrs, box = F.answers, then = saveDraft, tag = "input") {
   const i = el(tag, { ...(tag === "input" ? { type: "text", enterkeyhint: "done" } : {}), class: "co-line", "data-k": key, autocomplete: "off", ...attrs });
   i.value = box[key];
   const take = () => { if ([...i.value].length > max) i.value = upTo(i.value, max); if (box[key] !== i.value) { box[key] = i.value; then(); } };
-  i.addEventListener("input", guard(e => { if (!e.isComposing) take(); }));
+  i.addEventListener("input", guard(e => { if (tag === "textarea") fit([i]); if (!e.isComposing) take(); }));
   i.addEventListener("compositionstart", guard(() => { V.typing = true; }));
   i.addEventListener("compositionend", guard(() => { V.typing = false; take(); })); i.addEventListener("change", guard(take));
   i.addEventListener("blur", guard(() => { V.typing = false; }));
@@ -1679,17 +1748,21 @@ function frameView(box, onTap) {
 const CV = { grey: null, crop: null };
 // Seeks the clip to t (s) and resolves once the frame there can be drawn: after seeked, the frame callback (registered before the seek)
 // for at most 0.5 s, else after one more animation frame. On iOS seeked can come before the new frame is drawn, and the frame callback
-// never comes when the frame didn't change. A clip that fails, or doesn't seek within 20 s while the page shows, rejects.
+// never comes when the frame didn't change. A clip that fails, or doesn't seek within 20 s while the page shows, rejects: the 20 s start
+// again each time the page shows again (a phone may hold a hidden page's seek back), and a mark that finds the page hidden waits 20 s more.
 function seekTo(v, t) {
   return new Promise((ok, no) => {
     let seeked = false, framed = false, done = false, id = null, wait = 0, stuck = 0;
     const end = bad => { if (done) return; done = true; clearTimeout(wait); clearTimeout(stuck); v.removeEventListener("seeked", onSeeked); v.removeEventListener("error", onError);
+      document.removeEventListener("visibilitychange", onVis);
       if (id !== null && !framed) try { v.cancelVideoFrameCallback(id); } catch (e) {}
       if (bad) no(new Error("seek")); else ok(); };
     const drawn = () => requestAnimationFrame(() => end(false));
     const onSeeked = () => { seeked = true; clearTimeout(stuck); if (framed) end(false); else if (id === null) drawn(); else wait = setTimeout(drawn, 500); };
     const onError = () => end(true);
     const check = () => { if (document.visibilityState === "hidden") stuck = setTimeout(check, 20e3); else onError(); };
+    const onVis = () => { if (seeked || done || document.visibilityState === "hidden") return; clearTimeout(stuck); stuck = setTimeout(check, 20e3); };
+    document.addEventListener("visibilitychange", onVis);
     stuck = setTimeout(check, 20e3);
     if (typeof v.requestVideoFrameCallback === "function") id = v.requestVideoFrameCallback(() => { framed = true; if (seeked) end(false); });
     v.addEventListener("seeked", onSeeked); v.addEventListener("error", onError);
@@ -1763,7 +1836,8 @@ function redoWork() {
 // ---- Step 5, the check screen: all 12 close-ups, "Is this you in each key frame?". Tapping one opens its frame, where tapping yourself
 // moves its box there (a box of the side the others have), or "Not in this one" leaves it out; a frame the tracker lost is opened first,
 // asking for a tap, and isn't sent until it's had one. + / − change every box. Send stays off below 8 key frames. Picked up after a
-// reload, the clip isn't there: the close-ups still show and can be left out, and Send works.
+// reload, the clip isn't there: the close-ups still show and can be left out, and Send works; Choose the clip again (chooseAgain) brings
+// it back, with why it went when a clip failed (F.err).
 function checkScreen() {
   if (F.open !== null && F.frames[F.open]) return openFrame(F.open);
   const n = keptFrames().length, clip = hasClip(), out = [heading(S("checkHead"))];
@@ -1776,6 +1850,7 @@ function checkScreen() {
   if (clip) { const fits = dir => COACHM.resize({ x: 0, y: 0, side: F.side }, dir, F.vw, F.vh).side !== F.side;
     const minus = button("smaller", "−", () => resizeAll(-1), "", S("smaller")), plus = button("bigger", "+", () => resizeAll(1), "", S("bigger"));
     minus.disabled = !fits(-1); plus.disabled = !fits(1); out.push(el("div", { class: "co-size" }, minus, plus)); }
+  else { if (F.err) out.push(note(S(F.err), true)); out.push(button("again", S("again"), chooseAgain, "co-btn co-btn2")); }
   if (n < KEPT_MIN) out.push(note(S("need8"), true));
   const said = F.fail && F.fail !== true ? says(F.fail.code, F.fail.until) : null;
   if (said) out.push(el("p", { class: "co-err co-said", role: "alert" }, said));
@@ -1928,6 +2003,8 @@ function start() {
   // A redraw held for a line or edit box goes once it loses the focus or the input method is done; one held for a finger, 150 ms after it
   // lifts (the tap's click first), or after 3 s.
   P.body.addEventListener("focusout", guard(release)); P.body.addEventListener("compositionend", guard(release));
+  P.body.addEventListener("toggle", guard(e => { if (e.target.open) fit(e.target.querySelectorAll("textarea.co-line")); }), true);
+  addEventListener("resize", guard(() => { if (P.open) fit(P.body.querySelectorAll("textarea.co-line")); }));
   addEventListener("pointerdown", guard(() => { ptrTill = performance.now() + 3e3; }), true);
   for (const k of ["pointerup", "pointercancel"]) addEventListener(k, guard(() => { ptrTill = performance.now() + 150; }), true);
   // Escape shuts the panel and nothing else (not the map behind it), or only the key frame enlarged in it; Tab stays inside it (inside
@@ -1945,7 +2022,7 @@ function start() {
   // Coming back to the page asks GET /coach/me again, at most once a minute, as the chat asks for its reports.
   document.addEventListener("visibilitychange", guard(() => { if (document.visibilityState === "visible" && Date.now() - ME.at >= 60e3) ask(); }));
   P.started = true;
-  // Bryan's email link, ?coach=drafts (ruling R18), comes out of the address at once, as the chat's ?chat does, and opens the panel at
+  // The owner's email link, ?coach=drafts (ruling R18), comes out of the address at once, as the chat's ?chat does, and opens the panel at
   // Drafts once the coach is on: at once when it is, else once developer mode comes on (the PIN box first while World mode is locked,
   // as for a sign-in back from LINE; cancelled, the link is dropped).
   const drafts = new URLSearchParams(location.search).get("coach") === "drafts";

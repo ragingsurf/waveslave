@@ -120,7 +120,7 @@ async function openRid(page) {
 // admin (or st.me in its place, while it's set); GET /admin/coach/drafts with st.waiting (drafted(id) gives a draft) and none handled (st.gets counts them); each POST
 // /admin/coach/drafts/<id> noted (st.acts) and answered by o.act(id) when given (a promise holds it back), else {ok}; GET /admin/where as
 // o.where (text/plain; st.wheres notes each ask's Authorization); and each key frame as a JPEG (st.frames notes `${id}:${n}`).
-const DA = "A".repeat(22), DB = "B".repeat(22), DC = "C".repeat(22);
+const DA = "A".repeat(22), DB = "B".repeat(22), DC = "C".repeat(22), TWELVE = Array.from({ length: 12 }, (_, i) => i + 1);
 const SETTINGS = { autopilot: false, paused: false, stopped: false, spend: { usd: 1, stop: 78, reviews: 1 }, unchanged: { n: 0, of: 0 } };
 const drafted = (id, o = {}) => ({ id, status: "drafted", move: "top_turn", lang: "en", uid: "u-surfer", hold: 0, redos: 0, waiting_since: REVIEW_AT, handled_at: null,
   answers: { level: "turning_well", board: "shortboard", stance: "regular", note: "" }, times: KEY_MS, frames: [], have: [2, 6, 7, 8], flags: [], warnings: [],
@@ -143,7 +143,7 @@ const verOf = r => [r.status, r.redos, r.waiting_since, r.handled_at].join("|");
 // Scrolls the panel so review id's key frames are at the top of its view.
 const toFrames = (page, id) => page.evaluate(id => { const b = document.querySelector(".coachpanel .co-body"), g = document.querySelector(`.coachpanel .co-dr[data-id="${id}"] .co-kfs`);
   b.scrollTop += g.getBoundingClientRect().top - b.getBoundingClientRect().top; }, id);
-const BLOCKED = "This account can't use the coach.", BREAK = "Coach is taking a break. Try again later.";
+const BLOCKED = "This account can't use the coach.", BREAK = "Coach is taking a break. Try again later.", TOO_MANY = "Too many tries today. Try again tomorrow.";
 const inPanel = (page, what, sel, timeout = 15e3) => page.waitForSelector(".coachpanel " + sel, { timeout }).catch(e => { throw new Error(`waited for ${what}: ${e.message.split("\n")[0]}`); });
 const text = (page, sel) => page.evaluate(s => { const e = document.querySelector(".coachpanel " + s); return e && !e.closest("[hidden]") ? e.textContent : null; }, sel);
 // The video's displayed size, as the coach reads it.
@@ -690,6 +690,22 @@ const CHECKS = {
     await page.click('.coachpanel [data-k="notin"]'); await inPanel(page, "the 12 close-ups", ".co-grid");
     const grid = await page.evaluate(() => ({ lost: document.querySelectorAll(".coachpanel .co-tile.co-lost").length, out: [...document.querySelectorAll(".coachpanel .co-tile.co-out")].map(e => e.dataset.k) }));
     if (!eq(grid, { lost: 0, out: ["kf-9"] })) throw new Error(`after leaving it out: ${JSON.stringify(grid)}`);
+    // Without the clip, ‹ Back leaves the flow as it always has, for Pick up; and the check screen offers the clip again (in 中文 too).
+    await page.click('.coachpanel [data-k="back"]'); await inPanel(page, "Pick up after ‹ Back", ".co-resume");
+    await page.click('.coachpanel [data-k="pickup"]'); await inPanel(page, "Choose the clip again", '[data-k="again"]');
+    await page.evaluate(() => setLang("zh")); await settle(page);
+    const zh = await text(page, '[data-k="again"]'); await page.evaluate(() => setLang("en")); await settle(page);
+    if (zh !== "重新選擇影片" || await text(page, '[data-k="again"]') !== "Choose the clip again") throw new Error(`the check screen offers ${JSON.stringify([zh, await text(page, '[data-k="again"]')])}`);
+    // It goes to the picker, keeping the answers, the move and Here; the clip then goes straight to Find the move at Here, and Here
+    // and a tap cut the key frames again from it.
+    await page.click('.coachpanel [data-k="again"]'); await inPanel(page, "the picker", ".co-choose");
+    const same = await page.$$eval(".coachpanel .co-note", e => e.map(x => x.textContent));
+    if (!same.includes("Choose the same clip again to pick up where you left off.")) throw new Error(`the picker says ${JSON.stringify(same)}`);
+    await page.setInputFiles('.coachpanel input[type="file"]', makeClip(tmp, { gap: [2.9, 3.1] })); await inPanel(page, "Find the move", '[data-k="slider"]:not([disabled])');
+    const find = { head: await text(page, '[data-k="fh"]'), at: await page.evaluate(() => +document.querySelector('.coachpanel [data-k="slider"]').value), d: await draft(page) };
+    if (find.head !== "Find the move" || find.at !== 2.5 || find.d.answers.move !== "top_turn" || find.d.step !== "check") throw new Error(`the clip chosen again shows ${JSON.stringify({ head: find.head, at: find.at, move: find.d.answers.move, step: find.d.step })}`);
+    await page.click('.coachpanel [data-k="here"]'); await tapAt(page, b.x, b.y); await inPanel(page, "the cut again", '.co-grid, [data-k="notin"]', 30e3);
+    if (!await page.$(".coachpanel .co-frame")) throw new Error("cut again, the lost key frame opens without the clip");
   },
   // Shutting the panel while the key frames are being cut stops the cutting (nothing more is drawn) and keeps the clip; opening the panel
   // again cuts them again from it, to the check screen (ruling P52).
@@ -983,7 +999,7 @@ const CHECKS = {
   // has answered again; another card's buttons still work meanwhile.
   async draftsBusy(open) {
     let release = null, list = null; const hold = new Promise(r => { release = r; }), listed = new Promise(r => { list = r; });
-    const st = draftsBackend([drafted(DA), drafted(DB)], { act: id => id === DA ? hold.then(() => ({ body: { ok: true } })) : { body: { ok: true } } }), backend = st.backend;
+    const st = draftsBackend([drafted(DA, { have: TWELVE }), drafted(DB)], { act: id => id === DA ? hold.then(() => ({ body: { ok: true } })) : { body: { ok: true } } }), backend = st.backend;
     let holdList = false, held = 0;
     st.backend = (q, req) => { if (q.pathname !== "/admin/coach/drafts" || !holdList) return backend(q, req); held++; return listed.then(() => backend(q, req)); };
     try {
@@ -1108,7 +1124,8 @@ const CHECKS = {
     const MONEY = { error: "money", until: Date.UTC(2030, 10, 16) };
     for (const [status, body, said] of [[503, MONEY, "Coach is resting until 16 November."], [503, { error: "break" }, BREAK], [429, { error: "full_today" }, "Coach is full today. Try again tomorrow."],
       [429, { error: "no_reviews_left" }, "You've used your 2 reviews for November. More on December 1."], [409, { error: "in_progress" }, "Your last review is still with the coach."],
-      [403, { error: "blocked" }, BLOCKED], [403, { error: "banned" }, BLOCKED], [400, { error: "too_few_frames" }, NEED8], [400, { error: "invalid" }, null], [409, { error: "state" }, null]]) {
+      [403, { error: "blocked" }, BLOCKED], [403, { error: "banned" }, BLOCKED], [400, { error: "too_few_frames" }, NEED8], [429, { error: "too_many" }, TOO_MANY],
+      [400, { error: "invalid" }, null], [409, { error: "state" }, null]]) {
       const got = await refuse(status, body), want = said ? { said, retry: null, send: true } : { said: null, retry: FAILED, send: false };
       if (!eq(got, want)) throw new Error(`${status} ${body.error} shows ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
     }
@@ -1171,6 +1188,214 @@ const CHECKS = {
       if (!eq(await said(), [want])) throw new Error(`I agree answered ${status} ${error} says ${JSON.stringify(await said())}`);
       if (zh) { await page.evaluate(() => setLang("zh")); await settle(page); if (!eq(await said(), [zh])) throw new Error(`in 中文 I agree answered ${status} ${error} says ${JSON.stringify(await said())}`); }
     }
+  },
+  // The reasons a review wasn't reviewed are codes the page says in the panel's language: "late" (the 14-day close) and "failed" (it
+  // failed on our side and doesn't count), "not_surf" as before; a person's note shows as written. A move the surfer named themselves
+  // ("other") shows by their name for it (move_other), in the list and on the review.
+  async noteCodes(open) {
+    const OID = "o".repeat(22), rows = [{ id: OID, move: "other", move_other: "Air reverse", created: REVIEW_AT, status: "ready", published: REVIEW_AT + 3600e3, note: null },
+      { id: "l".repeat(22), move: "cutback", move_other: "", created: REVIEW_AT - 86400e3, status: "not_reviewed", published: null, note: "late" },
+      { id: "f".repeat(22), move: "popup", move_other: "", created: REVIEW_AT - 2 * 86400e3, status: "not_reviewed", published: null, note: "failed" },
+      { id: "s".repeat(22), move: "other", move_other: "Snap", created: REVIEW_AT - 3 * 86400e3, status: "not_reviewed", published: null, note: "not_surf" },
+      { id: "p".repeat(22), move: "top_turn", move_other: "", created: REVIEW_AT - 4 * 86400e3, status: "not_reviewed", published: null, note: "Film closer." }];
+    const backend = q => q.pathname === "/coach/me" ? { body: me({ reviews: rows }) }
+      : q.pathname === `/coach/reviews/${OID}` ? { body: { id: OID, status: "published", move: "other", move_other: "Air reverse", created: REVIEW_AT, have: [], note: null,
+        review: { text: reviewText({}), times: KEY_MS, checked: true } } }
+      : /\/frames\/\d+$/.test(q.pathname) ? { jpeg: JPEG } : { body: { reports: [], online: 0, last_id: 0 } };
+    const page = await open({ store: TOKEN, backend });
+    await page.tap(TAB); await inPanel(page, "the list", ".co-list");
+    const list = () => page.$$eval(".coachpanel .co-list li", ls => ls.map(li => [li.querySelector(".co-mv").textContent, (li.querySelector(".co-rnote") || {}).textContent || null]));
+    const en = [["Air reverse", null], ["Cutback", "Sorry, we couldn't review this in time."], ["Pop-up", "Something went wrong on our side. This one doesn't count."],
+      ["Snap", "We couldn't review this clip."], ["Top turn", "Film closer."]];
+    const zh = [["Air reverse", null], ["回切", "抱歉，我們沒能及時完成這份講評。"], ["起乘", "我們這邊出了問題，這次不算在次數內。"], ["Snap", "我們無法講評這段影片。"], ["頂部轉向", "Film closer."]];
+    let got = await list(); if (!eq(got, en)) throw new Error(`the list shows ${JSON.stringify(got)}`);
+    await page.evaluate(() => setLang("zh")); await settle(page);
+    got = await list(); if (!eq(got, zh)) throw new Error(`in 中文 the list shows ${JSON.stringify(got)}`);
+    await page.evaluate(() => setLang("en")); await settle(page);
+    await page.click(`.coachpanel [data-k="r-${OID}"]`); await inPanel(page, "the review", ".co-review .co-part");
+    if (await text(page, '[data-k="fh"]') !== "Air reverse") throw new Error(`the review is headed ${JSON.stringify(await text(page, '[data-k="fh"]'))}`);
+  },
+  // Every review in the list but a ready one (whose page has Delete) has Delete, with the same question as the review's; one still with
+  // the coach too, as the backend deletes a review in any state. Cancel keeps it; yes sends DELETE /coach/reviews/{id}, and the list
+  // goes on without it, saying "Review deleted.".
+  async rowDelete(open) {
+    const QID = "q".repeat(22), NID = "n".repeat(22), deletes = [], rows = [
+      { id: QID, move: "cutback", created: REVIEW_AT, status: "reviewing", published: null, note: null },
+      { id: RID, move: "top_turn", created: REVIEW_AT - 3600e3, status: "ready", published: REVIEW_AT, note: null },
+      { id: NID, move: "popup", created: REVIEW_AT - 86400e3, status: "not_reviewed", published: null, note: "late" }];
+    const backend = (q, req) => { if (q.pathname === "/coach/me") return { body: me({ reviews: rows.filter(r => !deletes.includes(r.id)) }) };
+      const m = /^\/coach\/reviews\/([\w-]{22})$/.exec(q.pathname); if (m && req.method() === "DELETE") { deletes.push(m[1]); return { body: { ok: true } }; }
+      return { body: { reports: [], online: 0, last_id: 0 } }; };
+    const page = await open({ store: TOKEN, backend }), ASK = "Delete this review? It and its key frames are deleted from WaveSlave.";
+    await page.tap(TAB); await inPanel(page, "Delete on the review still with the coach", `[data-k="rdel-${QID}"]`);
+    if (await page.$(`.coachpanel [data-k="rdel-${RID}"]`) || !await page.$(`.coachpanel [data-k="rdel-${NID}"]`)) throw new Error("Delete isn't on every row but the ready one");
+    await page.click(`.coachpanel [data-k="rdel-${QID}"]`); await inPanel(page, "Delete's question", `[data-k="rdelyes-${QID}"]`);
+    const ask = await text(page, ".co-list .co-ask p");
+    if (ask !== ASK) throw new Error(`Delete asks ${JSON.stringify(ask)}`);
+    await page.evaluate(() => setLang("zh")); await settle(page);
+    const zh = [await text(page, ".co-list .co-ask p"), await text(page, `[data-k="rdelyes-${QID}"]`)]; await page.evaluate(() => setLang("en")); await settle(page);
+    if (!eq(zh, ["要刪除這份講評嗎？講評和它的關鍵影格都會從 WaveSlave 刪除。", "刪除"])) throw new Error(`in 中文 Delete asks ${JSON.stringify(zh)}`);
+    await page.click(`.coachpanel [data-k="rdelno-${QID}"]`); await settle(page);
+    if (deletes.length || await page.$(".coachpanel .co-list .co-ask")) throw new Error(`Cancel: ${JSON.stringify(deletes)}`);
+    await page.click(`.coachpanel [data-k="rdel-${NID}"]`); await page.click(`.coachpanel [data-k="rdelyes-${NID}"]`); await inPanel(page, '"Review deleted."', '[data-k="said"]');
+    const left = await page.$$eval(".coachpanel .co-list li .co-mv", e => e.map(x => x.textContent));
+    if (!eq(deletes, [NID]) || await text(page, '[data-k="said"]') !== "Review deleted." || !eq(left, ["Cutback", "Top turn"])) throw new Error(`after Delete: ${JSON.stringify({ deletes, left })}`);
+  },
+  // An account GET /coach/me says is blocked has the blocked line in place of New review (and of the agreement), in English and 中文.
+  async blockedMe(open) {
+    for (const agreed of [true, false]) {
+      const page = await open({ store: TOKEN, backend: coachBackend({ blocked: true, agreed }) }); await page.tap(TAB); await inPanel(page, "the panel", ".co-left");
+      const got = await page.evaluate(() => ({ why: (document.querySelector(".coachpanel .co-why") || {}).textContent || null, new: !!document.querySelector('.coachpanel [data-k="new"]'),
+        agree: !!document.querySelector(".coachpanel .co-agree") }));
+      if (!eq(got, { why: BLOCKED, new: false, agree: false })) throw new Error(`blocked (agreed ${agreed}): ${JSON.stringify(got)}`);
+      await page.evaluate(() => setLang("zh")); await settle(page);
+      if (await text(page, ".co-why") !== "這個帳號無法使用教練。") throw new Error(`in 中文 blocked says ${JSON.stringify(await text(page, ".co-why"))}`);
+    }
+  },
+  // GET /coach/me refused 429 too_many (one account's cap a day, ruling P68) says so, with Try again, in English and 中文.
+  async tooMany(open) {
+    const backend = q => q.pathname === "/coach/me" ? { status: 429, body: { error: "too_many" } } : { body: { reports: [], online: 0, last_id: 0 } };
+    const page = await open({ store: TOKEN, backend }); await page.tap(TAB); await inPanel(page, "the refusal", ".co-err");
+    const got = { err: await text(page, ".co-err"), retry: !!await page.$('.coachpanel [data-k="retry"]') };
+    await page.evaluate(() => setLang("zh")); await settle(page);
+    if (!eq(got, { err: TOO_MANY, retry: true }) || await text(page, ".co-err") !== "今天嘗試太多次了，請明天再試。") throw new Error(`too_many: ${JSON.stringify(got)}, in 中文 ${JSON.stringify(await text(page, ".co-err"))}`);
+  },
+  // A draft with fewer than 8 key frames kept has no Redo; one refused no_frames all the same (its key frames cleared meanwhile) says
+  // why on its card, in English and 中文, and its note box shuts.
+  async draftsNoFrames(open) {
+    const st = draftsBackend([drafted(DA, { have: TWELVE }), drafted(DB)], { act: () => ({ status: 409, body: { error: "no_frames" } }) });
+    const page = await open({ store: TOKEN, backend: st.backend });
+    await page.tap(TAB); await inPanel(page, "A's Redo", `[data-k="act-${DA}-redo"]`);
+    const acts = await page.$$eval(`.coachpanel .co-dr[data-id="${DB}"] .co-dr-acts button`, b => b.map(x => x.textContent));
+    if (!eq(acts, ["Approve", "Reject", "Ban"])) throw new Error(`with 4 key frames kept B's buttons are ${JSON.stringify(acts)}`);
+    await page.click(`.coachpanel [data-k="act-${DA}-redo"]`); await page.fill(`.coachpanel [data-k="note-${DA}"]`, "Back foot");
+    await page.click(`.coachpanel [data-k="yes-${DA}"]`); await inPanel(page, "A's red line", `.co-dr[data-id="${DA}"] .co-dr-err`);
+    const line = await text(page, `.co-dr[data-id="${DA}"] .co-dr-err`), note = !!await page.$(`.coachpanel [data-k="note-${DA}"]`);
+    await page.evaluate(() => setLang("zh")); await settle(page);
+    const zh = await text(page, `.co-dr[data-id="${DA}"] .co-dr-err`);
+    if (line !== "Its key frames are already cleared, so it can't be redone." || note || zh !== "它的關鍵影格已經清除了，所以不能重寫。") throw new Error(`no_frames: ${JSON.stringify({ line, note, zh })}`);
+  },
+  // Emptying the heads-up's box or the progress line's removes that part (ruling P64): Approve sends them empty. Any other line emptied
+  // is refused on the page, sending nothing.
+  async draftsRemove(open) {
+    const text2 = reviewText({ heads_up: { text: "Watch the rocks on the inside.", move: "bottom_turn" }, progress: "Lower than last time." });
+    const st = draftsBackend([drafted(DA, { draft: text2 }), drafted(DB)]), page = await open({ store: TOKEN, backend: st.backend });
+    const box = (id, p) => `.coachpanel [data-k="ed-${id}-${p}"]`;
+    await page.tap(TAB); await inPanel(page, "A's heads-up box", `[data-k="ed-${DA}-heads_up.text"]`);
+    await page.fill(box(DA, "heads_up.text"), "  "); await page.fill(box(DA, "progress"), "");
+    await page.click(`.coachpanel [data-k="act-${DA}-approve"]`); await soon("A's Approve", () => st.acts.length === 1);
+    if (!eq(st.acts[0], [DA, { action: "approve", ver: verOf(drafted(DA)), edits: { "heads_up.text": "", progress: "" } }])) throw new Error(`Approve sent ${JSON.stringify(st.acts[0])}`);
+    await page.fill(box(DB, "went_well.title"), " "); await page.click(`.coachpanel [data-k="act-${DB}-approve"]`); await inPanel(page, "B's red line", `.co-dr[data-id="${DB}"] .co-dr-err`);
+    const line = await text(page, `.co-dr[data-id="${DB}"] .co-dr-err`);
+    if (st.acts.length !== 1 || line !== "Each line needs 1 to 1,000 characters. Only the heads-up and progress may be left empty.") throw new Error(`B with an empty title: ${JSON.stringify({ line, acts: st.acts.length })}`);
+  },
+  // On a 360-wide phone each edit box is as tall as its text, in English and 中文 (no line cut off), at least two lines, and at most
+  // its maximum, past which it scrolls; it grows as it's typed in.
+  async draftsFit(open) {
+    const LONG = "Keep your front knee bent and your chest over it as you come off the top of the wave. ".repeat(11);
+    const en = reviewText({ heads_up: { text: "Your back knee locks straight on your cutback too, so the board slides out from under you when you lean into the turn.", move: "cutback" },
+      main_fix: { frames: [6, 7, 8], title: "Stay over your front foot", what: LONG, why: "The board runs away from under you." } });
+    const zh = reviewText({ went_well: { frame: 2, title: "身體壓低，重心在板子上", detail: "進入轉向前，你兩個膝蓋都彎著，頭抬高、看著前方。板子平穩地貼在浪壁上，這個起步又穩又好。" },
+      main_fix: { frames: [6, 7, 8], title: "重心留在前腳", what: "衝上浪頂時，你的重心往後滑到板尾。前腿打直，整個人坐到後腳上（0:11.7 的關鍵影格）。板子往前衝出去，你就往後摔下來（0:12.0 和 0:12.2 的關鍵影格）。",
+        why: "重心在板尾，板子會從你腳下溜走，轉到一半就摔下來。前膝保持彎曲、胸口壓在前膝上方，板子就會留在你腳下。" },
+      drill: { title: "沙灘上練前膝轉向", how: "在沙灘上用衝浪站姿站好，膝蓋彎曲。轉頭、轉肩膀，想像自己正在浪頂。轉的同時把前膝往前推，胸口帶到前膝上方，停三秒。下水前慢慢做 10 次。" } });
+    const st = draftsBackend([drafted(DA, { draft: en }), drafted(DB, { lang: "zh", draft: zh })]), page = await open({ store: TOKEN, backend: st.backend });
+    await page.setViewportSize({ width: 360, height: 740 });
+    await page.tap(TAB); await inPanel(page, "B's edit boxes", `[data-k="ed-${DB}-drill.how"]`); await settle(page);
+    const boxes = () => page.evaluate(() => [...document.querySelectorAll(".coachpanel .co-ed textarea")].map(t => { const c = getComputedStyle(t);
+      return { k: t.dataset.k, cut: t.scrollHeight - t.clientHeight, h: t.getBoundingClientRect().height, line: parseFloat(c.lineHeight), max: parseFloat(c.maxHeight), oy: c.overflowY }; }));
+    const fits = async what => { const bs = await boxes(); if (bs.length !== 18) throw new Error(`${what}: ${bs.length} edit boxes`);
+      for (const b of bs) { const long = b.k === `ed-${DA}-main_fix.what`;
+        if (!(b.max > 0) || b.h > b.max + 1 || b.h < 2 * b.line) throw new Error(`${what}: ${b.k} is ${b.h}px tall, ${b.line}px lines, at most ${b.max}px`);
+        if (long ? !(b.cut > 0 && b.oy === "auto") : b.cut > 1) throw new Error(`${what}: ${b.k} cuts off ${b.cut}px (overflow ${b.oy})`); } return bs; };
+    const before = await fits("in English");
+    const hu = `ed-${DA}-heads_up.text`; await page.focus(`.coachpanel [data-k="${hu}"]`); await page.keyboard.press("End");
+    await page.keyboard.type(" Look up the line first, then turn.".repeat(3)); await settle(page);
+    const grown = await fits("typed in"), h0 = before.find(b => b.k === hu).h, h1 = grown.find(b => b.k === hu).h;
+    if (!(h1 > h0)) throw new Error(`the heads-up box didn't grow as it was typed in: ${h0}px, then ${h1}px`);
+    await page.evaluate(() => document.activeElement.blur()); await page.evaluate(() => setLang("zh")); await settle(page); await fits("in 中文");
+  },
+  // Enter while an input method still has the key (keyCode 229, as an iPhone's 中文 keyboard gives it) doesn't send Something wrong?'s
+  // line or a Drafts note; Enter itself does.
+  async enterIme(open) {
+    const ime = sel => (page => page.evaluate(s => { const e = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+      Object.defineProperty(e, "keyCode", { get: () => 229 }); document.querySelector(s).dispatchEvent(e); }, sel));
+    const st = reviewBackend(reviewText({})), page = await open({ store: TOKEN, backend: st.backend });
+    await openRid(page); await page.click('.coachpanel [data-k="wrong"]'); await page.fill('.coachpanel [data-k="wrongline"]', "選錯了");
+    await ime('.coachpanel [data-k="wrongline"]')(page); await wait(500);
+    if (st.reports.length) throw new Error(`Enter at keyCode 229 sent ${JSON.stringify(st.reports)}`);
+    await page.focus('.coachpanel [data-k="wrongline"]'); await page.keyboard.press("Enter"); await soon("the report", () => st.reports.length === 1);
+    const d = draftsBackend([drafted(DA)]), dp = await open({ store: TOKEN, backend: d.backend });
+    await dp.tap(TAB); await inPanel(dp, "A's Reject", `[data-k="act-${DA}-reject"]`); await dp.click(`.coachpanel [data-k="act-${DA}-reject"]`);
+    await dp.fill(`.coachpanel [data-k="note-${DA}"]`, "拍近一點"); await ime(`.coachpanel [data-k="note-${DA}"]`)(dp); await wait(500);
+    if (d.acts.length) throw new Error(`Enter at keyCode 229 in a Drafts note sent ${JSON.stringify(d.acts)}`);
+    await dp.focus(`.coachpanel [data-k="note-${DA}"]`); await dp.keyboard.press("Enter"); await soon("Reject", () => d.acts.length === 1);
+  },
+  // A seek on its way while the page is hidden gets 20 s afresh once the page shows again: with the clip's seeks held back, hidden as
+  // the cut starts and shown 12 s later, the cut is still going 22 s in (the stall timer's first mark finds the page shown, and once
+  // gave up there: "This phone can't open that clip.").
+  async seekHidden(open, { tmp }) {
+    const st = flowBackend(), page = await open({ store: TOKEN, backend: st.backend }), b = boxAt(640, 360, 6, 3);
+    await page.tap(TAB); await inPanel(page, "New review", '[data-k="new"]'); await page.click('.coachpanel [data-k="new"]');
+    await page.setInputFiles('.coachpanel input[type="file"]', makeClip(tmp, {}));
+    await inPanel(page, "the questions", '[data-k="move-top_turn"]'); await page.click('.coachpanel [data-k="move-top_turn"]'); await page.click('.coachpanel [data-k="next"]');
+    await slideTo(page, 3); await page.click('.coachpanel [data-k="here"]'); await inPanel(page, "the frame, ready for a tap", ".co-frame[data-ready]");
+    await page.evaluate(() => { const v = document.querySelector(".coachpanel video"), d = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "currentTime");
+      Object.defineProperty(v, "currentTime", { configurable: true, get() { return d.get.call(this); }, set() {} });
+      window.__vis = "hidden"; Object.defineProperty(document, "visibilityState", { configurable: true, get: () => window.__vis });
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => window.__vis === "hidden" });
+      document.dispatchEvent(new Event("visibilitychange")); });
+    await tapAt(page, b.x, b.y); await inPanel(page, "the cut", ".co-prog");
+    await wait(12e3); await page.evaluate(() => { window.__vis = "visible"; document.dispatchEvent(new Event("visibilitychange")); });
+    await wait(10e3);
+    const got = { head: await text(page, '[data-k="fh"]'), err: await text(page, ".co-err") };
+    if (!eq(got, { head: "Cutting your key frames…", err: null })) throw new Error(`22 s in, shown again at 12 s: ${JSON.stringify(got)}`);
+  },
+  // ‹ Back on the check screen: with a key frame open, it shuts it; with the clip there, it goes back to Find the move, at Here.
+  async checkBack(open, { tmp }) {
+    const st = flowBackend(), page = await open({ store: TOKEN, backend: st.backend }), b = boxAt(640, 360, 6, 2.5);
+    await toCheck(page, makeClip(tmp, { gap: [2.9, 3.1] }), { at: 2.5, x: b.x, y: b.y });
+    await inPanel(page, "the lost key frame", '[data-k="notin"]');
+    await page.click('.coachpanel [data-k="back"]'); await inPanel(page, "the 12 close-ups", ".co-grid");
+    await page.click('.coachpanel [data-k="back"]'); await inPanel(page, "Find the move", '[data-k="slider"]');
+    const got = { head: await text(page, '[data-k="fh"]'), at: await page.evaluate(() => +document.querySelector('.coachpanel [data-k="slider"]').value) };
+    if (!eq(got, { head: "Find the move", at: 2.5 })) throw new Error(`‹ Back from the check screen shows ${JSON.stringify(got)}`);
+  },
+  // A Drafts card shows the heads-up's button as the surfer will have it ("Get a review of your bottom turn"), which does nothing there,
+  // and the "used a word" warning names the words the backend found, in English and 中文.
+  async draftsHeadsUp(open) {
+    const st = draftsBackend([drafted(DA, { draft: reviewText({ heads_up: { text: "Watch the rocks on the inside.", move: "bottom_turn" } }), warnings: ["words"], words: ["video", "照片"] })]);
+    const page = await open({ store: TOKEN, backend: st.backend });
+    await page.tap(TAB); await inPanel(page, "A's heads-up button", `[data-k="headsup-${DA}"]`);
+    const look = () => page.evaluate(id => ({ btn: document.querySelector(`.coachpanel [data-k="headsup-${id}"]`).textContent,
+      off: document.querySelector(`.coachpanel [data-k="headsup-${id}"]`).getAttribute("aria-disabled"), warn: [...document.querySelectorAll(".coachpanel .co-warn li")].map(l => l.textContent) }), DA);
+    const en = await look();
+    await page.click(`.coachpanel [data-k="headsup-${DA}"]`, { force: true }); await settle(page); // aria-disabled: Playwright won't click it unforced
+    if (await page.$(".coachpanel .co-flow")) throw new Error("the heads-up's button on a Drafts card started New review");
+    await page.evaluate(() => setLang("zh")); await settle(page); const zh = await look();
+    const wantEn = { btn: "Get a review of your bottom turn", off: "true", warn: ["It used a word surfers shouldn't see. Find it and change it before you approve. Found: “video”, “照片”."] };
+    const wantZh = { btn: "讓教練講評你的底部轉向", off: "true", warn: ["用到了不該讓衝浪者看到的字詞，核准前請找出來改掉。找到：「video」、「照片」。"] };
+    if (!eq(en, wantEn) || !eq(zh, wantZh)) throw new Error(`the card shows ${JSON.stringify(en)}, in 中文 ${JSON.stringify(zh)}`);
+  },
+  // Find the move's slider is in the coach's amber (accent-color); the coach's amber is darker in the light theme, so its small text is
+  // at least 4.5:1 on the page's background, and in the dark theme it is the site's own amber, as it was.
+  async amber(open, { tmp }) {
+    const page = await open({ store: TOKEN, backend: flowBackend().backend });
+    await page.tap(TAB); await inPanel(page, "New review", '[data-k="new"]'); await page.click('.coachpanel [data-k="new"]');
+    await page.setInputFiles('.coachpanel input[type="file"]', makeClip(tmp, {})); await inPanel(page, "the questions", '[data-k="move-top_turn"]');
+    await page.click('.coachpanel [data-k="move-top_turn"]'); await page.click('.coachpanel [data-k="next"]'); await inPanel(page, "the slider", '[data-k="slider"]');
+    const look = () => page.evaluate(() => { const lum = c => { const [r, g, b] = c.match(/\d+/g).slice(0, 3).map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b; }, ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+      const back = getComputedStyle(document.querySelector('.coachpanel [data-k="back"]')).color, bg = getComputedStyle(document.querySelector(".coachpanel")).backgroundColor;
+      return { slider: getComputedStyle(document.querySelector('.coachpanel [data-k="slider"]')).accentColor, back, ratio: Math.round(ratio(back, bg) * 100) / 100 }; });
+    const light = await look();
+    await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark")); await settle(page); const dark = await look();
+    if (light.slider !== light.back || !(light.ratio >= 4.5) || dark.back !== "rgb(255, 207, 92)" || dark.slider !== dark.back) throw new Error(`light ${JSON.stringify(light)}, dark ${JSON.stringify(dark)}`);
+  },
+  // web/coach.js ships to every surfer, so its comments say "the owner", never his name (ruling P65).
+  async noOwnerName() {
+    const named = COACH_JS.split("\n").map((l, i) => [i + 1, l]).filter(([, l]) => /Bryan/.test(l)).map(([n]) => n);
+    if (named.length) throw new Error(`web/coach.js names the owner on lines ${named.join(", ")}`);
   },
   // The page's hooks never throw, whatever they're given, and a spot the page doesn't have leaves the tab as html.tw says.
   async hooksHold(open) {

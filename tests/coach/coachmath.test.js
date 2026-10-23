@@ -21,13 +21,14 @@ function rng(seed) {
 }
 // Twelve key frames of a W x H clip as the page gets them for tracking: each drawn at quarter size (every quarter pixel the mean of the
 // 4 x 4 displayed pixels under it), then through grey(). Every frame has its own noise (0-255 grey); a white square of side S sits over it
-// with its top-left at at(i), or is gone where at(i) is null. W and H are multiples of 4.
-function clip({W, H, S, at, n = 12, seed = 1}) {
+// with its top-left at at(i), or is gone where at(i) is null. Where under(i, x, y) gives a grey, that is drawn in place of the noise (the
+// square still on top). W and H are multiples of 4.
+function clip({W, H, S, at, n = 12, seed = 1, under = null}) {
   const r = rng(seed), w = W / 4, h = H / 4, out = [];
   for (let i = 0; i < n; i++) {
     const p = at(i), rgba = new Uint8ClampedArray(w * h * 4), sum = new Float64Array(w * h);
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
-      sum[(y >> 2) * w + (x >> 2)] += p && x >= p.x && x < p.x + S && y >= p.y && y < p.y + S ? 255 : Math.floor(r() * 256);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const u = under && under(i, x, y);
+      sum[(y >> 2) * w + (x >> 2)] += p && x >= p.x && x < p.x + S && y >= p.y && y < p.y + S ? 255 : u != null ? u : Math.floor(r() * 256); }
     for (let k = 0; k < w * h; k++) { rgba[4 * k] = rgba[4 * k + 1] = rgba[4 * k + 2] = sum[k] / 16; rgba[4 * k + 3] = 255; }
     out.push(M.grey(rgba, w, h));
   }
@@ -212,6 +213,73 @@ test("track: a surfer running out of the frame leaves every box inside it", () =
   got.forEach((b, i) => assert.ok(b.x >= 0 && b.y >= 0 && b.x + b.side <= W && b.y + b.side <= H && b.side === 120, `frame ${i}: ${JSON.stringify(b)}`));
   followed(got.slice(0, 7), got.slice(0, 7).map((b, i) => ({x: 370 + 24 * i, y: 12 * i})), 120);
   assert.ok(got[10].lost && got[11].lost, "gone from the frame");
+});
+
+test("track: a bright texture beside the surfer's path doesn't take the box (it stays on him or the frame is lost)", () => {
+  // As in Bryan's clip: tapped at the 8th key frame; from the 9th on, whitewater (high-contrast blobs, still) breaks just under his path,
+  // inside his box. A tracker that only follows the last patch sticks to the whitewater and calls it found.
+  const W = 640, H = 360, S = 60, from = 7, at = i => ({x: 41 + 24 * i, y: 100});
+  for (const seed of [1, 2, 3]) {
+    const r = rng(100 + seed), blobs = Array.from({length: 45 * 80}, () => r() < 0.5 ? 255 : 0);
+    const under = (i, x, y) => i >= 8 && x >= 120 && x < 600 && y >= 165 && y < 330 ? blobs[(y >> 3) * 80 + (x >> 3)] : null;
+    const greys = clip({W, H, S, at, seed, under}), p = at(from), box = M.startBox(p.x + S / 2, p.y + S / 2, W, H), got = M.track(greys, from, box);
+    const want = greys.map((g, i) => ({x: box.x + 24 * (i - from), y: box.y}));
+    followed(got.slice(0, 8), want.slice(0, 8), box.side);
+    for (let i = 8; i < 12; i++) {
+      const off = Math.hypot(got[i].x - want[i].x, got[i].y - want[i].y);
+      assert.ok(off <= 6 || got[i].lost, `seed ${seed}, frame ${i}: box at ${got[i].x},${got[i].y}, ${off.toFixed(0)} px off the square, and not lost (score ${got[i].score.toFixed(2)})`);
+    }
+  }
+});
+
+test("track: no slow drift at speeds that aren't a multiple of 4 px a frame", () => {
+  // 25-27 px a frame is 6.25-6.75 quarter pixels: following only the last patch, the rounding adds up over 11 frames.
+  const W = 640, H = 360, S = 60;
+  for (const v of [25, 26, 27]) for (const from of [0, 11]) {
+    const at = i => ({x: 61 + v * i, y: 151}), greys = clip({W, H, S, at, seed: 9}), p = at(from);
+    const box = M.startBox(p.x + S / 2, p.y + S / 2, W, H), got = M.track(greys, from, box), end = 11 - from;
+    got.forEach((b, i) => assert.equal(b.lost, false, `${v} px a frame from ${from}: frame ${i} lost`));
+    const off = got[end].x - (box.x + v * (end - from));
+    assert.ok(Math.abs(off) <= 6 && Math.abs(got[end].y - box.y) <= 6, `${v} px a frame from ${from}: frame ${end} is ${off} px off`);
+  }
+});
+
+test("track: a surfer half past the frame's edge is still found, the box clamped against that edge", () => {
+  // The square slides right (or left) until, in the last frame, half of it is past the edge; the box can't follow it out, so it stays
+  // clamped against the edge, but the frames are not lost.
+  const W = 640, H = 360, S = 60;
+  for (const [x0, v] of [[346, 24], [234, -24]]) for (const seed of [1, 2]) {
+    const at = i => ({x: x0 + v * i, y: 150}), greys = clip({W, H, S, at, seed}), p = at(0), box = M.startBox(p.x + S / 2, p.y + S / 2, W, H);
+    assert.equal(at(11).x + S / 2, v > 0 ? W : 0, "half the square is past the edge in the last frame");
+    const got = M.track(greys, 0, box);
+    got.forEach((b, i) => {
+      const x = Math.max(0, Math.min(box.x + v * i, W - box.side)), what = `${v > 0 ? "right" : "left"}, seed ${seed}, frame ${i}`;
+      assert.equal(b.lost, false, `${what}: lost (score ${b.score.toFixed(2)})`);
+      assert.ok(Math.abs(b.x - x) <= 2 && Math.abs(b.y - box.y) <= 2, `${what}: box at ${b.x},${b.y}, want ${x},${box.y}`);
+      assert.ok(b.x >= 0 && b.x + b.side <= W && b.side === 120, `${what}: ${JSON.stringify(b)}`);
+    });
+  }
+});
+
+test("track: after a frame it lost, it finds the surfer again round the last good place", () => {
+  const W = 640, H = 360, S = 60, from = 5, pos = i => ({x: 41 + 24 * i, y: 151}), at = i => i === 8 || i === 2 ? null : pos(i);
+  const greys = clip({W, H, S, at, seed: 4}), p = pos(from), box = M.startBox(p.x + S / 2, p.y + S / 2, W, H), got = M.track(greys, from, box);
+  const want = greys.map((g, i) => ({x: box.x + 24 * (i - from), y: box.y}));
+  for (const [i, last] of [[8, 7], [2, 3]]) {
+    assert.equal(got[i].lost, true, `frame ${i} is lost`);
+    assert.deepEqual([got[i].x, got[i].y], [got[last].x, got[last].y], `frame ${i} keeps frame ${last}'s place`);
+  }
+  const kept = got.map((b, i) => i).filter(i => i !== 8 && i !== 2);
+  followed(kept.map(i => got[i]), kept.map(i => want[i]), box.side);
+});
+
+test("track: 12 portrait key frames (270 x 480 at quarter size) in well under a third of a second", () => {
+  const W = 1080, H = 1920, S = 180, at = i => ({x: 301 + 26 * i, y: 501 + 26 * i});
+  const greys = clip({W, H, S, at, seed: 13}), from = 7, p = at(from), box = M.startBox(p.x + S / 2, p.y + S / 2, W, H);
+  const t0 = performance.now(), got = M.track(greys, from, box), ms = performance.now() - t0;
+  assert.ok(ms < 300, `track took ${ms.toFixed(0)} ms`);
+  got.forEach((b, i) => assert.ok(!b.lost && Math.abs(b.x - (box.x + 26 * (i - from))) <= 6 && Math.abs(b.y - (box.y + 26 * (i - from))) <= 6,
+    `frame ${i}: ${JSON.stringify(b)}`));
 });
 
 test("fmtTime: m:ss.s, rounded through hundredths as the coach's labels are", () => {

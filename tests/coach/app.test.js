@@ -327,6 +327,8 @@ const tabDot = page => page.evaluate(t => { const b = document.querySelector(t);
 // a time as the page shows it (COACHM.fmtTime).
 const PATHS = ["went_well.title", "went_well.detail", "main_fix.title", "main_fix.what", "main_fix.why", "drill.title", "drill.how", "heads_up.text", "progress"];
 const at = (o, p) => p.split(".").reduce((v, k) => (v && typeof v === "object" ? v[k] : undefined), o);
+// A review's version as the Drafts list shows it (verOf in web/coach.js), which Approve, Redo, Reject and Withdraw send as ver (ruling P59).
+const verOf = r => [r.status, r.redos, r.waiting_since, r.handled_at].join("|");
 const put = (o, p, v) => { const [a, b] = p.split("."); if (b === undefined) o[a] = v; else o[a][b] = v; };
 const fmt = ms => { const t = Math.round(Math.round(Math.max(0, ms) / 10) / 10), s = t % 600; return Math.floor(t / 600) + ":" + String(Math.floor(s / 10)).padStart(2, "0") + "." + (s % 10); };
 const MARKUP = `<img src=x onerror="window.__xss=1"><b>bold</b><script>window.__xss=2</script>`;
@@ -1210,7 +1212,7 @@ const STEPS = {
     await page.fill(`.coachpanel [data-k="ed-${en}-went_well.title"]`, title); await page.click(`.coachpanel [data-k="act-${en}-approve"]`);
     await dsaid(page, "Published."); await answered(calls, from, "the approval's answer");
     const sent = posts(calls, from);
-    if (!eq(sent, [{ path: `/admin/coach/drafts/${en}`, body: { action: "approve", edits: { "went_well.title": title } }, status: 200 }])) throw new Error(`Approve sent ${JSON.stringify(sent)}`);
+    if (!eq(sent, [{ path: `/admin/coach/drafts/${en}`, body: { action: "approve", ver: verOf(row(en)), edits: { "went_well.title": title } }, status: 200 }])) throw new Error(`Approve sent ${JSON.stringify(sent)}`);
     const pub = (await coachApi(surfer, `/coach/reviews/${en}`)).json, text = pub && pub.review && pub.review.text;
     if (!text || pub.status !== "published" || pub.review.checked !== true || text.went_well.title !== title || !PATHS.filter(p => p !== "went_well.title").every(p => at(text, p) === at(row(en).draft, p)))
       throw new Error(`the surfer's review after Approve: ${JSON.stringify(pub)}`);
@@ -1244,7 +1246,7 @@ const STEPS = {
     if (need !== "Write a short note first." || posts(calls, from).length) throw new Error(`Reject without a note says ${JSON.stringify(need)}, sent ${JSON.stringify(posts(calls, from))}`);
     await page.fill(`.coachpanel [data-k="note-${id}"]`, note); await page.click(`.coachpanel [data-k="yes-${id}"]`);
     await dsaid(page, "Rejected. The surfer gets your note and the review back."); await answered(calls, from, "the rejection's answer");
-    if (!eq(posts(calls, from), [{ path: `/admin/coach/drafts/${id}`, body: { action: "reject", note }, status: 200 }])) throw new Error(`Reject sent ${JSON.stringify(posts(calls, from))}`);
+    if (!eq(posts(calls, from), [{ path: `/admin/coach/drafts/${id}`, body: { action: "reject", ver: verOf(r), note }, status: 200 }])) throw new Error(`Reject sent ${JSON.stringify(posts(calls, from))}`);
     const me = (await coachApi(tok, "/coach/me")).json, mine = me.reviews.find(x => x.id === id);
     if (!mine || mine.status !== "not_reviewed" || mine.note !== note || me.left !== 2) throw new Error(`u-dan after Reject: ${JSON.stringify({ left: me.left, review: mine })}`);
   },
@@ -1254,10 +1256,10 @@ const STEPS = {
   async draftsRedo(s) {
     const { page, calls } = s.admin, id = (await coachApi(token("u-ben"), "/coach/me")).json.reviews.find(r => r.status === "reviewing").id;
     const back = async (what, test) => { await soon(what, async () => test((await draftsList()).waiting.find(x => x.id === id))); await recheck(page, calls); };
-    const redo = async (note, status) => { const from = calls.length;
+    const redo = async (note, status) => { const from = calls.length, ver = verOf((await draftsList()).waiting.find(x => x.id === id));
       await page.click(`.coachpanel [data-k="act-${id}-redo"]`); await inPanel(page, "Redo's note", `[data-k="note-${id}"]`);
       await page.fill(`.coachpanel [data-k="note-${id}"]`, note); await page.click(`.coachpanel [data-k="yes-${id}"]`); await answered(calls, from, "the Redo's answer");
-      if (!eq(posts(calls, from), [{ path: `/admin/coach/drafts/${id}`, body: { action: "redo", note }, status }])) throw new Error(`Redo sent ${JSON.stringify(posts(calls, from))}`); };
+      if (!eq(posts(calls, from), [{ path: `/admin/coach/drafts/${id}`, body: { action: "redo", ver, note }, status }])) throw new Error(`Redo sent ${JSON.stringify(posts(calls, from))}`); };
     let from = calls.length;
     await page.click(`.coachpanel [data-k="act-${id}-redo"]`); await inPanel(page, "Redo's note", `[data-k="note-${id}"]`); await page.click(`.coachpanel [data-k="yes-${id}"]`); await wait(500);
     const need = await text(page, `.co-dr[data-id="${id}"] .co-ask .co-err`);
@@ -1324,24 +1326,26 @@ const STEPS = {
     await recheck(page, calls); await hasCard(page, id, "the reported review", { handled: false });
     const c = await dcard(page, id);
     if (c.rep !== `Reported: “${said}”` || !eq(c.acts, ["Approve", "Redo", "Withdraw", "Ban"])) throw new Error(`the reported review shows ${JSON.stringify({ rep: c.rep, acts: c.acts })}`);
-    const from = calls.length;
+    const from = calls.length, ver = verOf((await draftsList()).waiting.find(x => x.id === id));
     await page.click(`.coachpanel [data-k="act-${id}-withdraw"]`); await page.click(`.coachpanel [data-k="yes-${id}"]`); await wait(500);
     if (await text(page, `.co-dr[data-id="${id}"] .co-ask .co-err`) !== "Write a short note first." || posts(calls, from).length) throw new Error("Withdraw went without a note");
     await page.fill(`.coachpanel [data-k="note-${id}"]`, note); await page.click(`.coachpanel [data-k="yes-${id}"]`);
     await dsaid(page, "Withdrawn. The surfer gets your note and the review back."); await answered(calls, from, "Withdraw's answer");
     const r = (await coachApi(token("u-hal"), `/coach/reviews/${id}`)).json;
-    if (!eq(posts(calls, from), [{ path: `/admin/coach/drafts/${id}`, body: { action: "withdraw", note }, status: 200 }]) || r.status !== "rejected" || r.note !== note) throw new Error(`Withdraw: ${JSON.stringify(r)}`);
+    if (!eq(posts(calls, from), [{ path: `/admin/coach/drafts/${id}`, body: { action: "withdraw", ver, note }, status: 200 }]) || r.status !== "rejected" || r.note !== note)
+      throw new Error(`Withdraw sent ${JSON.stringify(posts(calls, from))}: ${JSON.stringify(r)}`);
   },
-  // A draft that changed elsewhere (u-ana's, approved meanwhile through the route): Reject on the list as it was answers 409 state, a red
-  // line on the card, and the list is asked again, the card now among the handled ones.
+  // A draft that changed elsewhere (u-ana's, approved meanwhile through the route): Reject on the list as it was, with the version it
+  // showed, answers 409 state, a red line on the card, and the list is asked again, the card now among the handled ones.
   async draftsState(s) {
     const { page, calls } = s.admin, id = s.zhDraft;
     await hasCard(page, id, "u-ana's draft, waiting", { handled: false });
+    const was = verOf((await draftsList()).waiting.find(x => x.id === id));
     await act(id, { action: "approve" });
     const from = calls.length;
     await page.click(`.coachpanel [data-k="act-${id}-reject"]`); await page.fill(`.coachpanel [data-k="note-${id}"]`, "Too late."); await page.click(`.coachpanel [data-k="yes-${id}"]`);
     await answered(calls, from, "the stale Reject's answer");
-    if (!eq(posts(calls, from), [{ path: `/admin/coach/drafts/${id}`, body: { action: "reject", note: "Too late." }, status: 409 }])) throw new Error(`the stale Reject: ${JSON.stringify(posts(calls, from))}`);
+    if (!eq(posts(calls, from), [{ path: `/admin/coach/drafts/${id}`, body: { action: "reject", ver: was, note: "Too late." }, status: 409 }])) throw new Error(`the stale Reject: ${JSON.stringify(posts(calls, from))}`);
     await hasCard(page, id, "the red line on the handled card", { handled: true, err: "This review changed meanwhile. Here it is as it is now." });
   },
   // Review Focus 4 in the Drafts list (u-eve's draft): an edited line left empty sends nothing and says why; a line can't run past 1,000
@@ -1358,10 +1362,11 @@ const STEPS = {
     const cut = await page.$eval(box("progress"), e => [...e.value].length);
     if (cut !== 1000) throw new Error(`a line of 1,001 characters keeps ${cut}`);
     for (const [i, p] of PATHS.entries()) await page.fill(box(p), full(i));
+    const ver = verOf((await draftsList()).waiting.find(x => x.id === id));
     from = calls.length; await page.click(`.coachpanel [data-k="act-${id}-approve"]`);
     await dsaid(page, "Published."); await answered(calls, from, "the approval's answer");
     const sent = posts(calls, from), edits = Object.fromEntries(PATHS.map((p, i) => [p, full(i)]));
-    if (sent.length !== 1 || sent[0].status !== 200 || !eq(sent[0].body, { action: "approve", edits })) throw new Error(`Approve sent ${JSON.stringify(sent.map(c => [c.status, Object.keys(c.body.edits || {})]))}`);
+    if (sent.length !== 1 || sent[0].status !== 200 || !eq(sent[0].body, { action: "approve", ver, edits })) throw new Error(`Approve sent ${JSON.stringify(sent.map(c => [c.status, c.body.ver, Object.keys(c.body.edits || {})]))}, want ver ${ver}`);
     const text = (await coachApi(token("u-eve"), `/coach/reviews/${id}`)).json.review.text;
     if (!PATHS.every((p, i) => at(text, p) === full(i))) throw new Error("the published review doesn't have the nine lines");
     await page.click(`.coachpanel [data-k="old-${id}"]`); await wait(300);

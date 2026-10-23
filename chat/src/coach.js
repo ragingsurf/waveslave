@@ -347,6 +347,7 @@ const EDIT_MAX = 1_000; // characters in one field Bryan edits, after trimming (
 const REDOS_MAX = 2; // Redos a review may have, as each costs a new AI call (spec "Defaults")
 const HANDLED_MAX = 50; // the handled reviews the Drafts list shows after those waiting
 const UNCHANGED_OF = 20; // the approved reviews "Approved without changes: 14 of the last 20" looks back over
+const VER_MAX = 200; // characters in an action's ver
 
 // Bryan's actions on a review (spec "What Bryan sees"), POST /admin/coach/drafts/{id}: [whether it needs a note, the
 // method that does it]. Every method takes the review's row and the action's body (readAction).
@@ -360,18 +361,26 @@ const ACTIONS = Object.freeze({
   withdraw: [true, "withdraw"],
 });
 
-// An action's body, checked: {action, note, edits}, or null when it is invalid: an action not in ACTIONS, a note that
-// isn't text or runs over 200 characters, or is missing where the action needs one, or edits that aren't good
-// (readEdits) or come with any action but approve. note is "" when there is none; edits is {} when there are none.
+// An action's body, checked: {action, note, edits, ver}, or null when it is invalid: an action not in ACTIONS, a note
+// that isn't text or runs over 200 characters, or is missing where the action needs one, edits that aren't good
+// (readEdits) or come with any action but approve, or a ver that isn't text of at most 200 characters. note is "" when
+// there is none; edits is {} when there are none; ver is null when there is none.
 function readAction(body) {
   if (body === null || typeof body.action !== "string" || !Object.hasOwn(ACTIONS, body.action)) return null;
   const [needsNote] = ACTIONS[body.action];
   const note = ownLine(body.note, ADMIN_NOTE_MAX);
   if (note === null || (needsNote && note === "")) return null;
-  if (body.edits === undefined || body.edits === null) return { action: body.action, note, edits: {} };
+  const ver = body.ver ?? null;
+  if (ver !== null && (typeof ver !== "string" || ver.length > VER_MAX)) return null;
+  if (body.edits === undefined || body.edits === null) return { action: body.action, note, edits: {}, ver };
   const edits = body.action === "approve" ? readEdits(body.edits) : null;
-  return edits && { action: body.action, note, edits };
+  return edits && { action: body.action, note, edits, ver };
 }
+
+// A review's version as the Drafts list shows it (verOf in web/coach.js, ruling P59): its status, redos, waiting_since
+// and handled_at, joined with "|" (null as ""). Every new text a review gets changes one of them: a draft or a Redo's
+// draft (waiting_since), a Redo (redos), an approval, autopilot or a turn-down (handled_at), a report (waiting_since).
+const versionOf = (review) => [review.status, review.redos, review.waiting_since, review.handled_at].join("|");
 
 // Bryan's edits to a draft, checked (Review Focus 4): an object of the surfer's text fields he changed, each by its
 // path ("went_well.title", "progress": TEXT_FIELDS), to text of 1 to 1,000 characters after trimming, counted as
@@ -1097,14 +1106,17 @@ export class Coach extends DurableObject {
     };
   }
 
-  // POST /admin/coach/drafts/{id} {action, note, edits}: one of Bryan's actions on a review (ACTIONS), {ok: true}.
-  // Refused: invalid (readAction), not_found, then by the action: state when the review's status doesn't allow it.
-  // Every action but Ban checks and writes with no await between.
+  // POST /admin/coach/drafts/{id} {action, note, edits, ver}: one of Bryan's actions on a review (ACTIONS), {ok: true}.
+  // Refused: invalid (readAction), not_found, state when ver is given and the review is no longer that version (an old
+  // tab never publishes edits to a draft a Redo has since rewritten), then by the action: state when the review's
+  // status doesn't allow it. Without ver, the action goes on whatever version. Every action but Ban checks and writes
+  // with no await between.
   postDraft(who, body, id) {
     const ask = readAction(parseObject(body));
     if (!ask) return INVALID;
     const review = this.one("SELECT * FROM reviews WHERE id = ?", id);
     if (!review) return NOT_FOUND;
+    if (ask.ver !== null && ask.ver !== versionOf(review)) return STATE;
     return this[ACTIONS[ask.action][1]](review, ask, this.now());
   }
 

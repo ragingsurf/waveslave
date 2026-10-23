@@ -117,7 +117,7 @@ async function openRid(page) {
     null, { timeout: 10e3 }).catch(e => { throw new Error(`waited for the review's four key frames: ${e.message.split("\n")[0]}`); });
 }
 // ---- Bryan's Drafts list (web/coach.js), offline. draftsBackend(waiting, o) is a fake backend for it: GET /coach/me as me() for the
-// admin; GET /admin/coach/drafts with st.waiting (drafted(id) gives a draft) and none handled (st.gets counts them); each POST
+// admin (or st.me in its place, while it's set); GET /admin/coach/drafts with st.waiting (drafted(id) gives a draft) and none handled (st.gets counts them); each POST
 // /admin/coach/drafts/<id> noted (st.acts) and answered by o.act(id) when given (a promise holds it back), else {ok}; GET /admin/where as
 // o.where (text/plain; st.wheres notes each ask's Authorization); and each key frame as a JPEG (st.frames notes `${id}:${n}`).
 const DA = "A".repeat(22), DB = "B".repeat(22), DC = "C".repeat(22);
@@ -126,10 +126,10 @@ const drafted = (id, o = {}) => ({ id, status: "drafted", move: "top_turn", lang
   answers: { level: "turning_well", board: "shortboard", stance: "regular", note: "" }, times: KEY_MS, frames: [], have: [2, 6, 7, 8], flags: [], warnings: [],
   redo_note: [], draft: reviewText({}), english: null, final: null, waited_ms: 3600e3, reported: false, ...o });
 function draftsBackend(waiting, { act = null, where = { text: "room colo=NRT\ncoach colo=KIX\n" } } = {}) {
-  const st = { waiting, gets: 0, acts: [], wheres: [], frames: [] };
+  const st = { waiting, gets: 0, acts: [], wheres: [], frames: [], me: null };
   st.backend = (q, req) => {
     const p = q.pathname, m = req.method(), a = /^\/admin\/coach\/drafts\/([\w-]{22})$/.exec(p), fr = /^\/coach\/reviews\/([\w-]{22})\/frames\/(\d+)$/.exec(p);
-    if (p === "/coach/me") return { body: me({ admin: true, account: "u-bryan" }) };
+    if (p === "/coach/me") return st.me || { body: me({ admin: true, account: "u-bryan" }) };
     if (p === "/admin/coach/drafts" && m === "GET") { st.gets++; return { body: { waiting: st.waiting, handled: [], settings: SETTINGS } }; }
     if (a && m === "POST") { st.acts.push([a[1], req.postDataJSON()]); return act ? act(a[1]) : { body: { ok: true } }; }
     if (p === "/admin/where" && m === "GET") { st.wheres.push(req.headers().authorization || null); return where; }
@@ -138,6 +138,8 @@ function draftsBackend(waiting, { act = null, where = { text: "room colo=NRT\nco
   };
   return st;
 }
+// The page's version of review r (verOf in web/coach.js), which Approve, Redo, Reject and Withdraw send as ver (ruling P59).
+const verOf = r => [r.status, r.redos, r.waiting_since, r.handled_at].join("|");
 // Scrolls the panel so review id's key frames are at the top of its view.
 const toFrames = (page, id) => page.evaluate(id => { const b = document.querySelector(".coachpanel .co-body"), g = document.querySelector(`.coachpanel .co-dr[data-id="${id}"] .co-kfs`);
   b.scrollTop += g.getBoundingClientRect().top - b.getBoundingClientRect().top; }, id);
@@ -1002,25 +1004,69 @@ const CHECKS = {
       st.waiting = []; list(); await inPanel(page, "No drafts waiting.", ".co-drafts .co-note", 5e3);
     } finally { release(); list(); }
   },
-  // What Bryan has typed in a draft's edit box and not sent is kept for the tab (sessionStorage): a reload shows it again. Once the review
-  // has changed (a Redo came back) it's gone, and so it is once he approves it. Where the tab won't keep it, it's kept in the panel.
+  // What Bryan has typed in a draft's edit box and not sent is kept for the tab (sessionStorage): shutting the panel lets the list go, and
+  // opening it again shows the edit again, as a reload does. (A reload here could lose the tab's storage itself: this harness's init
+  // script touches sessionStorage as each page loads, which in Playwright can race the reload.) Once the review has changed (a Redo came
+  // back) it's gone, and so it is once he approves it. Where the tab won't keep it, it's kept in the panel.
   async draftsKept(open) {
     const st = draftsBackend([drafted(DA)]), box = `.coachpanel [data-k="ed-${DA}-went_well.title"]`, kept = `waveslave-coach-ed-${DA}`;
     const page = await open({ store: TOKEN, backend: st.backend }), at = () => page.$eval(box, t => t.value), has = () => page.evaluate(k => sessionStorage.getItem(k) !== null, kept);
     await page.tap(TAB); await inPanel(page, "A's edit box", `[data-k="ed-${DA}-went_well.title"]`);
-    await page.fill(box, "Kept across a reload"); await page.reload(); await settle(page);
-    await page.tap(TAB); await inPanel(page, "A's edit box after the reload", `[data-k="ed-${DA}-went_well.title"]`);
-    if (await at() !== "Kept across a reload") throw new Error(`after a reload A's edit box reads ${JSON.stringify(await at())}`);
+    await page.fill(box, "Kept for the tab"); await page.tap(".coachpanel .co-x"); await settle(page);
+    await page.tap(TAB); await inPanel(page, "A's edit box, the panel opened again", `[data-k="ed-${DA}-went_well.title"]`);
+    if (await at() !== "Kept for the tab") throw new Error(`the panel opened again, A's edit box reads ${JSON.stringify(await at())}`);
     st.waiting = [drafted(DA, { redos: 1, waiting_since: REVIEW_AT + 60e3 })]; await page.click('.coachpanel [data-k="drefresh"]'); await soon("the list asked for again", () => st.gets >= 3); await wait(300);
     if (await at() !== "Low and ready going in" || await has()) throw new Error(`A changed (a Redo came back): its box reads ${JSON.stringify(await at())}, ${await has() ? "still" : "no longer"} kept`);
     await page.fill(box, "Approved as typed"); if (!await has()) throw new Error("a new edit isn't kept for the tab");
     await page.click(`.coachpanel [data-k="act-${DA}-approve"]`); await soon("A's Approve", () => st.acts.length === 1); await wait(300);
-    if (!eq(st.acts[0], [DA, { action: "approve", edits: { "went_well.title": "Approved as typed" } }]) || await has()) throw new Error(`Approve sent ${JSON.stringify(st.acts)}, the edit ${await has() ? "still" : "no longer"} kept`);
+    if (!eq(st.acts[0], [DA, { action: "approve", ver: verOf(st.waiting[0]), edits: { "went_well.title": "Approved as typed" } }]) || await has()) throw new Error(`Approve sent ${JSON.stringify(st.acts)}, the edit ${await has() ? "still" : "no longer"} kept`);
     await page.evaluate(() => { for (const k of ["setItem", "getItem", "removeItem"]) { const f = Storage.prototype[k];
       Storage.prototype[k] = function (key, ...a) { if (String(key).startsWith("waveslave-coach-ed-")) throw new Error("denied"); return f.call(this, key, ...a); }; } });
     st.waiting = [drafted(DA, { redos: 2 })]; await page.click('.coachpanel [data-k="drefresh"]'); await soon("the list once more", () => st.gets >= 5); await wait(300);
     await page.fill(box, "Kept in the panel"); await page.click('.coachpanel [data-k="drefresh"]'); await soon("the list again", () => st.gets >= 6); await wait(300);
     if (await at() !== "Kept in the panel") throw new Error(`with the tab refusing to keep it, A's box reads ${JSON.stringify(await at())}`);
+  },
+  // A sign-out never waits on typing: GET /coach/me answering 401 while 中文 is being composed in a draft's edit box shows Sign in with
+  // LINE at once. What Bryan had typed stays kept for the tab, for his account, and is back in the box once he signs in again.
+  async draftsSignOut(open) {
+    const st = draftsBackend([drafted(DA)]), box = `.coachpanel [data-k="ed-${DA}-went_well.title"]`, kept = `waveslave-coach-ed-${DA}`;
+    const page = await open({ skew: true, store: TOKEN, backend: st.backend });
+    await page.tap(TAB); await inPanel(page, "A's edit box", `[data-k="ed-${DA}-went_well.title"]`);
+    await page.fill(box, "Kept through a sign-out"); await page.focus(box);
+    await page.evaluate(s => { const t = document.querySelector(s); t.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      t.value += "ㄓ"; t.dispatchEvent(new InputEvent("input", { isComposing: true, data: "ㄓ", inputType: "insertCompositionText" })); }, box);
+    st.me = { status: 401, body: { error: "auth" } };
+    await page.evaluate(() => { window.__skew(61e3); document.dispatchEvent(new Event("visibilitychange")); });
+    await inPanel(page, "Sign in with LINE at once", ".co-signin", 2e3);
+    const got = await page.evaluate(k => { let o = null; try { o = JSON.parse(sessionStorage.getItem(k)); } catch (e) {}
+      return { drafts: !!document.querySelector(".coachpanel .co-drafts"), who: o && o.who, text: o && o.f && o.f["went_well.title"] }; }, kept);
+    if (!eq(got, { drafts: false, who: "u-bryan", text: "Kept through a sign-out" })) throw new Error(`after a 401 mid-composition: ${JSON.stringify(got)}`);
+    st.me = null; await page.evaluate(() => { localStorage.setItem("waveslave-chat-token", "test-token"); window.COACH.dev(); });
+    await inPanel(page, "A's edit box after signing in again", `[data-k="ed-${DA}-went_well.title"]`, 5e3);
+    const back = await page.$eval(box, t => t.value);
+    if (back !== "Kept through a sign-out") throw new Error(`signed in again, A's edit box reads ${JSON.stringify(back)}`);
+  },
+  // A card drawn before a held redraw doesn't send for a review that has since changed: Approve again on a card already approved (now
+  // gone from the list), or Approve on one whose draft a Redo rewrote meanwhile, says "This draft changed. Check it again." and draws the
+  // list as it is, sending nothing.
+  async draftsStale(open) {
+    for (const tap of [DA, DB]) {
+      let release = null; const held = new Promise(r => { release = r; }), box = `.coachpanel [data-k="ed-${DB}-went_well.title"]`;
+      const st = draftsBackend([drafted(DA), drafted(DB)], { act: () => held.then(() => { st.waiting = [drafted(DB, { redos: 1, waiting_since: REVIEW_AT + 60e3 })]; return { body: { ok: true } }; }) });
+      try {
+        const page = await open({ store: TOKEN, backend: st.backend });
+        await page.tap(TAB); await inPanel(page, "B's edit box", `[data-k="ed-${DB}-went_well.title"]`);
+        await page.click(`.coachpanel [data-k="act-${DA}-approve"]`); await soon("A's Approve on its way", () => st.acts.length === 1);
+        await page.focus(box); await page.keyboard.type("x"); const gets = st.gets;
+        release(); await soon("the list asked for again after Approve", () => st.gets > gets); await wait(500);
+        await page.evaluate(k => document.querySelector(`.coachpanel [data-k="${k}"]`).click(), `act-${tap}-approve`); await wait(300);
+        const got = await page.evaluate(() => ({ said: (document.querySelector('.coachpanel [data-k="dsaid"]') || {}).textContent || null,
+          cards: [...document.querySelectorAll(".coachpanel .co-dr")].map(c => c.getAttribute("data-id")) }));
+        const want = { said: "This draft changed. Check it again.", cards: [DB] };
+        if (!eq(got, want) || st.acts.length !== 1) throw new Error(`Approve on ${tap === DA ? "A, already approved" : "B, changed meanwhile"}, from the card drawn before: ${JSON.stringify(got)}, sent ${JSON.stringify(st.acts)}`);
+        if (!eq(st.acts[0], [DA, { action: "approve", ver: verOf(drafted(DA)) }])) throw new Error(`A's Approve sent ${JSON.stringify(st.acts[0])}, want its ver`);
+      } finally { release(); }
+    }
   },
   // A draft's key frames are asked for once its card comes near the panel's view (IntersectionObserver), each once; where the phone has
   // no IntersectionObserver, all of them at once.

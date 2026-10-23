@@ -202,6 +202,7 @@ describe("Bryan's routes", () => {
       { action: "approve", note: 7 }, { action: "approve", note: "n".repeat(201) },
       { action: "reject", note: "x".repeat(201) }, { action: "giveback", note: "浪".repeat(201) },
       { action: "redo", edits: { progress: "Lower" }, note: "A note" },
+      { action: "approve", ver: 7 }, { action: "approve", ver: ["drafted|0||"] }, { action: "approve", ver: "v".repeat(201) },
     ];
     for (const body of bad) {
       expect(await act(c, id, body), JSON.stringify(body)).toEqual(INVALID);
@@ -275,6 +276,31 @@ describe("Approve", () => {
     expect(await examples(c)).toEqual([{
       move: "top_turn", level: "starting_turns", draft, bryan: row.final, note: null, review_id: id, at: T,
     }]);
+  });
+
+  it("with the draft's version (ver, ruling P59) is refused with 409 state once a Redo has drafted new text, changing nothing", async () => {
+    const c = await freshCoach();
+    const id = await insertReview(c, surfer(), { waiting_since: T - 5 * HOUR });
+    // The version the Drafts list shows (verOf in web/coach.js): status, redos, waiting_since and handled_at.
+    const verOf = async () => {
+      const r = (await drafts(c)).json.waiting.find((x) => x.id === id);
+      return [r.status, r.redos, r.waiting_since, r.handled_at].join("|");
+    };
+    const ver = await verOf();
+    expect(ver).toBe(`drafted|0|${T - 5 * HOUR}|`);
+    expect(await act(c, id, { action: "redo", note: "Back foot", ver })).toEqual(OK);
+    // The alarm drafts the Redo's new text, as it leaves a draft.
+    const fresh = goodReply();
+    fresh.drill.title = "The coach's new drill";
+    await c.rows("UPDATE reviews SET status = 'drafted', next_try = NULL, waiting_since = ?, draft = ? WHERE id = ?", T + MIN, JSON.stringify(fresh), id);
+    const before = await snapshot(c);
+    expect(await act(c, id, { action: "approve", edits: { "drill.title": "Bryan's drill" }, ver })).toEqual(STATE);
+    expect(await act(c, id, { action: "approve", ver })).toEqual(STATE);
+    expect(await act(c, id, { action: "reject", note: "Film closer", ver })).toEqual(STATE);
+    expect(await snapshot(c)).toEqual(before);
+    // With the version shown now it goes through, and publishes the new text.
+    expect(await act(c, id, { action: "approve", ver: await verOf() })).toEqual(OK);
+    expect(JSON.parse((await reviewRow(c, id)).final)).toEqual(fresh);
   });
 
   it("is refused with 409 state but on a drafted or published review", async () => {

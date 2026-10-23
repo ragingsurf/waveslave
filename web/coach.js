@@ -189,6 +189,7 @@ const STR = {
       done: { approve: "Published.", redo: "Sent to the coach for a Redo. Check again in a minute.", reject: "Rejected. The surfer gets your note and the review back.",
         giveback: "Given back.", clear: "Cleared. The account can send reviews again.", ban: "Banned.", withdraw: "Withdrawn. The surfer gets your note and the review back." },
       errs: { redo_limit: "No more Redo: this review has had its 2.", state: "This review changed meanwhile. Here it is as it is now.", not_found: "This review is gone.",
+        changed: "This draft changed. Check it again.",
         invalid: "Each line needs 1 to 1,000 characters, and a note at most 200.", edit: "Each line needs 1 to 1,000 characters." },
       st: { published: d => `Published · ${d}`, auto: d => `Published by autopilot · ${d}`, rejected: d => `Rejected · ${d}`, failed: d => `Failed · ${d}` },
       handled: "Handled lately", settings: "Settings", autopilot: on => `Autopilot: ${on ? "On" : "Off"}`, pause: "Pause the coach",
@@ -281,6 +282,7 @@ const STR = {
       done: { approve: "已發布。", redo: "已請教練重寫，一分鐘後再查一次。", reject: "已退回，衝浪者會收到你的留言，次數也會歸還。",
         giveback: "已歸還次數。", clear: "已解除，這個帳號可以再申請講評。", ban: "已封鎖。", withdraw: "已撤下，衝浪者會收到你的留言，次數也會歸還。" },
       errs: { redo_limit: "不能再重寫了：這份講評已經重寫 2 次。", state: "這份講評剛剛有變動，以下是它現在的樣子。", not_found: "這份講評已經不在了。",
+        changed: "這份草稿有變動，請再看一次。",
         invalid: "每一行要有 1 到 1,000 個字，留言最多 200 字。", edit: "每一行要有 1 到 1,000 個字。" },
       st: { published: d => `已發布 · ${d}`, auto: d => `自動發布 · ${d}`, rejected: d => `已退回 · ${d}`, failed: d => `失敗 · ${d}` },
       handled: "最近處理過的", settings: "設定", autopilot: on => `自動發布：${on ? "開" : "關"}`, pause: "暫停教練",
@@ -656,7 +658,7 @@ function drawDot() {
 // the token changes or GET /coach/me says this isn't the admin.
 function render() {
   if (!P.started || !P.open) return;
-  if (V.typing && P.body.contains(document.activeElement)) { held = true; return; } // drawn once the input method is done (release)
+  if (V.typing && P.body.contains(document.activeElement) && !gone()) { held = true; return; } // drawn once the input method is done (release)
   held = false; clearTimeout(laterT); laterT = 0;
   const had = P.body.contains(document.activeElement) ? document.activeElement : null, key = V.focus || (had && had.getAttribute("data-k")), at = P.body.scrollTop;
   let caret = null; try { if (had && !V.focus && typeof had.selectionStart === "number") caret = [had.selectionStart, had.selectionEnd, had.scrollTop]; } catch (e) {}
@@ -688,12 +690,15 @@ function render() {
 // a control drawn away), and not while a line or edit box has the focus (a Drafts edit box, Something wrong?'s line): drawing it again
 // would drop the iPhone's keyboard and any 中文 still being composed. That waits (held) until the focus leaves it or the input method is
 // done (release), unless the answer moves the focus on purpose (V.focus: the focus was still where Bryan tapped). render() itself never
-// draws over a composition.
+// draws over a composition. What's drawn for someone no longer signed in (gone: signed out, a refused token, another account, no longer
+// the admin, a review of another account) never waits: Sign in shows at once.
 let laterT = 0, held = false, ptrTill = 0;
 const editing = () => { const a = document.activeElement; return !!a && P.body.contains(a) && a.classList.contains("co-line"); };
+const gone = () => { const t = tokenNow();
+  return !t || ME.token !== t || !ME.me || (!!D.tok && D.tok !== t) || (ME.me.admin !== true && !!(D.list || D.asking)) || (!!R.row && R.owner !== account()); };
 function later() {
   if (!laterT) laterT = setTimeout(guard(() => { laterT = 0;
-    if (performance.now() < ptrTill) later(); else if (editing() && !V.focus) held = true; else render(); }), 30);
+    if (gone()) render(); else if (performance.now() < ptrTill) later(); else if (editing() && !V.focus) held = true; else render(); }), 30);
 }
 function release() { if (held) { held = false; later(); } }
 // The data-k of the control with the focus in the panel's body ("" for none), and whether it has moved from `from` to another control
@@ -997,15 +1002,18 @@ function dropDrafts() {
     busy: Object.create(null), ask: null, need: null, said: null, shots: new Map(), seen: new Set(), io: null, show: new Set(), open: new Set(), where: undefined,
     mail: null, sBusy: false, sErr: false });
 }
-// Bryan's unsent edits kept for the tab (sessionStorage), so a reload or a trip to LINE keeps them: {ver, who, f} by review, read back
-// only while the review is as it was (verOf) and for his account. Where the tab won't keep them, they're kept in the panel.
+// Bryan's unsent edits kept for the tab (sessionStorage), so a reload, a trip to LINE or a sign-out and back keeps them: {ver, who, f}
+// by review, written only while an account is signed in and read back only while the review is as it was (verOf) and for that account.
+// Where the tab won't keep them, they're kept in the panel.
 const ED_KEY = "waveslave-coach-ed-";
 function keepEd(id, e) {
-  try { if (e) sessionStorage.setItem(ED_KEY + id, JSON.stringify({ ver: e.ver, who: account(), f: e.f })); else sessionStorage.removeItem(ED_KEY + id); } catch (x) {}
+  const who = account(); if (e && !who) return;
+  try { if (e) sessionStorage.setItem(ED_KEY + id, JSON.stringify({ ver: e.ver, who, f: e.f })); else sessionStorage.removeItem(ED_KEY + id); } catch (x) {}
 }
 function keptEd(id, ver) {
+  const who = account(); if (!who) return null;
   let o = null; try { const v = sessionStorage.getItem(ED_KEY + id); if (v === null) return null; o = JSON.parse(v); } catch (x) {}
-  if (!isObj(o) || o.ver !== ver || o.who !== account() || !isObj(o.f)) { keepEd(id, null); return null; }
+  if (!isObj(o) || o.ver !== ver || o.who !== who || !isObj(o.f)) { keepEd(id, null); return null; }
   const f = Object.create(null); for (const p of TEXT_PATHS) if (typeof o.f[p] === "string") f[p] = upTo(o.f[p], EDIT_MAX);
   return { ver, f };
 }
@@ -1062,7 +1070,7 @@ function draftsSection(me) {
   const dr = S("dr"), year = +me.month.slice(0, 4), L = D.list;
   if (!L && !D.asking && !D.failed) guard(loadDrafts)();
   const out = [el("h3", { class: "co-h", tabindex: "-1", "data-k": "dhead" }, S("drafts")),
-    D.said === "gone" ? el("p", { class: "co-err", role: "alert", tabindex: "-1", "data-k": "dsaid" }, dr.errs.not_found)
+    D.said === "gone" || D.said === "changed" ? el("p", { class: "co-err", role: "alert", tabindex: "-1", "data-k": "dsaid" }, dr.errs[D.said === "gone" ? "not_found" : "changed"])
       : D.said ? el("p", { class: "co-ok", role: "status", tabindex: "-1", "data-k": "dsaid" }, dr.done[D.said]) : null,
     button("drefresh", dr.check, () => { D.said = null; render(); return loadDrafts(); }, "co-link")];
   if (D.failed) out.push(el("p", { class: "co-err", role: "alert" }, says(D.failed) || S("failed")));
@@ -1193,10 +1201,15 @@ function actArea(r, acts) {
 // One of Bryan's actions on review r: a note first where it needs one, and Approve sends only the lines changed. Done, the list says so
 // and is asked for again; refused, the card says why in red, and a review that changed meanwhile (state) or is gone shows as it is now.
 // The answer puts the focus on what it says only while the focus is still where he tapped (or nowhere in the panel); else it stays where
-// he's working, and the panel is drawn again once he leaves the box he's typing in (later()).
+// he's working, and the panel is drawn again once he leaves the box he's typing in (later()). A card drawn before the list came again
+// (a redraw held for typing) sends nothing for a review that is gone or changed since: "This draft changed. Check it again.", and the
+// list is drawn as it is. Approve, Redo, Reject and Withdraw send the version shown (ver, ruling P59): one changed meanwhile, in another
+// tab, is refused (state).
 async function act(r, action) {
-  const t = tokenNow(), g = D.g, id = r.id, body = { action }, from = focusKey();
+  const t = tokenNow(), g = D.g, id = r.id, body = { action }, from = focusKey(), now = D.byId.get(id);
   if (!t || D.busy[id]) return;
+  if (!now || verOf(now) !== verOf(r)) { if (D.ask && D.ask.id === id) D.ask = null; if (D.need === id) D.need = null; D.said = "changed"; V.focus = "dsaid"; return render(); }
+  if (action === "approve" || NOTED.includes(action)) body.ver = verOf(r);
   if (NOTED.includes(action)) { const note = upTo((D.notes[id] || "").trim(), NOTE_MAX);
     if (!note) { D.need = id; V.focus = `note-${id}`; return render(); } body.note = note; }
   if (action === "approve") { const e = edits(r);

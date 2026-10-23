@@ -47,8 +47,9 @@ const COACHM = (() => {
     for (let y = 0; y < h; y++) for (let x = 0, k = 2 * y * W; x < w; x++, k += 2) px[y * w + x] = (s[k] + s[k + 1] + s[k + W] + s[k + W + 1]) / 4;
     return {w, h, px}; };
   // Running sums of a w x h grid v (row by row) and of its squares, from the top-left: (w + 1) x (h + 1) each, so the sum over any
-  // rectangle of the grid is 4 reads (area()).
-  const sums = (v, w, h) => { const W = w + 1, s1 = new Float64Array(W * (h + 1)), s2 = new Float64Array(W * (h + 1));
+  // rectangle of the grid is 4 reads (area()). They go into the arrays of `to` (an earlier sums() of the same size) when there is one.
+  const sums = (v, w, h, to = null) => { const W = w + 1, n = W * (h + 1), re = !!to && to.W === W && to.s1.length === n;
+    const s1 = re ? to.s1 : new Float64Array(n), s2 = re ? to.s2 : new Float64Array(n);
     for (let y = 0; y < h; y++) for (let x = 0, a = 0, b = 0; x < w; x++) { const u = v[y * w + x], k = (y + 1) * W + x + 1;
       a += u; b += u * u; s1[k] = s1[k - W] + a; s2[k] = s2[k - W] + b; }
     return {W, s1, s2}; };
@@ -60,7 +61,9 @@ const COACHM = (() => {
     for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) t[j * n + i] = g.px[(y + j) * g.w + x + i];
     return {t, n, i0, i1, j0, j1, sums: sums(t, n, n)}; };
   // How alike patch p and frame g's n x n window at (x, y) are (gs: g's running sums), over only the part of the patch that is inside
-  // both frames: 1 the same up to brightness and contrast, 0 nothing alike. A part under half the side either way, or a flat one, scores 0.
+  // both frames: 1 the same up to brightness and contrast, 0 nothing alike, less 0.1 x the share of the patch left out (EDGE), so a
+  // lookalike half past the edge can't beat a match in full view. A part under half the side either way, or a flat one, scores 0.
+  const EDGE = 0.1;
   const ncc = (g, gs, x, y, p) => {
     const n = p.n, i0 = Math.max(p.i0, -x), i1 = Math.min(p.i1, g.w - x), j0 = Math.max(p.j0, -y), j1 = Math.min(p.j1, g.h - y);
     if (i1 - i0 < n >> 1 || j1 - j0 < n >> 1 || i1 <= i0 || j1 <= j0) return 0;
@@ -69,24 +72,20 @@ const COACHM = (() => {
     const v1 = area(gs.s1, gs.W, x + i0, y + j0, x + i1, y + j1), v2 = area(gs.s2, gs.W, x + i0, y + j0, x + i1, y + j1);
     const t1 = area(p.sums.s1, p.sums.W, i0, j0, i1, j1), t2 = area(p.sums.s2, p.sums.W, i0, j0, i1, j1);
     const vv = v2 - v1 * v1 / N, tt = t2 - t1 * t1 / N;
-    return vv > 1e-3 * N && tt > 1e-3 * N ? (s - v1 * t1 / N) / Math.sqrt(vv * tt) : 0; };
+    return vv > 1e-3 * N && tt > 1e-3 * N ? (s - v1 * t1 / N) / Math.sqrt(vv * tt) - EDGE * (1 - N / (n * n)) : 0; };
   // The best place at x0…x1, y0…y1 by f(x, y), with its score.
   const best = (f, x0, x1, y0, y1) => { let b = {x: x0, y: y0, score: -2};
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { const s = f(x, y); if (s > b.score) b = {x, y, score: s}; }
     return b; };
 
   // The surfer's box in each of the key frames, from the box tapped in frame `from`: greys are the key frames from grey(), at quarter size,
-  // so the boxes (in displayed pixels) are divided by 4 here. From the tapped frame it goes frame by frame, forward and back. Each frame is
-  // searched within one box side each way of where the surfer should be (his last place, moved on by half the step he took to get there),
-  // and each place there scores the lower of its likeness to the patch he was last found in and to the tapped one: a last patch that
-  // drifted onto something else, such as whitewater, then loses to him, and the tapped patch keeps the steps' rounding from adding up.
-  // The patch can go up to half its side past the frame's edge, compared there only on the part inside, so a surfer at the edge isn't lost
-  // for that. A score under LOST marks the frame lost, and the box stays at the last place; the frames after it are searched from there.
-  // (The tests' moving square scores about 0.9, and 0.4-0.6 with half its box on new still texture. On Bryan's clip every frame scored
-  // 0.63-0.82, the frames it went wrong on too, so there no threshold that keeps the right frames marks the wrong ones lost.)
-  // Each box keeps the tapped side and stays inside 4 x the quarter frame; that can be up to 2 px wider than the video
-  // (Math.round(videoWidth / 4) * 4), so the page clamps each box to the video too.
-  const LOST = 0.6;
+  // so the boxes (in displayed pixels) are divided by 4 here. From the tapped frame it goes frame by frame, forward and back: each frame is
+  // searched, within one box side each way of where the surfer should be (his last place, moved on by half the step he took to get there),
+  // for the patch he was last found in. The patch can go up to half its side past the frame's edge, compared there only on the part inside,
+  // so a surfer at the edge isn't lost for that. A score under 0.5 (LOST) marks the frame lost, and the box stays at the last place; the
+  // frames after it are searched from there. Each box keeps the tapped side and stays inside 4 x the quarter frame; that can be up to 2 px
+  // wider than the video (Math.round(videoWidth / 4) * 4), so the page clamps each box to the video too.
+  const LOST = 0.5;
   const track = (greys, from, box) => {
     const g0 = greys[from], qs = Math.max(1, Math.min(g0.w, g0.h, Math.round(box.side / 4)));
     const qx = Math.max(0, Math.min(Math.round(box.x / 4), g0.w - qs)), qy = Math.max(0, Math.min(Math.round(box.y / 4), g0.h - qs));
@@ -95,17 +94,16 @@ const COACHM = (() => {
     let L = 0; while (L < 4 && qs >> (L + 1) >= 12) L++;
     const usable = g => !!g && g.w === g0.w && g.h === g0.h && g.px && g.px.length >= g.w * g.h;
     const levels = greys.map(g => { if (!usable(g)) return null; const ls = [g]; for (let l = 1; l <= L; l++) ls.push(half(ls[l - 1])); return ls; });
-    const tapped = levels[from] && levels[from].map((g, l) => patch(g, qx >> l, qy >> l, qs >> l));
-    // Where the surfer is in frame b (its levels), searched round (cx, cy) for the patch at (ax, ay) in frame a and the tapped one. The 3
-    // best places on the coarsest level (not next to each other) each go down to full size, in case the best was a lookalike; the best
-    // there wins.
+    // Each level's running sums of the frame being searched, their arrays reused from frame to frame.
+    const gs = [];
+    // Where the patch at (ax, ay) in frame a (its levels) is in frame b, searched round (cx, cy). The 3 best places on the coarsest level
+    // (not next to each other) each go down to full size, in case the best was a lookalike; the best there wins.
     const find = (a, ax, ay, b, cx, cy) => {
-      const ps = [], gs = [], win = [];
+      const ps = [], win = [];
       for (let l = 0; l <= L; l++) { const n = qs >> l, h = n >> 1, r = Math.ceil(qs / (1 << l)), x = cx >> l, y = cy >> l, g = b[l];
-        ps.push(a === levels[from] && ax === qx && ay === qy ? [tapped[l]] : [patch(a[l], ax >> l, ay >> l, n), tapped[l]]);
-        gs.push(sums(g.px, g.w, g.h));
+        ps.push(patch(a[l], ax >> l, ay >> l, n)); gs[l] = sums(g.px, g.w, g.h, gs[l]);
         win.push([Math.max(h - n, x - r), Math.min(g.w - h, x + r), Math.max(h - n, y - r), Math.min(g.h - h, y + r)]); }
-      const score = l => (x, y) => { let s = 1; for (const p of ps[l]) s = Math.min(s, ncc(b[l], gs[l], x, y, p)); return s; };
+      const score = l => (x, y) => ncc(b[l], gs[l], x, y, ps[l]);
       const [x0, x1, y0, y1] = win[L], cw = x1 - x0 + 1; if (x1 < x0 || y1 < y0) return null;
       const sc = new Float32Array(cw * (y1 - y0 + 1)), coarse = score(L);
       for (let k = 0; k < sc.length; k++) sc[k] = coarse(x0 + k % cw, y0 + Math.floor(k / cw));
@@ -128,7 +126,7 @@ const COACHM = (() => {
       let ref = from, rx = qx, ry = qy, px = null, py = null;
       for (let i = from + dir; i >= 0 && i < greys.length; i += dir) {
         const cx = px === null ? rx : rx + Math.round((rx - px) / 2), cy = py === null ? ry : ry + Math.round((ry - py) / 2);
-        const hit = tapped && levels[i] && levels[ref] ? find(levels[ref], rx, ry, levels[i], cx, cy) : null;
+        const hit = levels[i] && levels[ref] ? find(levels[ref], rx, ry, levels[i], cx, cy) : null;
         const score = hit ? Math.max(0, hit.score) : 0, lost = score < LOST;
         if (!lost) { ref = i; px = rx; py = ry; rx = hit.x; ry = hit.y; }
         const b = clampBox({x: box.x + 4 * (rx - qx), y: box.y + 4 * (ry - qy), side: box.side}, 4 * g0.w, 4 * g0.h);

@@ -36,7 +36,9 @@
 //   requestFor, callAi         a review's Messages API request, and the call itself
 //   addSpend, startRest, holdForCredit   the money: a call's cost, a money rest, and the hard stop at US$80
 //   markOut, callBack, lostCalls   the calls on their way, and paying for one whose run was cut off
-//   alert(kind), tell          tells Bryan at once that the coach stopped itself or is resting
+//   mail(subject, text)        one email to Bryan through Resend, at most 20 a Taiwan day
+//   alert(kind), tell          tells Bryan at once that the coach stopped itself or is resting, once a Taiwan day each
+//   digestAfter, digest, digestMail   the hourly email: due after a draft, a failure or a report, sent by the alarm
 //   setPaused, startAgain      Bryan's Pause, and Start again after the coach stopped itself (ruling R10)
 //
 // Times are epoch milliseconds. Nothing reaches the coach but RPC calls from the Worker and the room, and its alarm.
@@ -47,8 +49,8 @@ import {
   AGREE_VER, BOARDS, LANGS, LEVELS, MOVES, STANCES, TEXT_FIELDS, autopilotOk, buildRequest, checkReply, readReply,
 } from "./coach-guide.js";
 import {
-  ATTEMPT_WAITS, CALLING_STALE, DAY, MAX_TRIES, MAX_WAITS, PROBE_EVERY, checkFrame, cleanupAfter, costUsd, creditMonth,
-  estimateIn, nextTwMonth, nextUtcMonth, sortError, twDay, twMonth, waitFor, worstUsd,
+  ATTEMPT_WAITS, CALLING_STALE, DAY, HOUR, MAX_TRIES, MAX_WAITS, PROBE_EVERY, TW_MS, checkFrame, cleanupAfter, costUsd,
+  creditMonth, estimateIn, nextTwDay, nextTwMonth, nextUtcMonth, sortError, twDay, twMonth, waitFor, worstUsd,
 } from "./coach-rules.js";
 import { colo, room } from "./stubs.js";
 
@@ -77,8 +79,8 @@ const USAGE_SAVE_MS = 30_000; // ...or time, whichever comes first
 //   today          {day, n}: the reviews sent on this Taiwan day
 //   frame_bytes    the bytes of key frames stored, for the size guard
 //   next_cleanup   when the daily clean-up next runs
-//   digest_due     when the hourly email is due (ruling R9), and last_digest, when the last one went
-//   mail_day       this Taiwan day's emails, for the cap of 20 a day
+//   digest_due     when the hourly email is due (ruling R9), null when none is; and last_digest, when the last one went
+//   mail_day       {day, n, alerts}: this Taiwan day's emails, for the cap of 20 a day, and the alerts sent on it
 //
 // Every table in the spec ("Storage (Coach's SQLite)") but meta, which migrate() makes first. The JSON columns hold text
 // written with JSON.stringify.
@@ -414,6 +416,41 @@ function fromBase64(text) {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return bytes;
 }
+
+// ---- The email ----------------------------------------------------------------------------------------------------
+
+// Bryan's emails (spec "The email"), sent through Resend's free service from its own address to COACH_ALERT_TO. Resend
+// refuses a request with no User-Agent, and a Worker's fetch sends none. At most 20 a Taiwan day in all (ruling R8),
+// the test email and the alerts included, and each fetch waits 30 s at most, as the alarm and Bryan's Settings wait on
+// it. They hold counts, times and the link to the Drafts list (ruling R18) only: never an account's ids, a name, LINE
+// details, a surfer's own words or a key frame.
+const MAIL_FROM = "WaveSlave Coach <onboarding@resend.dev>";
+const MAIL_AGENT = "waveslave-coach/1";
+const MAIL_DAILY = 20;
+const MAIL_TIMEOUT = 30_000;
+const DRAFTS_LINK = "https://waveslave.tw/?coach=drafts";
+
+// The alerts sent at once (alert), [subject, text]. "resting" says when the rest ends, when the coach knows (restLine).
+const ALERTS = Object.freeze({
+  stopped: [
+    "WaveSlave Coach: Coach stopped",
+    "The coach stopped itself: Anthropic turned down its API key or its model setting (COACH_MODEL). It makes no AI " +
+      "calls, and the reviews sent wait in the queue without using their attempts.\n\nFix the key or the model, then " +
+      "tap Start again in the Drafts settings.",
+  ],
+  resting: [
+    "WaveSlave Coach: Coach resting",
+    "The coach is resting for money: the credit month's spend reached its line, or Anthropic said the credit or the " +
+      "Console's spend limit ran out. New reviews and Redo are refused meanwhile.",
+  ],
+});
+const TEST_MAIL = Object.freeze([
+  "WaveSlave Coach: test email",
+  "This is a test email from the WaveSlave coach: its emails reach you.",
+]);
+
+// A time as Taiwan's clock reads it, "2030-06-16 08:00".
+const twClock = (ms) => new Date(ms + TW_MS).toISOString().slice(0, 16).replace("T", " ");
 
 // ---- Routes -------------------------------------------------------------------------------------------------------
 
@@ -915,9 +952,9 @@ export class Coach extends DurableObject {
   // POST /coach/reviews/{id}/report {line}, for its owner ("Something wrong?", spec "The review"): {ok: true}. A
   // published review goes back to Bryan's Drafts, drafted again and marked Reported, with the surfer's line of up to
   // 200 characters ("" when they gave none). It keeps its publish time, which tells Bryan's Withdraw it was published,
-  // and waits for him again, so it is no longer handled. Refused: not_found (not the caller's own), state (not
-  // published), invalid.
-  postReport(who, body, id) {
+  // and waits for him again, so it is no longer handled. Bryan hears of it in the hourly email (digestAfter). Refused:
+  // not_found (not the caller's own), state (not published), invalid.
+  async postReport(who, body, id) {
     const review = this.reviewFor(who, id);
     if (!review) return NOT_FOUND;
     if (review.status !== "published") return STATE;
@@ -925,6 +962,7 @@ export class Coach extends DurableObject {
     const line = ask === null ? null : ownLine(ask.line, ADMIN_NOTE_MAX);
     if (line === null) return INVALID;
     this.all("UPDATE reviews SET status = 'drafted', report = ?, handled_at = NULL WHERE id = ?", line, id);
+    await this.alarmBy(this.digestAfter(this.now()));
     return OK;
   }
 
@@ -940,9 +978,7 @@ export class Coach extends DurableObject {
   // for 24 months: the free-plan guard counts rows read.
   getDrafts() {
     const now = this.now();
-    const drafted = this.all("SELECT * FROM reviews WHERE status = 'drafted'");
-    const held = this.all("SELECT * FROM reviews INDEXED BY reviews_held WHERE hold = 1");
-    const waiting = [...drafted, ...held].sort(bySent);
+    const waiting = this.waiting();
     const handled = this.all(
       `SELECT * FROM reviews INDEXED BY reviews_handled WHERE handled_at IS NOT NULL AND hold = 0
        ORDER BY handled_at DESC LIMIT ?`,
@@ -956,6 +992,15 @@ export class Coach extends DurableObject {
         settings: this.settingsView(now),
       },
     };
+  }
+
+  // The reviews waiting for Bryan, the one sent first first: the drafts, those reported among them, and the clips held
+  // as not surf or flagged (ruling R16). Each query reads through its index. `columns` are the columns read, which
+  // must hold sent and id (bySent): the hourly email needs only a few.
+  waiting(columns = "*") {
+    const drafted = this.all(`SELECT ${columns} FROM reviews WHERE status = 'drafted'`);
+    const held = this.all(`SELECT ${columns} FROM reviews INDEXED BY reviews_held WHERE hold = 1`);
+    return [...drafted, ...held].sort(bySent);
   }
 
   // A review as the Drafts list shows it: adminView() (every column, but never a key frame's text), with the account's
@@ -1143,8 +1188,9 @@ export class Coach extends DurableObject {
   }
 
   // POST /admin/coach/settings {autopilot, paused, start_again, test_email}, each true or false and each left out
-  // when unchanged: {ok: true}. Autopilot on or off; Pause on or off (setPaused); Start again (startAgain, ruling R10).
-  // test_email is taken, and the coach's email will send it and answer with `email`. Anything else is invalid.
+  // when unchanged: {ok: true}. Autopilot on or off; Pause on or off (setPaused); Start again (startAgain, ruling R10);
+  // and "Send a test email", which answers {ok: true, email: {status, text}}: Resend's answer as it came, which shows
+  // in Settings (mail). Anything else is invalid.
   async postSettings(who, body) {
     const ask = parseObject(body);
     const good = ([key, value]) => SETTING_KEYS.includes(key) && typeof value === "boolean";
@@ -1152,7 +1198,8 @@ export class Coach extends DurableObject {
     if (ask.autopilot !== undefined) this.setMeta("autopilot", ask.autopilot);
     if (ask.paused !== undefined) await this.setPaused(ask.paused);
     if (ask.start_again) await this.startAgain();
-    return OK;
+    if (!ask.test_email) return OK;
+    return { status: 200, json: { ok: true, email: await this.mail(...TEST_MAIL) } };
   }
 
   // ---- Placement ---------------------------------------------------------------------------------------------------
@@ -1188,13 +1235,15 @@ export class Coach extends DurableObject {
   }
 
   // The one alarm (spec "Backend", steps 1-7): one review's AI call a run, never in a surfer's request, as a run may
-  // take 15 minutes. Whatever happened, the run counts itself as a request, the usage counts are saved, and the alarm
-  // is set for the next thing due (nextAlarmAt), as the room's alarm does.
+  // take 15 minutes. Whatever happened, the hourly email goes when it is due (step 4: digest), the run counts itself as
+  // a request, the usage counts are saved, and the alarm is set for the next thing due (nextAlarmAt), as the room's
+  // alarm does.
   async alarm() {
     try {
       await this.runOne(this.now());
     } finally {
       try {
+        await this.digest(this.now());
         // Counted last, so the save covers the rows the run itself read and wrote. usage() may have saved already.
         this.usage("req");
         if (this.unsaved > 0) this.saveUsage();
@@ -1441,7 +1490,8 @@ export class Coach extends DurableObject {
   // An answer, checked in the spec's order. A refusal or a flag first, as a reply of any shape may carry one (ruling
   // R16); then a reply cut off or failing a check counts an attempt; then a clip that isn't surfing is held for Bryan
   // (ruling R16); and the rest is a draft, published at once on autopilot when autopilotOk(), but for a Redo's, which
-  // Bryan asked for and sees first (ruling P24). The call's model, tokens and cost are saved with what it gave.
+  // Bryan asked for and sees first (ruling P24). The call's model, tokens and cost are saved with what it gave. A draft
+  // or a held clip waits for Bryan, so it brings the hourly email (digestAfter).
   answered(review, ask, { reply, stop, usage, model }, now) {
     const call = [model, usage?.input_tokens ?? null, usage?.output_tokens ?? null, this.callCost(usage, ask.estIn)];
     if (stop === "refusal") return this.flagged(review, ["refusal"], [], call);
@@ -1457,25 +1507,30 @@ export class Coach extends DurableObject {
     if (!reply.is_surf_clip) {
       // Not published, and held for Bryan, who may give it back or ban the account. Its key frames stay for him. It is
       // handled (ruling P39), so it shows among the handled once the hold ends, however that ends.
-      this.saveCall(review, `status = 'rejected', hold = 1, handled_at = ?, ${set}`, now, ...saved);
+      const held = `status = 'rejected', hold = 1, handled_at = ?, ${set}`;
+      if (this.saveCall(review, held, now, ...saved)) this.digestAfter(now);
     } else if (review.redos === 0 && this.getMeta("autopilot") && autopilotOk(reply, checked)) {
       const published = "status = 'published', published = ?, handled_at = ?, final = ?, checked = 0";
       this.saveCall(review, `${published}, ${set}`, now, now, saved[0], ...saved);
-    } else {
-      this.saveCall(review, `status = 'drafted', ${set}`, ...saved);
+    } else if (this.saveCall(review, `status = 'drafted', ${set}`, ...saved)) {
+      this.digestAfter(now);
     }
   }
 
   // A refusal, or a reply flagged sexual or under 18 (ruling R16), is never retried or published: the review is
   // rejected and held for Bryan with its flags, its key frames go at once, the account starts no new review until he
-  // clears or bans it, and the count is kept. Its reply isn't kept as a draft: Bryan sees only the warning. The block is
-  // the account's, so it holds even when the review was deleted or redone during the call and nothing else is saved.
+  // clears or bans it, and the count is kept. Its reply isn't kept as a draft: Bryan sees only the warning, and hears
+  // of it in the hourly email. The block is the account's, so it holds even when the review was deleted or redone
+  // during the call and nothing else is saved.
   flagged(review, flags, warnings, call) {
+    const now = this.now();
     this.ctx.storage.transactionSync(() => {
       this.all("UPDATE people SET blocked = 1 WHERE sub_hash = ?", review.sub_hash);
       const set = `status = 'rejected', hold = 1, next_try = NULL, handled_at = ?, flags = ?, warnings = ?, ${CALL_SET}`;
-      const binds = [this.now(), JSON.stringify(flags), JSON.stringify(warnings), ...call];
-      if (this.saveCall(review, set, ...binds)) this.dropFrames(review.id);
+      const binds = [now, JSON.stringify(flags), JSON.stringify(warnings), ...call];
+      if (!this.saveCall(review, set, ...binds)) return;
+      this.dropFrames(review.id);
+      this.digestAfter(now);
     });
   }
 
@@ -1499,18 +1554,21 @@ export class Coach extends DurableObject {
 
   // The coach gives up on a review after its third attempt, or on an error no retry would fix (spec steps 5 and 6): it
   // fails and its count goes back. A Redo instead goes back to Bryan as it was, its old draft with a red "Redo failed"
-  // line, and its count stays: the review itself didn't fail.
+  // line, and its count stays: the review itself didn't fail. Either way it goes in the hourly email (digestAfter).
   gaveUp(review, attempts) {
+    const now = this.now();
     if (review.redos > 0) {
       const warnings = fromJson(review.warnings);
       if (!warnings.includes("redo_failed")) warnings.push("redo_failed");
       const set = "status = 'drafted', attempts = ?, next_try = NULL, warnings = ?";
-      this.saveCall(review, set, attempts, JSON.stringify(warnings));
+      if (this.saveCall(review, set, attempts, JSON.stringify(warnings))) this.digestAfter(now);
       return;
     }
     this.ctx.storage.transactionSync(() => {
       const set = "status = 'failed', attempts = ?, next_try = NULL, handled_at = ?";
-      if (this.saveCall(review, set, attempts, this.now())) this.giveBack(review.id);
+      if (!this.saveCall(review, set, attempts, now)) return;
+      this.giveBack(review.id);
+      this.digestAfter(now);
     });
   }
 
@@ -1652,16 +1710,137 @@ export class Coach extends DurableObject {
     await this.tell(this.reached(crossed));
   }
 
-  // ---- Alerts ------------------------------------------------------------------------------------------------------
+  // ---- The email (spec "The email") --------------------------------------------------------------------------------
+
+  // One email to Bryan: POSTed to COACH_MAIL_URL (Resend) with RESEND_API_KEY, from Resend's own address to
+  // COACH_ALERT_TO, as plain text (MAIL_FROM). Returns Resend's answer as it came, {status, text}, or {status: 0, text}
+  // when nothing was sent: "no key" without RESEND_API_KEY (Bryan may not have set one: then nothing is ever sent, and
+  // the Drafts list works the same), "daily limit" once this Taiwan day's 20 have gone (mailDay), or the error's name
+  // when the fetch threw. Each email counts in the 20 as it goes. It never throws.
+  async mail(subject, text) {
+    const key = String(this.env.RESEND_API_KEY ?? "").trim();
+    if (key === "") return { status: 0, text: "no key" };
+    try {
+      const day = this.mailDay(this.now());
+      if (day.n >= MAIL_DAILY) return { status: 0, text: "daily limit" };
+      this.setMeta("mail_day", { ...day, n: day.n + 1 });
+      const res = await fetch(this.env.COACH_MAIL_URL, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "User-Agent": MAIL_AGENT, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: MAIL_FROM, to: [this.env.COACH_ALERT_TO], subject, text: `${text}\n\n${DRAFTS_LINK}\n`,
+        }),
+        signal: AbortSignal.timeout(MAIL_TIMEOUT),
+      });
+      return { status: res.status, text: await res.text() };
+    } catch (err) {
+      console.error("coach: the email failed:", err?.name ?? "error");
+      return { status: 0, text: err?.name ?? "error" };
+    }
+  }
+
+  // This Taiwan day's emails (ruling R8), meta mail_day: {day, n: how many went, alerts: the kinds sent}, or none yet
+  // once the day has changed.
+  mailDay(now) {
+    const day = twDay(now);
+    const saved = this.getMeta("mail_day");
+    return saved?.day === day ? saved : { day, n: 0, alerts: [] };
+  }
 
   // Tells Bryan at once (spec "The email"): "stopped" when the coach stopped itself (its key or model setting stopped
-  // working), "resting" when a money rest starts or the credit month's spend reaches US$78 or US$80 (+ extra). Its
-  // callers await it once their writes are done. It must never throw. Nothing is sent yet: the alert emails fill it in.
-  async alert(kind) {}
+  // working), "resting" when a money rest starts or the credit month's spend reaches US$78 or US$80 (+ extra). Each
+  // kind goes once a Taiwan day at most: it is marked sent before it goes, so even one Resend refused or the day's cap
+  // stopped isn't tried again that day. Its callers await it once their writes are done. It never throws.
+  async alert(kind) {
+    try {
+      const now = this.now();
+      const day = this.mailDay(now);
+      if (day.alerts.includes(kind)) return;
+      this.setMeta("mail_day", { ...day, alerts: [...day.alerts, kind] });
+      const [subject, text] = ALERTS[kind];
+      await this.mail(subject, kind === "resting" ? text + this.restLine(now) : text);
+    } catch (err) {
+      console.error("coach: the alert failed:", err?.name ?? "error");
+    }
+  }
+
+  // When new reviews may start again, for the "resting" email: " Until 2030-06-16 08:00, Taiwan time." while money
+  // stops them (stopFor), else "".
+  restLine(now) {
+    const stop = this.stopFor(now);
+    return stop?.kind === "money" ? ` Until ${twClock(stop.until)}, Taiwan time.` : "";
+  }
 
   // Sends each alert named (alert), in turn, leaving out the nulls.
   async tell(...kinds) {
     for (const kind of kinds) if (kind) await this.alert(kind);
+  }
+
+  // The hourly email (ruling R9) is due after a draft, a failure or a report: now, or an hour after the last one went,
+  // unless it is due sooner already. Returns when it is due. The alarm sends it (digest): the alarm's own run sets its
+  // time at the end (nextAlarmAt), and a route brings the alarm forward to it (alarmBy).
+  digestAfter(now) {
+    const last = this.getMeta("last_digest");
+    const at = last === null ? now : Math.max(now, last + HOUR);
+    const due = this.getMeta("digest_due");
+    if (due !== null && due <= at) return due;
+    this.setMeta("digest_due", at);
+    return at;
+  }
+
+  // The hourly email, sent by the alarm when it is due (spec "The email"): "WaveSlave Coach: 2 drafts waiting (oldest
+  // 3 h)", with the reviews reported and held among them, and those that failed since the last one (digestMail). Its
+  // time moves on in the run it is due, whatever comes of the send, so the alarm never goes off again at once: once
+  // this Taiwan day's 20 emails have gone, it waits for the next day (00:00 Taiwan), still covering everything since
+  // the last one; else its time is cleared, and a send Resend refused, or that failed, isn't tried again: the next
+  // draft, failure or report brings the next one, which counts what is waiting afresh. When nothing is waiting and
+  // nothing failed, no email goes. It never throws.
+  async digest(now) {
+    try {
+      const due = this.getMeta("digest_due");
+      if (due === null || due > now) return;
+      if (this.mailDay(now).n >= MAIL_DAILY) {
+        this.setMeta("digest_due", nextTwDay(now));
+        return;
+      }
+      this.setMeta("digest_due", null);
+      const email = this.digestMail(now, this.getMeta("last_digest") ?? 0);
+      if (email === null) return;
+      this.setMeta("last_digest", now);
+      await this.mail(email.subject, email.text);
+    } catch (err) {
+      console.error("coach: the hourly email failed:", err?.name ?? "error");
+    }
+  }
+
+  // The hourly email's {subject, text}, or null when there is nothing to tell. Its waiting reviews are the Drafts
+  // list's (waiting), with how long the surfer of the one sent first has waited, in whole hours, as the list counts
+  // it (draftView); the failed ones are those handled since `since` (the last email), read through the handled index.
+  // Counts and times only.
+  digestMail(now, since) {
+    const waiting = this.waiting("id, sent, created, hold, report");
+    const failed = this.one(
+      "SELECT count(*) AS n FROM reviews INDEXED BY reviews_handled WHERE handled_at > ? AND status = 'failed'",
+      since,
+    ).n;
+    if (waiting.length === 0 && failed === 0) return null;
+    const lines = [];
+    let subject;
+    if (waiting.length > 0) {
+      const hours = Math.floor((now - (waiting[0].sent ?? waiting[0].created)) / HOUR);
+      const oldest = hours < 1 ? "under 1 h" : `${hours} h`;
+      const n = waiting.length;
+      subject = `WaveSlave Coach: ${n} draft${n === 1 ? "" : "s"} waiting (oldest ${oldest})`;
+      lines.push(`Waiting for you in Drafts: ${n}, the oldest sent ${oldest} ago.`);
+      const reported = waiting.filter((r) => r.report !== null).length;
+      const held = waiting.filter((r) => r.hold === 1).length;
+      if (reported > 0) lines.push(`Reported by the surfer: ${reported}`);
+      if (held > 0) lines.push(`Held as not surf or flagged: ${held}`);
+    } else {
+      subject = `WaveSlave Coach: ${failed} review${failed === 1 ? "" : "s"} failed`;
+    }
+    if (failed > 0) lines.push(`Failed since the last email: ${failed} (given back)`);
+    return { subject, text: lines.join("\n") };
   }
 
   // ---- Pause and Start again ---------------------------------------------------------------------------------------

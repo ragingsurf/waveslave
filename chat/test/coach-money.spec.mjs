@@ -8,10 +8,11 @@
 // As in coach-alarm.spec.mjs, each test has a coach of its own (newCoach) with its clock years ahead, so no alarm a test
 // sets goes off by itself: a test runs it with runAlarm(), as the runtime would. Reviews are written straight into the
 // tables. The room stub is replaced (ruling R1), and so is the coach's alert(), by one that records each alert in
-// `alerts`. The AI is a mocked fetch of env.COACH_API_URL that gives the answers a test queued in `ai`, in turn; any other
-// fetch, or one more AI call than was queued, throws. The daily clean-up is set far off, so the alarm times a test sees
-// are the money's. After each test, every queued answer was used, nothing else was fetched and nothing was logged that
-// the test didn't expect.
+// `alerts`; the coach has no email key, so the hourly email sends nothing (the emails are coach-mail.spec.mjs's). The
+// AI is a mocked fetch of env.COACH_API_URL that gives the answers a test queued in `ai`, in turn; any other fetch, or
+// one more AI call than was queued, throws. The daily clean-up is set far off, so the alarm times a test sees are the
+// money's. After each test, every queued answer was used, nothing else was fetched and nothing was logged that the test
+// didn't expect.
 import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -87,13 +88,14 @@ const worstFor = (call) => worstUsd(estFor(call), 16_000, PRICES);
 
 // ---- Coaches, accounts and reviews ----------------------------------------------------------------------------------
 
-// A coach of its own with its clock at `at` and its clean-up far off, whose room stub answers isBanned (first running
-// c.onAsk(), when a test set one), and whose alert() records each alert in c.alerts.
+// A coach of its own with its clock at `at`, its clean-up far off and no email key, whose room stub answers isBanned
+// (first running c.onAsk(), when a test set one), and whose alert() records each alert in c.alerts.
 async function freshCoach(at = T) {
   const c = await newCoach("money", at);
   c.alerts = [];
   c.onAsk = null;
   await c.inCoach((coach) => {
+    coach.env = { ...coach.env, RESEND_API_KEY: "" };
     coach.roomStub = () => ({
       async isBanned() {
         await c.onAsk?.(coach);

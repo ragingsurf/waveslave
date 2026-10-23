@@ -7,10 +7,10 @@
 // Each test has a coach of its own (newCoach) with its clock at T, years ahead, so no alarm a test sets goes off by
 // itself: a test runs it with runAlarm(), as the runtime would, or calls coach.alarm() inside the coach when it has to
 // change something while the call is out. Reviews are written straight into the tables. The room stub is replaced
-// (ruling R1) by one whose isBanned reads a set. The AI is a mocked fetch of env.COACH_API_URL that gives the answers a
-// test queued in `ai`, in turn, and records each request; any other fetch, or one more AI call than was queued, throws.
-// After each test, every queued answer was used, nothing else was fetched and nothing was logged that the test didn't
-// expect.
+// (ruling R1) by one whose isBanned reads a set, and the coach has no email key, so it sends no email: the emails are
+// coach-mail.spec.mjs's. The AI is a mocked fetch of env.COACH_API_URL that gives the answers a test queued in `ai`, in
+// turn, and records each request; any other fetch, or one more AI call than was queued, throws. After each test, every
+// queued answer was used, nothing else was fetched and nothing was logged that the test didn't expect.
 import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -73,14 +73,15 @@ const userText = (call) => call.body.messages[0].content.at(-1).text;
 
 // ---- Coaches, accounts and reviews ----------------------------------------------------------------------------------
 
-// A coach of its own with its clock at `at`, whose room stub answers isBanned from the set `banned`, records each LINE
-// account it was asked about in `asked`, and first runs c.onAsk(coach) when a test set one.
+// A coach of its own with its clock at `at` and no email key, whose room stub answers isBanned from the set `banned`,
+// records each LINE account it was asked about in `asked`, and first runs c.onAsk(coach) when a test set one.
 async function freshCoach(at = T) {
   const c = await newCoach("alarm", at);
   c.banned = new Set();
   c.asked = [];
   c.onAsk = null;
   await c.inCoach((coach) => {
+    coach.env = { ...coach.env, RESEND_API_KEY: "" };
     coach.roomStub = () => ({
       async isBanned(sub_hash) {
         c.asked.push(sub_hash);
@@ -258,7 +259,8 @@ describe("a good reply", () => {
     ai.push(ok(goodReply()));
     await runAlarm(c);
     expect((await reviewRow(c, newer)).status).toBe("drafted");
-    expect(await alarmAt(c)).toBe(CLEANUP);
+    // Next, the hourly email for the second draft, an hour after the first's (coach-mail.spec.mjs).
+    expect(await alarmAt(c)).toBe(T + HOUR);
   });
 });
 
@@ -844,8 +846,8 @@ describe("when the alarm next goes off", () => {
     await insertReview(c, surfer(), { next_try: T + 10 * MIN });
     await runAlarm(c);
     expect(await alarmAt(c)).toBe(T + 10 * MIN);
+    // A time already past is now. (A run would send that email and clear it: coach-mail.spec.mjs.)
     await setMeta(c, "digest_due", T - HOUR);
-    await runAlarm(c);
-    expect(await alarmAt(c)).toBe(T);
+    expect(await c.inCoach((coach) => coach.nextAlarmAt(T))).toBe(T);
   });
 });

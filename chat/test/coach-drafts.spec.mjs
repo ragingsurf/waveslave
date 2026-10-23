@@ -911,7 +911,7 @@ describe("POST /admin/coach/settings", () => {
     expect(await alarmAt(c)).toBe(T + MIN);
   });
 
-  it("Start again clears stopped and paused and brings the alarm to now; a test email answers ok", async () => {
+  it("Start again clears stopped and paused and brings the alarm to now", async () => {
     const c = await freshCoach();
     await setMeta(c, "stopped", true);
     await setMeta(c, "paused", true);
@@ -919,7 +919,6 @@ describe("POST /admin/coach/settings", () => {
     expect(await getMeta(c, "stopped")).toBe(false);
     expect(await getMeta(c, "paused")).toBe(false);
     expect(await alarmAt(c)).toBe(T);
-    expect(await settings(c, { test_email: true })).toEqual(OK);
   });
 
   it("refuses a body that isn't an object of those settings, each true or false, with 400 invalid", async () => {

@@ -939,11 +939,28 @@ function unbanSheet() { const h = R.hidden;
     return el("div", { class: "cr-row cr-row-1" }, el("b", { dir: "auto" }, b.nick ?? S("aSurfer")), go); }) : [];
   return { title: S("unbanN", h ? h.bannedCount : "…"), body: rows.length ? rows : el("p", null, h ? S("noBanned") : "…") }; }
 
+// ---- Holding the page still under the room. On an iPhone the keyboard doesn't shrink the page: Safari slides the page up under it
+// to bring the box into view, and a drag anywhere then moves the whole page, so the room's top went off the screen and the Forecast
+// behind it showed under the box (overflow: hidden on the page doesn't stop Safari). So while the room is open the page is pinned
+// where it was (body position: fixed, put back on close), the room is drawn over just the part of the screen that shows (the visual
+// viewport, above the keyboard), and a drag outside the parts that scroll moves nothing.
+const PIN = { y: 0 };
+function fitRoom() { const v = window.visualViewport, s = R.el.room.style; if (!v) return;
+  s.top = `${v.offsetTop}px`; s.height = `${v.height}px`; s.bottom = "auto"; }
+function pinPage(on) { const b = document.body.style, v = window.visualViewport;
+  if (on) { PIN.y = scrollY; Object.assign(b, { position: "fixed", top: `${-PIN.y}px`, left: "0", right: "0" }); fitRoom();
+    if (v) { v.addEventListener("resize", PIN.fit = guard(fitRoom)); v.addEventListener("scroll", PIN.fit); } return; }
+  if (v && PIN.fit) { v.removeEventListener("resize", PIN.fit); v.removeEventListener("scroll", PIN.fit); }
+  Object.assign(b, { position: "", top: "", left: "", right: "" }); for (const k of ["top", "height", "bottom"]) R.el.room.style[k] = "";
+  scrollTo({ top: PIN.y, behavior: "instant" }); }
+const SCROLLS = ".cr-list, .cr-filters, .cr-sheet, .cr-pop, input, textarea";
+addEventListener("touchmove", e => { if (R.open && e.cancelable && !(e.target.closest && e.target.closest(SCROLLS))) e.preventDefault(); }, { passive: false });
+
 // ---- Opening and closing. Escape closes the menu, then the sheet, then the room; Tab stays inside whichever is on top.
 function openRoom(o = {}) {
   build();
   if (!R.open) {
-    R.open = true; R.opener = document.activeElement; R.el.room.hidden = false; document.documentElement.classList.add("chat-open");
+    R.open = true; R.opener = document.activeElement; R.el.room.hidden = false; document.documentElement.classList.add("chat-open"); pinPage(true);
     R.fresh = true; sock.tries = 0; connect(); clearInterval(R.agesT); R.agesT = setInterval(guard(tickAges), 30e3);
     drawAll(); render({ toEnd: true }); R.el.room.focus({ preventScroll: true });
   }
@@ -954,7 +971,7 @@ function openRoom(o = {}) {
 function closeRoom() {
   if (!R.open) return;
   markSeen(); R.open = false; stopSocket(); clearTimeout(sock.awayT); clearInterval(R.agesT); closePop(); closeSheet();
-  R.el.room.hidden = true; document.documentElement.classList.remove("chat-open"); setState("idle"); drawFab();
+  R.el.room.hidden = true; document.documentElement.classList.remove("chat-open"); pinPage(false); setState("idle"); drawFab();
   const back = R.opener; R.opener = null; if (back && back.isConnected && back.getClientRects().length) back.focus();
 }
 addEventListener("keydown", guard(e => {

@@ -108,6 +108,29 @@ const onTop = (page, what, sel) => until(page, `${what} on top`, sel => { const 
 // button's display (none under the Coach panel).
 const signedInState = page => page.evaluate(() => ({ token: !!localStorage.getItem("waveslave-chat-token"), v: localStorage.getItem("waveslave-chat-v"), room: !!document.querySelector(".chatroom"), cur: CUR,
   fab: getComputedStyle(document.querySelector(".chatfab")).display }));
+// The home-screen app's coach sign-in with LINE finished elsewhere (tests/chat/flow.test.js's autoPath): B opens the Coach panel, sends
+// its redeems from 203.0.113.7, starts the coach's sign-in (LINE held back) and is opened again (a reload, as after iOS closed the app),
+// so its panel is shut and its room not built; then A, with no v, finishes LINE from lineIp and shows the code. Resolves to
+// {a, b, redeems, pin}, redeems being what B sent to /auth/redeem.
+async function appTrip(s, lineIp) {
+  const redeems = []; let start = null;
+  const b = await s.open({}); await b.tap(TAB); await panelOpen(b);
+  await b.route(`${CHAT()}/auth/line/start**`, r => { start = r.request().url(); return r.fulfill({ status: 204 }); });
+  await b.route(`${CHAT()}/auth/redeem`, r => { if (r.request().method() === "POST") redeems.push(r.request().postDataJSON());
+    return r.continue({ headers: { ...r.request().headers(), "cf-connecting-ip": "203.0.113.7" } }); });
+  await b.evaluate(() => { CHAT.signIn("coach"); });
+  for (let i = 0; i < 50 && !start; i++) await wait(100);
+  if (!start) throw new Error("CHAT.signIn(\"coach\") didn't start a sign-in");
+  await b.reload({ waitUntil: "load" });
+  await until(b, "the page again", () => { const f = document.querySelector(".chatfab"); return !!f && !!window.CHAT && !!window.COACH; });
+  const before = await b.evaluate(() => ({ v: JSON.parse(localStorage.getItem("waveslave-chat-v") || "null"), coach: document.documentElement.classList.contains("coach-open"), room: !!document.querySelector(".chatroom") }));
+  if (!before.v || before.v.then !== "coach" || before.coach || before.room) throw new Error(`opened again before LINE finished: ${JSON.stringify(before)}`);
+  const a = await s.open({ go: false });
+  await a.setExtraHTTPHeaders({ "cf-connecting-ip": lineIp }); // on every request, the callback LINE redirects to included
+  await a.goto(start, { waitUntil: "load" }); await a.waitForURL(u => u.href.startsWith(ORIGIN()), { waitUntil: "load" });
+  await a.waitForSelector(".chatroom .cr-pin-code", { state: "attached" });
+  return { a, b, redeems, pin: await a.textContent(".chatroom .cr-pin-code") };
+}
 // Gives the coach's clip picker a clip (a path from makeClip), as the phone's own picker would. (The picker comes with New review.)
 const pick = (page, clip) => page.setInputFiles('.coachpanel input[type="file"]', clip);
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -211,6 +234,36 @@ const STEPS = {
     const st = await signedInState(page);
     if (!st.token || st.v !== null || st.room || st.fab !== "none") throw new Error(`back from LINE: ${JSON.stringify(st)}`);
   },
+  // The ?chat return's race, forced (merge review). Back from LINE, the page redeems LINE's code at start-up, and on pageshow it also
+  // asks {v, auto: true} (main's #111). Here the ask goes first: the code's redeem is held until the ask has answered 200 and signed the
+  // page in. (One page sends both, from the one address wrangler dev gives every local request, which the callback had too.) The known
+  // account lands on the Coach panel, and the code then finds the sign-in used up (410 expired), which changes nothing: the room is
+  // never built and there's no note.
+  async coachAutoFirst(s) {
+    const page = await s.open({}), asks = []; let asked = null;
+    const askedFirst = new Promise(r => { asked = r; });
+    await page.tap(TAB); await panelOpen(page);
+    await page.route(`${CHAT()}/auth/redeem`, async r => {
+      const body = r.request().method() === "POST" ? r.request().postDataJSON() : null;
+      if (body && body.auto === true) { // the ask CHAT.signIn() sends before it leaves for LINE may be cut off by the page going
+        let res; try { res = await r.fetch(); } catch (e) { return r.abort().catch(() => {}); }
+        asks.push(res.status()); if (res.status() === 200) asked();
+        return r.fulfill({ response: res }).catch(() => {});
+      }
+      // Held for up to 20 s: should the ask not come, the code goes on, and the 410 check below says so.
+      if (body && body.code) { await Promise.race([askedFirst, wait(20e3)]); await until(page, "the ask's token", () => !!localStorage.getItem("waveslave-chat-token")).catch(() => {}); }
+      return r.continue();
+    });
+    const coded = page.waitForResponse(r => r.url() === `${CHAT()}/auth/redeem` && r.request().method() === "POST" && !!(r.request().postDataJSON() || {}).code, { timeout: 60e3 });
+    const back = await coachTrip(page);
+    if (!/\?chat#c=/.test(back || "")) throw new Error(`the backend sent the browser back to ${back}`);
+    const code = await coded;
+    if (code.status() !== 410) throw new Error(`the code's redeem answered ${code.status()}; the asks before it answered ${JSON.stringify(asks)}`);
+    await landed(page); await wait(500);
+    const st = await signedInState(page), note = await page.evaluate(() => { const n = document.querySelector(".chatroom .cr-note"); return n && !n.hidden ? n.textContent : null; });
+    if (!st.token || st.v !== null || st.room || st.fab !== "none" || note) throw new Error(`after the code came back used up: ${JSON.stringify({ ...st, note })}`);
+    await landed(page);
+  },
   // The home-screen app's way (tests/chat/flow.test.js's pinPath): B, whose room was built before its Coach panel (it came in on a ?chat
   // link and shut the room), starts the coach's sign-in from the panel, and LINE finishes it in A, a browser with no v, which shows the pin.
   // B is in the background meanwhile (document.visibilityState "hidden"), as the app is while the person is in LINE and Safari, so it
@@ -246,32 +299,32 @@ const STEPS = {
     if (!st.token || st.v !== null || st.fab !== "none") throw new Error(`after the code: ${JSON.stringify(st)}`);
     if (await a.evaluate(() => localStorage.getItem("waveslave-chat-token"))) throw new Error("A got signed in too");
   },
-  // The home-screen app finishing the coach's sign-in by itself (tests/chat/flow.test.js's autoPath, with then: "coach"). B starts it from
-  // the Coach panel and is opened again (a reload, as after iOS closed the app), so its panel is shut; LINE finishes it in A, with no v, on
-  // B's network (the same CF-Connecting-IP on A's return from LINE and on B's redeems). B signs itself in, the known account, with nothing
-  // typed, only {v, auto: true} asked, and lands on the Coach panel with the room never built. A still shows the code.
+  // The home-screen app finishing the coach's sign-in by itself (tests/chat/flow.test.js's autoPath, with then: "coach"), through appTrip().
+  // On B's network (A finishes LINE from B's 203.0.113.7): B signs itself in, the known account, with nothing typed and only {v, auto: true}
+  // asked, and lands on the Coach panel with the room never built. On another network (198.51.100.7): B's ask answers "net", and the
+  // Coach panel and the room open together, the room on top with the code box (no "Finishing your LINE sign-in…"); the pin from A signs B
+  // in and lands on the Coach panel. A, which has no v, never signs in.
   async coachAutoFinish(s) {
-    const IP = { "cf-connecting-ip": "203.0.113.7" }, redeems = [];
-    const b = await s.open({}); let start = null;
-    await b.tap(TAB); await panelOpen(b);
-    await b.route(`${CHAT()}/auth/line/start**`, r => { start = r.request().url(); return r.fulfill({ status: 204 }); });
-    await b.route(`${CHAT()}/auth/redeem`, r => { if (r.request().method() === "POST") redeems.push(r.request().postDataJSON()); return r.continue({ headers: { ...r.request().headers(), ...IP } }); });
-    await b.evaluate(() => { CHAT.signIn("coach"); });
-    for (let i = 0; i < 50 && !start; i++) await wait(100);
-    if (!start) throw new Error("CHAT.signIn(\"coach\") didn't start a sign-in");
-    await b.reload({ waitUntil: "load" });
-    await until(b, "the page again", () => { const f = document.querySelector(".chatfab"); return !!f && !!window.CHAT && !!window.COACH; });
-    const before = await b.evaluate(() => ({ v: JSON.parse(localStorage.getItem("waveslave-chat-v") || "null"), coach: document.documentElement.classList.contains("coach-open"), room: !!document.querySelector(".chatroom") }));
-    if (!before.v || before.v.then !== "coach" || before.coach || before.room) throw new Error(`opened again before LINE finished: ${JSON.stringify(before)}`);
-    const a = await s.open({ go: false });
-    await a.setExtraHTTPHeaders(IP); // on every request, the callback LINE redirects to included
-    await a.goto(start, { waitUntil: "load" }); await a.waitForURL(u => u.href.startsWith(ORIGIN()), { waitUntil: "load" });
-    await a.waitForSelector(".chatroom .cr-pin-code", { state: "attached" });
+    let { a, b, redeems, pin } = await appTrip(s, "203.0.113.7");
     await until(b, "the session token", () => !!localStorage.getItem("waveslave-chat-token"));
     await landed(b);
-    const st = await signedInState(b);
+    let st = await signedInState(b);
     if (!st.token || st.v !== null || st.room || st.fab !== "none") throw new Error(`after finishing by itself: ${JSON.stringify(st)}`);
     if (!redeems.length || redeems.some(r => r.auto !== true || "pin" in r || "code" in r)) throw new Error(`B asked ${JSON.stringify(redeems.map(r => Object.keys(r).sort()))}`);
+    if (await a.evaluate(() => localStorage.getItem("waveslave-chat-token"))) throw new Error("A got signed in too");
+    // "net": LINE finished on another network.
+    ({ a, b, redeems, pin } = await appTrip(s, "198.51.100.7"));
+    await until(b, "the Coach panel and the room", () => { const c = document.documentElement.classList; return c.contains("coach-open") && c.contains("chat-open"); });
+    await onTop(b, "the code box", ".chatroom .cr-pinbox input");
+    const waiting = await b.evaluate(() => ({ wait: document.querySelector(".chatroom .cr-pin-wait").hidden, token: !!localStorage.getItem("waveslave-chat-token"),
+      v: !!localStorage.getItem("waveslave-chat-v"), panel: !document.querySelector(".coachpanel").hidden }));
+    if (!waiting.wait || waiting.token || !waiting.v || !waiting.panel) throw new Error(`after "net": ${JSON.stringify(waiting)}`);
+    await b.fill(".chatroom .cr-pinbox input", pin); await b.click(".chatroom .cr-pinbox button");
+    await landed(b);
+    st = await signedInState(b);
+    if (!st.token || st.v !== null || st.fab !== "none") throw new Error(`after the code: ${JSON.stringify(st)}`);
+    const pins = redeems.filter(r => "pin" in r);
+    if (pins.length !== 1 || redeems.some(r => !("pin" in r) && r.auto !== true) || "code" in pins[0]) throw new Error(`B asked ${JSON.stringify(redeems.map(r => Object.keys(r).sort()))}`);
     if (await a.evaluate(() => localStorage.getItem("waveslave-chat-token"))) throw new Error("A got signed in too");
   },
   // CHAT.token() gives the coach the token; after the backend refuses it (401: signed out everywhere), CHAT.token(old) signs out quietly:

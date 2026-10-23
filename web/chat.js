@@ -1115,6 +1115,9 @@ async function redeem(v, proof, pin, then) {
     landed(await api("/auth/redeem", { method: "POST", body: { v, ...proof } }), v, proof, then);
   } catch (e) {
     const code = e && e.body && e.body.error;
+    // A sign-in for the coach that the app's own ask ({v, auto: true}, sent on pageshow) finished first: it reached the room before this
+    // code, so the code finds the sign-in used up, and the page has already landed on the Coach panel, signed in. Nothing to say.
+    if (then && code === "expired" && signedIn()) return;
     if (code === "v" && pin) { roomFor(then); return openSheet("pin", pinSheet, { pin }); } // the code was made for another v: finished away from where it began
     if (proof.pin && code === "pin") { R.pinErr = S("pinWrong"); return drawBar(); }
     if (code === "expired" || code === "banned") save(KEYS.v, null);

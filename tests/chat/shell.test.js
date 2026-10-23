@@ -333,7 +333,16 @@ const CHECKS = {
     w = await where();
     if (!(w.vH < 844)) throw new Error(`zooming in didn't change the visual viewport (the check itself is off): ${JSON.stringify(w)}`);
     if (w.top !== w.vTop || w.h !== w.vH) throw new Error(`after the screen moved the room is at ${w.top}, ${w.h} tall, the screen shows ${w.vTop}, ${w.vH} tall`);
+    // The room doesn't zoom (Bryan, Oct 23): no pinch or double-tap zoom in it, a two-finger drag and Safari's gesture events stopped,
+    // and the page's viewport capped at scale 1 while it's open (put back on close, so the Forecast zooms as before).
+    const z = await page.evaluate(() => { const r = document.querySelector(".chatroom"), stop = ev => !r.dispatchEvent(ev);
+      const two = new TouchEvent("touchmove", { cancelable: true, bubbles: true, touches: [0, 1].map(i => new Touch({ identifier: i, target: r, clientX: 100 + 50*i, clientY: 600 })) });
+      return { meta: document.querySelector('meta[name="viewport"]').content, ta: getComputedStyle(r).touchAction, two: stop(two),
+        gesture: stop(Object.assign(new Event("gesturestart", { cancelable: true, bubbles: true }))) }; });
+    if (z.meta !== "width=device-width, initial-scale=1, maximum-scale=1" || z.ta !== "pan-x pan-y" || !z.two || !z.gesture) throw new Error(`the room can zoom: ${JSON.stringify(z)}`);
     await page.evaluate(() => document.querySelector(".chatroom .cr-hd .cr-x").click()); await settle(page);
+    const meta = await page.evaluate(() => document.querySelector('meta[name="viewport"]').content);
+    if (meta !== "width=device-width, initial-scale=1") throw new Error(`closed, the page's viewport is "${meta}", want it back as it was`);
     w = await where();
     if (w.y !== 1500 || w.body !== at) throw new Error(`closed, the page is at ${w.y} (body ${w.body}), want 1500 (body ${at}) where it was`);
   },

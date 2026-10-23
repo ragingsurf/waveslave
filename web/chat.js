@@ -943,18 +943,24 @@ function unbanSheet() { const h = R.hidden;
 // to bring the box into view, and a drag anywhere then moves the whole page, so the room's top went off the screen and the Forecast
 // behind it showed under the box (overflow: hidden on the page doesn't stop Safari). So while the room is open the page is pinned
 // where it was (body position: fixed, put back on close), the room is drawn over just the part of the screen that shows (the visual
-// viewport, above the keyboard), and a drag outside the parts that scroll moves nothing.
+// viewport, above the keyboard), and a drag outside the parts that scroll moves nothing. The room doesn't zoom either (Bryan, Oct 23:
+// it should stay still like an app's screen): a pinch or a double tap in it does nothing (touch-action in the CSS, Safari's gesture
+// events, two-finger drags, and maximum-scale on the page's viewport for Android), and the page zooms as before once the room is shut.
 const PIN = { y: 0 };
 function fitRoom() { const v = window.visualViewport, s = R.el.room.style; if (!v) return;
   s.top = `${v.offsetTop}px`; s.height = `${v.height}px`; s.bottom = "auto"; }
 function pinPage(on) { const b = document.body.style, v = window.visualViewport;
+  const meta = document.querySelector('meta[name="viewport"]');
   if (on) { PIN.y = scrollY; Object.assign(b, { position: "fixed", top: `${-PIN.y}px`, left: "0", right: "0" }); fitRoom();
+    if (meta) { PIN.meta = meta.content; if (!/maximum-scale/.test(PIN.meta)) meta.content = `${PIN.meta}, maximum-scale=1`; }
     if (v) { v.addEventListener("resize", PIN.fit = guard(fitRoom)); v.addEventListener("scroll", PIN.fit); } return; }
   if (v && PIN.fit) { v.removeEventListener("resize", PIN.fit); v.removeEventListener("scroll", PIN.fit); }
+  if (meta && PIN.meta != null) { meta.content = PIN.meta; PIN.meta = null; }
   Object.assign(b, { position: "", top: "", left: "", right: "" }); for (const k of ["top", "height", "bottom"]) R.el.room.style[k] = "";
   scrollTo({ top: PIN.y, behavior: "instant" }); }
 const SCROLLS = ".cr-list, .cr-filters, .cr-sheet, .cr-pop, input, textarea";
-addEventListener("touchmove", e => { if (R.open && e.cancelable && !(e.target.closest && e.target.closest(SCROLLS))) e.preventDefault(); }, { passive: false });
+addEventListener("touchmove", e => { if (R.open && e.cancelable && (e.touches.length > 1 || !(e.target.closest && e.target.closest(SCROLLS)))) e.preventDefault(); }, { passive: false });
+for (const t of ["gesturestart", "gesturechange"]) addEventListener(t, e => { if (R.open) e.preventDefault(); }, { passive: false });
 
 // ---- Opening and closing. Escape closes the menu, then the sheet, then the room; Tab stays inside whichever is on top.
 function openRoom(o = {}) {
@@ -1444,7 +1450,7 @@ html:not([lang="en"]) .chatfab b{font:700 16px/1 var(--body);letter-spacing:.04e
 .chatfab-dot{flex:none;width:9px;height:9px;border-radius:50%;background:#ff3d7f;box-shadow:0 0 8px #ff3d7f}
 html.tw.chat-on .wrap{padding-bottom:calc(84px + env(safe-area-inset-bottom))}
 html.chat-open,html.chat-open body{overflow:hidden}
-.chatroom{position:fixed;inset:0;z-index:110;display:flex;flex-direction:column;background:var(--bg);color:var(--ink);font:15px/1.45 var(--body);overscroll-behavior:contain;outline:none;-webkit-text-size-adjust:100%}
+.chatroom{position:fixed;inset:0;z-index:110;touch-action:pan-x pan-y;display:flex;flex-direction:column;background:var(--bg);color:var(--ink);font:15px/1.45 var(--body);overscroll-behavior:contain;outline:none;-webkit-text-size-adjust:100%}
 .chatroom[hidden],.chatroom [hidden]{display:none!important}
 .chatroom button{font-family:var(--body);-webkit-tap-highlight-color:transparent}
 .chatroom>.cr-hd,.chatroom>.cr-filters,.chatroom>.cr-status,.chatroom>.cr-list,.chatroom>.cr-foot{width:100%;max-width:760px;margin-inline:auto}

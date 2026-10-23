@@ -121,10 +121,12 @@ async function insertReview(c, who, opts = {}) {
   return id;
 }
 
-// A clip the coach found isn't surfing, held for Bryan (ruling R16): rejected, hold 1, no flags, its key frames kept.
+// A clip the coach found isn't surfing, held for Bryan (ruling R16), as the alarm leaves it: rejected, hold 1, its
+// "not_surf" warning, no flags, its key frames kept.
 const insertNotSurf = (c, who, more = {}) => {
   const reply = { ...goodReply(), is_surf_clip: false };
-  return insertReview(c, who, { status: "rejected", hold: 1, draft: JSON.stringify(reply), ...more });
+  const warnings = JSON.stringify(["not_surf"]);
+  return insertReview(c, who, { status: "rejected", hold: 1, draft: JSON.stringify(reply), warnings, ...more });
 };
 // A flagged clip (ruling R16): rejected, hold 1, its flags, no key frames, no draft, and the account blocked.
 async function insertFlagged(c, who, flags = ["sexual"]) {
@@ -220,7 +222,7 @@ describe("Approve", () => {
     expect(await act(c, id, { action: "approve", edits, note: " Shorter titles " })).toEqual(OK);
 
     const row = await reviewRow(c, id);
-    expect(row).toMatchObject({ status: "published", published: T, checked: 1, next_try: null });
+    expect(row).toMatchObject({ status: "published", published: T, checked: 1, next_try: null, handled_at: T });
     const want = goodReply();
     want.main_fix.title = "Keep your weight forward";
     want.progress = "Lower than last time.";
@@ -260,10 +262,10 @@ describe("Approve", () => {
     const c = await freshCoach();
     const a = surfer();
     const draft = JSON.stringify(goodReply());
-    const id = await insertReview(c, a, { status: "published", published: T - HOUR, final: draft, checked: 0 });
+    const id = await insertReview(c, a, { status: "published", published: T - HOUR, handled_at: T - HOUR, final: draft, checked: 0 });
     expect((await ownerView(c, a, id)).review.checked).toBe(false);
     expect(await act(c, id, { action: "approve" })).toEqual(OK);
-    expect(await reviewRow(c, id)).toMatchObject({ status: "published", published: T - HOUR, checked: 1, final: draft });
+    expect(await reviewRow(c, id)).toMatchObject({ status: "published", published: T - HOUR, checked: 1, final: draft, handled_at: T });
     expect((await ownerView(c, a, id)).review.checked).toBe(true);
 
     // Approving it again with an edit changes the published text, and that is an example.
@@ -402,6 +404,27 @@ describe("Redo", () => {
     expect(await act(c, id, { action: "redo", note: "Back foot" })).toEqual(OK);
   });
 
+  it("is refused (409 state) unless at least 8 of the review's key frames are still kept", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    const id = await insertReview(c, a);
+    await c.rows("UPDATE frames SET b64 = NULL WHERE review_id = ? AND n > 7", id);
+    const before = await snapshot(c);
+    expect(await act(c, id, { action: "redo", note: "Back foot" })).toEqual(STATE);
+    expect(await snapshot(c)).toEqual(before);
+    await c.rows("UPDATE frames SET b64 = ? WHERE review_id = ? AND n = 8", FRAME, id);
+    expect(await act(c, id, { action: "redo", note: "Back foot" })).toEqual(OK);
+
+    // An old reported review whose key frames are gone can't be redone, but can still be withdrawn.
+    const old = await insertReview(c, a, {
+      status: "published", published: T - 40 * DAY, final: JSON.stringify(goodReply()), frames: false,
+    });
+    expect(await report(c, a, old, { line: "Wrong" })).toEqual(OK);
+    expect(await act(c, old, { action: "redo", note: "Look again" })).toEqual(STATE);
+    expect(await reviewRow(c, old)).toMatchObject({ status: "drafted", redos: 0 });
+    expect(await act(c, old, { action: "withdraw", note: "Sorry" })).toEqual(OK);
+  });
+
   it("of a reported review lets its next approval publish the new draft", async () => {
     const c = await freshCoach();
     const a = surfer();
@@ -427,7 +450,7 @@ describe("Reject", () => {
     expect(await used(c, a)).toBe(1);
     expect(await act(c, id, { action: "reject", note: " We couldn't see you. Try filming closer. " })).toEqual(OK);
     expect(await reviewRow(c, id)).toMatchObject({
-      status: "rejected", surfer_note: "We couldn't see you. Try filming closer.", given: 1, hold: 0,
+      status: "rejected", surfer_note: "We couldn't see you. Try filming closer.", given: 1, hold: 0, handled_at: T,
     });
     expect(await used(c, a)).toBe(0);
     expect(await ownerView(c, a, id)).toMatchObject({ status: "rejected", note: "We couldn't see you. Try filming closer." });
@@ -458,11 +481,15 @@ describe("Give back", () => {
     expect(await ownerView(c, a, id)).toMatchObject({ note: "not_surf" });
     expect(await used(c, a)).toBe(1);
     expect(await getMeta(c, "frame_bytes")).toBe(12 * FRAME.length);
+    c.clock.t = T + MIN;
     expect(await act(c, id, { action: "giveback" })).toEqual(OK);
-    expect(await reviewRow(c, id)).toMatchObject({ status: "rejected", hold: 0, given: 1 });
+    expect(await reviewRow(c, id)).toMatchObject({ status: "rejected", hold: 0, given: 1, handled_at: T + MIN });
     expect(await used(c, a)).toBe(0);
     expect(await frameCount(c, id)).toBe(0);
     expect(await getMeta(c, "frame_bytes")).toBe(0);
+    // The surfer is still told "We couldn't review this clip."
+    expect(await ownerView(c, a, id)).toMatchObject({ status: "rejected", note: "not_surf" });
+    expect((await myReviews(c, a))[0]).toMatchObject({ status: "not_reviewed", note: "not_surf" });
     expect(await act(c, id, { action: "giveback" })).toEqual(STATE);
     expect(await used(c, a)).toBe(0);
   });
@@ -488,9 +515,14 @@ describe("Clear", () => {
     const second = await insertFlagged(c, a, ["under_18"]);
     const notSurf = await insertNotSurf(c, a);
     const other = await insertFlagged(c, b);
+    c.clock.t = T + MIN;
     expect(await act(c, first, { action: "clear" })).toEqual(OK);
     expect((await c.rows("SELECT blocked FROM people WHERE sub_hash = ?", a.sub_hash))[0].blocked).toBe(0);
-    for (const id of [first, second]) expect(await reviewRow(c, id)).toMatchObject({ status: "rejected", hold: 0, given: 0 });
+    for (const id of [first, second]) {
+      expect(await reviewRow(c, id)).toMatchObject({ status: "rejected", hold: 0, given: 0, handled_at: T + MIN });
+      // The surfer is still told "We couldn't review this clip." (ruling R16).
+      expect(await ownerView(c, a, id)).toMatchObject({ note: "not_surf" });
+    }
     // A not-surf clip waits for Give back or Ban, and another account's block stays.
     expect(await reviewRow(c, notSurf)).toMatchObject({ hold: 1 });
     expect(await reviewRow(c, other)).toMatchObject({ hold: 1 });
@@ -514,15 +546,16 @@ describe("Ban", () => {
     const others = await insertReview(c, b);
     expect(await used(c, a)).toBe(3);
 
+    c.clock.t = T + MIN;
     expect(await act(c, target, { action: "ban" })).toEqual(OK);
     expect(c.bans).toEqual([a.sub_hash]);
     for (const id of [target, queued, held]) {
-      expect(await reviewRow(c, id)).toMatchObject({ status: "rejected", hold: 0, given: 0, next_try: null });
+      expect(await reviewRow(c, id)).toMatchObject({ status: "rejected", hold: 0, given: 0, next_try: null, handled_at: T + MIN });
       expect(await frameCount(c, id)).toBe(0);
     }
     expect(await used(c, a)).toBe(3);
     // A published review stays as it is, and so does another account's.
-    expect(await reviewRow(c, published)).toMatchObject({ status: "published" });
+    expect(await reviewRow(c, published)).toMatchObject({ status: "published", handled_at: null });
     expect(await frameCount(c, published)).toBe(12);
     expect(await reviewRow(c, others)).toMatchObject({ status: "drafted" });
     expect(await getMeta(c, "frame_bytes")).toBe(2 * 12 * FRAME.length);
@@ -573,7 +606,9 @@ describe("Withdraw", () => {
     const id = await insertReview(c, a, { status: "published", published: T - HOUR, final: JSON.stringify(goodReply()), checked: 1 });
     expect(await act(c, id, { action: "withdraw" })).toEqual(INVALID);
     expect(await act(c, id, { action: "withdraw", note: "Sorry, this one was wrong." })).toEqual(OK);
-    expect(await reviewRow(c, id)).toMatchObject({ status: "rejected", surfer_note: "Sorry, this one was wrong.", given: 1 });
+    expect(await reviewRow(c, id)).toMatchObject({
+      status: "rejected", surfer_note: "Sorry, this one was wrong.", given: 1, handled_at: T,
+    });
     expect(await used(c, a)).toBe(0);
     expect((await ownerView(c, a, id)).review).toBeUndefined();
     expect(await act(c, id, { action: "withdraw", note: "Again" })).toEqual(STATE);
@@ -607,9 +642,14 @@ describe("Something wrong? (report)", () => {
   it("sends a published review back to Drafts marked Reported, with the surfer's line", async () => {
     const c = await freshCoach();
     const a = surfer();
-    const id = await insertReview(c, a, { status: "published", published: T - HOUR, final: JSON.stringify(goodReply()), checked: 1 });
+    const id = await insertReview(c, a, {
+      status: "published", published: T - HOUR, handled_at: T - HOUR, final: JSON.stringify(goodReply()), checked: 1,
+    });
     expect(await report(c, a, id, { line: "  That isn't me in key frame 3  " })).toEqual(OK);
-    expect(await reviewRow(c, id)).toMatchObject({ status: "drafted", report: "That isn't me in key frame 3", published: T - HOUR });
+    expect(await reviewRow(c, id)).toMatchObject({
+      status: "drafted", report: "That isn't me in key frame 3", published: T - HOUR, handled_at: null,
+    });
+    expect((await drafts(c)).json.handled).toEqual([]);
     expect((await myReviews(c, a))[0]).toMatchObject({ status: "reviewing" });
     const { waiting } = (await drafts(c)).json;
     expect(waiting.map((r) => [r.id, r.reported, r.report])).toEqual([[id, true, "That isn't me in key frame 3"]]);
@@ -676,66 +716,80 @@ describe("GET /admin/coach/drafts", () => {
     });
     expect(first.frames).toHaveLength(12);
     expect(first.frames[0]).toEqual({ n: 1, ms: 11_000, box: [200, 120, 360] });
-    expect(waiting[1]).toMatchObject({ status: "rejected", hold: 1, flags: [], have: TWELVE });
+    expect(waiting[1]).toMatchObject({ status: "rejected", hold: 1, flags: [], warnings: ["not_surf"], have: TWELVE });
     expect(waiting[2]).toMatchObject({ status: "rejected", hold: 1, flags: ["sexual"], have: [], frames: [], draft: null });
     expect(waiting[2].profile.blocked).toBe(true);
   });
 
-  it("then the last 50 handled, newest first: published, rejected and failed reviews", async () => {
+  it("then the last 50 handled, the last handled first (handled_at): published, rejected and failed reviews", async () => {
     const c = await freshCoach();
     const a = surfer();
     const handled = [];
+    // The ones started first were handled last.
     for (let k = 0; k < 53; k++) {
       const status = ["published", "rejected", "failed"][k % 3];
-      const sent = T - (61 - k) * MIN;
-      const more = status === "published" ? { published: sent + 30 * SEC, final: JSON.stringify(goodReply()) } : {};
-      handled.push(await insertReview(c, a, { status, sent, frames: false, counted: false, ...more }));
+      const more = status === "published" ? { published: T - 2 * HOUR, final: JSON.stringify(goodReply()) } : {};
+      const cols = { status, sent: T - 3 * HOUR + k * SEC, handled_at: T - k * MIN, frames: false, counted: false, ...more };
+      handled.push(await insertReview(c, a, cols));
     }
+    // Not handled: a draft, a clip held (handled by the alarm, but waiting for Bryan) and a reported review.
     await insertReview(c, a, { frames: false, counted: false });
-    await insertNotSurf(c, a, { frames: false, counted: false });
+    await insertNotSurf(c, a, { handled_at: T, frames: false, counted: false });
+    await insertReview(c, a, { published: T - HOUR, report: "Wrong", frames: false, counted: false });
     const json = (await drafts(c)).json;
-    expect(json.waiting).toHaveLength(2);
-    expect(json.handled.map((r) => r.id)).toEqual(handled.slice(-50).reverse());
-    expect(json.handled[1]).toMatchObject({ status: "published", final: goodReply(), reported: false });
+    expect(json.waiting).toHaveLength(3);
+    expect(json.handled.map((r) => r.id)).toEqual(handled.slice(0, 50));
+    expect(json.handled[0]).toMatchObject({ status: "published", final: goodReply(), reported: false, handled_at: T });
   });
 
-  it("reads about as many rows as it shows, however many handled reviews are kept", async () => {
+  it("reads about as many rows as it shows, however many reviews are kept", async () => {
     const c = await freshCoach();
     const a = surfer();
     const final = JSON.stringify(goodReply());
-    await c.inCoach((coach) => {
-      for (let k = 0; k < 400; k++) {
+    // 900 handled reviews, a third each published (approved without changes), rejected and failed, the ones started
+    // first handled last.
+    const handled = await c.inCoach((coach) => {
+      const ids = [];
+      for (let k = 0; k < 900; k++) {
         const status = ["published", "rejected", "failed"][k % 3];
+        const id = hex(11);
+        ids.push(id);
         coach.sql.exec(
-          `INSERT INTO reviews (id, uid, sub_hash, lang, move, answers, status, created, sent, published, draft, final, checked)
-           VALUES (?, ?, ?, 'en', 'top_turn', ?, ?, ?, ?, ?, ?, ?, 1)`,
-          hex(11), a.uid, a.sub_hash, JSON.stringify(ANSWERS), status, T - DAY + k, T - DAY + k,
-          status === "published" ? T - DAY + k : null, final, status === "published" ? final : null,
+          `INSERT INTO reviews (id, uid, sub_hash, lang, move, answers, status, created, sent, published, handled_at,
+             draft, final, checked)
+           VALUES (?, ?, ?, 'en', 'top_turn', ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+          id, a.uid, a.sub_hash, JSON.stringify(ANSWERS), status, T - 2 * DAY + k, T - 2 * DAY + k,
+          status === "published" ? T - DAY : null, T - k * MIN, final, status === "published" ? final : null,
         );
       }
+      return ids;
     });
     await insertReview(c, a, { frames: false, counted: false });
-    // The rows every statement read while the coach drew the list. Reading every review kept would be over 1,200.
-    const read = await c.inCoach((coach) => {
+    await insertReview(c, a, { frames: false, counted: false });
+    await insertNotSurf(c, a, { frames: false, counted: false });
+    // Each statement's rows read while the coach drew the list.
+    const reads = await c.inCoach((coach) => {
       const real = coach.sql;
-      const cursors = [];
+      const seen = [];
       coach.sql = {
-        exec(...args) {
-          const cursor = real.exec(...args);
-          cursors.push(cursor);
+        exec(query, ...binds) {
+          const cursor = real.exec(query, ...binds);
+          seen.push({ query, cursor });
           return cursor;
         },
       };
       try {
         const { json } = coach.getDrafts();
-        expect(json.handled).toHaveLength(50);
+        expect(json.waiting).toHaveLength(3);
+        expect(json.handled.map((r) => r.id)).toEqual(handled.slice(0, 50));
         expect(json.settings.unchanged).toEqual({ n: 20, of: 20 });
       } finally {
         coach.sql = real;
       }
-      return cursors.reduce((n, cursor) => n + cursor.rowsRead, 0);
+      return seen.map(({ query, cursor }) => ({ query, read: cursor.rowsRead }));
     });
-    expect(read).toBeLessThan(400);
+    // One that read every published, every rejected or every failed review would read 300 or more.
+    for (const { query, read } of reads) expect(read, query).toBeLessThan(150);
   });
 
   it("settings: autopilot, pause, stop, the credit month's spend, and approved without changes over the last 20", async () => {
@@ -752,10 +806,17 @@ describe("GET /admin/coach/drafts", () => {
       "same", "same", "redo", "edit", "same", "same",
     ];
     expect(kinds).toHaveLength(25);
-    for (const kind of kinds) {
-      const id = await insertReview(c, a, { frames: false, counted: false, redos: kind === "redo" || kind === "both" ? 1 : 0 });
+    // Started in the opposite order to the one they are approved in, so the count must go by when they were approved:
+    // by the order they were started in, it would be 14 of 20.
+    const ids = [];
+    for (const kind of [...kinds].reverse()) {
+      ids.push(await insertReview(c, a, { frames: false, counted: false, redos: kind === "redo" || kind === "both" ? 1 : 0 }));
+    }
+    ids.reverse(); // ids[k] is kinds[k]'s review
+    for (const [k, kind] of kinds.entries()) {
+      c.clock.t = T + k * SEC;
       const edits = kind === "edit" || kind === "both" ? { "drill.how": "Do 20 a day." } : undefined;
-      expect(await act(c, id, { action: "approve", edits })).toEqual(OK);
+      expect(await act(c, ids[k], { action: "approve", edits })).toEqual(OK);
     }
     const draft = JSON.stringify(goodReply());
     for (let k = 0; k < 2; k++) {
@@ -774,6 +835,61 @@ describe("GET /admin/coach/drafts", () => {
     expect((await drafts(c)).json.settings).toEqual({
       autopilot: true, paused: true, stopped: true, spend: { usd: 12.4, stop: 83, reviews: 96 }, unchanged: { n: 12, of: 20 },
     });
+  });
+});
+
+// ---- When the alarm handles a review (ruling P39) --------------------------------------------------------------------
+
+describe("the alarm's outcomes", () => {
+  it("set handled_at when a review fails, publishes on autopilot, is skipped as banned, flagged or found not surf", async () => {
+    const c = await freshCoach();
+    const owners = {};
+    const calling = async (name, more = {}) => {
+      owners[name] = surfer();
+      return insertReview(c, owners[name], { status: "calling", next_try: T + 16 * MIN, draft: null, ...more });
+    };
+    const ids = {
+      failed: await calling("failed"),
+      redoFailed: await calling("redoFailed", { redos: 1, draft: JSON.stringify(goodReply()) }),
+      banned: await calling("banned"),
+      flagged: await calling("flagged"),
+      notSurf: await calling("notSurf"),
+      published: await calling("published"),
+      drafted: await calling("drafted"),
+    };
+    await setMeta(c, "autopilot", true);
+    c.clock.t = T + MIN;
+    // What the alarm does with each, as runOne() calls it once the AI has answered (or not).
+    const ask = { nums: TWELVE, hadHistory: false, estIn: 20_000 };
+    const answer = (reply) => ({
+      reply, stop: "end_turn", usage: { input_tokens: 15_400, output_tokens: 3_000 }, model: "coach-test-model",
+    });
+    const headsUp = { ...goodReply(), heads_up: { text: "Bend your knees on the bottom turn too.", move: "bottom_turn" } };
+    await c.inCoach((coach) => {
+      const row = (id) => coach.sql.exec("SELECT * FROM reviews WHERE id = ?", id).toArray()[0];
+      const now = coach.now();
+      coach.gaveUp(row(ids.failed), 3);
+      coach.gaveUp(row(ids.redoFailed), 3);
+      coach.skipBanned(row(ids.banned));
+      coach.answered(row(ids.flagged), ask, answer({ ...goodReply(), sexual_content: true }), now);
+      coach.answered(row(ids.notSurf), ask, answer({ ...goodReply(), is_surf_clip: false }), now);
+      coach.answered(row(ids.published), ask, answer(goodReply()), now);
+      coach.answered(row(ids.drafted), ask, answer(headsUp), now);
+    });
+    const want = {
+      failed: ["failed", T + MIN], redoFailed: ["drafted", null], banned: ["rejected", T + MIN], flagged: ["rejected", T + MIN],
+      notSurf: ["rejected", T + MIN], published: ["published", T + MIN], drafted: ["drafted", null],
+    };
+    for (const [name, [status, handledAt]] of Object.entries(want)) {
+      expect(await reviewRow(c, ids[name]), name).toMatchObject({ status, handled_at: handledAt });
+    }
+    // What each surfer is told: "We couldn't review this clip." for the clips that weren't, nothing for the failed one.
+    const notes = {
+      failed: null, banned: null, flagged: "not_surf", notSurf: "not_surf", published: null, drafted: null,
+    };
+    for (const [name, note] of Object.entries(notes)) {
+      expect(await ownerView(c, owners[name], ids[name]), name).toMatchObject({ note });
+    }
   });
 });
 

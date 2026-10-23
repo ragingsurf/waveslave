@@ -92,6 +92,8 @@ const SCHEMA_V1 = [
   // never goes back twice. checked is 1 once Bryan approved or edited it (ruling R20); hold is 1 while Bryan has a
   // not-surf or flagged clip to act on (ruling R16). model, tok_in, tok_out and cost (US$) are the call's.
   // surfer_note is what the surfer is told when it isn't published; report is the surfer's line when they report it.
+  // handled_at is when it was last handled (ruling P39): published, rejected or failed, by Bryan or the alarm; null
+  // while it waits, a report included.
   `CREATE TABLE reviews (
     id TEXT PRIMARY KEY,
     uid TEXT NOT NULL,
@@ -107,6 +109,7 @@ const SCHEMA_V1 = [
     created INTEGER NOT NULL,
     sent INTEGER,
     published INTEGER,
+    handled_at INTEGER,
     quota_month TEXT,
     given INTEGER NOT NULL DEFAULT 0,
     checked INTEGER NOT NULL DEFAULT 0,
@@ -124,10 +127,14 @@ const SCHEMA_V1 = [
     surfer_note TEXT,
     report TEXT
   )`,
-  // The alarm's next review; a person's own list, newest first; and a LINE account's open reviews.
+  // The alarm's next review; a person's own list, newest first; a LINE account's open reviews; the Drafts list's
+  // handled reviews and its approved ones, the last handled first; and the clips held for Bryan (a partial index, so
+  // finding them never reads the rejected reviews kept for 24 months).
   "CREATE INDEX reviews_status_next ON reviews (status, next_try)",
   "CREATE INDEX reviews_uid_created ON reviews (uid, created)",
   "CREATE INDEX reviews_sub_status ON reviews (sub_hash, status)",
+  "CREATE INDEX reviews_handled ON reviews (handled_at)",
+  "CREATE INDEX reviews_held ON reviews (sent) WHERE hold = 1",
   // A review's key frames, numbered 1-12, one row each (a row is capped at 2 MB): its time in the clip in ms, the box
   // around the surfer as JSON [x, y, side], and the JPEG as base64 text, null while a listed frame hasn't arrived.
   `CREATE TABLE frames (
@@ -298,13 +305,23 @@ const SURFER_STATUS = Object.freeze({
   failed: "not_reviewed",
 });
 
-// What the surfer is told about a review that wasn't published: "not_surf" while Bryan holds a not-surf or flagged clip
-// (ruling R16: "We couldn't review this clip."), else his note, or null.
-const noteFor = (review) => (review.hold ? "not_surf" : review.surfer_note ?? null);
-
 // The reviews columns that hold JSON (SCHEMA_V1), read back as values for the admin.
 const JSON_COLUMNS = Object.freeze(["answers", "draft", "english", "final", "flags", "warnings", "redo_note"]);
 const fromJson = (text) => (text === null ? null : JSON.parse(text));
+
+// Whether a review was flagged (ruling R16): a refusal, sexual content or a surfer who looks under 18.
+const isFlagged = (review) => fromJson(review.flags).length > 0;
+
+// What the surfer is told about a review that wasn't published (spec "When something goes wrong"): "not_surf" ("We
+// couldn't review this clip.", ruling R16) while Bryan holds a not-surf or flagged clip; else his note, when he wrote
+// one; else "not_surf" still for a clip rejected as not surf (its "not_surf" warning) or flagged, after Give back,
+// Clear or Ban ended the hold; else null.
+function noteFor(review) {
+  if (review.hold) return "not_surf";
+  if (review.surfer_note !== null) return review.surfer_note;
+  const unreviewable = fromJson(review.warnings).includes("not_surf") || isFlagged(review);
+  return review.status === "rejected" && unreviewable ? "not_surf" : null;
+}
 
 // ---- Bryan's Drafts -----------------------------------------------------------------------------------------------
 
@@ -372,10 +389,8 @@ function withEdits(text, edits) {
 // The settings Bryan may change (POST /admin/coach/settings), each true or false.
 const SETTING_KEYS = Object.freeze(["autopilot", "paused", "start_again", "test_email"]);
 
-// When a review was handled, for the Drafts list's order: when it was published, else when it was sent or started.
-const handledAt = (review) => review.published ?? review.sent ?? review.created;
-// Whether a review was flagged (ruling R16): a refusal, sexual content or a surfer who looks under 18.
-const isFlagged = (review) => fromJson(review.flags).length > 0;
+// The Drafts list's waiting reviews in the order they were sent, the first first.
+const bySent = (a, b) => a.sent - b.sent || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 // ---- The AI call --------------------------------------------------------------------------------------------------
 
@@ -710,7 +725,7 @@ export class Coach extends DurableObject {
     const { left, sent_left } = this.leftOf(this.counts(who.sub_hash, month));
     const person = this.person(who.sub_hash);
     const reviews = this.all(
-      `SELECT id, move, created, status, published, surfer_note, hold FROM reviews
+      `SELECT id, move, created, status, published, surfer_note, hold, warnings, flags FROM reviews
        WHERE uid = ? AND status != 'uploading' ORDER BY created DESC, id DESC`,
       who.uid,
     );
@@ -899,8 +914,9 @@ export class Coach extends DurableObject {
 
   // POST /coach/reviews/{id}/report {line}, for its owner ("Something wrong?", spec "The review"): {ok: true}. A
   // published review goes back to Bryan's Drafts, drafted again and marked Reported, with the surfer's line of up to
-  // 200 characters ("" when they gave none). It keeps its publish time, which tells Bryan's Withdraw it was published.
-  // Refused: not_found (not the caller's own), state (not published), invalid.
+  // 200 characters ("" when they gave none). It keeps its publish time, which tells Bryan's Withdraw it was published,
+  // and waits for him again, so it is no longer handled. Refused: not_found (not the caller's own), state (not
+  // published), invalid.
   postReport(who, body, id) {
     const review = this.reviewFor(who, id);
     if (!review) return NOT_FOUND;
@@ -908,7 +924,7 @@ export class Coach extends DurableObject {
     const ask = parseObject(body);
     const line = ask === null ? null : ownLine(ask.line, ADMIN_NOTE_MAX);
     if (line === null) return INVALID;
-    this.all("UPDATE reviews SET status = 'drafted', report = ? WHERE id = ?", line, id);
+    this.all("UPDATE reviews SET status = 'drafted', report = ?, handled_at = NULL WHERE id = ?", line, id);
     return OK;
   }
 
@@ -919,19 +935,19 @@ export class Coach extends DurableObject {
 
   // GET /admin/coach/drafts: {waiting, handled, settings}. waiting is every review Bryan has to act on, the one sent
   // first first: the drafts, those reported among them, and the clips held as not surf or flagged (ruling R16). handled
-  // is the last 50 handled, published, rejected or failed, the newest first. Each is as draftView() shows it.
+  // is the last 50 handled (handled_at, ruling P39), published, rejected or failed, the last handled first. Each is as
+  // draftView() shows it. Every query reads about as many rows as it shows, through its index, never every review kept
+  // for 24 months: the free-plan guard counts rows read.
   getDrafts() {
     const now = this.now();
-    const waiting = this.all(
-      "SELECT * FROM reviews WHERE status = 'drafted' OR (status = 'rejected' AND hold = 1) ORDER BY sent, id",
-    );
-    // The 50 started last (by rowid, read backwards with no index, so the query reads about as many rows as it shows,
-    // not every review kept for 24 months), then the newest handled first.
+    const drafted = this.all("SELECT * FROM reviews WHERE status = 'drafted'");
+    const held = this.all("SELECT * FROM reviews INDEXED BY reviews_held WHERE hold = 1");
+    const waiting = [...drafted, ...held].sort(bySent);
     const handled = this.all(
-      `SELECT * FROM reviews NOT INDEXED WHERE status IN ('published', 'rejected', 'failed') AND hold = 0
-       ORDER BY rowid DESC LIMIT ?`,
+      `SELECT * FROM reviews INDEXED BY reviews_handled WHERE handled_at IS NOT NULL AND hold = 0
+       ORDER BY handled_at DESC LIMIT ?`,
       HANDLED_MAX,
-    ).sort((a, b) => handledAt(b) - handledAt(a));
+    );
     return {
       status: 200,
       json: {
@@ -963,10 +979,10 @@ export class Coach extends DurableObject {
   // Redo, which tells him when autopilot is ready.
   settingsView(now) {
     const spend = this.spendAt(now);
-    // The last approved by rowid, read as getDrafts() reads handled.
+    // The last handled first, as getDrafts() reads handled, so it reads about as many rows as it counts.
     const approved = this.all(
-      `SELECT draft, final, redos FROM reviews NOT INDEXED WHERE status = 'published' AND checked = 1
-       ORDER BY rowid DESC LIMIT ?`,
+      `SELECT draft, final, redos FROM reviews INDEXED BY reviews_handled
+       WHERE handled_at IS NOT NULL AND status = 'published' AND checked = 1 ORDER BY handled_at DESC LIMIT ?`,
       UNCHANGED_OF,
     );
     return {
@@ -1001,8 +1017,8 @@ export class Coach extends DurableObject {
     this.ctx.storage.transactionSync(() => {
       this.all(
         `UPDATE reviews SET status = 'published', published = coalesce(published, ?), final = ?, checked = 1,
-         next_try = NULL WHERE id = ?`,
-        now, final, review.id,
+         next_try = NULL, handled_at = ? WHERE id = ?`,
+        now, final, now, review.id,
       );
       if (final !== was) this.addExample(review, final, note, now);
     });
@@ -1012,10 +1028,13 @@ export class Coach extends DurableObject {
   // Redo, a draft, with Bryan's note for the coach (spec "Backend", step 6): back in the queue, due now, with one more
   // redo and no attempts used. The old draft stays: the alarm sends it with his notes, and a Redo that fails goes back
   // to it. The note joins redo_note and is kept as an example. Text published before a report goes, so the next
-  // approval starts from the new draft. At most 2 a review (redo_limit), and refused while stopFor() stops new reviews:
-  // money at the stop line, or a break.
+  // approval starts from the new draft. Refused (state) unless at least 8 of its key frames are still kept, as the
+  // coach is never called with fewer (an old reported review's may be gone); at most 2 a review (redo_limit); and
+  // refused while stopFor() stops new reviews: money at the stop line, or a break.
   async redo(review, { note }, now) {
     if (review.status !== "drafted") return STATE;
+    const kept = this.one("SELECT count(*) AS n FROM frames WHERE review_id = ? AND b64 IS NOT NULL", review.id).n;
+    if (kept < FRAMES_MIN) return STATE;
     if (review.redos >= REDOS_MAX) return refuse(409, "redo_limit");
     const stop = this.stopFor(now);
     if (stop) return stopped(stop);
@@ -1042,23 +1061,26 @@ export class Coach extends DurableObject {
   }
 
   // Reject, a draft, with a short note to the surfer: never published, and given back.
-  reject(review, { note }) {
+  reject(review, { note }, now) {
     if (review.status !== "drafted") return STATE;
-    return this.turnDown(review, note);
+    return this.turnDown(review, note, now);
   }
 
   // Withdraw, with a note (ruling R17): a published review, or one the surfer reported (drafted again, with its report
   // and publish time), is taken down and given back.
-  withdraw(review, { note }) {
+  withdraw(review, { note }, now) {
     const reported = review.status === "drafted" && review.report !== null && review.published !== null;
     if (review.status !== "published" && !reported) return STATE;
-    return this.turnDown(review, note);
+    return this.turnDown(review, note, now);
   }
 
   // A review Bryan turned down: rejected, his note for the surfer, and its count given back (once: giveBack).
-  turnDown(review, note) {
+  turnDown(review, note, now) {
     this.ctx.storage.transactionSync(() => {
-      this.all("UPDATE reviews SET status = 'rejected', surfer_note = ?, next_try = NULL WHERE id = ?", note, review.id);
+      this.all(
+        "UPDATE reviews SET status = 'rejected', surfer_note = ?, next_try = NULL, handled_at = ? WHERE id = ?",
+        note, now, review.id,
+      );
       this.giveBack(review.id);
     });
     return OK;
@@ -1066,10 +1088,10 @@ export class Coach extends DurableObject {
 
   // Give back, a clip held as not surf (ruling R16) that Bryan thinks was an honest mistake: the hold ends, its key
   // frames go and its count goes back. A flagged clip is Clear's or Ban's.
-  giveBackHeld(review) {
+  giveBackHeld(review, ask, now) {
     if (review.status !== "rejected" || review.hold !== 1 || isFlagged(review)) return STATE;
     this.ctx.storage.transactionSync(() => {
-      this.all("UPDATE reviews SET hold = 0 WHERE id = ?", review.id);
+      this.all("UPDATE reviews SET hold = 0, handled_at = ? WHERE id = ?", now, review.id);
       this.dropFrames(review.id);
       this.giveBack(review.id);
     });
@@ -1078,13 +1100,14 @@ export class Coach extends DurableObject {
 
   // Clear, a flagged clip (ruling R16): the account may start reviews again, and every flagged clip of it held for
   // Bryan is let go. The count stays used; the key frames went when it was flagged.
-  clearBlock(review) {
+  clearBlock(review, ask, now) {
     if (review.status !== "rejected" || review.hold !== 1 || !isFlagged(review)) return STATE;
     this.ctx.storage.transactionSync(() => {
       this.all("UPDATE people SET blocked = 0 WHERE sub_hash = ?", review.sub_hash);
       this.all(
-        "UPDATE reviews SET hold = 0 WHERE sub_hash = ? AND status = 'rejected' AND hold = 1 AND flags != '[]'",
-        review.sub_hash,
+        `UPDATE reviews SET hold = 0, handled_at = ?
+         WHERE sub_hash = ? AND status = 'rejected' AND hold = 1 AND flags != '[]'`,
+        now, review.sub_hash,
       );
     });
     return OK;
@@ -1108,11 +1131,11 @@ export class Coach extends DurableObject {
     // The account's reviews are read again after that await, by the write itself: they may have moved on meanwhile.
     this.ctx.storage.transactionSync(() => {
       const gone = this.all(
-        `UPDATE reviews SET status = 'rejected', hold = 0, next_try = NULL
+        `UPDATE reviews SET status = 'rejected', hold = 0, next_try = NULL, handled_at = ?
          WHERE sub_hash = ? AND (status IN ('uploading', 'queued', 'calling', 'drafted') OR hold = 1
            OR (id = ? AND status = 'published'))
          RETURNING id`,
-        sub_hash, review.id,
+        this.now(), sub_hash, review.id,
       );
       for (const { id } of gone) this.dropFrames(id);
     });
@@ -1432,10 +1455,12 @@ export class Coach extends DurableObject {
     ];
     const set = `next_try = NULL, draft = ?, english = ?, warnings = ?, flags = '[]', ${CALL_SET}`;
     if (!reply.is_surf_clip) {
-      // Not published, and held for Bryan, who may give it back or ban the account. Its key frames stay for him.
-      this.saveCall(review, `status = 'rejected', hold = 1, ${set}`, ...saved);
+      // Not published, and held for Bryan, who may give it back or ban the account. Its key frames stay for him. It is
+      // handled (ruling P39), so it shows among the handled once the hold ends, however that ends.
+      this.saveCall(review, `status = 'rejected', hold = 1, handled_at = ?, ${set}`, now, ...saved);
     } else if (review.redos === 0 && this.getMeta("autopilot") && autopilotOk(reply, checked)) {
-      this.saveCall(review, `status = 'published', published = ?, final = ?, checked = 0, ${set}`, now, saved[0], ...saved);
+      const published = "status = 'published', published = ?, handled_at = ?, final = ?, checked = 0";
+      this.saveCall(review, `${published}, ${set}`, now, now, saved[0], ...saved);
     } else {
       this.saveCall(review, `status = 'drafted', ${set}`, ...saved);
     }
@@ -1448,8 +1473,9 @@ export class Coach extends DurableObject {
   flagged(review, flags, warnings, call) {
     this.ctx.storage.transactionSync(() => {
       this.all("UPDATE people SET blocked = 1 WHERE sub_hash = ?", review.sub_hash);
-      const set = `status = 'rejected', hold = 1, next_try = NULL, flags = ?, warnings = ?, ${CALL_SET}`;
-      if (this.saveCall(review, set, JSON.stringify(flags), JSON.stringify(warnings), ...call)) this.dropFrames(review.id);
+      const set = `status = 'rejected', hold = 1, next_try = NULL, handled_at = ?, flags = ?, warnings = ?, ${CALL_SET}`;
+      const binds = [this.now(), JSON.stringify(flags), JSON.stringify(warnings), ...call];
+      if (this.saveCall(review, set, ...binds)) this.dropFrames(review.id);
     });
   }
 
@@ -1483,7 +1509,8 @@ export class Coach extends DurableObject {
       return;
     }
     this.ctx.storage.transactionSync(() => {
-      if (this.saveCall(review, "status = 'failed', attempts = ?, next_try = NULL", attempts)) this.giveBack(review.id);
+      const set = "status = 'failed', attempts = ?, next_try = NULL, handled_at = ?";
+      if (this.saveCall(review, set, attempts, this.now())) this.giveBack(review.id);
     });
   }
 
@@ -1497,7 +1524,8 @@ export class Coach extends DurableObject {
   // A banned account's review (spec step 2): rejected with no call, its key frames gone, its count not given back.
   skipBanned(review) {
     this.ctx.storage.transactionSync(() => {
-      if (this.saveCall(review, "status = 'rejected', hold = 0, next_try = NULL")) this.dropFrames(review.id);
+      const set = "status = 'rejected', hold = 0, next_try = NULL, handled_at = ?";
+      if (this.saveCall(review, set, this.now())) this.dropFrames(review.id);
     });
   }
 

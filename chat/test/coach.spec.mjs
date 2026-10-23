@@ -65,8 +65,8 @@ const rows = (coach, query, ...binds) => coach.sql.exec(query, ...binds).toArray
 const TABLES = {
   reviews: [
     "id", "uid", "sub_hash", "lang", "move", "answers", "status", "attempts", "waits", "redos", "next_try", "created", "sent",
-    "published", "quota_month", "given", "checked", "hold", "model", "tok_in", "tok_out", "cost", "draft", "english", "final",
-    "flags", "warnings", "redo_note", "surfer_note", "report",
+    "published", "handled_at", "quota_month", "given", "checked", "hold", "model", "tok_in", "tok_out", "cost", "draft",
+    "english", "final", "flags", "warnings", "redo_note", "surfer_note", "report",
   ],
   frames: ["review_id", "n", "ms", "box", "b64"],
   people: ["sub_hash", "level", "board", "stance", "agreed_ver", "agreed_at", "blocked"],
@@ -114,10 +114,13 @@ describe("tables", () => {
     });
   });
 
-  it("indexes reviews on (status, next_try), (uid, created) and (sub_hash, status), and nothing else", async () => {
+  it("indexes reviews on (status, next_try), (uid, created), (sub_hash, status), handled_at and the held ones' sent", async () => {
     const c = await freshCoach();
     await c.inCoach((coach) => {
-      expect(indexes(coach, "reviews")).toEqual(["status,next_try", "sub_hash,status", "uid,created"]);
+      expect(indexes(coach, "reviews")).toEqual(["handled_at", "sent", "status,next_try", "sub_hash,status", "uid,created"]);
+      // The held ones' index is partial: only the clips held for Bryan are in it (ruling R16).
+      const held = rows(coach, "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'reviews_held'")[0].sql;
+      expect(held).toMatch(/WHERE hold = 1$/);
       for (const table of ["frames", "people", "quota", "examples", "meta"]) expect(indexes(coach, table), table).toEqual([]);
     });
   });
@@ -129,7 +132,7 @@ describe("tables", () => {
       const review = rows(coach, "SELECT * FROM reviews WHERE id = 'r1'")[0];
       expect(review).toMatchObject({ attempts: 0, waits: 0, redos: 0, given: 0, checked: 0, hold: 0 });
       for (const list of ["flags", "warnings", "redo_note"]) expect(JSON.parse(review[list]), list).toEqual([]);
-      for (const unset of ["next_try", "sent", "published", "quota_month", "model", "cost", "draft", "english", "final", "surfer_note", "report"]) {
+      for (const unset of ["next_try", "sent", "published", "handled_at", "quota_month", "model", "cost", "draft", "english", "final", "surfer_note", "report"]) {
         expect(review[unset], unset).toBeNull();
       }
       coach.sql.exec("INSERT INTO people (sub_hash) VALUES ('sub-1')");

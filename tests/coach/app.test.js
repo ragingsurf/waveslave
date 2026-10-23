@@ -146,7 +146,7 @@ async function coachApi(tok, p, { method = "GET", body, text } = {}) {
 }
 // Sends a review for tok's account straight through the backend's routes, as the New review flow does: the agreement, the start with 8
 // key frames (a stand-in 784x784 JPEG each), each frame, then send. Resolves to its id once the fake AI's draft is in (status drafted, as
-// the admin's view of it says).
+// GET /coach/reviews/<id> tells its owner).
 async function sendReview(tok) {
   const { jpegB64 } = await import(path.join(ROOT, "chat", "test", "coach-fixtures.mjs"));
   const b64 = jpegB64(), frames = [1, 2, 3, 4, 5, 6, 7, 8].map(n => ({ n, ms: 10000 + 250 * n, box: [100, 100, 360] }));
@@ -156,7 +156,7 @@ async function sendReview(tok) {
     body: { lang: "en", move: "top_turn", move_other: "", level: "turning_well", board: "shortboard", stance: "regular", note: "", frames } }));
   for (const f of frames) await must(`key frame ${f.n}`, coachApi(tok, `/coach/reviews/${id}/frames/${f.n}`, { method: "POST", text: b64 }));
   await must("send", coachApi(tok, `/coach/reviews/${id}/send`, { method: "POST", body: {} }));
-  for (let i = 0; i < 60; i++) { const r = await coachApi(token("u-bryan"), `/coach/reviews/${id}`); if (r.json && r.json.status === "drafted") return id; await wait(500); }
+  for (let i = 0; i < 60; i++) { const r = await coachApi(tok, `/coach/reviews/${id}`); if (r.json && r.json.status === "drafted") return id; await wait(500); }
   throw new Error(`review ${id} wasn't drafted within 30 s`);
 }
 // The Coach tab's dot: there, and drawn.
@@ -490,8 +490,21 @@ const STEPS = {
   },
   // Bryan's email link, ?coach=drafts (ruling R18), out of developer mode: the address is tidied at once to the spot, the World PIN is
   // asked for before anything, and once it's in, the panel opens at Drafts with the focus on it, which only the admin has (ruling P40).
-  // The surfer following the same link gets the panel without Drafts.
+  // The surfer following the same link gets the panel without Drafts. A cancelled PIN drops the link: developer mode coming on later
+  // (the PIN in) leaves the panel shut and asks the coach nothing until then.
   async draftsLink(s) {
+    {
+      const page = await s.open({ pub: false, pin: true, unlocked: false, store: { "waveslave-chat-token": token("u-bryan") }, at: "/?coach=drafts" }), asked = [];
+      page.on("request", r => { if (r.url().startsWith(CHAT() + "/coach")) asked.push(r.url()); });
+      await wait(500);
+      if (!await page.evaluate(() => !!window.__pinAsked)) throw new Error("?coach=drafts didn't ask for the PIN");
+      await page.evaluate(() => window.__pinAsked.cancel()); await wait(300);
+      const cancelled = await page.evaluate(() => ({ world: WORLD, open: document.documentElement.classList.contains("coach-open") }));
+      if (cancelled.world || cancelled.open || asked.length) throw new Error(`after a cancelled PIN: ${JSON.stringify(cancelled)}, the coach asked ${JSON.stringify(asked)}`);
+      await page.evaluate(() => { sessionStorage.setItem("waveslave-unlock", window.__lockHash); return setWorld(true); }); await wait(1000);
+      const later = await page.evaluate(t => ({ world: WORLD, tab: !document.querySelector(t).hidden, open: document.documentElement.classList.contains("coach-open") }), TAB);
+      if (!later.world || !later.tab || later.open) throw new Error(`developer mode on after a cancelled PIN: ${JSON.stringify(later)}, want the tab and the panel shut`);
+    }
     const surfer = await s.surfer.evaluate(() => CHAT.token());
     for (const [who, tok, admin] of [["u-bryan", token("u-bryan"), true], ["the surfer", surfer, false]]) {
       const page = await s.open({ pub: false, pin: true, unlocked: false, store: { "waveslave-chat-token": tok }, at: "/?coach=drafts" }), asked = [];

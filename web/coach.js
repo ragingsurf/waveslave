@@ -292,10 +292,11 @@ function open() {
   sync(); if (tokenNow() && ME.token === tokenNow() && !ME.asking && Date.now() - ME.at >= 60e3) ask();
   render();
 }
-// ✕ or Escape, or the coach going away: the focus goes back where it was, else to the tab while it shows.
+// ✕ or Escape, or the coach going away: the focus goes back where it was, else to the tab while it shows. A ?coach=drafts link still
+// waiting for GET /coach/me is dropped, so drawing the page again (a new language, a spot) doesn't open the panel again.
 function close() {
   if (!P.open) return;
-  P.open = false; P.el.hidden = true; document.documentElement.classList.remove("coach-open");
+  P.open = false; P.el.hidden = true; document.documentElement.classList.remove("coach-open"); V.drafts = false;
   const back = P.opener; P.opener = null;
   const to = [back, P.tab].find(e => e && e !== document.body && e.isConnected && e.getClientRects().length);
   if (to) to.focus({ preventScroll: true });
@@ -392,8 +393,10 @@ function sync() {
   if (can() && t !== ME.token && t !== ME.asking) ask();
 }
 
-// The tab's dot: a ready review published after the newest one this phone has opened.
-const seen = () => { const v = Number(load(SEEN)); return Number.isFinite(v) ? v : 0; };
+// The tab's dot: a ready review published after the newest one this phone has opened. seenHere keeps it for this page load too, for when
+// localStorage won't.
+let seenHere = 0;
+const seen = () => { const v = Number(load(SEEN)); return Math.max(Number.isFinite(v) ? v : 0, seenHere); };
 const isNew = r => !!r && r.status === "ready" && Number.isFinite(r.published) && r.published > seen();
 function drawDot() {
   if (!P.started) return;
@@ -404,8 +407,8 @@ function drawDot() {
 
 // The panel's content, drawn again from what the coach knows each time something changes. Only while the panel is open, so the example's
 // key frames load only when it shows. It keeps its place, and the focus stays on the same control where it can (each carries a data-k),
-// else on the panel; a ?coach=drafts link scrolls to Drafts and puts the focus on it once GET /coach/me has answered (only the admin has
-// it).
+// else on the panel. A ?coach=drafts link scrolls to Drafts and puts the focus on it once GET /coach/me has answered (only the admin has
+// it); once it has answered or failed, the link is done with.
 function render() {
   if (!P.started || !P.open) return;
   const had = P.body.contains(document.activeElement) ? document.activeElement : null, key = V.focus || (had && had.getAttribute("data-k")), at = P.body.scrollTop;
@@ -419,7 +422,7 @@ function render() {
   P.body.scrollTop = at;
   const to = key && P.body.querySelector(`[data-k="${key}"]`);
   if (to) { to.focus({ preventScroll: true }); reveal(to); } else if (had) P.el.focus({ preventScroll: true });
-  if (V.drafts && mine && ME.me) {
+  if (V.drafts && mine && (ME.me || ME.failed)) {
     V.drafts = false; const h = P.body.querySelector(".co-drafts h3");
     if (h) { h.focus({ preventScroll: true }); reveal(h, true); }
   }
@@ -464,7 +467,7 @@ function lineIcon() { const ns = "http://www.w3.org/2000/svg", svg = document.cr
 function signedIn(me) {
   const reviews = me.reviews.filter(r => !!r && typeof r === "object");
   const out = [el("p", { class: "co-left" }, S("left")(me.left, me.monthly, +me.month.slice(5) - 1)), film(reviews.length > 0), me.agreed === true ? newReview() : agreement()];
-  if (reviews.length) out.push(el("h3", { class: "co-h co-yours" }, S("yours")), el("ul", { class: "co-list" }, reviews.map(row)));
+  if (reviews.length) out.push(el("h3", { class: "co-h co-yours" }, S("yours")), el("ul", { class: "co-list" }, reviews.map(r => row(r, +me.month.slice(0, 4)))));
   if (me.admin === true) out.push(el("section", { class: "co-drafts" }, el("h3", { class: "co-h", tabindex: "-1" }, S("drafts"))));
   return out;
 }
@@ -507,11 +510,11 @@ async function agree() {
   else V.agreeErr = true;
   render();
 }
-// A review in the list: its move, the Taiwan day it was sent, and its status in the surfer's words. A ready one opens (and one this phone
-// hasn't opened yet carries a dot, as the tab does).
-function row(r) {
+// A review in the list: its move, the Taiwan day it was sent (year: this year by the server), and its status in the surfer's words. A ready
+// one opens (and one this phone hasn't opened yet carries a dot, as the tab does).
+function row(r, year) {
   const st = STATUS.includes(r.status) ? r.status : "reviewing", moves = S("moves");
-  const kids = [el("span", { class: "co-mv" }, Object.prototype.hasOwnProperty.call(moves, r.move) ? moves[r.move] : moves.other), el("span", { class: "co-date" }, day(r.created)),
+  const kids = [el("span", { class: "co-mv" }, Object.prototype.hasOwnProperty.call(moves, r.move) ? moves[r.move] : moves.other), el("span", { class: "co-date" }, day(r.created, year)),
     el("span", { class: "co-st co-st-" + st }, S("status")[st])];
   if (st !== "ready") return el("li", null, el("div", { class: "co-row" }, kids));
   if (isNew(r)) kids.push(el("i", { class: "co-fresh", "aria-hidden": "true" }));
@@ -519,15 +522,16 @@ function row(r) {
   b.addEventListener("click", guard(() => openReview(r)));
   return el("li", null, b);
 }
-// A day as surfers read it, on Taiwan's calendar: "23 October" (the year too when it isn't this one), 10月23日.
-function day(ms) {
+// A day as surfers read it, on Taiwan's calendar: "23 October" (the year too when it isn't `year`, this year by the server's month, not
+// the phone's clock), 10月23日.
+function day(ms, year) {
   if (!Number.isFinite(ms)) return "";
   const d = new Date(ms + TW), y = d.getUTCFullYear();
-  return S("date")(y === new Date(Date.now() + TW).getUTCFullYear() ? 0 : y, d.getUTCMonth(), d.getUTCDate());
+  return S("date")(y === year ? 0 : y, d.getUTCMonth(), d.getUTCDate());
 }
 // Opening a ready review: this phone has seen it now, so the dot goes (waveslave-coach-seen keeps the newest published time opened).
 function openReview(r) {
-  if (isNew(r)) save(SEEN, r.published);
+  if (isNew(r)) { seenHere = r.published; save(SEEN, r.published); }
   drawDot(); render();
 }
 
@@ -561,7 +565,7 @@ function start() {
     if (!P.open || document.documentElement.classList.contains("chat-open")) return;
     if (e.key === "Escape" && !e.isComposing) { e.preventDefault(); e.stopImmediatePropagation(); close(); return; }
     if (e.key !== "Tab") return;
-    const all = [...P.el.querySelectorAll("button, input, a[href], textarea, select")].filter(x => !x.disabled && x.getClientRects().length);
+    const all = [...P.el.querySelectorAll('button, input, a[href], textarea, select, summary, [tabindex]:not([tabindex="-1"])')].filter(x => !x.disabled && x.getClientRects().length);
     if (!all.length) { e.preventDefault(); P.el.focus(); return; }
     const i = all.indexOf(document.activeElement);
     if (e.shiftKey && i <= 0) { e.preventDefault(); all[all.length - 1].focus(); } else if (!e.shiftKey && (i === -1 || i === all.length - 1)) { e.preventDefault(); all[0].focus(); }

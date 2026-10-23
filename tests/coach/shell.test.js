@@ -46,11 +46,12 @@ const backends = page => page.tried.filter(u => /workers\.dev/.test(u));
 class Skip extends Error {}
 
 // GET /coach/me's answer for a signed-in surfer (getMe in chat/src/coach.js), o's fields over these; and a fake backend that gives it (or,
-// with status 401, the backend's refusal of the token) besides /reports. The token the checks give the page is a stand-in: only the fake
-// backend sees it.
+// with another status, the backend's refusal: 401 auth, else 503 break) besides /reports. The token the checks give the page is a
+// stand-in: only the fake backend sees it.
 const me = o => ({ left: 2, sent_left: 4, monthly: 2, month: "2030-11", next_month: Date.UTC(2030, 10, 30, 16), full_today: false, stop: null, profile: null,
   agreed: true, admin: false, reviews: [], ...o });
-const coachBackend = (o = {}, status = 200) => q => q.pathname === "/coach/me" ? { status, body: status === 200 ? me(o) : { error: "auth" } } : { body: { reports: [], online: 0, last_id: 0 } };
+const coachBackend = (o = {}, status = 200) => q => q.pathname === "/coach/me" ? { status, body: status === 200 ? me(o) : { error: status === 401 ? "auth" : "break" } }
+  : { body: { reports: [], online: 0, last_id: 0 } };
 const TOKEN = { "waveslave-chat-token": "test-token" };
 
 const CHECKS = {
@@ -233,9 +234,10 @@ const CHECKS = {
   },
   // Review Focus 3: the month the panel names is the server's, whatever the phone's clock says. At 23:59 on 31 October in Taiwan by the
   // phone, with GET /coach/me answering for November (month "2030-11", as a review sent a minute later counts), the panel says "2 of 2
-  // reviews left in November", and 11月 in 中文.
+  // reviews left in November", and 「11月還剩 2 次講評（共 2 次）」 in 中文. At the year's turn the list's dates follow the server's year too:
+  // at 23:59 on 31 December 2030 by the phone, with the server in January 2031, a review from that evening is dated "31 December 2030".
   async monthFromServer(open) {
-    const page = await open({ clock: Date.UTC(2030, 9, 31, 15, 59), store: TOKEN, backend: coachBackend({ month: "2030-11" }) }); await wait(300);
+    let page = await open({ clock: Date.UTC(2030, 9, 31, 15, 59), store: TOKEN, backend: coachBackend({ month: "2030-11" }) }); await wait(300);
     const phone = await page.evaluate(() => new Date(Date.now() + 8 * 3600e3).getUTCMonth() + 1);
     if (phone !== 10) throw new Error(`in Taiwan the phone's clock says month ${phone}, want 10 (the check itself is off)`);
     await page.tap(TAB); await page.waitForFunction(() => !!document.querySelector(".coachpanel .co-left"), null, { timeout: 5000 }).catch(() => {});
@@ -243,7 +245,12 @@ const CHECKS = {
     let l = await line();
     if (l !== "2 of 2 reviews left in November") throw new Error(`the panel says ${JSON.stringify(l)}, want "2 of 2 reviews left in November"`);
     await page.evaluate(() => setLang("zh")); await settle(page); l = await line();
-    if (!l || !l.includes("11月") || l.includes("10月") || !l.includes("2")) throw new Error(`in 中文 the panel says ${JSON.stringify(l)}, want 11月 and the count`);
+    if (l !== "11月還剩 2 次講評（共 2 次）") throw new Error(`in 中文 the panel says ${JSON.stringify(l)}, want "11月還剩 2 次講評（共 2 次）"`);
+    const sent = Date.UTC(2030, 11, 31, 15, 0), review = { id: "y".repeat(22), move: "cutback", created: sent, status: "reviewing", published: null, note: null };
+    page = await open({ clock: Date.UTC(2030, 11, 31, 15, 59), store: TOKEN, backend: coachBackend({ month: "2031-01", reviews: [review] }) }); await wait(300);
+    await page.tap(TAB); await page.waitForFunction(() => !!document.querySelector(".coachpanel .co-list .co-date"), null, { timeout: 5000 }).catch(() => {});
+    const date = await page.evaluate(() => { const e = document.querySelector(".coachpanel .co-list .co-date"); return e && e.textContent; });
+    if (date !== "31 December 2030") throw new Error(`with the server in January 2031, a review from 31 December 2030 is dated ${JSON.stringify(date)}`);
   },
   // Signed in, the coach asks GET /coach/me once as the page loads, with the session token, and again on coming back to the page only
   // once a minute has gone by, as the chat asks for its reports. A review ready since this phone last opened one (waveslave-coach-seen)
@@ -261,6 +268,38 @@ const CHECKS = {
     if (heard.length !== 2) throw new Error(`coming back after a minute asked ${heard.length - 1} more times, want once`);
     page = await open({ store: { ...TOKEN, "waveslave-coach-seen": String(T) }, backend: coachBackend({ reviews: [ready] }) }); await wait(300);
     if (await dot(page)) throw new Error("a review this phone has already opened still puts a dot on the tab");
+  },
+  // Opening a ready review clears the dot even where localStorage won't keep waveslave-coach-seen (its setItem throws): for this page load.
+  async seenNoStorage(open) {
+    const T = Date.UTC(2030, 5, 1), ready = { id: "r".repeat(22), move: "top_turn", created: T - 3600e3, status: "ready", published: T, note: null };
+    const page = await open({ store: TOKEN, backend: coachBackend({ reviews: [ready] }) }); await wait(300);
+    const dot = () => page.evaluate(s => document.querySelector(s).classList.contains("co-dot"), TAB);
+    if (!await dot()) throw new Error("no dot for the ready review (the check itself is off)");
+    await page.evaluate(() => { const set = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (k === "waveslave-coach-seen") throw new Error("full"); return set.call(this, k, v); }; });
+    await page.tap(TAB); await page.waitForFunction(() => !!document.querySelector(".coachpanel .co-list button"), null, { timeout: 5000 }).catch(() => {});
+    await page.click(".coachpanel .co-list button"); await page.tap(".coachpanel .co-x"); await settle(page);
+    if (await dot()) throw new Error("with localStorage refusing waveslave-coach-seen, opening the review left the dot");
+  },
+  // Tab goes through every control in the signed-in panel, How to film's line included, and wraps round: ✕, How to film, the 18+ tick,
+  // I agree, and back to ✕.
+  async tabTrap(open) {
+    const page = await open({ store: TOKEN, backend: coachBackend({ agreed: false }) }); await wait(300);
+    await page.tap(TAB); await page.waitForFunction(() => !!document.querySelector('.coachpanel [data-k="agree"]'), null, { timeout: 5000 }).catch(() => {});
+    const went = [];
+    for (let i = 0; i < 5; i++) { await page.keyboard.press("Tab");
+      went.push(await page.evaluate(() => { const a = document.activeElement; return a.classList.contains("co-x") ? "x" : a.getAttribute("data-k") || a.tagName.toLowerCase(); })); }
+    if (!eq(went, ["x", "film", "adult", "agree", "x"])) throw new Error(`Tab went ${went.join(" → ")}, want x → film → adult → agree → x`);
+  },
+  // A ?coach=drafts link whose GET /coach/me fails (here 503) opens the panel once: shut, it stays shut when the page draws again (a new
+  // language, the spot drawn again).
+  async draftsOnce(open) {
+    const page = await open({ query: "?coach=drafts", store: TOKEN, backend: coachBackend({}, 503) }); await wait(300);
+    await page.waitForFunction(() => !!document.querySelector('.coachpanel [data-k="retry"]'), null, { timeout: 5000 }).catch(() => {});
+    let l = await look(page);
+    if (!l.open || /coach=drafts/.test(await page.evaluate(() => location.href))) throw new Error(`?coach=drafts left the panel ${l.open ? "open" : "shut"} at ${await page.evaluate(() => location.href)}`);
+    await page.tap(".coachpanel .co-x"); await settle(page);
+    await page.evaluate(() => { setLang("zh"); window.COACH.spot(CUR); window.COACH.relang(); window.COACH.dev(); }); await settle(page); await wait(300); l = await look(page);
+    if (l.open || l.panel) throw new Error("after ✕, drawing the page again opened the panel again");
   },
   // A token the backend refuses (401 auth) goes back through CHAT.token(old), which signs out quietly, and the panel shows the signed-out
   // view with Sign in with LINE.
@@ -302,9 +341,9 @@ const CHECKS = {
   // backend answers what backend(url) gives back (null: the network fails); everything else is cut off. page.asked lists the backend calls.
   //   world: developer mode (World mode, the PIN in); pub: window.__chatPublic; coachPub: window.__coachPublic; url: window.__chatUrl;
   //   view: the saved view; test: window.__chatTest; store: localStorage entries; clock: the page's fixed time (page.clock); skew: Date.now
-  //   moved on by window.__skew(ms). backend(url, request) answers the fake backend's calls.
+  //   moved on by window.__skew(ms); query: the address's ?… before #<spot>. backend(url, request) answers the fake backend's calls.
   async function open({ spot = "donghe", world = true, pub = false, coachPub = false, url = CHAT, view = "fc", test = true, store = {}, chatJs = CHAT_JS, coachJs = COACH_JS,
-    clock = null, skew = false, backend = () => ({ body: { reports: [], online: 0, last_id: 0 } }) }) {
+    clock = null, skew = false, query = "", backend = () => ({ body: { reports: [], online: 0, last_id: 0 } }) }) {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block" });
     ctxs.push(ctx); const asked = [], tried = [];
     await ctx.route("**/*", r => { const u = r.request().url(), bare = u.split(/[?#]/)[0];
@@ -323,7 +362,7 @@ const CHECKS = {
       [{ view, world, store, url, contact: CONTACT, test, pub, coachPub, skew }, LOCK]);
     const page = await ctx.newPage(); page.on("pageerror", e => errs.push(String(e)));
     if (clock != null) await page.clock.setFixedTime(clock);
-    await page.goto(PAGE + "#" + spot, { waitUntil: "load" }); await settle(page);
+    await page.goto(PAGE + query + "#" + spot, { waitUntil: "load" }); await settle(page);
     page.asked = asked; page.tried = tried; return page;
   }
   // Runs one check and prints `ok <name>` or `FAIL <name>: why`; a page error during it fails it.

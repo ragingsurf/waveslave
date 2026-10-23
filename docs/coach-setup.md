@@ -9,14 +9,15 @@ workflow. Until the AI key below is in, the coach just says it's taking a break;
 no email. The chat carries on as normal either way. The **Coach** tab shows only in developer mode (the PIN on the W)
 until you say "go live", so nothing here changes waveslave.tw for visitors. You can stop at any point and carry on later.
 
-**What you need:** a computer with Chrome, your phone with LINE on it, your claude.ai account (the one with the Max plan), the
-WaveSlave Gmail (waveslave050@gmail.com), your GitHub account, and your developer PIN.
+**What you need:** a computer with a web browser such as Chrome, your phone with LINE on it, your claude.ai account (the one
+with the Max plan), the WaveSlave Gmail (waveslave050@gmail.com), your GitHub account, and your developer PIN.
 
 **Keep the two keys private.** You'll make two keys below: the AI key and the email key. Each one is shown only once, and it
 only ever goes into GitHub's secret box. So before you make each key, open GitHub's **New repository secret** page in another
-tab (step 8 shows how), and paste the key straight in there. If you must hold a key for a moment, keep it in a password
-manager, and delete it from there, and from anywhere else you pasted it, once it's in GitHub. Never paste the keys into a chat
-with Claude, an email, a screenshot or the repo. Claude never needs them, and can't add secrets to GitHub for you.
+tab (step 8, further down in Part 3, shows how), and paste the key straight in there. If you must hold a key for a moment,
+keep it in a password manager, and delete it from there, and from anywhere else you pasted it, once it's in GitHub. Never paste
+the keys into a chat with Claude, an email, a screenshot or the repo. Claude never needs them, and can't add secrets to GitHub
+for you.
 
 ## How the money works
 
@@ -26,12 +27,14 @@ with Claude, an email, a screenshot or the repo. Claude never needs them, and ca
 - **What a review costs:** about US$0.12 to 0.17, a little more in 中文 (it comes with an English copy for you). The limit of
   10 new reviews a day keeps it to about US$40 to 55 a month.
 - **US$78:** once the coach has spent this in a month, it takes no new reviews (surfers see "Coach is resting until 16 …").
-- **US$80:** the next US$2 finishes reviews already sent, then the coach makes no more AI calls until the 16th.
+- **US$80:** the next US$2 finishes reviews already sent, then the coach makes no more AI calls until the 16th (or until the
+  1st, when the Console's own limit below is reached first).
 - **The last US$20** is left over every month. Keep the WaveSlave Console organization for the coach only, so nothing else
   eats into the coach's money.
 - **Extra budget: 0.** The coach never goes past US$80 a month. If you ever want more, see "Spending more later" at the end.
 - **Backups:** a US$80 monthly limit on the coach's workspace in the Console (step 3), and no card, so the credit can only run
-  out, never charge you.
+  out, never charge you. The Console's limit counts calendar months, from the 1st, so in a busy stretch it can be reached
+  before the coach's own: the coach then rests until 08:00 Taiwan time on the 1st, not the 16th.
 
 ## Part 1: The AI credit and key (Claude Console)
 
@@ -68,7 +71,7 @@ with Claude, an email, a screenshot or the repo. Claude never needs them, and ca
    4. Leave **Linked account** as yourself.
    5. Set the workspace to **WaveSlave Coach**. This matters: a key that isn't in that workspace makes every review fail.
    6. Create it. The Console shows the key only once (it starts with `sk-ant-`): copy it and paste it straight into GitHub's
-      **New repository secret** page as `ANTHROPIC_API_KEY` (step 8).
+      **New repository secret** page as `ANTHROPIC_API_KEY` (step 8, in Part 3 below).
 
 ## Part 2: The email key (Resend)
 
@@ -86,7 +89,7 @@ you signed up with. That's why the account must be the WaveSlave Gmail.
    2. Name it `WaveSlave coach`.
    3. For **Permission**, pick **Sending access**. Leave **Domain** as it is.
    4. Create it. Resend shows the key only once (it starts with `re_`): copy it and paste it straight into GitHub's **New
-      repository secret** page as `RESEND_API_KEY` (step 8).
+      repository secret** page as `RESEND_API_KEY` (step 8, in Part 3 below).
 
 7. **Keep the coach's emails out of spam.** Open Gmail as waveslave050@gmail.com on a computer.
    1. In the search box at the top, select **Show search options** (the sliders button at its right).
@@ -125,38 +128,28 @@ you signed up with. That's why the account must be the WaveSlave Gmail.
 
 Cloudflare puts the coach in one of its data centres the first time it's used, and it never moves. The AI only works from some
 countries, so before anyone sends a real review, check that the coach landed in Japan, Korea or Taiwan. Do this right after
-the first deploy, before you try the Coach tab.
+the first deploy, before you send any review. The check is in the Coach tab's **Drafts** list, which only you see.
 
-10. **Sign in to the chat on your computer, as the admin.** On your computer, open https://waveslave.tw in **Chrome**. If you
-    haven't signed in to the chat in this browser yet:
+10. **Sign in to the coach as the admin.** On your phone or your computer, open https://waveslave.tw:
     1. Select the **W** in the WaveSlave logo at the top and type your developer PIN. Developer mode comes on.
-    2. Open a Taiwan spot and open the chat.
-    3. Sign in with LINE using your own LINE account, with your LINE email and password or the QR code.
+    2. Open a Taiwan spot and select the **Coach** tab, next to **Forecast** and **Map**.
+    3. If it shows **Sign in with LINE**, select it and sign in with your own LINE account. (The coach uses the chat's
+       sign-in, so if you're signed in to the chat in this browser, you're signed in here too.)
 
     You became the chat's admin when it went live, by sending `/admin`, a space and your `ADMIN_CODE` once in the chat. If
     you never did, do it now (step 1 of "When the chat is live" in
     [the chat guide](https://github.com/ragingsurf/waveslave/blob/main/docs/chat-setup.md)).
 
-    Once you're signed in, Chrome remembers it. Developer mode can be off for the next step.
+11. **Ask the coach where it lives.** In the Coach tab, scroll down to **Drafts**, then to its **Settings**. The last line there
+    is **Where it runs**, with two lines like these (your letters may differ):
 
-11. **Ask the chat where it lives.** Still on waveslave.tw in Chrome:
-    1. Open Chrome's console: on a Mac, **View** > **Developer** > **JavaScript Console** (or press Cmd, Option and J
-       together). On Windows, press Ctrl, Shift and J together. A panel opens with a **Console** tab.
-    2. Copy this whole line, paste it into the console, and press Enter:
+    ```
+    room colo=NRT
+    coach colo=KIX
+    ```
 
-       ```
-       fetch("https://waveslave-chat.waveslave050.workers.dev/admin/where", { headers: { Authorization: "Bearer " + localStorage.getItem("waveslave-chat-token") } }).then(r => r.text()).then(t => alert(t))
-       ```
-
-       If Chrome warns you about pasting and won't take it, type `allow pasting`, press Enter, and paste the line again.
-       The line asks the chat's own address where it lives, with the sign-in this browser already has. It shows nothing
-       secret and sends nothing anywhere else.
-    3. A box pops up with two lines, like this (your letters may differ):
-
-       ```
-       room colo=NRT
-       coach colo=KIX
-       ```
+    The Coach tab asks the chat's own address for them each time you open it, with the sign-in you already have. They show
+    nothing secret.
 
 12. **Read the two lines.** The three letters after `colo=` name the Cloudflare data centre, by its nearest airport.
     - **The `coach` line must be in Japan, Korea or Taiwan:** for example `NRT` (Tokyo), `KIX` (Osaka), `FUK` (Fukuoka), `OKA`
@@ -165,12 +158,11 @@ the first deploy, before you try the Coach tab.
       again after that deploy.
     - **The `room` line** is where the chat lives. It was placed when the chat started and anywhere in north-east Asia is fine,
       so just note it down.
-    - **`coach colo=?`** means the coach didn't answer. Wait a minute and run the line again (press the Up arrow in the console,
-      then Enter). If it stays `?`, tell Claude.
-    - **`{"error":"auth"}`** means this browser isn't signed in: go back to step 10. **`{"error":"admin"}`** means you're signed
-      in with an account that isn't the admin.
-
-    You can close the console now (the ✕ at its top right).
+    - **`coach colo=?`** means the coach didn't answer. Close the Coach panel (the ✕ at its top right), wait a minute and open
+      it again. If it stays `?`, tell Claude.
+    - **"Where it runs: couldn't ask"** means the chat couldn't say. Close the panel and open it again in a minute. If it
+      keeps saying so, tell Claude.
+    - **No Drafts list at all** means you're signed in with an account that isn't the admin: go back to step 10.
 
 ## Part 5: Before go-live
 
@@ -260,4 +252,9 @@ review back for that month, but it still counts toward the 4 sends.
   it was, without pasting it.
 - **Spending more later:** buy credit in the Console (this needs a card, so from then on it can charge), raise the workspace's
   spend limit (step 3), and tell Claude the extra monthly amount. Claude changes one setting, and the coach's two limits go up
-  by that amount.
+  by that amount. Reviews already waiting on the money then move by themselves the next time the coach checks its queue, which
+  is the daily clean-up at 04:00 Taiwan time at the latest. To wake it at once, open **Drafts** > **Settings**, select
+  **Pause the coach**, then **Start again**.
+- **A block that shows nowhere:** when a surfer whose clip was flagged deletes their chat account, the block on their LINE
+  account is kept for 90 days, but it isn't in **Drafts** or the email, and there's no **Clear** for it. If they sign up again
+  in that time, the coach tells them "This account can't use the coach." until it lapses.

@@ -2,7 +2,7 @@
 // coach.js, and its hooks in template.html (the hidden Coach tab, the tab handler, the language, developer mode and spot hooks, and the
 // Escape and pull-to-refresh guards), and the test clips tests/coach/clips.js makes.
 // Usage: node tests/coach/shell.test.js <page.html> [check ...]   (the checks named, or every one)
-// Prints ok / FAIL for each check, and exits 1 on any FAIL or page error.
+// Prints ok / FAIL for each check, and exits 1 on any FAIL or page error; a check name it doesn't have exits 2 before any check runs.
 // Only what the real backend can't give runs here (ruling R15): every page opens in its own fresh browser context, offline. Only the page,
 // chat.js and coach.js load (page.tried lists the other web addresses it asked for), and a fake backend at https://chat.test answers
 // /reports with none and, for the checks that give the page a session token, GET /coach/me with a stand-in answer (page.asked lists every
@@ -17,7 +17,8 @@ const fs = require("fs"), os = require("os"), path = require("path"), { pathToFi
 const { makeClip } = require("./clips.js");
 
 const [file, ...ONLY] = process.argv.slice(2);
-if (!file) { console.error("usage: node tests/coach/shell.test.js <page.html>"); process.exit(2); }
+const USAGE = "usage: node tests/coach/shell.test.js <page.html> [check ...]";
+if (!file) { console.error(USAGE); process.exit(2); }
 const ROOT = path.join(__dirname, "..", ".."), PAGE = pathToFileURL(path.resolve(file)).href, HTML = fs.readFileSync(file, "utf8");
 const CHAT_JS = fs.readFileSync(path.join(ROOT, "web", "chat.js"), "utf8"), COACH_JS = fs.readFileSync(path.join(ROOT, "web", "coach.js"), "utf8");
 const LOCK = (HTML.match(/\bH="([0-9a-f]{64})"/) || [])[1]; // a site build opens on the passcode screen: start unlocked
@@ -866,9 +867,29 @@ const CHECKS = {
     let got = await look();
     const failed = ["Key frame at 0:11.8", "Tap to try again (The key frame at 0:11.8 didn't load. Tap to try again.)"];
     if (!eq(got, [["Key frame at 0:10.5", "img"], ["Key frame at 0:11.5", "img"], failed])) throw new Error(`with key frame 7 failing and 8 gone the review shows ${JSON.stringify(got)}`);
+    await page.evaluate(() => setLang("zh")); await settle(page);
+    const zh = await page.evaluate(() => { const a = document.querySelector('.coachpanel [data-k="again-f7"]'); return a && [a.textContent, a.getAttribute("aria-label")]; });
+    if (!eq(zh, ["點一下再試一次", "0:11.8 的關鍵影格載入失敗，點一下再試一次。"])) throw new Error(`in 中文 key frame 7's button reads ${JSON.stringify(zh)}`);
+    await page.evaluate(() => setLang("en")); await settle(page);
     await page.click('.coachpanel [data-k="again-f7"]'); await inPanel(page, "key frame 7 again", '[data-k="shot-f7"] img[src^="blob:"]'); got = await look();
     if (!eq(got, [["Key frame at 0:10.5", "img"], ["Key frame at 0:11.5", "img"], ["Key frame at 0:11.8", "img"]])) throw new Error(`after the tap the review shows ${JSON.stringify(got)}`);
     if (!eq(st.frames.map(f => f.n).sort((a, b) => a - b), [2, 6, 7, 7, 8]) || !st.frames.every(f => f.auth === "Bearer test-token")) throw new Error(`the key frames were asked for as ${JSON.stringify(st.frames)}`);
+  },
+  // Each key frame shows as soon as it lands: with key frame 7 held back, 2, 6 and 8 show while 7 waits in its place, and 7 shows once it
+  // comes.
+  async frameStall(open) {
+    let release = null; const held = new Promise(r => { release = r; });
+    const st = reviewBackend(reviewText({}), { frame: n => n === 7 ? held.then(() => ({ jpeg: JPEG })) : null });
+    try {
+      const page = await open({ store: TOKEN, backend: st.backend });
+      await page.tap(TAB); await inPanel(page, "the ready review", `[data-k="r-${RID}"]`); await page.click(`.coachpanel [data-k="r-${RID}"]`);
+      let got = null;
+      const shows = want => async () => eq(got = await page.evaluate(() => [...document.querySelectorAll(".coachpanel .co-review .co-kf")].map(f =>
+        f.querySelector('img[src^="blob:"]') ? "img" : f.querySelector(".co-again") ? "again" : "waiting")), want);
+      await soon("key frames 2, 6 and 8 with 7 held back", shows(["img", "img", "waiting", "img"])).catch(e => { throw new Error(`${e.message}: the review shows ${JSON.stringify(got)}`); });
+      release();
+      await soon("key frame 7 once it comes", shows(["img", "img", "img", "img"])).catch(e => { throw new Error(`${e.message}: the review shows ${JSON.stringify(got)}`); });
+    } finally { release(); }
   },
   // GET /coach/reviews/{id} refused: 403 banned says "This account can't use the coach." with no Try again, as GET /coach/me's does; 503
   // break says the coach is taking a break, with Try again.
@@ -985,6 +1006,9 @@ const CHECKS = {
     if (tagged) throw new Error(`${tagged} coach elements carry data-zh or data-ja`);
   },
 };
+// A check name it doesn't have is a mistake in the command, not a pass with nothing run.
+const unknown = ONLY.filter(n => !Object.prototype.hasOwnProperty.call(CHECKS, n));
+if (unknown.length) { console.error(`no check called ${unknown.join(", ")}\n${USAGE}`); process.exit(2); }
 
 (async () => {
   const browser = await chromium.launch(), tmp = fs.mkdtempSync(path.join(os.tmpdir(), "coach-shell-")); let bad = false, ctxs = [], errs = [];
@@ -994,18 +1018,19 @@ const CHECKS = {
   //   view: the saved view; test: window.__chatTest; store: localStorage entries; clock: the page's fixed time (page.clock); skew: Date.now
   //   moved on by window.__skew(ms); query: the address's ?… before #<spot>. backend(url, request) answers the fake backend's calls. ua: the
 //   browser's user agent; init: more init scripts, each a function (or [function, its argument]); tz: the phone's time zone (the
-//   machine's when null). An answer with jpeg (bytes) goes as image/jpeg.
+//   machine's when null). An answer with jpeg (bytes) goes as image/jpeg; backend may answer with a promise of one, to hold it back.
   async function open({ spot = "donghe", world = true, pub = false, coachPub = false, url = CHAT, view = "fc", test = true, store = {}, chatJs = CHAT_JS, coachJs = COACH_JS,
     clock = null, skew = false, query = "", backend = () => ({ body: { reports: [], online: 0, last_id: 0 } }), ua = null, init = [], tz = null }) {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block",
       ...(ua ? { userAgent: ua } : {}), ...(tz ? { timezoneId: tz } : {}) });
     ctxs.push(ctx); const asked = [], tried = [];
-    await ctx.route("**/*", r => { const u = r.request().url(), bare = u.split(/[?#]/)[0];
+    await ctx.route("**/*", async r => { const u = r.request().url(), bare = u.split(/[?#]/)[0];
       if (bare === PAGE) return r.continue();
       if (u.startsWith("file:") && bare.endsWith("/chat.js")) return chatJs == null ? r.abort() : r.fulfill({ contentType: "text/javascript", body: chatJs });
       if (u.startsWith("file:") && bare.endsWith("/coach.js")) return coachJs == null ? r.abort() : r.fulfill({ contentType: "text/javascript", body: coachJs });
-      if (u.startsWith(CHAT + "/")) { const q = new URL(u); asked.push(q.pathname + q.search); const a = backend(q, r.request());
-        return a ? r.fulfill({ status: a.status || 200, contentType: a.jpeg ? "image/jpeg" : "application/json", headers: { "access-control-allow-origin": "*" }, body: a.jpeg || JSON.stringify(a.body) }) : r.abort(); }
+      if (u.startsWith(CHAT + "/")) { const q = new URL(u); asked.push(q.pathname + q.search); const a = await backend(q, r.request());
+        // An answer held back may come after its context has closed: that's no failure of the page.
+        return (a ? r.fulfill({ status: a.status || 200, contentType: a.jpeg ? "image/jpeg" : "application/json", headers: { "access-control-allow-origin": "*" }, body: a.jpeg || JSON.stringify(a.body) }) : r.abort()).catch(() => {}); }
       if (u.startsWith("https:") || u.startsWith("http:") || u.startsWith("wss:")) tried.push(u);
       return r.abort(); });
     await ctx.addInitScript(([o, lock]) => {

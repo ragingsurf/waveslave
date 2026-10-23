@@ -167,6 +167,36 @@ const STR = {
     moves: { popup: "Pop-up", bottom_turn: "Bottom turn", top_turn: "Top turn", cutback: "Cutback", down_the_line: "Riding down the line", other: "Other" },
     date: (y, m, d) => `${d} ${MONTHS[m]}${y ? " " + y : ""}`,
     drafts: "Drafts",
+    // Bryan's Drafts list (AI coach spec, "The Drafts list"), which only the admin sees: it may say "you" (ruling P33).
+    dr: { none: "No drafts waiting.", check: "Check again", note: t => `Their note: “${t}”`, langs: { en: "English", zh: "中文" },
+      wait: ms => { const m = Math.max(1, Math.floor(ms / 60e3)), h = Math.floor(ms / 3600e3), d = Math.floor(ms / 86400e3);
+        return d >= 2 ? `waiting ${d} days` : h >= 1 ? `waiting ${h} h` : `waiting ${m} min`; },
+      reported: t => t ? `Reported: “${t}”` : "Reported, with no line.", redoNotes: ns => `Your Redo notes: ${ns.join(" · ")}`,
+      told: t => `Your note to the surfer: “${t}”`,
+      warn: { not_surf: "The coach thinks this isn't a surf clip.", cant_see: "The coach couldn't see the surfer.", unusable: "The coach marked key frames as unusable.",
+        words: "It used a word surfers shouldn't see. Find it and change it before you approve.", redo_failed: "Redo failed: this is the draft from before.",
+        sexual: "Flagged: sexual content.", under_18: "Flagged: the surfer may be under 18.", refusal: "Flagged: the coach declined to review it." },
+      flagged: "Its key frames are deleted, and the account can't send another review until you clear it or ban it.",
+      hidden: "Its key frames are hidden: the coach thinks this isn't a surf clip.", show: "Show anyway",
+      marks: { well: "went well", fix: "main fix", unusable: "unusable" },
+      fields: { "went_well.title": "Title", "went_well.detail": "Detail", "main_fix.title": "Title", "main_fix.what": "What's happening", "main_fix.why": "Why it matters",
+        "drill.title": "Title", "drill.how": "How to do it", "heads_up.text": "Text", progress: "Text" },
+      english: t => `English: ${t}`,
+      acts: { approve: "Approve", redo: "Redo", reject: "Reject", giveback: "Give back", clear: "Clear", ban: "Ban", withdraw: "Withdraw" },
+      asks: { redo: "Note for the coach (for example “focus on the back foot”)", reject: "Short note to the surfer (for example “We couldn't see you. Try filming closer.”)",
+        withdraw: "Short note to the surfer", ban: "Ban this account? This review and every open one of the account are rejected, nothing is given back, and the account is banned from the chat too." },
+      need: "Write a short note first.",
+      done: { approve: "Published.", redo: "Sent to the coach for a Redo. Check again in a minute.", reject: "Rejected. The surfer gets your note and the review back.",
+        giveback: "Given back.", clear: "Cleared. The account can send reviews again.", ban: "Banned.", withdraw: "Withdrawn. The surfer gets your note and the review back." },
+      errs: { redo_limit: "No more Redo: this review has had its 2.", state: "This review changed meanwhile. Here it is as it is now.", not_found: "This review is gone.",
+        invalid: "Each line needs 1 to 1,000 characters, and a note at most 200.", edit: "Each line needs 1 to 1,000 characters." },
+      st: { published: d => `Published · ${d}`, auto: d => `Published by autopilot · ${d}`, rejected: d => `Rejected · ${d}`, failed: d => `Failed · ${d}` },
+      handled: "Handled lately", settings: "Settings", autopilot: on => `Autopilot: ${on ? "On" : "Off"}`, pause: "Pause the coach",
+      paused: "Paused: no new reviews and no AI calls.", start: "Start again", stopped: "Coach stopped: its key or model setting failed",
+      mail: "Send a test email", mailSaid: (s, t) => s ? `Resend answered ${s}: ${t}` : `Not sent: ${t}`,
+      spend: (usd, stop, n) => `US$${usd} of US$${stop}, ${n} review${n === 1 ? "" : "s"}`,
+      unchanged: (n, of) => of ? `Approved without changes: ${n} of the last ${of}` : "Approved without changes: none approved yet",
+      where: "Where it runs: ", whereFail: "couldn't ask. Close the panel and open it again in a minute." },
     // New review (AI coach spec, "New review").
     back: "‹ Back", choose: "Choose a clip", privacy: "Only key frames are sent. Your video never leaves your phone.",
     sameClip: "Choose the same clip again to pick up where you left off.",
@@ -230,6 +260,35 @@ const STR = {
     moves: { popup: "起乘", bottom_turn: "底部轉向", top_turn: "頂部轉向", cutback: "回切", down_the_line: "沿浪壁滑行", other: "其他" },
     date: (y, m, d) => `${y ? y + "年" : ""}${m + 1}月${d}日`,
     drafts: "草稿",
+    dr: { none: "沒有等待中的草稿。", check: "再查一次", note: t => `對方的留言：「${t}」`, langs: { en: "英文", zh: "中文" },
+      wait: ms => { const m = Math.max(1, Math.floor(ms / 60e3)), h = Math.floor(ms / 3600e3), d = Math.floor(ms / 86400e3);
+        return d >= 2 ? `已等 ${d} 天` : h >= 1 ? `已等 ${h} 小時` : `已等 ${m} 分鐘`; },
+      reported: t => t ? `被回報：「${t}」` : "被回報，沒有留言。", redoNotes: ns => `你的重寫備註：${ns.join(" · ")}`,
+      told: t => `你給對方的留言：「${t}」`,
+      warn: { not_surf: "教練認為這不是衝浪影片。", cant_see: "教練看不到衝浪者。", unusable: "教練把部分關鍵影格標為無法使用。",
+        words: "用到了不該讓衝浪者看到的字詞，核准前請找出來改掉。", redo_failed: "重寫失敗：這是之前的草稿。",
+        sexual: "已標記：含有性內容。", under_18: "已標記：衝浪者可能未滿 18 歲。", refusal: "已標記：教練拒絕講評。" },
+      flagged: "它的關鍵影格已刪除；在你解除或封鎖之前，這個帳號不能再申請講評。",
+      hidden: "關鍵影格已隱藏：教練認為這不是衝浪影片。", show: "仍要顯示",
+      marks: { well: "做得好", fix: "主要修正", unusable: "無法使用" },
+      fields: { "went_well.title": "標題", "went_well.detail": "說明", "main_fix.title": "標題", "main_fix.what": "發生了什麼", "main_fix.why": "為什麼重要",
+        "drill.title": "標題", "drill.how": "做法", "heads_up.text": "內容", progress: "內容" },
+      english: t => `英文：${t}`,
+      acts: { approve: "核准", redo: "重寫", reject: "退回", giveback: "歸還次數", clear: "解除", ban: "封鎖", withdraw: "撤下" },
+      asks: { redo: "給教練的備註（例如「注意後腳」）", reject: "給衝浪者的簡短留言（例如「我們看不清楚你，試試拍近一點。」）",
+        withdraw: "給衝浪者的簡短留言", ban: "要封鎖這個帳號嗎？這份講評和這個帳號所有進行中的講評都會被退回，次數不歸還，這個帳號也會被聊天室封鎖。" },
+      need: "請先寫一句簡短的留言。",
+      done: { approve: "已發布。", redo: "已請教練重寫，一分鐘後再查一次。", reject: "已退回，衝浪者會收到你的留言，次數也會歸還。",
+        giveback: "已歸還次數。", clear: "已解除，這個帳號可以再申請講評。", ban: "已封鎖。", withdraw: "已撤下，衝浪者會收到你的留言，次數也會歸還。" },
+      errs: { redo_limit: "不能再重寫了：這份講評已經重寫 2 次。", state: "這份講評剛剛有變動，以下是它現在的樣子。", not_found: "這份講評已經不在了。",
+        invalid: "每一行要有 1 到 1,000 個字，留言最多 200 字。", edit: "每一行要有 1 到 1,000 個字。" },
+      st: { published: d => `已發布 · ${d}`, auto: d => `自動發布 · ${d}`, rejected: d => `已退回 · ${d}`, failed: d => `失敗 · ${d}` },
+      handled: "最近處理過的", settings: "設定", autopilot: on => `自動發布：${on ? "開" : "關"}`, pause: "暫停教練",
+      paused: "已暫停：不接受新講評，也不呼叫 AI。", start: "重新啟動", stopped: "教練已停止：它的金鑰或模型設定出錯了",
+      mail: "寄一封測試信", mailSaid: (s, t) => s ? `Resend 回覆 ${s}：${t}` : `沒有寄出：${t}`,
+      spend: (usd, stop, n) => `US$${usd}／US$${stop}，${n} 份講評`,
+      unchanged: (n, of) => of ? `未修改就核准：最近 ${of} 份中有 ${n} 份` : "未修改就核准：還沒有核准過",
+      where: "在哪裡執行：", whereFail: "查不到。關閉面板，一分鐘後再打開。" },
     back: "‹ 返回", choose: "選擇影片", privacy: "只會傳送關鍵影格，你的影片不會離開你的手機。",
     sameClip: "請再選一次同一段影片，從上次中斷的地方繼續。",
     nothingOpens: "點了沒反應嗎？", openBrowser: "改用手機的瀏覽器開啟",
@@ -255,7 +314,7 @@ const STR = {
     resumeHead: "要從上次中斷的地方繼續嗎？", resumeFrames: "你的關鍵影格已經準備好了。", pickUp: "繼續", startOver: "重新開始",
     headsUp: "提醒", progressHead: "和上次相比", reviewOf: m => `讓教練講評${m}`, enlarge: t => `放大 ${t} 的關鍵影格`,
     reviewMoves: { popup: "你的起乘", bottom_turn: "你的底部轉向", top_turn: "你的頂部轉向", cutback: "你的回切", down_the_line: "你沿浪壁滑行" },
-    frameAgain: "點一下再試一次", frameFailed: t => `${t} 的關鍵影格沒有載入，點一下再試一次。`,
+    frameAgain: "點一下再試一次", frameFailed: t => `${t} 的關鍵影格載入失敗，點一下再試一次。`,
     footChecked: "由 WaveSlave 教練（AI）講評，並經真人檢查。在自己的能力範圍內衝浪。", footAuto: "由 WaveSlave 教練（AI）講評。在自己的能力範圍內衝浪。",
     wrong: "哪裡不對嗎？", wrongLine: "哪裡不對？（選填）", wrongSend: "送出", cancel: "取消", wrongSent: "謝謝，我們會再檢查一次這份講評。",
     del: "刪除", delAsk: "要刪除這份講評嗎？講評和它的關鍵影格都會從 WaveSlave 刪除。", deleted: "講評已刪除。", deleting: "刪除中…",
@@ -388,6 +447,28 @@ button.co-row{cursor:pointer}
 .co-lb-hd h3{flex:1;min-width:0;margin:0;font-size:16px}
 .co-lb-pic{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:0 calc(12px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));cursor:zoom-out}
 .co-lb-pic img{display:block;width:100%;height:100%;max-width:784px;max-height:784px;object-fit:contain}
+.co-drafts{overflow-wrap:anywhere}
+.co-drafts>.co-link{margin-top:4px}
+.co-dr,.co-dset{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.co-dr>p,.co-dset>p{margin-top:6px}
+.co-dr-h{font-size:16px}
+.co-dr-who,.co-dr-wait,.co-dr-st,.co-dr-hid,.co-en,.co-ed label{color:var(--muted)}
+.co-dr-rep,.co-dr-paused{color:var(--led-amb);font-weight:600}
+.co-warn{margin:8px 0 0;padding-left:20px;color:var(--bad);font-weight:600}
+.co-ed{display:grid;gap:4px;margin-top:8px}
+.co-ed label{font-size:13px}
+.co-ed .co-line{margin-top:0;resize:vertical;line-height:1.4}
+.co-en{font-size:14px}
+@media (min-width:600px){.co-ed2{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start}.co-ed2 label{grid-column:1/-1}}
+.co-dr-acts{flex-wrap:wrap;margin-top:12px}.co-dr-acts .co-btn{flex:1 1 40%;margin:0}
+.co-dr .co-ask{margin-top:12px}
+.co-dset .co-btn{margin-top:10px}
+.co-dr-where code{font:13px var(--mono)}
+.co-dr-old{border-top:1px solid var(--line)}
+.co-dr-old:first-of-type{margin-top:8px}
+.co-dr-old>summary{padding:10px 2px;cursor:pointer;font-weight:600}
+.co-dr-old>.co-dr{margin:0 0 12px}
+.co-dr-old>.co-dr>.co-dr-h,.co-dr-old>.co-dr>.co-dr-st{display:none}
 `;
 
 // What the shell keeps: whether it has started (the page is there, with its Coach tab), an open() asked for before that, the tab, the
@@ -424,10 +505,12 @@ function open() {
 }
 // ✕ or Escape, or the coach going away: the focus goes back where it was, else to the tab while it shows. A ?coach=drafts link still
 // waiting for GET /coach/me is dropped, so drawing the page again (a new language, a spot) doesn't open the panel again. A review open in
-// it shuts too, its key frames' blob URLs revoked, and so does a key frame enlarged.
+// it shuts too, its key frames' blob URLs revoked, and so does a key frame enlarged. The Drafts list goes too (dropDrafts), and is asked
+// for again when the panel next opens.
 function close() {
   if (!P.open) return;
   P.open = false; P.el.hidden = true; document.documentElement.classList.remove("coach-open"); V.drafts = false; V.sent = false; V.said = null; V.headsMove = null; stopWork();
+  dropDrafts();
   if (R.row) { closeReview(); P.body.textContent = ""; } else closeBig(false); // a review's key frames go with it
   const back = P.opener; P.opener = null;
   const to = [back, P.tab].find(e => e && e !== document.body && e.isConnected && e.getClientRects().length);
@@ -480,15 +563,17 @@ const tokenNow = () => { const t = window.CHAT && typeof window.CHAT.token === "
 const refused = t => { if (window.CHAT && typeof window.CHAT.token === "function") window.CHAT.token(t); };
 // One call to the backend with the session token, as a Bearer header and no cookies: GET, or POST with body as JSON, or another method.
 // Resolves to {status, json, code}: status 0 when the network fails or after `wait` ms (15 s), code the backend's error code (null when
-// none). With jpeg, json is null and jpeg the answer's body as an image/jpeg Blob (a key frame), whatever type the answer said.
+// none). With jpeg, json is null and jpeg the answer's body as an image/jpeg Blob (a key frame), whatever type the answer said; with
+// text, a 2xx answer's body comes as text (GET /admin/where's lines).
 const BASE = BACKEND.replace(/\/+$/, "");
-async function call(path, tok, body, { method = body === undefined ? "GET" : "POST", jpeg = false, wait = 15e3 } = {}) {
+async function call(path, tok, body, { method = body === undefined ? "GET" : "POST", jpeg = false, text = false, wait = 15e3 } = {}) {
   const ctl = typeof AbortController === "function" ? new AbortController() : null, timer = ctl ? setTimeout(() => ctl.abort(), wait) : 0;
   const headers = { Authorization: "Bearer " + tok }; if (body !== undefined) headers["Content-Type"] = "application/json";
   try {
     const r = await fetch(BASE + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), credentials: "omit",
       signal: ctl ? ctl.signal : undefined });
     if (jpeg) return { status: r.status, json: null, code: null, jpeg: r.ok ? new Blob([await r.arrayBuffer()], { type: "image/jpeg" }) : null };
+    if (text && r.ok) return { status: r.status, json: null, code: null, text: await r.text() };
     let json = null; try { json = await r.json(); } catch (e) {}
     return { status: r.status, json, code: json && typeof json === "object" && typeof json.error === "string" ? json.error : null };
   } catch (e) { return { status: 0, json: null, code: null, jpeg: null }; } finally { clearTimeout(timer); }
@@ -517,8 +602,10 @@ const ME = { me: null, token: null, at: -Infinity, n: 0, asking: null, failed: f
 // to show the top of the panel (a new screen of New review), whether a review was just sent ("Sent.", until the panel shuts), and a line
 // about the review just reported or deleted (said: its key in STR, until the panel shuts). agreeErr is false, true or the refusal's code.
 // headsMove is the move of a review's heads-up tapped while a draft was waiting: Start over picks it (ruling P55), and Pick up, the panel
-// shutting, the review shutting or another account forgets it.
-const V = { film: null, tick: false, adultErr: false, agreeErr: false, busy: false, focus: null, drafts: false, top: false, sent: false, said: null, headsMove: null };
+// shutting, the review shutting or another account forgets it. typing is true while an input method is composing in a line (line()), when
+// later() holds off drawing the panel again.
+const V = { film: null, tick: false, adultErr: false, agreeErr: false, busy: false, focus: null, drafts: false, top: false, sent: false, said: null, headsMove: null,
+  typing: false };
 // GET /coach/me's answer looks right: whole counts, a "YYYY-MM" month, a list of reviews and whose they are (account). Without the account
 // an unsent review can't be kept to its own account (ruling P51), so such an answer is taken as a failure: "Couldn't reach the coach."
 const meOk = j => !!j && typeof j === "object" && Number.isInteger(j.left) && Number.isInteger(j.monthly) && typeof j.month === "string"
@@ -565,12 +652,15 @@ function drawDot() {
 // way shows in the panel's place, and the first time the panel shows signed in it reads the draft a reload may have left (loadDraft). A
 // review open for an account that's no longer the one signed in goes (closeReview). A ?coach=drafts link scrolls to
 // Drafts and puts the focus on it once GET /coach/me has answered (only the admin has it); once it has answered or failed, the link is
-// done with.
+// done with. A line or edit box keeps its caret and its own scroll when it's drawn again. The Drafts list is let go (dropDrafts) when
+// the token changes or GET /coach/me says this isn't the admin.
 function render() {
   if (!P.started || !P.open) return;
   const had = P.body.contains(document.activeElement) ? document.activeElement : null, key = V.focus || (had && had.getAttribute("data-k")), at = P.body.scrollTop;
-  V.focus = null;
+  let caret = null; try { if (had && !V.focus && typeof had.selectionStart === "number") caret = [had.selectionStart, had.selectionEnd, had.scrollTop]; } catch (e) {}
+  V.focus = null; V.typing = false;
   const t = tokenNow(), mine = !!t && ME.token === t;
+  if ((D.tok && D.tok !== t) || (mine && ME.me && ME.me.admin !== true && (D.list || D.asking))) dropDrafts();
   if (R.row && !(mine && ME.me && R.owner === account())) closeReview();
   P.body.textContent = "";
   if (!t) { V.drafts = false; P.body.append(...signedOut()); }
@@ -582,12 +672,20 @@ function render() {
   else P.body.append(el("p", { class: "co-wait" }, S("loading")));
   P.body.scrollTop = V.top ? 0 : at; V.top = false;
   const to = key && P.body.querySelector(`[data-k="${key}"]`);
-  if (to) { to.focus({ preventScroll: true }); reveal(to); } else if (had) P.el.focus({ preventScroll: true });
+  if (to) { to.focus({ preventScroll: true });
+    if (caret && to.tagName === had.tagName) try { to.setSelectionRange(caret[0], caret[1]); to.scrollTop = caret[2]; } catch (e) {}
+    reveal(to); } else if (had) P.el.focus({ preventScroll: true });
   drawBig();
   if (V.drafts && mine && (ME.me || ME.failed)) {
     V.drafts = false; const h = P.body.querySelector(".co-drafts h3");
     if (h) { h.focus({ preventScroll: true }); reveal(h, true); }
   }
+}
+// The panel drawn again soon, once for everything that lands together (key frames, each as it comes), and not while an input method
+// is composing in the line that has the focus.
+let laterT = 0;
+function later() {
+  if (!laterT) laterT = setTimeout(guard(() => { laterT = 0; if (V.typing && P.body.contains(document.activeElement)) later(); else render(); }), 30);
 }
 // Scrolls the panel's body (and nothing behind it) so e shows, or with top, so e is at the top.
 function reveal(e, top) {
@@ -608,26 +706,35 @@ function signedOut() {
 // frames, the drill, and only when there's one, the heads-up (with "Get a review of your bottom turn" when it names a move, ruling P12:
 // headsUp(move) starts it) and the progress line. frame(n) gives key frame n's {src, ms} (src null while it's on its way; with again, it
 // didn't load, and again() tries once more), or null to leave it out. Tapping a key frame enlarges it (openBig). Every word goes in as text.
-function reviewParts(r, frame, headsUp) {
-  const shots = (ns, k) => el("div", { class: "co-kfs" }, ns.map(n => { const f = frame(n); if (!f) return null;
-    const t = COACHM.fmtTime(f.ms), cap = el("figcaption", null, S("keyFrameAt")(t));
-    if (!f.src && f.again) return el("figure", { class: "co-kf" }, button(`again-${k}${n}`, S("frameAgain"), f.again, "co-shot-wait co-again", S("frameFailed")(t)), cap);
-    if (!f.src) return el("figure", { class: "co-kf" }, el("div", { class: "co-shot co-shot-wait", "aria-hidden": "true" }), cap);
-    const key = `shot-${k}${n}`, b = el("button", { type: "button", class: "co-shot", "data-k": key, "aria-label": S("enlarge")(t) },
-      el("img", { src: f.src, alt: "", width: String(SIDE), height: String(SIDE), decoding: "async" }));
-    b.addEventListener("click", guard(() => openBig(f.src, f.ms, key)));
-    return el("figure", { class: "co-kf" }, b, cap); }));
+// With field (the Drafts list), each line of text is field(path, text)'s element in its place, an edit box, and the heads-up and the
+// progress line show even when empty, so a line can be written in.
+function reviewParts(r, frame, headsUp, field) {
+  const shots = (ns, k) => { const fs = ns.map(n => { const f = frame(n); return f && shotFig(f, `${k}${n}`, S("keyFrameAt")(COACHM.fmtTime(f.ms))); }).filter(Boolean);
+    return fs.length ? el("div", { class: "co-kfs" }, fs) : null; };
+  const ln = (path, text, attrs, lead) => field ? field(path, text) : el("p", attrs, lead ? el("b", null, lead) : null, text);
   const out = [
-    el("section", { class: "co-part" }, el("h4", null, S("wentWell")), shots([r.went_well.frame], "w"), el("p", { class: "co-pt" }, r.went_well.title), el("p", null, r.went_well.detail)),
-    el("section", { class: "co-part" }, el("h4", null, S("mainFix")), shots(r.main_fix.frames, "f"), el("p", { class: "co-pt" }, r.main_fix.title),
-      el("p", null, el("b", null, S("happening")), r.main_fix.what), el("p", null, el("b", null, S("matters")), r.main_fix.why)),
-    el("section", { class: "co-part" }, el("h4", null, S("drill")), el("p", { class: "co-pt" }, r.drill.title), el("p", null, r.drill.how)),
+    el("section", { class: "co-part" }, el("h4", null, S("wentWell")), shots([r.went_well.frame], "w"), ln("went_well.title", r.went_well.title, { class: "co-pt" }),
+      ln("went_well.detail", r.went_well.detail)),
+    el("section", { class: "co-part" }, el("h4", null, S("mainFix")), shots(r.main_fix.frames, "f"), ln("main_fix.title", r.main_fix.title, { class: "co-pt" }),
+      ln("main_fix.what", r.main_fix.what, null, S("happening")), ln("main_fix.why", r.main_fix.why, null, S("matters"))),
+    el("section", { class: "co-part" }, el("h4", null, S("drill")), ln("drill.title", r.drill.title, { class: "co-pt" }), ln("drill.how", r.drill.how)),
   ];
   const hu = r.heads_up, mv = hu.move;
-  if (hu.text.trim()) out.push(el("section", { class: "co-part co-heads" }, el("h4", null, S("headsUp")), el("p", null, hu.text),
+  if (field || hu.text.trim()) out.push(el("section", { class: "co-part co-heads" }, el("h4", null, S("headsUp")), ln("heads_up.text", hu.text),
     headsUp && Object.prototype.hasOwnProperty.call(S("reviewMoves"), mv) ? button("headsup", S("reviewOf")(S("reviewMoves")[mv]), () => headsUp(mv)) : null));
-  if (r.progress.trim()) out.push(el("section", { class: "co-part" }, el("h4", null, S("progressHead")), el("p", null, r.progress)));
+  if (field || r.progress.trim()) out.push(el("section", { class: "co-part" }, el("h4", null, S("progressHead")), ln("progress", r.progress)));
   return out;
+}
+// One key frame in a grid, f as reviewParts' frame(n) gives it, under its caption: the key frame (a tap enlarges it), its place while
+// it's on its way, or "Tap to try again" when it didn't load. key names its controls (shot-<key>, again-<key>); attrs go on the figure.
+function shotFig(f, key, caption, attrs) {
+  const t = COACHM.fmtTime(f.ms), cap = el("figcaption", null, caption), fig = (...kids) => el("figure", { class: "co-kf", ...attrs }, kids, cap);
+  if (!f.src && f.again) return fig(button(`again-${key}`, S("frameAgain"), f.again, "co-shot-wait co-again", S("frameFailed")(t)));
+  if (!f.src) return fig(el("div", { class: "co-shot co-shot-wait", "aria-hidden": "true" }));
+  const k = `shot-${key}`, b = el("button", { type: "button", class: "co-shot", "data-k": k, "aria-label": S("enlarge")(t) },
+    el("img", { src: f.src, alt: "", width: String(SIDE), height: String(SIDE), decoding: "async" }));
+  b.addEventListener("click", guard(() => openBig(f.src, f.ms, k)));
+  return fig(b);
 }
 // LINE's own icon for its button, as the chat's: the white speech bubble with "LINE" in green (LINE's button guidelines).
 function lineIcon() { const ns = "http://www.w3.org/2000/svg", svg = document.createElementNS(ns, "svg"), p = document.createElementNS(ns, "path"), t = document.createElementNS(ns, "text");
@@ -648,7 +755,7 @@ function signedIn(me) {
     el("p", { class: "co-left" }, S("left")(me.left, me.monthly, +me.month.slice(5) - 1)), stop ? el("p", { class: "co-why", role: "status" }, stop) : null, film(reviews.length > 0),
     me.agreed === true ? (F.draft ? resumeOffer() : newReview()) : agreement()];
   if (reviews.length) out.push(el("h3", { class: "co-h co-yours" }, S("yours")), el("ul", { class: "co-list" }, reviews.map(r => row(r, +me.month.slice(0, 4)))));
-  if (me.admin === true) out.push(el("section", { class: "co-drafts" }, el("h3", { class: "co-h", tabindex: "-1" }, S("drafts"))));
+  if (me.admin === true) out.push(draftsSection(me));
   return out;
 }
 // GET /coach/me failed: "Couldn't reach the coach." (the network, or an answer that doesn't look right), or what the refusal means: a
@@ -751,15 +858,18 @@ async function loadReview() {
   R.view = v; render();
   return loadShots([...new Set([v.text.went_well.frame, ...v.text.main_fix.frames])].filter(k => Number.isInteger(v.times[k])));
 }
-// Key frames ks of the review open, all at once, each with 60 s (the sends' time, for a weak beach connection), then drawn.
+// Key frames ks of the review open, all asked at once, each with 60 s (the sends' time, for a weak beach connection), and each drawn as
+// it lands.
 async function loadShots(ks) {
   const t = tokenNow(), r = R.row, n = R.n;
   if (!t || !r) return;
-  const got = await Promise.all(ks.map(k => call(`/coach/reviews/${r.id}/frames/${k}`, t, undefined, { jpeg: true, wait: 60e3 })));
-  if (n !== R.n) return;
-  if (got.some(x => x.status === 401)) return signOut(t);
-  ks.forEach((k, i) => { let u = got[i].status === 404 ? null : false; if (got[i].jpeg) try { u = URL.createObjectURL(got[i].jpeg); } catch (e) {} R.shots.set(k, u); });
-  render();
+  await Promise.all(ks.map(async k => {
+    const got = await call(`/coach/reviews/${r.id}/frames/${k}`, t, undefined, { jpeg: true, wait: 60e3 });
+    if (n !== R.n) return;
+    if (got.status === 401) return signOut(t);
+    let u = got.status === 404 ? null : false; if (got.jpeg) try { u = URL.createObjectURL(got.jpeg); } catch (e) {}
+    R.shots.set(k, u); later();
+  }));
 }
 // GET /coach/reviews/{id}'s answer as {text, times: {n: ms}, checked}, or null unless it's a published review that looks right. Its owner
 // gets review: {text, times, checked}; the admin, opening his own, gets the row (final, frames [{n, ms, box}], checked 0 or 1).
@@ -848,6 +958,249 @@ async function remove() {
 function done(id, said, change) {
   if (ME.me) { const rows = ME.me.reviews; if (change) rows.filter(x => x && x.id === id).forEach(change); else ME.me.reviews = rows.filter(x => !x || x.id !== id); }
   closeReview(); V.said = said; V.top = true; V.focus = "said"; render(); return ask();
+}
+
+// ---- Bryan's Drafts list (AI coach spec, "The Drafts list"), at the end of the signed-in panel only when GET /coach/me says admin: true.
+// GET /admin/coach/drafts gives the reviews waiting for him, the one waiting longest first (the drafts, those reported, and the clips held
+// as not surf or flagged), the last handled, and his settings; each action is POST /admin/coach/drafts/{id}, each setting POST
+// /admin/coach/settings, and the list is asked for again after each. Every word from the network, the surfer's and the coach's, goes in
+// as text (Review Focus 4). D: the list (null until it answers) and the token it's for; the number of the newest ask and the list's life
+// (g: anything that comes back for a list let go is dropped); an ask on its way, or one failed (true or the code). By review id: the edits
+// typed (ed: {ver, f: {path: text}}, forgotten once the review changes), the note typed for an action and a red line (err: {code, until}).
+// Then the action asked about (ask: {id, action}), a note missing (need: the id), the action on its way (busy: {id, action}), what was
+// just done (said: the action, or "gone"), each key frame by `${id}:${n}` (shots: "" on its way, its blob URL, false when it didn't load,
+// null when it's gone), the not-surf clips shown anyway and the handled reviews opened, GET /admin/where's lines (where: undefined until
+// asked, null on its way, false when it failed), the test email's answer (mail: {status, text}), and a setting on its way or failed.
+const D = { g: 0, n: 0 };
+const TEXT_PATHS = ["went_well.title", "went_well.detail", "main_fix.title", "main_fix.what", "main_fix.why", "drill.title", "drill.how", "heads_up.text", "progress"];
+const EDIT_MAX = 1_000, NOTED = ["redo", "reject", "withdraw"]; // characters in a line Bryan edits (TEXT_FIELDS and EDIT_MAX in chat/src)
+// The list let go (the panel shut, signed out, another account): the key frames' blob URLs are revoked, and what's on its way is dropped.
+function dropDrafts() {
+  D.g++; if (D.shots) for (const u of D.shots.values()) if (u) try { URL.revokeObjectURL(u); } catch (e) {}
+  Object.assign(D, { list: null, byId: new Map(), tok: null, asking: false, failed: false, ed: Object.create(null), notes: Object.create(null), err: Object.create(null),
+    ask: null, need: null, busy: null, said: null, shots: new Map(), show: new Set(), open: new Set(), where: undefined, mail: null, sBusy: false, sErr: false });
+}
+dropDrafts();
+const ownKey = (o, k) => typeof k === "string" && Object.prototype.hasOwnProperty.call(o, k) ? o[k] : null;
+const atPath = (o, p) => p.split(".").reduce((v, k) => isObj(v) ? v[k] : undefined, o);
+// GET /admin/coach/drafts's answer looks right; a review in it that doesn't is left out.
+const itemOk = r => isObj(r) && typeof r.id === "string" && REVIEW_ID.test(r.id) && typeof r.status === "string" && isObj(r.answers) && isObj(r.times)
+  && [r.frames, r.have, r.flags, r.warnings, r.redo_note].every(Array.isArray);
+const settingsOk = s => isObj(s) && isObj(s.spend) && Number.isFinite(s.spend.usd) && Number.isFinite(s.spend.stop) && Number.isInteger(s.spend.reviews)
+  && isObj(s.unchanged) && Number.isInteger(s.unchanged.n) && Number.isInteger(s.unchanged.of);
+async function loadDrafts() {
+  const t = tokenNow(), g = D.g, n = ++D.n;
+  if (!t || !can()) return;
+  D.asking = true; D.tok = t;
+  const r = await call("/admin/coach/drafts", t);
+  if (g !== D.g || n !== D.n) return;
+  D.asking = false;
+  if (r.status === 401) return signOut(t);
+  const j = r.json;
+  if (r.status === 200 && isObj(j) && Array.isArray(j.waiting) && Array.isArray(j.handled) && settingsOk(j.settings)) {
+    D.list = { waiting: j.waiting.filter(itemOk), handled: j.handled.filter(itemOk), settings: j.settings }; D.failed = false; prune(); }
+  else D.failed = r.code || true;
+  render();
+  if (D.list && D.where === undefined) return loadWhere();
+}
+// What's kept for reviews no longer in the list goes, their key frames' blob URLs revoked.
+function prune() {
+  D.byId = new Map([...D.list.waiting, ...D.list.handled].map(r => [r.id, r]));
+  for (const [k, u] of [...D.shots]) { const [id, n] = k.split(":"), r = D.byId.get(id);
+    if (!r || !r.have.includes(+n)) { if (u) try { URL.revokeObjectURL(u); } catch (e) {} D.shots.delete(k); } }
+  for (const o of [D.ed, D.notes, D.err]) for (const id of Object.keys(o)) if (!D.byId.has(id)) delete o[id];
+  for (const s of [D.show, D.open]) for (const id of [...s]) if (!D.byId.has(id)) s.delete(id);
+  if (D.ask && !D.byId.has(D.ask.id)) D.ask = null;
+}
+// Where the room and the coach run (ruling P19): GET /admin/where's two lines, "room colo=NRT" and "coach colo=KIX", asked once a list.
+async function loadWhere() {
+  const t = tokenNow(), g = D.g;
+  if (!t || D.where !== undefined) return;
+  D.where = null;
+  const r = await call("/admin/where", t, undefined, { text: true });
+  if (g !== D.g) return;
+  const lines = r.status === 200 && typeof r.text === "string" ? r.text.split("\n").map(l => l.trim()).filter(Boolean) : [];
+  D.where = lines.length === 2 && lines.every(l => /^(room|coach) colo=([A-Z]{3}|\?)$/.test(l)) ? lines : false;
+  later();
+}
+
+// The section: Drafts, what was just done, Check again, the reviews waiting (or "No drafts waiting."), Settings, and Handled lately, each
+// of those folded until it's opened.
+function draftsSection(me) {
+  const dr = S("dr"), year = +me.month.slice(0, 4), L = D.list;
+  if (!L && !D.asking && !D.failed) guard(loadDrafts)();
+  const out = [el("h3", { class: "co-h", tabindex: "-1", "data-k": "dhead" }, S("drafts")),
+    D.said === "gone" ? el("p", { class: "co-err", role: "alert", tabindex: "-1", "data-k": "dsaid" }, dr.errs.not_found)
+      : D.said ? el("p", { class: "co-ok", role: "status", tabindex: "-1", "data-k": "dsaid" }, dr.done[D.said]) : null,
+    button("drefresh", dr.check, () => { D.said = null; render(); return loadDrafts(); }, "co-link")];
+  if (D.failed) out.push(el("p", { class: "co-err", role: "alert" }, says(D.failed) || S("failed")));
+  if (!L) { if (!D.failed) out.push(el("p", { class: "co-wait" }, S("loading"))); return el("section", { class: "co-drafts" }, out); }
+  if (!L.waiting.length) out.push(el("p", { class: "co-note" }, dr.none));
+  out.push(...L.waiting.map(r => card(r, false, year)), settingsBox(L.settings));
+  if (L.handled.length) out.push(el("h4", { class: "co-h co-yours" }, dr.handled), ...L.handled.map(r => {
+    const d = el("details", { class: "co-dr-old" }, el("summary", { "data-k": "old-" + r.id }, `${headOf(r)} · ${stLine(r, year)}`), card(r, true, year));
+    d.open = D.open.has(r.id);
+    d.addEventListener("toggle", guard(() => { if (d.open === D.open.has(r.id)) return; if (d.open) D.open.add(r.id); else D.open.delete(r.id); render(); }));
+    return d; }));
+  return el("section", { class: "co-drafts" }, out);
+}
+const baseOf = r => textOk(r.final) ? r.final : textOk(r.draft) ? r.draft : null; // the text an approval edits: published before, else the draft
+const headOf = r => { const o = typeof r.answers.move_other === "string" ? r.answers.move_other.trim() : "";
+  return moveName(r.move) + (r.move === "other" && o ? ` · ${o}` : ""); };
+const stLine = (r, year) => { const st = S("dr").st, pub = r.status === "published";
+  return (pub ? (r.checked === 1 ? st.published : st.auto) : ownKey(st, r.status) || st.rejected)(day(pub ? r.published : r.handled_at, year)); };
+// The actions a review takes: a held clip Give back (not surf) or Clear (flagged), a draft Approve, Redo and Reject (Withdraw once it
+// was published and reported), a published one Approve (an edit, or the check) and Withdraw; Ban on any but Bryan's own.
+function actsOf(r) {
+  const a = r.hold === 1 ? (r.flags.length ? ["clear", "ban"] : ["giveback", "ban"])
+    : r.status === "drafted" ? ["approve", "redo", r.reported && r.published != null ? "withdraw" : "reject", "ban"]
+    : r.status === "published" ? ["approve", "withdraw", "ban"] : ["ban"];
+  return ME.me && r.uid === ME.me.account ? a.filter(x => x !== "ban") : a;
+}
+// A review's card: its move (and for a handled one, its status), the surfer's level, board, stance and language, their note, how long it
+// has waited, Reported with their line, Bryan's Redo notes, the red warnings (a flagged clip's first, then that its key frames are
+// gone), its key frames with their times (what went well's and the main fix's marked; a not-surf clip's behind Show anyway, none asked
+// for until then), its text in edit boxes while Approve can publish it (else as it is; none for a held clip), the note the surfer got, a
+// red line, and its actions. A handled one's card is only its first lines until it's opened.
+function card(r, old, year) {
+  const dr = S("dr"), id = r.id, a = r.answers, base = baseOf(r), flagged = r.flags.length > 0, acts = actsOf(r);
+  const out = [el("h4", { class: "co-dr-h" }, headOf(r)), old ? el("p", { class: "co-dr-st" }, stLine(r, year)) : null,
+    el("p", { class: "co-dr-who" }, [ownKey(S("levels"), a.level), ownKey(S("boards"), a.board), ownKey(S("stances"), a.stance), ownKey(dr.langs, r.lang)].filter(Boolean).join(" · "))];
+  if (old && !D.open.has(id)) return el("article", { class: "co-dr", "data-id": id }, out);
+  if (typeof a.note === "string" && a.note.trim()) out.push(el("p", { class: "co-dr-note" }, dr.note(a.note)));
+  if (!old) out.push(el("p", { class: "co-dr-wait" }, dr.wait(Number.isFinite(r.waited_ms) ? r.waited_ms : 0)));
+  if (r.reported) out.push(el("p", { class: "co-dr-rep" }, dr.reported(typeof r.report === "string" ? r.report.trim() : "")));
+  const notes = r.redo_note.filter(x => typeof x === "string" && x.trim());
+  if (notes.length) out.push(el("p", { class: "co-dr-redo" }, dr.redoNotes(notes)));
+  const warn = [...r.flags.map(f => ownKey(dr.warn, f)), flagged ? dr.flagged : null, ...r.warnings.map(w => ownKey(dr.warn, w))].filter(Boolean);
+  if (warn.length) out.push(el("ul", { class: "co-warn" }, warn.map(w => el("li", null, w))));
+  const ns = flagged ? [] : r.have.filter(n => isFrame(n) && Number.isInteger(r.times[n])).sort((x, y) => x - y);
+  if (ns.length && r.warnings.includes("not_surf") && !D.show.has(id)) out.push(el("p", { class: "co-dr-hid" }, dr.hidden),
+    button(`show-${id}`, dr.show, () => { D.show.add(id); V.focus = `act-${id}-${acts[0]}`; render(); }, "co-link"));
+  else if (ns.length) out.push(el("div", { class: "co-kfs" }, ns.map(n => dshot(r, n))));
+  if (base && !flagged && r.hold !== 1) out.push(...reviewParts(base, () => null, null, acts.includes("approve") ? fieldFor(r, base) : null));
+  if (r.status === "rejected" && typeof r.surfer_note === "string" && r.surfer_note.trim()) out.push(el("p", { class: "co-dr-told" }, dr.told(r.surfer_note)));
+  const e = D.err[id];
+  if (e) out.push(el("p", { class: "co-err co-dr-err", role: "alert" }, ownKey(dr.errs, e.code) || says(e.code, e.until) || S("failed")));
+  if (acts.length) out.push(actArea(r, acts));
+  return el("article", { class: "co-dr", "data-id": id }, out);
+}
+// A key frame of review r, drawn by itself as it lands (redrawShot); its place, or Tap to try again, until then.
+function dshot(r, n) {
+  const dr = S("dr"), base = baseOf(r), sk = `${r.id}:${n}`, ms = r.times[n];
+  if (!D.shots.has(sk)) guard(loadShot)(r.id, n);
+  const u = D.shots.get(sk); if (u === null) return null;
+  const marks = base ? [base.went_well.frame === n && dr.marks.well, base.main_fix.frames.includes(n) && dr.marks.fix,
+    Array.isArray(base.unusable_frames) && base.unusable_frames.includes(n) && dr.marks.unusable] : [];
+  const f = u === false ? { src: null, ms, again: () => { D.shots.delete(sk); redrawShot(r.id, n); } } : { src: u || null, ms };
+  return shotFig(f, `${r.id}-${n}`, [COACHM.fmtTime(ms), ...marks].filter(Boolean).join(" · "), { "data-s": sk });
+}
+async function loadShot(id, n) {
+  const t = tokenNow(), g = D.g, sk = `${id}:${n}`;
+  if (!t) return;
+  D.shots.set(sk, "");
+  const r = await call(`/coach/reviews/${id}/frames/${n}`, t, undefined, { jpeg: true, wait: 60e3 });
+  if (g !== D.g || D.shots.get(sk) !== "") return;
+  if (r.status === 401) return signOut(t);
+  let u = r.status === 404 ? null : false; if (r.jpeg) try { u = URL.createObjectURL(r.jpeg); } catch (e) {}
+  D.shots.set(sk, u); redrawShot(id, n);
+}
+// Puts key frame n of review id in its place without drawing the rest again, so an edit box being typed in keeps its keyboard.
+function redrawShot(id, n) {
+  const old = P.open && P.body.querySelector(`[data-s="${id}:${n}"]`), r = D.byId.get(id);
+  if (!old || !r) return;
+  const had = old.contains(document.activeElement), f = dshot(r, n);
+  if (f) old.replaceWith(f); else old.remove();
+  if (had) { const b = f && f.querySelector("button"); (b || P.el).focus({ preventScroll: true }); }
+}
+// The edit box of each line, by its path, with the English copy beside it for a 中文 draft. What's typed stays while the review is as it
+// was (verOf), and is cut at 1,000 characters as the backend counts them.
+const verOf = r => [r.status, r.redos, r.waiting_since, r.handled_at].join("|");
+function fieldFor(r, base) {
+  let e = D.ed[r.id]; if (!e || e.ver !== verOf(r)) e = D.ed[r.id] = { ver: verOf(r), f: Object.create(null) };
+  for (const p of TEXT_PATHS) if (typeof e.f[p] !== "string") { const v = atPath(base, p); e.f[p] = typeof v === "string" ? v : ""; }
+  const dr = S("dr"), f = e.f;
+  return path => { const box = `coE-${r.id}-${path}`, en = isObj(r.english) ? atPath(r.english, path) : null;
+    const i = line(path, EDIT_MAX, { "data-k": `ed-${r.id}-${path}`, id: box, rows: String(Math.min(8, Math.max(2, Math.ceil([...f[path]].length / 40)))) }, f, () => {}, "textarea");
+    const copy = typeof en === "string" && en.trim() ? el("p", { class: "co-en", "data-p": path }, dr.english(en)) : null;
+    return el("div", { class: copy ? "co-ed co-ed2" : "co-ed" }, el("label", { for: box }, dr.fields[path]), i, copy); };
+}
+// The lines Bryan changed, trimmed, by path; null when one is empty or over 1,000 characters (Review Focus 4).
+function edits(r) {
+  const base = baseOf(r), e = D.ed[r.id], out = {};
+  if (!base || !e || e.ver !== verOf(r)) return out;
+  for (const p of TEXT_PATHS) { const v = String(e.f[p] ?? "").trim(); if (v === String(atPath(base, p) ?? "").trim()) continue;
+    const n = [...v].length; if (n < 1 || n > EDIT_MAX) return null; out[p] = v; }
+  return out;
+}
+// The card's buttons, or the action asked about: Redo, Reject and Withdraw with their note, Ban with its question.
+function actArea(r, acts) {
+  const dr = S("dr"), id = r.id, ask = D.ask && D.ask.id === id ? D.ask.action : null;
+  const label = a => D.busy && D.busy.id === id && D.busy.action === a ? S("sending") : dr.acts[a];
+  if (!ask) return el("div", { class: "co-acts co-dr-acts" }, acts.map(a => button(`act-${id}-${a}`, label(a), () => {
+    if (!NOTED.includes(a) && a !== "ban") return act(r, a);
+    D.ask = { id, action: a }; D.need = null; if (typeof D.notes[id] !== "string") D.notes[id] = ""; V.focus = a === "ban" ? `no-${id}` : `note-${id}`; render(); }, a === "approve" ? "co-btn" : "co-btn co-btn2")));
+  const yes = button(`yes-${id}`, label(ask), () => act(r, ask)), no = button(`no-${id}`, S("cancel"), () => { D.ask = null; D.need = null; V.focus = `act-${id}-${ask}`; render(); }, "co-btn co-btn2");
+  if (ask === "ban") return el("div", { class: "co-ask" }, el("p", null, dr.asks.ban), yes, no);
+  const i = line(id, NOTE_MAX, { "data-k": `note-${id}`, id: `coN-${id}`, enterkeyhint: "send" }, D.notes, () => {});
+  i.addEventListener("keydown", guard(e => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); return act(r, ask); } }));
+  return el("div", { class: "co-ask" }, el("label", { class: "co-h", for: `coN-${id}` }, dr.asks[ask]), i, D.need === id ? el("p", { class: "co-err", role: "alert" }, dr.need) : null, yes, no);
+}
+// One of Bryan's actions on review r: a note first where it needs one, and Approve sends only the lines changed. Done, the list says so
+// and is asked for again; refused, the card says why in red, and a review that changed meanwhile (state) or is gone shows as it is now.
+async function act(r, action) {
+  const t = tokenNow(), g = D.g, id = r.id, body = { action };
+  if (!t || D.busy) return;
+  if (NOTED.includes(action)) { const note = upTo((D.notes[id] || "").trim(), NOTE_MAX);
+    if (!note) { D.need = id; V.focus = `note-${id}`; return render(); } body.note = note; }
+  if (action === "approve") { const e = edits(r);
+    if (!e) { D.err[id] = { code: "edit" }; V.focus = `act-${id}-approve`; return render(); } if (Object.keys(e).length) body.edits = e; }
+  D.busy = { id, action }; D.need = null; delete D.err[id]; D.said = null; render();
+  const res = await call(`/admin/coach/drafts/${id}`, t, body, { wait: 45e3 });
+  if (g !== D.g) return;
+  D.busy = null;
+  if (res.status === 401) return signOut(t);
+  if (res.status === 200) { D.ask = null; delete D.notes[id]; delete D.ed[id]; D.said = action; V.focus = "dsaid"; render(); return loadDrafts(); }
+  const code = res.code || true, over = ["state", "not_found", "redo_limit"].includes(code);
+  D.err[id] = { code, until: isObj(res.json) ? res.json.until : null };
+  if (over) D.ask = null;
+  V.focus = D.ask ? `yes-${id}` : over ? null : `act-${id}-${action}`;
+  if (code === "not_found") D.said = "gone";
+  if (code === "state" || code === "not_found") { D.open.add(id); render(); return loadDrafts(); }
+  render();
+}
+// Settings (spec "Settings"): Coach stopped, or Paused, with Start again, else Pause; Autopilot; Send a test email with Resend's answer;
+// the credit month's spend; how many of the last approved went without changes; and where it runs.
+function settingsBox(st) {
+  const dr = S("dr"), out = [el("h4", { class: "co-h" }, dr.settings)];
+  if (st.stopped === true || st.paused === true) out.push(el("p", { class: st.stopped === true ? "co-err co-dr-stop" : "co-dr-stop co-dr-paused", role: "status" }, st.stopped === true ? dr.stopped : dr.paused),
+    button("dstart", dr.start, () => setting(st.stopped === true ? { start_again: true } : { paused: false }, "dpause")));
+  else out.push(button("dpause", dr.pause, () => setting({ paused: true }, "dstart"), "co-btn co-btn2"));
+  const auto = button("dauto", dr.autopilot(st.autopilot === true), () => setting({ autopilot: st.autopilot !== true }, "dauto"), "co-btn co-btn2");
+  auto.setAttribute("aria-pressed", String(st.autopilot === true));
+  out.push(auto, button("dmail", dr.mail, () => setting({ test_email: true }, "dmail"), "co-btn co-btn2"));
+  if (D.mail) out.push(el("p", { class: "co-mail", role: "status" }, dr.mailSaid(D.mail.status, D.mail.text)));
+  if (D.sErr) out.push(el("p", { class: "co-err", role: "alert" }, says(D.sErr) || S("failed")));
+  const w = D.where;
+  out.push(el("p", { class: "co-dr-spend" }, dr.spend(st.spend.usd.toFixed(2), Math.round(st.spend.stop * 100) / 100, st.spend.reviews)),
+    el("p", { class: "co-dr-unch" }, dr.unchanged(st.unchanged.n, st.unchanged.of)),
+    el("p", { class: "co-dr-where" }, dr.where, Array.isArray(w) ? w.map(l => [el("br"), el("code", null, l)]) : w === false ? dr.whereFail : S("loading")));
+  return el("section", { class: "co-dset" }, out);
+}
+async function setting(body, focus) {
+  const t = tokenNow(), g = D.g;
+  if (!t || D.sBusy) return;
+  D.sBusy = true; D.sErr = false; if (body.test_email) D.mail = null; render();
+  const r = await call("/admin/coach/settings", t, body, { wait: 45e3 });
+  if (g !== D.g) return;
+  D.sBusy = false;
+  if (r.status === 401) return signOut(t);
+  if (r.status !== 200) { D.sErr = r.code || true; return render(); }
+  if (body.test_email) { const m = isObj(r.json) && isObj(r.json.email) ? r.json.email : {};
+    D.mail = { status: Number.isInteger(m.status) ? m.status : 0, text: typeof m.text === "string" ? m.text : "" }; }
+  const s = D.list && D.list.settings; // shown as set at once, then as the backend has it
+  if (s) { if (typeof body.autopilot === "boolean") s.autopilot = body.autopilot; if (typeof body.paused === "boolean") s.paused = body.paused; if (body.start_again) s.stopped = s.paused = false; }
+  V.focus = focus; render(); return loadDrafts();
 }
 
 // ---- A key frame enlarged (tapping one in a review, or in the example): over the whole panel, with its time and ✕. ✕ or Escape shuts it,
@@ -1142,14 +1495,17 @@ function questionsScreen() {
   return out;
 }
 // A one-line answer, cut to max characters as the backend counts them (a textarea's maxlength counts UTF-16 units, which would cut an
-// emoji short), but not while an input method is still composing. It's kept in box[key] (the answers, or Something wrong?'s line), and
-// then() runs as it changes (the answers are saved).
-function line(key, max, attrs, box = F.answers, then = saveDraft) {
-  const i = el("input", { type: "text", class: "co-line", "data-k": key, autocomplete: "off", enterkeyhint: "done", ...attrs });
+// emoji short), but not while an input method is still composing. It's kept in box[key] (the answers, Something wrong?'s line, a Drafts
+// note or edit box), and then() runs as it changes (the answers are saved). attrs may give it another data-k; tag "textarea" makes it an
+// edit box.
+function line(key, max, attrs, box = F.answers, then = saveDraft, tag = "input") {
+  const i = el(tag, { ...(tag === "input" ? { type: "text", enterkeyhint: "done" } : {}), class: "co-line", "data-k": key, autocomplete: "off", ...attrs });
   i.value = box[key];
   const take = () => { if ([...i.value].length > max) i.value = upTo(i.value, max); if (box[key] !== i.value) { box[key] = i.value; then(); } };
   i.addEventListener("input", guard(e => { if (!e.isComposing) take(); }));
-  i.addEventListener("compositionend", guard(take)); i.addEventListener("change", guard(take));
+  i.addEventListener("compositionstart", guard(() => { V.typing = true; }));
+  i.addEventListener("compositionend", guard(() => { V.typing = false; take(); })); i.addEventListener("change", guard(take));
+  i.addEventListener("blur", guard(() => { V.typing = false; }));
   return i;
 }
 

@@ -279,15 +279,16 @@ async function coachApi(tok, p, { method = "GET", body, text } = {}) {
   return { status: r.status, json: await r.json().catch(() => null) };
 }
 // Sends a top-turn review for tok's account straight through the backend's routes, as the New review flow does: the agreement, the start
-// with 8 key frames (a stand-in 784x784 JPEG each, at 10.25 s to 12.0 s), each frame, then send, in lang. Resolves to its id once the
-// fake AI's answer is in: status want (drafted, or published on autopilot, or rejected), as GET /coach/reviews/<id> tells its owner.
-async function sendReview(tok, { lang = "en", want = "drafted" } = {}) {
+// with 8 key frames (a stand-in 784x784 JPEG each, at 10.25 s to 12.0 s), each frame, then send, in lang, with the surfer's note. Resolves
+// to its id once the fake AI's answer is in: status want (drafted, or published on autopilot, or rejected), as GET /coach/reviews/<id>
+// tells its owner.
+async function sendReview(tok, { lang = "en", want = "drafted", note = "" } = {}) {
   const { jpegB64 } = await import(path.join(ROOT, "chat", "test", "coach-fixtures.mjs"));
   const b64 = jpegB64(), frames = [1, 2, 3, 4, 5, 6, 7, 8].map(n => ({ n, ms: 10000 + 250 * n, box: [100, 100, 360] }));
   const must = async (what, r) => { r = await r; if (r.status !== 200) throw new Error(`${what} answered ${r.status} ${JSON.stringify(r.json)}`); return r.json; };
   await must("POST /coach/agree", coachApi(tok, "/coach/agree", { method: "POST", body: { ver: "c1", adult: true } }));
   const { id } = await must("POST /coach/reviews", coachApi(tok, "/coach/reviews", { method: "POST",
-    body: { lang, move: "top_turn", move_other: "", level: "turning_well", board: "shortboard", stance: "regular", note: "", frames } }));
+    body: { lang, move: "top_turn", move_other: "", level: "turning_well", board: "shortboard", stance: "regular", note, frames } }));
   for (const f of frames) await must(`key frame ${f.n}`, coachApi(tok, `/coach/reviews/${id}/frames/${f.n}`, { method: "POST", text: b64 }));
   await must("send", coachApi(tok, `/coach/reviews/${id}/send`, { method: "POST", body: {} }));
   for (let i = 0; i < 60; i++) { const r = await coachApi(tok, `/coach/reviews/${id}`); if (r.json && r.json.status === want) return id; await wait(500); }
@@ -321,6 +322,63 @@ async function openReview(page, id, n = 4) {
 const twDate = () => { const d = new Date(Date.now() + 8 * 3600e3); return { en: `${d.getUTCDate()} ${d.toLocaleString("en", { month: "long", timeZone: "UTC" })}`, zh: `${d.getUTCMonth() + 1}月${d.getUTCDate()}日` }; };
 // The Coach tab's dot: there, and drawn.
 const tabDot = page => page.evaluate(t => { const b = document.querySelector(t); return b.classList.contains("co-dot") && getComputedStyle(b, "::after").content !== "none"; }, TAB);
+
+// ---- Bryan's Drafts list. The 9 lines of a review he can edit (TEXT_FIELDS in chat/src/coach-guide.js), the value at one of them, and
+// a time as the page shows it (COACHM.fmtTime).
+const PATHS = ["went_well.title", "went_well.detail", "main_fix.title", "main_fix.what", "main_fix.why", "drill.title", "drill.how", "heads_up.text", "progress"];
+const at = (o, p) => p.split(".").reduce((v, k) => (v && typeof v === "object" ? v[k] : undefined), o);
+const put = (o, p, v) => { const [a, b] = p.split("."); if (b === undefined) o[a] = v; else o[a][b] = v; };
+const fmt = ms => { const t = Math.round(Math.round(Math.max(0, ms) / 10) / 10), s = t % 600; return Math.floor(t / 600) + ":" + String(Math.floor(s / 10)).padStart(2, "0") + "." + (s % 10); };
+const MARKUP = `<img src=x onerror="window.__xss=1"><b>bold</b><script>window.__xss=2</script>`;
+// Bryan's page, in developer mode (the coach shows only there until go-live), signed in, the Coach panel open, with its Drafts list
+// loaded; and its calls to his own routes (watchAdmin) from the first.
+async function draftsPage(s) {
+  const page = await s.open({ pub: false, go: false, store: { "waveslave-chat-token": token("u-bryan"), "waveslave-world": "1" } }), calls = watchAdmin(page);
+  await s.go(page); await page.tap(TAB); await panelOpen(page);
+  await until(page, "the Drafts list", () => !!document.querySelector('.coachpanel [data-k="drefresh"]'));
+  return { page, calls };
+}
+// Notes a page's calls to Bryan's own routes (/admin/…) as they go: method, path, the body (from JSON) and the Authorization header, and
+// the status once answered (null until then). posts(calls, from) are the POSTs from the from-th call on, as {path, body, status}.
+function watchAdmin(page) {
+  const calls = [];
+  page.on("request", r => { const u = r.url(); if (!u.startsWith(CHAT() + "/admin/") || r.method() === "OPTIONS") return;
+    let body = r.postData(); try { body = body ? JSON.parse(body) : null; } catch (e) {}
+    const c = { method: r.method(), path: u.slice(CHAT().length), body, auth: r.headers().authorization || null, status: null }; calls.push(c);
+    r.response().then(res => { c.status = res ? res.status() : 0; }, () => { c.status = 0; }); });
+  return calls;
+}
+const posts = (calls, from = 0) => calls.slice(from).filter(c => c.method === "POST").map(c => ({ path: c.path, body: c.body, status: c.status }));
+const answered = (calls, from, what) => soon(what, () => posts(calls, from).length > 0 && posts(calls, from).every(c => c.status !== null));
+// Review id's card in the Drafts list, read: its heading, its lines (the surfer's answers, their note, how long it has waited, Reported,
+// the status of a handled one, Bryan's Redo notes), its red warnings and red line, its key frames (caption, and whether the image is a blob
+// URL), whether they wait behind Show anyway, its images, its edit boxes (value by path) and English copy (by path), its lines shown as
+// they are, and its buttons; null when it isn't there.
+const dcard = (page, id) => page.evaluate(id => { const c = document.querySelector(`.coachpanel .co-dr[data-id="${id}"]`); if (!c) return null;
+  const t = s => { const e = c.querySelector(s); return e ? e.textContent : null; };
+  return { head: t(".co-dr-h"), who: t(".co-dr-who"), note: t(".co-dr-note"), wait: t(".co-dr-wait"), rep: t(".co-dr-rep"), st: t(".co-dr-st"), redo: t(".co-dr-redo"),
+    warn: [...c.querySelectorAll(".co-warn li")].map(e => e.textContent), err: t(".co-dr-err"),
+    frames: [...c.querySelectorAll(".co-kf")].map(f => [f.querySelector("figcaption").textContent, !!f.querySelector('img[src^="blob:"]')]),
+    hidden: !!c.querySelector(`[data-k="show-${id}"]`), imgs: [...c.querySelectorAll("img")].map(i => i.src.startsWith("blob:")),
+    fields: Object.fromEntries([...c.querySelectorAll("textarea")].map(e => [e.getAttribute("data-k").slice(id.length + 4), e.value])),
+    english: Object.fromEntries([...c.querySelectorAll(".co-en")].map(e => [e.getAttribute("data-p"), e.textContent])),
+    lines: [...c.querySelectorAll(".co-part p")].map(e => e.textContent), handled: !!c.closest("details.co-dr-old"),
+    acts: [...c.querySelectorAll(".co-dr-acts button, .co-ask button")].map(b => b.textContent) }; }, id);
+// Waits for review id's card in the Drafts list, with what `want` says of it: blobs, that many key frames shown as blob URLs; handled,
+// among the handled ones (or waiting); warn, that red warning; err, that red line. With want.gone, waits for it to be gone.
+const hasCard = (page, id, what, want = {}) => until(page, what, ([id, w]) => { const c = document.querySelector(`.coachpanel .co-dr[data-id="${id}"]`);
+  if (w.gone) return !c; if (!c) return false;
+  return (w.blobs === undefined || c.querySelectorAll('.co-kf img[src^="blob:"]').length === w.blobs) && (w.handled === undefined || !!c.closest("details.co-dr-old") === w.handled)
+    && (w.warn === undefined || [...c.querySelectorAll(".co-warn li")].some(l => l.textContent === w.warn)) && (w.err === undefined || (c.querySelector(".co-dr-err") || {}).textContent === w.err); },
+  [id, want], 30e3);
+// The Drafts list's line saying what was just done.
+const dsaid = (page, t) => until(page, JSON.stringify(t), t => { const e = document.querySelector('.coachpanel [data-k="dsaid"]'); return !!e && e.textContent === t; }, t, 30e3);
+// Asks for the Drafts list again (its Check again) and waits for the answer.
+async function recheck(page, calls) {
+  const gets = () => calls.filter(c => c.method === "GET" && c.path === "/admin/coach/drafts"), n = gets().length;
+  await page.click('.coachpanel [data-k="drefresh"]');
+  await soon("the Drafts list asked for again", () => gets().length > n && gets().every(c => c.status !== null)); await wait(200);
+}
 
 const STEPS = {
   // The fake AI answers as the backend expects (chat/src/coach-guide.js): for a request built by the backend's own buildRequest, in English
@@ -1108,7 +1166,249 @@ const STEPS = {
     await until(page, "the banned line", t => { const e = document.querySelector(".coachpanel .co-err"); return !!e && e.textContent === t; }, "This account can't use the coach.");
     if (await page.$('.coachpanel [data-k="retry"]') || await page.$(".coachpanel .co-left")) throw new Error("a banned account gets Try again or the count");
   },
+  // ---- Bryan's Drafts (AI coach spec, "The Drafts list"), against the real backend, in developer mode (where the coach shows until
+  // go-live). A surfer never sees it, even in developer mode: their panel has no Drafts, and the page asks none of Bryan's routes.
+  async draftsHidden(s) {
+    const page = await s.open({ pub: false, go: false, store: { "waveslave-chat-token": await s.surfer.evaluate(() => CHAT.token()), "waveslave-world": "1" } }), calls = watchAdmin(page);
+    await s.go(page); await page.tap(TAB); await panelOpen(page);
+    await until(page, "the surfer's panel, signed in", () => !!document.querySelector(".coachpanel .co-left")); await wait(1000);
+    const st = await page.evaluate(() => ({ world: WORLD, drafts: !!document.querySelector(".coachpanel .co-drafts") }));
+    if (!st.world || st.drafts || calls.length) throw new Error(`a surfer's panel in developer mode: ${JSON.stringify(st)}, asking ${JSON.stringify(calls.map(c => c.path))}`);
+  },
+  // Bryan's list: the drafts the New review flow made (flowEn's, in English, and flowZh's, in 中文) wait in it, in the backend's order
+  // (waiting longest first), each with its move, the surfer's answers and note, how long it has waited, its 12 key frames with their times
+  // (what went well's and the main fix's marked), and its text in edit boxes, the 中文 one with its English copy beside each. In 中文 the
+  // list speaks 中文. Editing one line and approving sends only that edit: the review is published with it, checked, and its card goes
+  // among the handled ones.
+  async draftsList(s) {
+    const surfer = await s.surfer.evaluate(() => CHAT.token()), en = (await coachApi(surfer, "/coach/me")).json.reviews[0].id, zh = (await coachApi(token("u-ana"), "/coach/me")).json.reviews[0].id;
+    const list = await draftsList(), row = id => list.waiting.find(r => r.id === id);
+    if (!row(en) || !row(zh)) throw new Error(`the Drafts list has ${JSON.stringify(list.waiting.map(r => r.id))}, without flowEn's ${en} or flowZh's ${zh}`);
+    s.zhDraft = zh; s.admin = await draftsPage(s); const { page, calls } = s.admin;
+    for (const id of [en, zh]) await hasCard(page, id, "a draft's 12 key frames", { blobs: 12 });
+    const order = await page.$$eval(".coachpanel .co-drafts > .co-dr", a => a.map(x => x.getAttribute("data-id")));
+    if (!eq(order, list.waiting.map(r => r.id))) throw new Error(`the list's order is ${JSON.stringify(order)}, the backend's ${JSON.stringify(list.waiting.map(r => r.id))}`);
+    for (const [id, lang] of [[en, "en"], [zh, "zh"]]) {
+      const r = row(id), d = r.draft, got = await dcard(page, id), mark = n => (n === d.went_well.frame ? " · went well" : "") + (d.main_fix.frames.includes(n) ? " · main fix" : "");
+      const want = { head: "Top turn", who: `Starting to turn · Shortboard · Goofy · ${lang === "en" ? "English" : "中文"}`, note: lang === "en" ? "Their note: “Trying to make my carve better.”" : null,
+        warn: [], frames: TIMES.map((ms, i) => [fmt(ms) + mark(i + 1), true]), fields: Object.fromEntries(PATHS.map(p => [p, at(d, p)])),
+        english: lang === "zh" ? Object.fromEntries(PATHS.filter(p => at(r.english, p).trim()).map(p => [p, "English: " + at(r.english, p)])) : {}, acts: ["Approve", "Redo", "Reject", "Ban"] };
+      const have = Object.fromEntries(Object.keys(want).map(k => [k, got[k]]));
+      if (!eq(have, want)) throw new Error(`the ${lang} draft shows ${JSON.stringify(have)}, want ${JSON.stringify(want)}`);
+      if (!/^waiting \d+ (min|h)$/.test(got.wait || "")) throw new Error(`the ${lang} draft says ${JSON.stringify(got.wait)}`);
+    }
+    await page.evaluate(() => setLang("zh"));
+    await until(page, "the Drafts list in 中文", () => { const h = document.querySelector(".coachpanel .co-drafts h3"); return !!h && h.textContent === "草稿"; });
+    const z = await dcard(page, zh);
+    if (z.head !== "頂部轉向" || !eq(z.acts, ["核准", "重寫", "退回", "封鎖"]) || !Object.values(z.english).every(t => t.startsWith("英文：")) || !/^已等 \d+ (分鐘|小時)$/.test(z.wait || ""))
+      throw new Error(`the 中文 draft in 中文: ${JSON.stringify({ head: z.head, acts: z.acts, english: z.english, wait: z.wait })}`);
+    await page.evaluate(() => setLang("en"));
+    const title = "Low and ready, both knees bent", from = calls.length;
+    await page.fill(`.coachpanel [data-k="ed-${en}-went_well.title"]`, title); await page.click(`.coachpanel [data-k="act-${en}-approve"]`);
+    await dsaid(page, "Published."); await answered(calls, from, "the approval's answer");
+    const sent = posts(calls, from);
+    if (!eq(sent, [{ path: `/admin/coach/drafts/${en}`, body: { action: "approve", edits: { "went_well.title": title } }, status: 200 }])) throw new Error(`Approve sent ${JSON.stringify(sent)}`);
+    const pub = (await coachApi(surfer, `/coach/reviews/${en}`)).json, text = pub && pub.review && pub.review.text;
+    if (!text || pub.status !== "published" || pub.review.checked !== true || text.went_well.title !== title || !PATHS.filter(p => p !== "went_well.title").every(p => at(text, p) === at(row(en).draft, p)))
+      throw new Error(`the surfer's review after Approve: ${JSON.stringify(pub)}`);
+    await hasCard(page, en, "the approved card among the handled ones", { handled: true });
+    const st = (await dcard(page, en)).st;
+    if (!/^Published · /.test(st || "")) throw new Error(`the approved card says ${JSON.stringify(st)}`);
+  },
+  // A draft whose every line and the surfer's note hold markup (u-dan's; the fake AI's answer also says the coach couldn't see the surfer,
+  // marks key frame 2 unusable and uses a word surfers mustn't read) shows it all as text, in its edit boxes: no element is added (no image
+  // but its 8 key frames, no script) and nothing runs. Its red warnings say what the coach found, and key frame 2 is marked unusable.
+  // Reject needs a note: without one nothing is sent and the card says so; with one it's rejected with that note, which the surfer sees,
+  // and given back.
+  async draftsMarkup(s) {
+    const tok = token("u-dan"), { page, calls } = s.admin;
+    aiReply = r => { const m = FX.goodReply(FX.sentOf(r.body), "en"); m.can_see_surfer = false; m.unusable_frames = [2];
+      for (const p of PATHS.filter(p => p !== "progress")) put(m, p, `${MARKUP} ${p}`); m.drill.how += " Keep the photo."; return FX.apiMessage(m); };
+    let id; try { id = await sendReview(tok, { note: MARKUP }); } finally { aiReply = null; }
+    await recheck(page, calls); await hasCard(page, id, "u-dan's draft with its 8 key frames", { blobs: 8 });
+    const r = (await draftsList()).waiting.find(x => x.id === id), got = await dcard(page, id);
+    const want = { note: `Their note: “${MARKUP}”`, fields: Object.fromEntries(PATHS.map(p => [p, at(r.draft, p)])), imgs: Array(8).fill(true),
+      warn: ["The coach couldn't see the surfer.", "The coach marked key frames as unusable.", "It used a word surfers shouldn't see. Find it and change it before you approve."] };
+    const have = Object.fromEntries(Object.keys(want).map(k => [k, got[k]]));
+    if (!eq(have, want) || !PATHS.filter(p => p !== "progress").every(p => got.fields[p].startsWith(MARKUP))) throw new Error(`the markup draft shows ${JSON.stringify(have)}, want ${JSON.stringify(want)}`);
+    if (got.frames[1][0] !== fmt(10500) + " · unusable") throw new Error(`key frame 2 says ${JSON.stringify(got.frames[1])}`);
+    const ran = await page.evaluate(() => ({ xss: window.__xss || null, scripts: document.querySelectorAll(".coachpanel script, .coachpanel b").length }));
+    if (ran.xss || ran.scripts) throw new Error(`the markup ran or made elements: ${JSON.stringify(ran)}`);
+    const from = calls.length, note = "We couldn't see you. Try filming closer.";
+    await page.click(`.coachpanel [data-k="act-${id}-reject"]`); await inPanel(page, "Reject's note", `[data-k="note-${id}"]`);
+    await page.click(`.coachpanel [data-k="yes-${id}"]`); await wait(500);
+    const need = await text(page, `.co-dr[data-id="${id}"] .co-ask .co-err`);
+    if (need !== "Write a short note first." || posts(calls, from).length) throw new Error(`Reject without a note says ${JSON.stringify(need)}, sent ${JSON.stringify(posts(calls, from))}`);
+    await page.fill(`.coachpanel [data-k="note-${id}"]`, note); await page.click(`.coachpanel [data-k="yes-${id}"]`);
+    await dsaid(page, "Rejected. The surfer gets your note and the review back."); await answered(calls, from, "the rejection's answer");
+    if (!eq(posts(calls, from), [{ path: `/admin/coach/drafts/${id}`, body: { action: "reject", note }, status: 200 }])) throw new Error(`Reject sent ${JSON.stringify(posts(calls, from))}`);
+    const me = (await coachApi(tok, "/coach/me")).json, mine = me.reviews.find(x => x.id === id);
+    if (!mine || mine.status !== "not_reviewed" || mine.note !== note || me.left !== 2) throw new Error(`u-dan after Reject: ${JSON.stringify({ left: me.left, review: mine })}`);
+  },
+  // Redo needs a note too (u-ben's draft). A Redo with a note goes to the coach; the fake AI answering 400 this time, the draft comes back
+  // as it was with a red "Redo failed", and Bryan's note listed. A second Redo comes back as a new draft, without it. A third is refused
+  // (409 redo_limit): a red line on the draft.
+  async draftsRedo(s) {
+    const { page, calls } = s.admin, id = (await coachApi(token("u-ben"), "/coach/me")).json.reviews.find(r => r.status === "reviewing").id;
+    const back = async (what, test) => { await soon(what, async () => test((await draftsList()).waiting.find(x => x.id === id))); await recheck(page, calls); };
+    const redo = async (note, status) => { const from = calls.length;
+      await page.click(`.coachpanel [data-k="act-${id}-redo"]`); await inPanel(page, "Redo's note", `[data-k="note-${id}"]`);
+      await page.fill(`.coachpanel [data-k="note-${id}"]`, note); await page.click(`.coachpanel [data-k="yes-${id}"]`); await answered(calls, from, "the Redo's answer");
+      if (!eq(posts(calls, from), [{ path: `/admin/coach/drafts/${id}`, body: { action: "redo", note }, status }])) throw new Error(`Redo sent ${JSON.stringify(posts(calls, from))}`); };
+    let from = calls.length;
+    await page.click(`.coachpanel [data-k="act-${id}-redo"]`); await inPanel(page, "Redo's note", `[data-k="note-${id}"]`); await page.click(`.coachpanel [data-k="yes-${id}"]`); await wait(500);
+    const need = await text(page, `.co-dr[data-id="${id}"] .co-ask .co-err`);
+    if (need !== "Write a short note first." || posts(calls, from).length) throw new Error(`Redo without a note says ${JSON.stringify(need)}, sent ${JSON.stringify(posts(calls, from))}`);
+    await page.click(`.coachpanel [data-k="no-${id}"]`); await inPanel(page, "the draft's buttons again", `[data-k="act-${id}-redo"]`);
+    aiReply = () => ({ status: 400, body: { type: "error", error: { type: "invalid_request_error", message: "A test refusal." } } });
+    try { await redo("Focus on the back foot.", 200); await dsaid(page, "Sent to the coach for a Redo. Check again in a minute.");
+      await back("the failed Redo back", r => !!r && r.redos === 1 && r.warnings.includes("redo_failed")); } finally { aiReply = null; }
+    await hasCard(page, id, "Redo failed on the draft", { warn: "Redo failed: this is the draft from before." });
+    let c = await dcard(page, id);
+    if (c.redo !== "Your Redo notes: Focus on the back foot.") throw new Error(`after a failed Redo the draft says ${JSON.stringify(c.redo)}`);
+    await redo("Look at the front knee.", 200);
+    await back("the second Redo's new draft", r => !!r && r.redos === 2 && !r.warnings.includes("redo_failed"));
+    await hasCard(page, id, "the new draft"); c = await dcard(page, id);
+    if (c.warn.length || c.redo !== "Your Redo notes: Focus on the back foot. · Look at the front knee.") throw new Error(`after the second Redo the draft says ${JSON.stringify({ warn: c.warn, redo: c.redo })}`);
+    await redo("One more look.", 409);
+    await hasCard(page, id, "the red line", { err: "No more Redo: this review has had its 2." });
+  },
+  // Ban asks first: the question, and Cancel sends nothing. Ban there bans the account (u-cho's): its draft is rejected and leaves the
+  // list, and its sign-in no longer works.
+  async draftsBan(s) {
+    const { page, calls } = s.admin, id = (await coachApi(token("u-cho"), "/coach/me")).json.reviews[0].id, from = calls.length;
+    await page.click(`.coachpanel [data-k="act-${id}-ban"]`); await inPanel(page, "Ban's question", `[data-k="yes-${id}"]`);
+    const q = await text(page, `.co-dr[data-id="${id}"] .co-ask p`);
+    if (q !== BAN_ASK || posts(calls, from).length) throw new Error(`Ban asks ${JSON.stringify(q)}, sent ${JSON.stringify(posts(calls, from))}`);
+    await page.click(`.coachpanel [data-k="no-${id}"]`); await inPanel(page, "the draft's buttons again", `[data-k="act-${id}-ban"]`);
+    if (posts(calls, from).length) throw new Error(`Cancel sent ${JSON.stringify(posts(calls, from))}`);
+    await page.click(`.coachpanel [data-k="act-${id}-ban"]`); await page.click(`.coachpanel [data-k="yes-${id}"]`);
+    await dsaid(page, "Banned."); await answered(calls, from, "the ban's answer");
+    if (!eq(posts(calls, from), [{ path: `/admin/coach/drafts/${id}`, body: { action: "ban" }, status: 200 }])) throw new Error(`Ban sent ${JSON.stringify(posts(calls, from))}`);
+    if ((await coachApi(token("u-cho"), "/coach/me")).status !== 401 || (await draftsList()).waiting.some(r => r.id === id)) throw new Error("after Ban the account still signs in, or its draft still waits");
+  },
+  // A clip the fake AI finds isn't surfing (u-fay's) waits with its red warning, its key frames hidden behind Show anyway and none of them
+  // asked for until then; Show anyway shows them, and Give back gives the review back. A flagged one (u-gus's, sexual content) shows only
+  // its warnings: no key frames (none asked for), no text, no Show anyway; Clear lifts the account's block.
+  async draftsHeld(s) {
+    const { page, calls } = s.admin, asked = [];
+    page.on("request", r => { if (r.method() === "GET" && /\/frames\/\d+$/.test(r.url())) asked.push(r.url()); });
+    let fay, gus;
+    aiReply = replyWith({ is_surf_clip: false }); try { fay = await sendReview(token("u-fay"), { want: "rejected" }); } finally { aiReply = null; }
+    aiReply = replyWith({ sexual_content: true }); try { gus = await sendReview(token("u-gus"), { want: "rejected" }); } finally { aiReply = null; }
+    await recheck(page, calls); await hasCard(page, fay, "u-fay's clip"); await hasCard(page, gus, "u-gus's clip"); await wait(1000);
+    const f = await dcard(page, fay), g = await dcard(page, gus);
+    const pick = (c, ks) => Object.fromEntries(ks.map(k => [k, c[k]]));
+    if (!eq(pick(f, ["warn", "imgs", "hidden", "acts"]), { warn: ["The coach thinks this isn't a surf clip."], imgs: [], hidden: true, acts: ["Give back", "Ban"] }) || asked.some(u => u.includes(fay)))
+      throw new Error(`the not-surf clip shows ${JSON.stringify(f)}, its key frames asked for ${asked.filter(u => u.includes(fay)).length} times`);
+    const flagged = { warn: ["Flagged: sexual content.", FLAGGED], imgs: [], hidden: false, fields: {}, lines: [], acts: ["Clear", "Ban"] };
+    if (!eq(pick(g, Object.keys(flagged)), flagged) || asked.some(u => u.includes(gus))) throw new Error(`the flagged clip shows ${JSON.stringify(g)}, its key frames asked for ${asked.filter(u => u.includes(gus)).length} times`);
+    await page.click(`.coachpanel [data-k="show-${fay}"]`); await hasCard(page, fay, "u-fay's 8 key frames", { blobs: 8 });
+    let from = calls.length;
+    await page.click(`.coachpanel [data-k="act-${fay}-giveback"]`); await dsaid(page, "Given back."); await answered(calls, from, "Give back's answer");
+    if (!eq(posts(calls, from), [{ path: `/admin/coach/drafts/${fay}`, body: { action: "giveback" }, status: 200 }]) || (await coachApi(token("u-fay"), "/coach/me")).json.left !== 2)
+      throw new Error(`Give back sent ${JSON.stringify(posts(calls, from))}`);
+    from = calls.length;
+    await page.click(`.coachpanel [data-k="act-${gus}-clear"]`); await dsaid(page, "Cleared. The account can send reviews again."); await answered(calls, from, "Clear's answer");
+    const h = (await draftsList()).handled.find(r => r.id === gus);
+    if (!eq(posts(calls, from), [{ path: `/admin/coach/drafts/${gus}`, body: { action: "clear" }, status: 200 }]) || !h || h.hold !== 0 || h.profile.blocked) throw new Error(`Clear sent ${JSON.stringify(posts(calls, from))}`);
+  },
+  // A review the surfer reported (u-hal's 中文 one) comes back marked Reported, with their line. Withdraw needs a note, and takes it down
+  // with it: the surfer sees the note.
+  async draftsReported(s) {
+    const { page, calls } = s.admin, id = s.halZh, said = "The drill doesn't fit my board.", note = "Sorry, this one missed. It's given back.";
+    if ((await coachApi(token("u-hal"), `/coach/reviews/${id}/report`, { method: "POST", body: { line: said } })).status !== 200) throw new Error("the report was refused");
+    await recheck(page, calls); await hasCard(page, id, "the reported review", { handled: false });
+    const c = await dcard(page, id);
+    if (c.rep !== `Reported: “${said}”` || !eq(c.acts, ["Approve", "Redo", "Withdraw", "Ban"])) throw new Error(`the reported review shows ${JSON.stringify({ rep: c.rep, acts: c.acts })}`);
+    const from = calls.length;
+    await page.click(`.coachpanel [data-k="act-${id}-withdraw"]`); await page.click(`.coachpanel [data-k="yes-${id}"]`); await wait(500);
+    if (await text(page, `.co-dr[data-id="${id}"] .co-ask .co-err`) !== "Write a short note first." || posts(calls, from).length) throw new Error("Withdraw went without a note");
+    await page.fill(`.coachpanel [data-k="note-${id}"]`, note); await page.click(`.coachpanel [data-k="yes-${id}"]`);
+    await dsaid(page, "Withdrawn. The surfer gets your note and the review back."); await answered(calls, from, "Withdraw's answer");
+    const r = (await coachApi(token("u-hal"), `/coach/reviews/${id}`)).json;
+    if (!eq(posts(calls, from), [{ path: `/admin/coach/drafts/${id}`, body: { action: "withdraw", note }, status: 200 }]) || r.status !== "rejected" || r.note !== note) throw new Error(`Withdraw: ${JSON.stringify(r)}`);
+  },
+  // A draft that changed elsewhere (u-ana's, approved meanwhile through the route): Reject on the list as it was answers 409 state, a red
+  // line on the card, and the list is asked again, the card now among the handled ones.
+  async draftsState(s) {
+    const { page, calls } = s.admin, id = s.zhDraft;
+    await hasCard(page, id, "u-ana's draft, waiting", { handled: false });
+    await act(id, { action: "approve" });
+    const from = calls.length;
+    await page.click(`.coachpanel [data-k="act-${id}-reject"]`); await page.fill(`.coachpanel [data-k="note-${id}"]`, "Too late."); await page.click(`.coachpanel [data-k="yes-${id}"]`);
+    await answered(calls, from, "the stale Reject's answer");
+    if (!eq(posts(calls, from), [{ path: `/admin/coach/drafts/${id}`, body: { action: "reject", note: "Too late." }, status: 409 }])) throw new Error(`the stale Reject: ${JSON.stringify(posts(calls, from))}`);
+    await hasCard(page, id, "the red line on the handled card", { handled: true, err: "This review changed meanwhile. Here it is as it is now." });
+  },
+  // Review Focus 4 in the Drafts list (u-eve's draft): an edited line left empty sends nothing and says why; a line can't run past 1,000
+  // characters; nine full lines of 1,000 中文 characters all go, and the review is published with them, the panel not scrolling sideways.
+  async draftsLong(s) {
+    const { page, calls } = s.admin, id = (await coachApi(token("u-eve"), "/coach/me")).json.reviews[0].id, box = p => `.coachpanel [data-k="ed-${id}-${p}"]`;
+    let from = calls.length;
+    await hasCard(page, id, "u-eve's draft", { handled: false });
+    await page.fill(box("drill.title"), "   "); await page.click(`.coachpanel [data-k="act-${id}-approve"]`);
+    await hasCard(page, id, "the empty line's red line", { err: "Each line needs 1 to 1,000 characters." }); await wait(300);
+    if (posts(calls, from).length) throw new Error(`an empty line sent ${JSON.stringify(posts(calls, from))}`);
+    const full = i => "浪".repeat(999) + i;
+    await page.fill(box("progress"), "浪".repeat(1001));
+    const cut = await page.$eval(box("progress"), e => [...e.value].length);
+    if (cut !== 1000) throw new Error(`a line of 1,001 characters keeps ${cut}`);
+    for (const [i, p] of PATHS.entries()) await page.fill(box(p), full(i));
+    from = calls.length; await page.click(`.coachpanel [data-k="act-${id}-approve"]`);
+    await dsaid(page, "Published."); await answered(calls, from, "the approval's answer");
+    const sent = posts(calls, from), edits = Object.fromEntries(PATHS.map((p, i) => [p, full(i)]));
+    if (sent.length !== 1 || sent[0].status !== 200 || !eq(sent[0].body, { action: "approve", edits })) throw new Error(`Approve sent ${JSON.stringify(sent.map(c => [c.status, Object.keys(c.body.edits || {})]))}`);
+    const text = (await coachApi(token("u-eve"), `/coach/reviews/${id}`)).json.review.text;
+    if (!PATHS.every((p, i) => at(text, p) === full(i))) throw new Error("the published review doesn't have the nine lines");
+    await page.click(`.coachpanel [data-k="old-${id}"]`); await wait(300);
+    const wide = await page.evaluate(() => { const b = document.querySelector(".coachpanel .co-body"); return b.scrollWidth - b.clientWidth; });
+    if (wide > 0) throw new Error(`with the long lines open the panel scrolls ${wide} px sideways`);
+  },
+  // Settings: where the room and the coach run (GET /admin/where, asked once, with the session token); the credit month's spend and how
+  // many of the last approved went without changes, as the backend counts them; Autopilot on and off; Pause, then Start again; Send a test
+  // email, with Resend's answer. With the coach stopped (meta stopped) and a spend seeded, "Coach stopped: its key or model setting failed"
+  // and Start again, which starts it; and "US$12.40 of US$78, 96 reviews".
+  async draftsSettings(s) {
+    const { page, calls } = await draftsPage(s), { creditMonth } = await import(path.join(ROOT, "chat", "src", "coach-rules.js"));
+    const where = await fetch(CHAT() + "/admin/where", { headers: { Origin: ORIGIN(), Authorization: "Bearer " + token("u-bryan") } }), lines = where.status === 200 ? (await where.text()).trim().split("\n") : null;
+    const whereLine = lines ? "Where it runs: " + lines.join("") : "Where it runs: couldn't ask. Close the panel and open it again in a minute.";
+    await until(page, "the Where line", t => { const e = document.querySelector(".coachpanel .co-dr-where"); return !!e && e.textContent === t; }, whereLine);
+    const wheres = calls.filter(c => c.path === "/admin/where"), kept = await page.evaluate(() => localStorage.getItem("waveslave-chat-token"));
+    if (wheres.length !== 1 || wheres[0].method !== "GET" || !kept || wheres[0].auth !== "Bearer " + kept) throw new Error(`the page asked /admin/where ${JSON.stringify(wheres.map(c => ({ ...c, auth: c.auth === "Bearer " + kept ? "the token kept" : c.auth && "another" })))}`);
+    const look = () => page.evaluate(() => { const q = s => { const e = document.querySelector(".coachpanel .co-dset " + s); return e ? e.textContent : null; };
+      return { spend: q(".co-dr-spend"), unchanged: q(".co-dr-unch"), auto: q('[data-k="dauto"]'), pressed: (document.querySelector('.coachpanel [data-k="dauto"]') || { getAttribute: () => null }).getAttribute("aria-pressed"),
+        pause: q('[data-k="dpause"]'), start: q('[data-k="dstart"]'), line: q(".co-dr-stop"), mail: q(".co-mail") }; });
+    const st = (await draftsList()).settings, money = `US$${st.spend.usd.toFixed(2)} of US$${st.spend.stop}, ${st.spend.reviews} reviews`;
+    let got = await look();
+    const want = { spend: money, unchanged: `Approved without changes: ${st.unchanged.n} of the last ${st.unchanged.of}`, auto: "Autopilot: Off", pressed: "false", pause: "Pause the coach", start: null, line: null, mail: null };
+    if (!eq(got, want)) throw new Error(`Settings show ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+    const setting = async (k, body, what, test) => { const from = calls.length; await page.click(`.coachpanel [data-k="${k}"]`); await answered(calls, from, `${what}'s answer`);
+      if (!eq(posts(calls, from), [{ path: "/admin/coach/settings", body, status: 200 }])) throw new Error(`${what} sent ${JSON.stringify(posts(calls, from))}`);
+      await until(page, what, test); };
+    await setting("dauto", { autopilot: true }, "Autopilot on", () => (document.querySelector('.coachpanel [data-k="dauto"]') || {}).textContent === "Autopilot: On");
+    await setting("dauto", { autopilot: false }, "Autopilot off", () => (document.querySelector('.coachpanel [data-k="dauto"]') || {}).textContent === "Autopilot: Off");
+    await setting("dpause", { paused: true }, "Pause", () => (document.querySelector(".coachpanel .co-dr-stop") || {}).textContent === "Paused: no new reviews and no AI calls.");
+    got = await look();
+    if (got.start !== "Start again" || got.pause !== null) throw new Error(`paused, Settings show ${JSON.stringify(got)}`);
+    await setting("dstart", { paused: false }, "Start again after Pause", () => !!document.querySelector('.coachpanel [data-k="dpause"]') && !document.querySelector(".coachpanel .co-dr-stop"));
+    const mails = ai.mails.length;
+    await setting("dmail", { test_email: true }, "the test email", () => /^Resend answered 200: \{"id":"fake-mail-\d+"\}$/.test((document.querySelector(".coachpanel .co-mail") || {}).textContent || ""));
+    if (ai.mails.length !== mails + 1 || ai.mails[mails].subject !== "WaveSlave Coach: test email") throw new Error(`the test email: ${JSON.stringify(ai.mails.slice(mails).map(m => m.subject))}`);
+    if ((await draftsList()).settings.paused) throw new Error("Start again left the coach paused");
+    const spend = JSON.stringify({ start: creditMonth(Date.now(), 16).start, usd: 12.4, reviews: 96 });
+    const old = await coachMeta("stopped", "true", { spend });
+    await recheck(page, calls);
+    await until(page, "Coach stopped", () => (document.querySelector(".coachpanel .co-dr-stop") || {}).textContent === "Coach stopped: its key or model setting failed");
+    got = await look();
+    if (got.start !== "Start again" || got.pause !== null || got.spend !== "US$12.40 of US$78, 96 reviews") throw new Error(`stopped, Settings show ${JSON.stringify(got)}`);
+    await setting("dstart", { start_again: true }, "Start again", () => !!document.querySelector('.coachpanel [data-k="dpause"]') && !document.querySelector(".coachpanel .co-dr-stop"));
+    const after = (await draftsList()).settings;
+    if (after.stopped || after.paused) throw new Error(`after Start again the coach is ${JSON.stringify({ stopped: after.stopped, paused: after.paused })} (meta stopped was ${old})`);
+  },
 };
+const BAN_ASK = "Ban this account? This review and every open one of the account are rejected, nothing is given back, and the account is banned from the chat too.";
+const FLAGGED = "Its key frames are deleted, and the account can't send another review until you clear it or ban it.";
 const HEADS_EN = "On your bottom turn your back knee locks straight, which can hurt a knee.", PROGRESS_EN = "Your front knee stays bent longer than last time.";
 const HEADS_ZH = "你回切時後膝打直，容易受傷。", PROGRESS_ZH = "比上次好：前膝彎得更久。";
 

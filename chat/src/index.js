@@ -13,8 +13,15 @@
 //                             ->  the same path under /r (the Authorization header goes through)
 //   GET  /admin/where         ->  /r/where (the room asks the coach for its line too)
 //
-// /reports is open to every page. The rest answer only our own pages, and /auth/..., /me/... and /admin/... are never
-// cached.
+// The AI coach's routes (AI coach spec, "Routes") go to the coach, over RPC rather than as requests (coachRoute()):
+//
+//   GET /coach/me; POST /coach/agree; POST /coach/reviews; GET, DELETE /coach/reviews/<id>;
+//   GET, POST /coach/reviews/<id>/frames/<n>; POST /coach/reviews/<id>/send; POST /coach/reviews/<id>/report;
+//   GET /admin/coach/drafts; POST /admin/coach/drafts/<id>; POST /admin/coach/settings
+//                             ->  Coach.route({method, path, who, body}), once the room's whoIs has said who is calling
+//
+// /reports is open to every page. The rest answer only our own pages, and /auth/..., /me/..., /admin/... and
+// /coach/... are never cached.
 //
 // The LINE sign-in (spec "Login (LINE, web flow)", steps 2 and 3) is two page navigations, and the Worker runs it:
 //
@@ -31,9 +38,11 @@ export { Room } from "./room.js";
 // The AI coach's Durable Object (AI coach spec, "Backend"), bound as COACH in wrangler.toml.
 export { Coach } from "./coach.js";
 import { verifyLineIdToken } from "./auth.js";
+import { FRAME_TEXT_MAX } from "./coach-rules.js";
 import { SPOTS } from "./mod.js";
-// One room for all of Taiwan (Bryan, Oct 21). Every route reaches it through room(env), with its location hint.
-import { room } from "./stubs.js";
+// One room for all of Taiwan (Bryan, Oct 21), and one coach. Every route reaches them through room(env) and coach(env),
+// with their location hint.
+import { coach, room } from "./stubs.js";
 
 // How a route treats the page that calls it:
 //   open     anyone may read the answer, from any page (CORS "*"), and the browser may keep it for a minute
@@ -41,7 +50,16 @@ import { room } from "./stubs.js";
 //   private  only our own pages (the origins in ALLOWED_ORIGINS) may call it, and the answer is never cached
 //   login    a page navigation in the LINE sign-in, run by the Worker itself (`run`): it needs no Origin (a navigation
 //            sends none), takes no CORS headers and is never cached
-// Without `to`, the room path is "/r" plus the public path.
+// Without `to`, the room path is "/r" plus the public path. A route with `coach: true` goes to the coach instead
+// (coachRoute()).
+//
+// A review id is 22 characters of base64url, and a key frame is numbered 1 to 12.
+const ID = "[A-Za-z0-9_-]{22}";
+const N = "(?:[1-9]|1[0-2])";
+const exact = (pattern) => new RegExp(`^${pattern}$`);
+const FRAME_PATH = exact(`/coach/reviews/${ID}/frames/${N}`);
+const DRAFT_PATH = exact(`/admin/coach/drafts/${ID}`);
+
 const ROUTES = [
   { path: "/reports", methods: ["GET"], kind: "open", to: "/r/reports" },
   { path: "/ws", methods: ["GET"], kind: "socket", to: "/r/ws" },
@@ -55,6 +73,16 @@ const ROUTES = [
   { path: "/me/export", methods: ["GET"], kind: "private" },
   { path: "/me", methods: ["DELETE"], kind: "private" },
   { path: "/admin/where", methods: ["GET"], kind: "private", to: "/r/where" },
+  { path: "/coach/me", methods: ["GET"], kind: "private", coach: true },
+  { path: "/coach/agree", methods: ["POST"], kind: "private", coach: true },
+  { path: "/coach/reviews", methods: ["POST"], kind: "private", coach: true },
+  { path: exact(`/coach/reviews/${ID}`), methods: ["GET", "DELETE"], kind: "private", coach: true },
+  { path: FRAME_PATH, methods: ["GET", "POST"], kind: "private", coach: true },
+  { path: exact(`/coach/reviews/${ID}/send`), methods: ["POST"], kind: "private", coach: true },
+  { path: exact(`/coach/reviews/${ID}/report`), methods: ["POST"], kind: "private", coach: true },
+  { path: "/admin/coach/drafts", methods: ["GET"], kind: "private", coach: true },
+  { path: DRAFT_PATH, methods: ["POST"], kind: "private", coach: true },
+  { path: "/admin/coach/settings", methods: ["POST"], kind: "private", coach: true },
 ];
 
 const PREFLIGHT = {
@@ -65,7 +93,7 @@ const PREFLIGHT = {
 
 // Everything under these paths holds a sign-in or somebody's own data, so no answer there is ever cached, whatever
 // it is (an unknown path included).
-const NEVER_CACHED = /^\/(auth|me|admin)(\/|$)/;
+const NEVER_CACHED = /^\/(auth|me|admin|coach)(\/|$)/;
 
 const allowedOrigins = (env) =>
   String(env.ALLOWED_ORIGINS ?? "")
@@ -140,6 +168,7 @@ async function handle(route, request, env, url, from) {
     return Response.json({ error: "upgrade" }, { status: 426 });
   }
   if (route.kind === "login") return route.run(env, url);
+  if (route.coach) return coachRoute(request, env, url);
 
   let search = url.search;
   if (route.kind === "open") {
@@ -151,6 +180,85 @@ async function handle(route, request, env, url, from) {
   const target = `https://room${route.to ?? `/r${url.pathname}`}${search}`;
   const answer = await askRoom(env, () => forward(request, target, route.kind === "socket"));
   return answer ?? resting();
+}
+
+// ---- The coach -----------------------------------------------------------------------------------------------
+
+// The most a request body may be, in bytes: a key frame's text (FRAME_TEXT_MAX); Bryan's action on a draft, whose
+// edits are up to nine fields of 1,000 characters (as 中文, 27 KB in UTF-8, or 54 KB written as \u escapes); and
+// everything else.
+const DRAFT_BODY_MAX = 65_536;
+const BODY_MAX = 16_384;
+
+function bodyMax(pathname) {
+  if (FRAME_PATH.test(pathname)) return FRAME_TEXT_MAX;
+  if (DRAFT_PATH.test(pathname)) return DRAFT_BODY_MAX;
+  return BODY_MAX;
+}
+
+// The token in an "Authorization: Bearer <token>" header, or null, read as the room reads it.
+const bearer = (request) => /^Bearer (\S+)$/.exec(request.headers.get("Authorization") ?? "")?.[1] ?? null;
+
+const coachRefuses = (status, error) => Response.json({ error }, { status });
+
+// The answer to a whoIs refusal: "auth" (no such sign-in, or signed out), "banned", or "resting" (the chat rests near
+// the free plan's daily limits), which the coach shows as taking a break, as it does anything else the room might say.
+function whoRefused(error) {
+  if (error === "auth") return coachRefuses(401, "auth");
+  if (error === "banned") return coachRefuses(403, "banned");
+  return coachRefuses(503, "break");
+}
+
+// The request body as text, or null once it passes `max` bytes. It counts the bytes as they come, whatever
+// Content-Length says, and stops reading at the first byte too many, so a body over the cap never reaches the coach.
+async function readBody(request, max) {
+  if (request.body === null) return "";
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return text + decoder.decode();
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+}
+
+// A /coach/... or /admin/coach/... request, once handle() has checked its origin and method. The room's whoIs says who
+// the token stands for, and only that, {uid, sub_hash, role}, goes to the coach (ruling R2): never the token, and never
+// anything the surfer says about who they are. The admin paths need Bryan's account, and the coach checks again.
+// The body goes on as text, capped in size but never parsed: a key frame would cost the Worker more CPU than the free
+// plan gives a request. The coach answers {status, json}, or {status, jpeg} for a key frame.
+//
+// The room or the coach failing (down, overloaded, a throw) is 503 {error: "break"}, the coach "taking a break". Only
+// the error's name is logged: its message could hold part of the request.
+async function coachRoute(request, env, url) {
+  const token = bearer(request);
+  if (!token) return coachRefuses(401, "auth");
+  let step = "the room's whoIs";
+  try {
+    const answer = await room(env).whoIs(token);
+    if (answer?.error) return whoRefused(answer.error);
+    const who = { uid: answer.uid, sub_hash: answer.sub_hash, role: answer.role };
+    if (url.pathname.startsWith("/admin/coach/") && who.role !== "admin") return coachRefuses(403, "admin");
+    step = "reading the body";
+    const body = await readBody(request, bodyMax(url.pathname));
+    if (body === null) return coachRefuses(413, "too_big");
+    step = "the coach";
+    const reply = await coach(env).route({ method: request.method, path: url.pathname, who, body });
+    if (reply.jpeg instanceof Uint8Array) {
+      return new Response(reply.jpeg, { status: reply.status, headers: { "Content-Type": "image/jpeg" } });
+    }
+    return Response.json(reply.json, { status: reply.status });
+  } catch (err) {
+    console.error(`coach: ${step} failed:`, err?.name ?? "error");
+    return coachRefuses(503, "break");
+  }
 }
 
 // ---- LINE sign-in --------------------------------------------------------------------------------------------

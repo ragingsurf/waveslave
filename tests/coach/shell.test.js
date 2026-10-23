@@ -699,7 +699,12 @@ const CHECKS = {
     // It goes to the picker, keeping the answers, the move and Here; the clip then goes straight to Find the move at Here, and Here
     // and a tap cut the key frames again from it.
     await page.click('.coachpanel [data-k="again"]'); await inPanel(page, "the picker", ".co-choose");
-    const same = await page.$$eval(".coachpanel .co-note", e => e.map(x => x.textContent));
+    // ‹ Back from the picker and Pick up come back to the check screen, as its key frames are still kept.
+    await page.click('.coachpanel [data-k="back"]'); await inPanel(page, "Pick up after the picker", ".co-resume");
+    await page.click('.coachpanel [data-k="pickup"]'); await inPanel(page, "the check screen after the picker", '[data-k="again"], .co-choose');
+    if (!await page.$('.coachpanel [data-k="again"]')) throw new Error("Pick up after ‹ Back from the picker opened the picker, not the check screen");
+    await page.click('.coachpanel [data-k="again"]'); await inPanel(page, "the picker again", ".co-choose");
+    const same =await page.$$eval(".coachpanel .co-note", e => e.map(x => x.textContent));
     if (!same.includes("Choose the same clip again to pick up where you left off.")) throw new Error(`the picker says ${JSON.stringify(same)}`);
     await page.setInputFiles('.coachpanel input[type="file"]', makeClip(tmp, { gap: [2.9, 3.1] })); await inPanel(page, "Find the move", '[data-k="slider"]:not([disabled])');
     const find = { head: await text(page, '[data-k="fh"]'), at: await page.evaluate(() => +document.querySelector('.coachpanel [data-k="slider"]').value), d: await draft(page) };
@@ -1215,20 +1220,28 @@ const CHECKS = {
     await page.click(`.coachpanel [data-k="r-${OID}"]`); await inPanel(page, "the review", ".co-review .co-part");
     if (await text(page, '[data-k="fh"]') !== "Air reverse") throw new Error(`the review is headed ${JSON.stringify(await text(page, '[data-k="fh"]'))}`);
   },
-  // Every review in the list but a ready one (whose page has Delete) has Delete, with the same question as the review's; one still with
-  // the coach too, as the backend deletes a review in any state. Cancel keeps it; yes sends DELETE /coach/reviews/{id}, and the list
-  // goes on without it, saying "Review deleted.".
+  // Every review in the list but a ready one (whose page has Delete) and one held for the owner's check (held: deleting it would keep
+  // the account's block for 90 days with nothing left for him to Clear, ruling P72) has Delete, with the same question as the review's;
+  // one still with the coach too, as the backend deletes a review in any state. Cancel keeps it; yes sends DELETE /coach/reviews/{id},
+  // and the list goes on without it, saying "Review deleted.". The list's green "Ready" is at least 4.5:1 on the light background.
   async rowDelete(open) {
-    const QID = "q".repeat(22), NID = "n".repeat(22), deletes = [], rows = [
+    const QID = "q".repeat(22), NID = "n".repeat(22), HID = "h".repeat(22), deletes = [], rows = [
       { id: QID, move: "cutback", created: REVIEW_AT, status: "reviewing", published: null, note: null },
       { id: RID, move: "top_turn", created: REVIEW_AT - 3600e3, status: "ready", published: REVIEW_AT, note: null },
-      { id: NID, move: "popup", created: REVIEW_AT - 86400e3, status: "not_reviewed", published: null, note: "late" }];
+      { id: NID, move: "popup", created: REVIEW_AT - 86400e3, status: "not_reviewed", published: null, note: "late" },
+      { id: HID, move: "cutback", created: REVIEW_AT - 2 * 86400e3, status: "not_reviewed", published: null, note: "not_surf", held: true }];
     const backend = (q, req) => { if (q.pathname === "/coach/me") return { body: me({ reviews: rows.filter(r => !deletes.includes(r.id)) }) };
       const m = /^\/coach\/reviews\/([\w-]{22})$/.exec(q.pathname); if (m && req.method() === "DELETE") { deletes.push(m[1]); return { body: { ok: true } }; }
       return { body: { reports: [], online: 0, last_id: 0 } }; };
     const page = await open({ store: TOKEN, backend }), ASK = "Delete this review? It and its key frames are deleted from WaveSlave.";
     await page.tap(TAB); await inPanel(page, "Delete on the review still with the coach", `[data-k="rdel-${QID}"]`);
     if (await page.$(`.coachpanel [data-k="rdel-${RID}"]`) || !await page.$(`.coachpanel [data-k="rdel-${NID}"]`)) throw new Error("Delete isn't on every row but the ready one");
+    if (await page.$(`.coachpanel [data-k="rdel-${HID}"]`)) throw new Error("Delete is on a review held for the owner's check");
+    const ready = await page.evaluate(() => { const lum = c => { const [r, g, b] = c.match(/\d+/g).slice(0, 3).map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b; }, [x, y] = [lum(getComputedStyle(document.querySelector(".coachpanel .co-st-ready")).color),
+        lum(getComputedStyle(document.querySelector(".coachpanel")).backgroundColor)].sort((p, q) => q - p);
+      return Math.round((x + 0.05) / (y + 0.05) * 100) / 100; });
+    if (!(ready >= 4.5)) throw new Error(`"Ready" is ${ready}:1 on the light background`);
     await page.click(`.coachpanel [data-k="rdel-${QID}"]`); await inPanel(page, "Delete's question", `[data-k="rdelyes-${QID}"]`);
     const ask = await text(page, ".co-list .co-ask p");
     if (ask !== ASK) throw new Error(`Delete asks ${JSON.stringify(ask)}`);
@@ -1239,7 +1252,7 @@ const CHECKS = {
     if (deletes.length || await page.$(".coachpanel .co-list .co-ask")) throw new Error(`Cancel: ${JSON.stringify(deletes)}`);
     await page.click(`.coachpanel [data-k="rdel-${NID}"]`); await page.click(`.coachpanel [data-k="rdelyes-${NID}"]`); await inPanel(page, '"Review deleted."', '[data-k="said"]');
     const left = await page.$$eval(".coachpanel .co-list li .co-mv", e => e.map(x => x.textContent));
-    if (!eq(deletes, [NID]) || await text(page, '[data-k="said"]') !== "Review deleted." || !eq(left, ["Cutback", "Top turn"])) throw new Error(`after Delete: ${JSON.stringify({ deletes, left })}`);
+    if (!eq(deletes, [NID]) || await text(page, '[data-k="said"]') !== "Review deleted." || !eq(left, ["Cutback", "Top turn", "Cutback"])) throw new Error(`after Delete: ${JSON.stringify({ deletes, left })}`);
   },
   // An account GET /coach/me says is blocked has the blocked line in place of New review (and of the agreement), in English and 中文.
   async blockedMe(open) {
@@ -1360,6 +1373,12 @@ const CHECKS = {
     await page.click('.coachpanel [data-k="back"]'); await inPanel(page, "Find the move", '[data-k="slider"]');
     const got = { head: await text(page, '[data-k="fh"]'), at: await page.evaluate(() => +document.querySelector('.coachpanel [data-k="slider"]').value) };
     if (!eq(got, { head: "Find the move", at: 2.5 })) throw new Error(`‹ Back from the check screen shows ${JSON.stringify(got)}`);
+    // On to the questions and out: Pick up opens the check screen again, its key frames as they were, not the questions.
+    await page.click('.coachpanel [data-k="back"]'); await inPanel(page, "the questions", '[data-k="move-top_turn"]');
+    await page.click('.coachpanel [data-k="back"]'); await inPanel(page, "Pick up", '[data-k="pickup"]');
+    await page.click('.coachpanel [data-k="pickup"]'); await inPanel(page, "the check screen again", ".co-grid, .co-flow h3");
+    const back = { grid: !!await page.$(".coachpanel .co-grid"), lost: (await page.$$(".coachpanel .co-tile.co-lost")).length };
+    if (!back.grid || back.lost < 1) throw new Error(`Pick up after ‹ Back from the check screen shows ${JSON.stringify(back)}`);
   },
   // A Drafts card shows the heads-up's button as the surfer will have it ("Get a review of your bottom turn"), which does nothing there,
   // and the "used a word" warning names the words the backend found, in English and 中文.

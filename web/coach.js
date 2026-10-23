@@ -379,9 +379,9 @@ function el(tag, attrs, ...kids) { const e = document.createElement(tag);
 
 // The panel covers the whole screen above everything, the full-screen map (z-index 100) and the CHAT button included, like the chat's room.
 const CSS = `
-:root{--co-amb:#9a5c00}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--co-amb:var(--led-amb)}}
-:root[data-theme="dark"]{--co-amb:var(--led-amb)}
+:root{--co-amb:#9a5c00;--co-good:#1b7a50}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--co-amb:var(--led-amb);--co-good:var(--good)}}
+:root[data-theme="dark"]{--co-amb:var(--led-amb);--co-good:var(--good)}
 html.coach-open,html.coach-open body{overflow:hidden}
 .coachpanel{position:fixed;inset:0;z-index:110;display:flex;flex-direction:column;background:var(--bg);color:var(--ink);font:15px/1.45 var(--body);overscroll-behavior:contain;outline:none;-webkit-text-size-adjust:100%}
 .coachpanel[hidden],.coachpanel [hidden]{display:none!important}
@@ -430,7 +430,7 @@ button.co-row{cursor:pointer}
 .co-mv{font-weight:700}
 .co-date{color:var(--muted)}
 .co-st{margin-left:auto;font-weight:600}
-.co-st-ready{color:var(--good)}
+.co-st-ready{color:var(--co-good)}
 .co-st-not_reviewed{color:var(--muted)}
 .co-fresh{flex:none;width:8px;height:8px;border-radius:50%;background:#ff3d7f;box-shadow:0 0 8px #ff3d7f}
 .co-drafts{margin-top:24px}
@@ -440,7 +440,7 @@ button.co-row{cursor:pointer}
 .co-flow>p{margin-top:8px}
 .co-flow .co-film{margin:10px 0 0}
 .co-note{margin:10px 0 0!important;color:var(--muted)}
-.co-ok{margin:0 0 12px!important;color:var(--good);font-weight:700}
+.co-ok{margin:0 0 12px!important;color:var(--co-good);font-weight:700}
 .co-q{margin-top:16px}
 .co-q h4{margin-bottom:6px;font-size:15px}
 .co-chips{display:flex;flex-wrap:wrap;gap:8px}
@@ -881,7 +881,7 @@ function row(r, year) {
   const kids = [el("span", { class: "co-mv" }, moveName(r.move, r.move_other)), el("span", { class: "co-date" }, day(r.created, year)),
     el("span", { class: "co-st co-st-" + st }, S("status")[st]), why ? el("span", { class: "co-rnote" }, ownKey(NOTES, why) ? S(NOTES[why]) : why) : null];
   if (typeof r.id !== "string" || !REVIEW_ID.test(r.id)) return el("li", null, el("div", { class: "co-row" }, kids));
-  if (st !== "ready") return el("li", null, el("div", { class: "co-row" }, kids), rowDelete(r.id));
+  if (st !== "ready") return el("li", null, el("div", { class: "co-row" }, kids), r.held === true ? null : rowDelete(r.id));
   if (isNew(r)) kids.push(el("i", { class: "co-fresh", "aria-hidden": "true" }));
   const b = el("button", { type: "button", class: "co-row", "data-k": "r-" + r.id }, kids);
   b.addEventListener("click", guard(() => openReview(r)));
@@ -897,7 +897,7 @@ function day(ms, year) {
 // A move as the list and the review name it: an "other" one by the surfer's own name for it (move_other), when they gave one.
 const moveName = (m, other) => { const moves = S("moves"), own = m === "other" && typeof other === "string" ? other.trim() : "";
   return own || (Object.prototype.hasOwnProperty.call(moves, m) ? moves[m] : moves.other); };
-// Delete under a row of the list that isn't ready, asked first with the review's own question (delAsk); yes sends DELETE
+// Delete under a row of the list that isn't ready (nor held for the owner's check, ruling P72), asked first with the review's own question (delAsk); yes sends DELETE
 // /coach/reviews/{id} (one the backend no longer has is gone already), and the list goes on without it, "Review deleted.". V.rowDel is
 // the row asked about: {id, busy, fail}.
 function rowDelete(id) {
@@ -1544,10 +1544,15 @@ function back() {
   else { F.show = false; F.open = null; if (!F.draft) resetFlow(); }
   go();
 }
-// Pick up where you left off?: back to the screen it was on; once the page has reloaded, the clip is chosen again first (and then straight
-// to Find the move), unless the key frames were cut, or no clip had been chosen yet (then the picker, and the questions after it). Start
-// over clears it and starts afresh, with the move of the heads-up that offered it picked (ruling P55).
-function pickUp() { V.headsMove = null; if (!F.video && F.screen !== "check") { F.screen = "pick"; F.resumed = F.picked; } F.show = true; go(); }
+// Pick up where you left off?: with the 12 key frames cut, the check screen, as loadDraft opens it, whichever screen ‹ Back or Choose the
+// clip again left; else back to the screen it was on; once the page has reloaded, the clip is chosen again first (and then straight to
+// Find the move), or, with no clip chosen yet, the picker and the questions after it. Start over clears it and starts afresh, with the
+// move of the heads-up that offered it picked (ruling P55).
+function pickUp() {
+  V.headsMove = null;
+  if (F.frames.length === 12) F.screen = "check"; else if (!F.video) { F.screen = "pick"; F.resumed = F.picked; }
+  F.show = true; go();
+}
 function startOver() { const move = V.headsMove; dropDraft(); startNew(move); }
 function resumeOffer() {
   const mv = MOVES.includes(F.answers.move) ? moveName(F.answers.move, F.answers.move_other) : null;

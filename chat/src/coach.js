@@ -851,7 +851,8 @@ export class Coach extends DurableObject {
   // next_month (when the next one starts) are the server's, whatever the phone's clock says (Review Focus 3); stop is
   // stopFor(); profile is the saved level, board and stance; blocked, whether the account may start no review (blocked);
   // the account's reviews, newest first, but the one still uploading, each with its status in the surfer's words and
-  // an "other" move's own name as the surfer wrote it (move_other, "" for the others); and account, the chat account's
+  // an "other" move's own name as the surfer wrote it (move_other, "" for the others) and held, true while Bryan holds
+  // it (a not-surf or flagged clip, which the page offers no Delete on, ruling P72); and account, the chat account's
   // uid (ruling P51), which the page keeps with an unsent review so only this account picks it up. Never the LINE sub
   // or its hash.
   getMe(who) {
@@ -881,7 +882,7 @@ export class Coach extends DurableObject {
         blocked: this.blocked(who.sub_hash, person, now),
         reviews: reviews.map((r) => ({
           id: r.id, move: r.move, move_other: r.move_other, created: r.created, status: SURFER_STATUS[r.status],
-          published: r.published, note: noteFor(r),
+          published: r.published, note: noteFor(r), held: r.hold === 1,
         })),
         account: who.uid,
       },
@@ -2138,7 +2139,7 @@ export class Coach extends DurableObject {
     // A rejected review's texts, 30 days after: the coach's draft, its English copy, the text published before a
     // Withdraw, which no one is shown now, and Bryan's Redo notes. What the surfer is shown stays (his note to them, and
     // the not-surf warning and the flags, noteFor), and so does the row. A published review's text is kept until the
-    // surfer deletes it, and Bryan's examples until forget.
+    // surfer deletes it, and so are Bryan's examples made from it (ruling P67).
     this.all(
       `UPDATE reviews INDEXED BY reviews_handled SET draft = NULL, english = NULL, final = NULL, redo_note = '[]'
        WHERE handled_at > ? AND handled_at <= ? AND status = 'rejected' AND hold = 0`,

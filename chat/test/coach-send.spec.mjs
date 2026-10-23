@@ -929,17 +929,18 @@ describe("access", () => {
     }
     await insertReview(c, surfer(), { status: "published", created: at(0.5), frames: false, published: at(0.2) });
     expect((await me(c, a)).json.reviews).toEqual([
-      { id: ids.queued, move: "cutback", move_other: "", created: at(1), status: "reviewing", published: null, note: null },
-      { id: ids.calling, move: "cutback", move_other: "", created: at(2), status: "reviewing", published: null, note: null },
-      { id: ids.drafted, move: "cutback", move_other: "", created: at(3), status: "reviewing", published: null, note: null },
-      { id: ids.published, move: "cutback", move_other: "", created: at(4), status: "ready", published: at(3.5), note: null },
+      { id: ids.queued, move: "cutback", move_other: "", created: at(1), status: "reviewing", published: null, note: null, held: false },
+      { id: ids.calling, move: "cutback", move_other: "", created: at(2), status: "reviewing", published: null, note: null, held: false },
+      { id: ids.drafted, move: "cutback", move_other: "", created: at(3), status: "reviewing", published: null, note: null, held: false },
+      { id: ids.published, move: "cutback", move_other: "", created: at(4), status: "ready", published: at(3.5), note: null, held: false },
       {
         id: ids.rejected, move: "cutback", move_other: "", created: at(5), status: "not_reviewed", published: null,
-        note: "We couldn't see you. Try filming closer.",
+        note: "We couldn't see you. Try filming closer.", held: false,
       },
-      { id: ids.not_surf, move: "cutback", move_other: "", created: at(6), status: "not_reviewed", published: null, note: "not_surf" },
+      // Held for Bryan's check: held, so the page offers no Delete on it (ruling P72).
+      { id: ids.not_surf, move: "cutback", move_other: "", created: at(6), status: "not_reviewed", published: null, note: "not_surf", held: true },
       // Failed on our side, and given back: the page says so, and that it doesn't count.
-      { id: ids.failed, move: "cutback", move_other: "", created: at(7), status: "not_reviewed", published: null, note: "failed" },
+      { id: ids.failed, move: "cutback", move_other: "", created: at(7), status: "not_reviewed", published: null, note: "failed", held: false },
     ]);
     expect((await getReview(c, a, ids.not_surf)).json).toMatchObject({ status: "rejected", note: "not_surf" });
     expect((await getReview(c, a, ids.rejected)).json.note).toBe("We couldn't see you. Try filming closer.");
@@ -952,7 +953,7 @@ describe("access", () => {
     const answers = JSON.stringify({ ...ANSWERS, move: "other", move_other: "Air reverse" });
     const id = await insertReview(c, a, { move: "other", answers, status: "published", published: T, frames: false });
     expect((await me(c, a)).json.reviews).toEqual([
-      { id, move: "other", move_other: "Air reverse", created: T, status: "ready", published: T, note: null },
+      { id, move: "other", move_other: "Air reverse", created: T, status: "ready", published: T, note: null, held: false },
     ]);
     expect((await getReview(c, a, id)).json).toMatchObject({ move: "other", move_other: "Air reverse" });
   });

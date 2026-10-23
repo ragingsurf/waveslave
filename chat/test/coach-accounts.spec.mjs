@@ -321,6 +321,8 @@ describe("a block kept for a LINE account (rulings P47 and P48)", () => {
     const a = await flaggedAccount(c);
     const blocked = async () => (await route(c, a, "GET", "/coach/me")).json.blocked;
     const [{ id }] = await c.rows("SELECT id FROM reviews WHERE sub_hash = ?", a.sub_hash);
+    // GET /coach/me marks it held, so the page offers no Delete on it (ruling P72); the API still deletes it.
+    expect((await route(c, a, "GET", "/coach/me")).json.reviews.map((r) => [r.id, r.held])).toEqual([[id, true]]);
     expect(await route(c, a, "DELETE", `/coach/reviews/${id}`)).toEqual({ status: 200, json: { ok: true } });
     expect(await c.rows("SELECT id FROM reviews")).toEqual([]);
     expect(await c.rows("SELECT blocked FROM people WHERE sub_hash = ?", a.sub_hash)).toEqual([{ blocked: 0 }]);
@@ -330,6 +332,7 @@ describe("a block kept for a LINE account (rulings P47 and P48)", () => {
     // Deleting a review of an account that isn't blocked keeps no block.
     const b = surfer();
     const published = await insertReview(c, b, { status: "published", final: JSON.stringify(goodReply()), frames: false });
+    expect((await route(c, b, "GET", "/coach/me")).json.reviews.map((r) => r.held)).toEqual([false]);
     expect(await route(c, b, "DELETE", `/coach/reviews/${published}`)).toEqual({ status: 200, json: { ok: true } });
     expect(await c.rows("SELECT sub_hash FROM kept_blocks")).toEqual([{ sub_hash: a.sub_hash }]);
     // 90 days on, the block has lapsed.

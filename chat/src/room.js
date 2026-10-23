@@ -1774,6 +1774,8 @@ export class Room extends DurableObject {
   //   slow:<s>   429  past the 20 logs a day, with the seconds until the next one goes
   //   full       429  1,000 logs kept already: one has to be deleted first
   //   not found  404  DELETE /me/sessions/<id> for a log that isn't this user's
+  //   coach      503  DELETE /me and GET /me/export, when the coach couldn't forget or export the account (AI coach
+  //                   spec, "Accounts"; ruling R5)
   //
   //   GET    /me/sessions       mySessions()
   //   POST   /me/sessions       logSession()
@@ -1841,14 +1843,26 @@ export class Room extends DurableObject {
     return Response.json({ ok: true });
   }
 
-  // GET /me/export ("Download my data"): what the room keeps about the user, as {nick, created, messages, reports,
-  // sessions}. messages are their text messages and session cards, and reports their reports, each {id, ts, kind,
-  // spot, body, reply_to, likes, hidden}, oldest first; hidden ones are there too, marked, without why. sessions are
-  // their logs as GET /me/sessions gives them. A report over 30 days old no longer says who posted it (retention), so
-  // it isn't theirs any more. No user id or LINE account code is in it.
+  // GET /me/export ("Download my data"): what the room and the coach keep about the user, as {nick, created, messages,
+  // reports, sessions, coach}. messages are their text messages and session cards, and reports their reports, each {id,
+  // ts, kind, spot, body, reply_to, likes, hidden}, oldest first; hidden ones are there too, marked, without why.
+  // sessions are their logs as GET /me/sessions gives them. A report over 30 days old no longer says who posted it
+  // (retention), so it isn't theirs any more. coach is their coach reviews as Coach.exportFor gives them (AI coach
+  // spec, "Accounts"): the published text and the key frames' times, never a key frame. No user id or LINE account
+  // code is in it. When the coach throws, it is 503 {error: "coach"} (ruling R5). The coach is asked first, and the
+  // account read again after it (it may have gone meanwhile: 401), so the room's part is read with no await between.
   async exportMine(request) {
-    const user = await this.userFromToken(bearer(request));
-    if (!user) return refuse(401, "auth");
+    const signedIn = await this.userFromToken(bearer(request));
+    if (!signedIn) return refuse(401, "auth");
+    let coach;
+    try {
+      coach = await this.coachStub().exportFor(signedIn.id);
+    } catch (err) {
+      console.error("chat: the coach's export failed:", err?.name ?? "error");
+      return refuse(503, "coach");
+    }
+    const user = this.account(signedIn.id, signedIn.tv);
+    if (!user || user.banned) return refuse(401, "auth");
     const posted = this.all(
       "SELECT id, ts, kind, spot, body, reply_to, likes, hidden_by FROM messages WHERE uid = ? ORDER BY ts, id",
       user.id,
@@ -1859,19 +1873,34 @@ export class Room extends DurableObject {
       messages: posted.filter((msg) => msg.kind !== "report"),
       reports: posted.filter((msg) => msg.kind === "report"),
       sessions: this.sessionsOf(user.id),
+      coach,
     });
   }
 
-  // DELETE /me ("Delete my account"; spec "Deleting an account"): everything of the account goes, in one transaction
-  // (forgetAccount()). Then every open screen is told: their text messages and session cards go (update {id, deleted:
+  // DELETE /me ("Delete my account"; spec "Deleting an account"): first the coach forgets the account (Coach.forget:
+  // its reviews, key frames and saved answers; AI coach spec, "Accounts"), then everything of it here goes, in one
+  // transaction (forgetAccount()). When the coach throws or doesn't confirm, it is 503 {error: "coach"} and nothing here
+  // is deleted, so the account and its token still work and the surfer can try again. The account is read again after
+  // the coach, as another request may have signed it out everywhere, banned or deleted it meanwhile: then 401 auth, and
+  // nothing more goes. Then every open screen is told: their text messages and session cards go (update {id, deleted:
   // true}), and each message they liked has its new count (update {id, likes}); for a message hidden since, only
   // Bryan's screens are told, as only they show it. Their sockets close with 4401, as on signing out everywhere. A
   // locked room doesn't stop it (canWrite()). {ok: true}.
   async deleteAccount(request) {
-    const user = await this.userFromToken(bearer(request));
-    if (!user) return refuse(401, "auth");
-    const refused = this.canWrite(user, "account");
+    const signedIn = await this.userFromToken(bearer(request));
+    if (!signedIn) return refuse(401, "auth");
+    const refused = this.canWrite(signedIn, "account");
     if (refused) return refuseWrite(refused);
+    let forgot;
+    try {
+      forgot = await this.coachStub().forget(signedIn.id, signedIn.sub_hash);
+    } catch (err) {
+      console.error("chat: the coach's forget failed:", err?.name ?? "error");
+      return refuse(503, "coach");
+    }
+    if (forgot?.ok !== true) return refuse(503, "coach");
+    const user = this.account(signedIn.id, signedIn.tv);
+    if (!user || user.banned) return refuse(401, "auth");
     const { gone, liked } = this.forgetAccount(user, this.now());
     this.closeUser(user.id, CLOSE_SIGNED_OUT);
     this.announceDeleted(gone);
@@ -2043,7 +2072,8 @@ export class Room extends DurableObject {
   // The one alarm. Expired sign-ins go first, then retention runs once it's past next_retention, then the keepalive
   // tick goes out while sockets are open, or, while the chat rests, the sockets are closed instead (rest()). Whatever
   // happened before, the alarm is counted as a request, the usage counts are saved and the next alarm is set: the
-  // next retention or tick, or sooner when a handoff still waiting runs out before them.
+  // next retention or tick, or sooner when a handoff still waiting runs out before them. Retention waits on the coach
+  // (deleteStaleAccounts()), and the room takes other requests meanwhile.
   async alarm() {
     const now = this.now();
     let handoffsDue = Infinity;
@@ -2056,7 +2086,13 @@ export class Room extends DurableObject {
       if (now >= this.nextRetention()) {
         // The next run is set first, so a run that fails waits until tomorrow instead of retrying in a loop.
         this.setNextRetention(now);
-        this.retention(now);
+        try {
+          await this.retention(now);
+        } finally {
+          // A sign-in may have started while retention waited on the coach: its handoff's time is read too, or the
+          // alarm set below would put it off until tomorrow's run.
+          handoffsDue = this.handoffsDue();
+        }
       }
       if (!this.rest()) this.tick();
     } finally {
@@ -2094,8 +2130,10 @@ export class Room extends DurableObject {
 
   // ---- Retention -------------------------------------------------------------------------------------------
 
-  // The daily clean-up, in the spec's order ("Retention (daily)"). Every step runs in batches of 1,000 rows.
-  retention(now) {
+  // The daily clean-up, in the spec's order ("Retention (daily)"). Every step runs in batches of 1,000 rows. It waits on
+  // the coach for the accounts not seen for 24 months (deleteStaleAccounts()), and the room takes other requests
+  // meanwhile; every other step is one statement at a time with no await, as before.
+  async retention(now) {
     // Text messages and shared session cards after 30 days.
     this.batched(
       `DELETE FROM messages WHERE id IN (
@@ -2112,8 +2150,8 @@ export class Room extends DurableObject {
          SELECT id FROM messages WHERE kind = 'report' AND ts < ? AND uid IS NOT NULL LIMIT ${BATCH})`,
       now - KEEP_REPORT_POSTER,
     );
-    // Accounts not seen for 24 months, with their logs.
-    this.deleteStaleAccounts(now - KEEP_ACCOUNT, now);
+    // Accounts not seen for 24 months, with their logs, once the coach has forgotten them.
+    await this.deleteStaleAccounts(now - KEEP_ACCOUNT, now);
     // What pointed at messages that are gone now: shared session cards, likes and flags.
     this.batched(
       `UPDATE sessions SET shared_msg = NULL WHERE id IN (
@@ -2151,26 +2189,56 @@ export class Room extends DurableObject {
     this.batched(`DELETE FROM handoffs WHERE rowid IN (SELECT rowid FROM handoffs WHERE created < ? LIMIT ${BATCH})`, now - LOGIN_TTL);
   }
 
-  // Deletes the accounts last seen before `cutoff`: their private logs go, their LINE account's row is marked
-  // deleted (it goes 30 days later unless banned), no message keeps their user id, and meta forgets them as
-  // DELETE /me does (forgetAdmin()), so a stale admin_uid can't lock Bryan out of the role. Their text messages,
-  // session cards and likes went long before (texts after 30 days, and a like needs a recent sign-in), and the
-  // earlier steps already took them off their reports.
-  deleteStaleAccounts(cutoff, now) {
-    for (;;) {
-      const stale = this.all(`SELECT id, sub_hash FROM users WHERE last_seen < ? LIMIT ${BATCH}`, cutoff);
-      for (const { id, sub_hash } of stale) {
-        this.batched(`DELETE FROM sessions WHERE id IN (SELECT id FROM sessions WHERE uid = ? LIMIT ${BATCH})`, id);
-        this.batched(`UPDATE messages SET uid = NULL WHERE id IN (SELECT id FROM messages WHERE uid = ? LIMIT ${BATCH})`, id);
-        this.all(
-          `INSERT INTO subs (sub_hash, deleted_at) VALUES (?, ?)
-           ON CONFLICT (sub_hash) DO UPDATE SET deleted_at = excluded.deleted_at`,
-          sub_hash, now,
+  // Deletes the accounts last seen before `cutoff`, each once the coach has forgotten it (Coach.forget, AI coach spec
+  // "Accounts"): their private logs go, their LINE account's row is marked deleted (it goes 30 days later unless
+  // banned), no message keeps their user id, and meta forgets them as DELETE /me does (forgetAdmin()), so a stale
+  // admin_uid can't lock Bryan out of the role. Their text messages, session cards and
+  // likes went long before (texts after 30 days, and a like needs a recent sign-in), and the earlier steps already
+  // took them off their reports.
+  //
+  // The coach is asked one account at a time. One it didn't confirm (it threw, or answered anything but {ok: true}) is
+  // kept for the next day's run. The pages go by id (ruling R6), so such an account is passed over, not read again in
+  // this run, and the run ends however many the coach failed. Each account is read again after the coach: one that
+  // signed in meanwhile (last_seen) or went (DELETE /me) is left as it is. A coach that fails is logged once a run, by
+  // the first error's name.
+  async deleteStaleAccounts(cutoff, now) {
+    let after = "";
+    let failed = null;
+    try {
+      for (;;) {
+        const stale = this.all(
+          `SELECT id, sub_hash FROM users WHERE last_seen < ? AND id > ? ORDER BY id LIMIT ${BATCH}`,
+          cutoff, after,
         );
-        this.forgetAdmin(id, sub_hash);
-        this.all("DELETE FROM users WHERE id = ?", id);
+        for (const { id, sub_hash } of stale) {
+          let forgot = null;
+          try {
+            forgot = await this.coachStub().forget(id, sub_hash);
+          } catch (err) {
+            failed ??= err?.name ?? "error";
+          }
+          if (forgot?.ok !== true || !this.one("SELECT 1 FROM users WHERE id = ? AND last_seen < ?", id, cutoff)) continue;
+          this.deleteStaleAccount(id, sub_hash, now);
+        }
+        if (stale.length < BATCH) return;
+        after = stale.at(-1).id;
       }
-      if (stale.length < BATCH) return;
+    } finally {
+      if (failed !== null) console.error("chat: the coach's forget failed:", failed);
     }
+  }
+
+  // One account of deleteStaleAccounts(), once the coach has forgotten it. Nothing here awaits, so no other request
+  // runs between its steps.
+  deleteStaleAccount(id, sub_hash, now) {
+    this.batched(`DELETE FROM sessions WHERE id IN (SELECT id FROM sessions WHERE uid = ? LIMIT ${BATCH})`, id);
+    this.batched(`UPDATE messages SET uid = NULL WHERE id IN (SELECT id FROM messages WHERE uid = ? LIMIT ${BATCH})`, id);
+    this.all(
+      `INSERT INTO subs (sub_hash, deleted_at) VALUES (?, ?)
+       ON CONFLICT (sub_hash) DO UPDATE SET deleted_at = excluded.deleted_at`,
+      sub_hash, now,
+    );
+    this.forgetAdmin(id, sub_hash);
+    this.all("DELETE FROM users WHERE id = ?", id);
   }
 }

@@ -28,6 +28,7 @@
 //     getDrafts                GET /admin/coach/drafts: Bryan's Drafts list and his settings
 //     postDraft                POST /admin/coach/drafts/{id}: Bryan's actions on a review (ACTIONS)
 //     postSettings             POST /admin/coach/settings
+//   forget, exportFor          a chat account the room deletes (DELETE /me, its 24-month clean-up), and GET /me/export
 //   where()                    the second line of GET /admin/where: which Cloudflare data centre the coach lives in
 //   roomStub()                 the room's stub (stubs.js), which tests replace
 //   alarmBy(at)                makes sure the coach's one alarm goes off by `at`
@@ -1241,6 +1242,71 @@ export class Coach extends DurableObject {
     if (ask.start_again) await this.startAgain();
     if (!ask.test_email) return OK;
     return { status: 200, json: { ok: true, email: await this.mail(...TEST_MAIL) } };
+  }
+
+  // ---- Accounts (spec "Backend", "Accounts") -----------------------------------------------------------------------
+  //
+  // The room calls these over RPC: forget() before it deletes a chat account (DELETE /me, and its daily clean-up of
+  // accounts not seen for 24 months), and exportFor() for GET /me/export. Each counts itself as a coach request.
+
+  // Forgets a chat account before the room deletes it: every review of it goes with its key frames (dropFrames(), so
+  // frame_bytes stays right), and so do Bryan's examples that came from those reviews and the LINE account's people row
+  // (its saved level, board and stance, the agreement, and a block). The reviews are found by the account's uid and by
+  // its LINE account's sub_hash, so any an earlier account of the same LINE account left go too. The current Taiwan
+  // month's quota row stays, so an account deleted and made again inside the month has the reviews left it had, not 2
+  // more; the rows of earlier months go, as the daily clean-up's would. No count goes back. All in one transaction, and
+  // {ok: true} once it is done: the room deletes the account only then.
+  //
+  // A review whose AI call is out goes at once like the rest. Its answer is dropped when it comes back, as saveCall()
+  // finds no review calling, and a flag's block makes no people row again (flagged() only updates one). Its mark stays
+  // in calls_out, so the call is still paid when it comes back (settle), or at its worst case once lostCalls() finds it
+  // lost: forgetting an account never leaves a call unpaid.
+  async forget(uid, sub_hash) {
+    this.usage("req");
+    this.ctx.storage.transactionSync(() => {
+      for (const { id } of this.all("SELECT id FROM reviews WHERE uid = ? OR sub_hash = ?", uid, sub_hash)) {
+        this.all("DELETE FROM examples WHERE review_id = ?", id);
+        this.dropReview(id);
+      }
+      this.all("DELETE FROM people WHERE sub_hash = ?", sub_hash);
+      this.all("DELETE FROM quota WHERE sub_hash = ? AND month < ?", sub_hash, twMonth(this.now()));
+    });
+    return { ok: true };
+  }
+
+  // The coach's part of GET /me/export ("Download my data"): every review of the account (by uid), oldest first, each
+  // {id, lang, move, answers, created, sent, published, status, note, text, times, report}: what the surfer said (their
+  // answers), the dates, the status in their words as GET /coach/me shows it (or "uploading" for one not sent yet),
+  // what they are told about one not published (noteFor), the published text once it is published, each key frame's
+  // time in ms by its number, and their "Something wrong?" line. The times come from the frame rows, which stay after
+  // the frames themselves are cleared (ruling P16). Never a key frame, a draft or its English copy, Bryan's notes, the
+  // flags, warnings, tokens or cost, or the account's uid and sub_hash: the room's export holds no user id or LINE
+  // account code either.
+  async exportFor(uid) {
+    this.usage("req");
+    const reviews = this.all(
+      `SELECT id, lang, move, answers, created, sent, published, status, hold, surfer_note, warnings, flags, final, report
+       FROM reviews WHERE uid = ? ORDER BY created, id`,
+      uid,
+    );
+    const frames = this.all(
+      "SELECT review_id, n, ms FROM frames WHERE review_id IN (SELECT id FROM reviews WHERE uid = ?) ORDER BY review_id, n",
+      uid,
+    );
+    return reviews.map((r) => ({
+      id: r.id,
+      lang: r.lang,
+      move: r.move,
+      answers: JSON.parse(r.answers),
+      created: r.created,
+      sent: r.sent,
+      published: r.published,
+      status: SURFER_STATUS[r.status] ?? r.status,
+      note: noteFor(r),
+      text: r.status === "published" ? fromJson(r.final) : null,
+      times: Object.fromEntries(frames.filter((f) => f.review_id === r.id).map((f) => [f.n, f.ms])),
+      report: r.report,
+    }));
   }
 
   // ---- Placement ---------------------------------------------------------------------------------------------------

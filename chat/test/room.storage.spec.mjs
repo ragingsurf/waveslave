@@ -871,10 +871,19 @@ describe("alarm()", () => {
 describe("retention, run by the alarm at 19:00 UTC", () => {
   const stub = freshRoom();
   let id;
+  // The accounts the coach was asked to forget, [uid, sub_hash] each. The room reaches it through coachStub() (ruling
+  // R1), here a stand-in that confirms each (coach-accounts.spec.mjs has the real one, and one that fails).
+  const forgotten = [];
 
   beforeAll(async () => {
     id = await runInDurableObject(stub, async (room) => {
       room.now = () => T;
+      room.coachStub = () => ({
+        async forget(uid, sub_hash) {
+          forgotten.push([uid, sub_hash]);
+          return { ok: true };
+        },
+      });
       seedYear(room, T);
       addUser(room, { id: "gone", nick: "Gone", lastSeen: T - 731 * DAY });
       addUser(room, { id: "kept", nick: "Still", lastSeen: T - 729 * DAY });
@@ -1001,6 +1010,10 @@ describe("retention, run by the alarm at 19:00 UTC", () => {
     check((room) => {
       expect(rows(room, "SELECT key FROM limits ORDER BY key")).toEqual([{ key: "held:mika:sub-u2" }, { key: "sub-u2:like:10m" }]);
     }));
+
+  it("has the coach forget each account not seen for 730 days first, and only those", () => {
+    expect(forgotten).toEqual([["gone", "sub-gone"]]);
+  });
 
   it("deletes accounts not seen for 730 days, with their logs, and keeps their LINE account's row for 30 days", () =>
     check((room) => {

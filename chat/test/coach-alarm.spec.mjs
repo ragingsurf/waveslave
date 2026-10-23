@@ -379,18 +379,20 @@ describe("attempts and waits", () => {
     expect(await quota(c, a)).toEqual({ used: 0, sent: 1 });
   });
 
+  // What each starts (the coach's stop, a money rest) is in coach-money.spec.mjs. A money rest gives back the reviews
+  // waiting; the coach's stop doesn't.
   it.each([
-    ["pause", 401, "authentication_error", "invalid x-api-key"],
-    ["credit", 400, "invalid_request_error", "Your credit balance is too low to access the Anthropic API."],
-    ["limit", 400, "invalid_request_error", "You have reached your specified workspace API usage limits."],
-  ])("a %s error puts the review back in the queue with no attempt used and nothing given back", async (_kind, status, type, message) => {
+    ["pause", 401, "authentication_error", "invalid x-api-key", 0],
+    ["credit", 400, "invalid_request_error", "Your credit balance is too low to access the Anthropic API.", 1],
+    ["limit", 400, "invalid_request_error", "You have reached your specified workspace API usage limits.", 1],
+  ])("a %s error puts the review back in the queue with no attempt used", async (_kind, status, type, message, given) => {
     const c = await freshCoach();
     const a = surfer();
     const id = await insertReview(c, a);
     ai.push(apiError(status, type, message));
     await runAlarm(c);
-    expect(await reviewRow(c, id)).toMatchObject({ status: "queued", attempts: 0, waits: 0, next_try: T, given: 0 });
-    expect(await quota(c, a)).toEqual({ used: 1, sent: 1 });
+    expect(await reviewRow(c, id)).toMatchObject({ status: "queued", attempts: 0, waits: 0, next_try: T, given });
+    expect(await quota(c, a)).toEqual({ used: 1 - given, sent: 1 });
   });
 });
 

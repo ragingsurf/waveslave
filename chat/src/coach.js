@@ -10,7 +10,8 @@
 //   config()                   the coach's [vars] from wrangler.toml as numbers, with the spec's for a bad one
 //   usage(kind, n)             approximate daily counts of coach requests and SQL rows, for the free-plan guard
 //   stopFor(now)               why no new review may start or send now: a break, money, or nothing
-//   switchedOff, usageGuard    the breaks only a person ends (Pause, a stop, no key), and the free-plan guard
+//   onBreak()                  a break: Pause, a stop or no key (switchedOff), the free-plan (usageGuard) or size guard
+//   restAt, spendAt, moneyLines    the money rest now, the credit month's spend, and the lines at US$78 and US$80
 //   dailyLimit(), sentToday(now)   how many reviews a Taiwan day takes, and how many were sent today
 //   counts(sub_hash, month)    a LINE account's reviews used and sent in a Taiwan month
 //   giveBack(id)               a review's count given back, once: the only way any count goes back
@@ -27,8 +28,11 @@
 //   alarmBy(at)                makes sure the coach's one alarm goes off by `at`
 //   alarm()                    the one alarm: one review's AI call a run (spec "Backend", steps 1-7)
 //   nextAlarmAt(now)           when the alarm should next go off
-//   callsHeld(now)             whether Pause, a stop or a money rest holds every AI call
+//   callHold(now), held        what holds every AI call now, if anything, and whether it holds this run's call
 //   requestFor, callAi         a review's Messages API request, and the call itself
+//   addSpend, startRest, holdForCredit   the money: a call's cost, a money rest, and the hard stop at US$80
+//   markOut, callBack, lostCalls   the calls on their way, and paying for one whose run was cut off
+//   alert(kind)                tells Bryan at once that the coach stopped itself or is resting
 //   setPaused, startAgain      Bryan's Pause, and Start again after the coach stopped itself (ruling R10)
 //
 // Times are epoch milliseconds. Nothing reaches the coach but RPC calls from the Worker and the room, and its alarm.
@@ -39,8 +43,8 @@ import {
   AGREE_VER, BOARDS, LANGS, LEVELS, MOVES, STANCES, autopilotOk, buildRequest, checkReply, readReply,
 } from "./coach-guide.js";
 import {
-  ATTEMPT_WAITS, CALLING_STALE, DAY, MAX_TRIES, MAX_WAITS, checkFrame, cleanupAfter, costUsd, creditMonth, estimateIn,
-  nextTwMonth, sortError, twDay, twMonth, waitFor, worstUsd,
+  ATTEMPT_WAITS, CALLING_STALE, DAY, MAX_TRIES, MAX_WAITS, PROBE_EVERY, checkFrame, cleanupAfter, costUsd, creditMonth,
+  estimateIn, nextTwMonth, nextUtcMonth, sortError, twDay, twMonth, waitFor, worstUsd,
 } from "./coach-rules.js";
 import { colo, room } from "./stubs.js";
 
@@ -59,8 +63,12 @@ const USAGE_SAVE_MS = 30_000; // ...or time, whichever comes first
 //   autopilot      true while a draft that passes every check is published without Bryan
 //   paused         true while Bryan's Pause holds: no new reviews and no AI calls
 //   stopped        true after a key or model error, until Bryan taps Start again (ruling R10)
-//   spend          {start, usd, reviews}: the credit month's spending
-//   rest           {kind, until, probe_at}: a money rest
+//   spend          {start, usd, reviews}: the credit month's spending: when that month started, the US$ spent and the
+//                  AI calls paid for (spendAt, addSpend)
+//   rest           {kind, until, probe_at}: a money rest, "credit" or "limit", until `until`; probe_at is a credit
+//                  rest's next probe, null for a limit rest (startRest)
+//   calls_out      {review id: {redos, est_in, at}}: each AI call on its way, from just before its fetch until it comes
+//                  back, with the tokens its request sends and when it went (markOut)
 //   today          {day, n}: the reviews sent on this Taiwan day
 //   frame_bytes    the bytes of key frames stored, for the size guard
 //   next_cleanup   when the daily clean-up next runs
@@ -298,6 +306,9 @@ const fromJson = (text) => (text === null ? null : JSON.parse(text));
 const API_VERSION = "2026-10-21";
 const MAX_TOKENS = 16_000;
 const CALL_TIMEOUT = 600_000;
+// A review whose call couldn't be made (the room's ban check failed, or its request couldn't be built) goes back in the
+// queue for a minute, with no attempt used: no call went out.
+const NOT_CALLED_WAIT = 60_000;
 // The reviews columns that record a call that answered, in the order answered() lists them: the model named in the
 // answer, its tokens in and out, and its cost in US$.
 const CALL_SET = "model = ?, tok_in = ?, tok_out = ?, cost = ?";
@@ -439,26 +450,56 @@ export class Coach extends DurableObject {
 
   // ---- Limits ------------------------------------------------------------------------------------------------------
 
-  // Why no new review may start or be sent at `now`, or null when nothing stops it (spec "Backend" and "Money"):
-  //   {kind: "break"}   "Coach is taking a break": Bryan's Pause, the coach stopped itself (ruling R10), no API key, the
-  //                     free-plan guard (8% of a daily limit, by the coach's own UTC-day count, ruling R8), or the size
-  //                     guard
+  // Why no new review may start or be sent at `now`, or null when nothing stops it (spec "Backend" and "Money"). A
+  // Redo asks it too.
+  //   {kind: "break"}   "Coach is taking a break": onBreak()
   //   {kind: "money", until}   "Coach is resting until <until>": a money rest, until it ends; or the credit month's spend
-  //                     at COACH_STOP_USD + COACH_EXTRA_USD, until the next credit day, when the spend starts again
+  //                     at COACH_STOP_USD + COACH_EXTRA_USD, until the next credit day, when the spend starts again.
+  //                     When both hold, until is the later, when a review may start again.
   // A break says more than money, so it comes first.
   stopFor(now) {
-    if (this.switchedOff() || this.usageGuard()) return BREAK;
-    if ((this.getMeta("frame_bytes") ?? 0) > FRAME_BYTES_MAX || this.sql.databaseSize > DATABASE_MAX) return BREAK;
+    if (this.onBreak()) return BREAK;
+    const ends = [];
+    const rest = this.restAt(now);
+    if (rest) ends.push(rest.until);
+    const spend = this.spendAt(now);
+    if (spend.usd >= this.moneyLines().stop) ends.push(spend.next);
+    return ends.length > 0 ? { kind: "money", until: Math.max(...ends) } : null;
+  }
+
+  // A break: Bryan's Pause, the coach stopped itself (ruling R10) or no API key (switchedOff), the free-plan guard (8%
+  // of a daily limit, by the coach's own UTC-day count, ruling R8: usageGuard), or the size guard.
+  onBreak() {
+    if (this.switchedOff() || this.usageGuard()) return true;
+    return (this.getMeta("frame_bytes") ?? 0) > FRAME_BYTES_MAX || this.sql.databaseSize > DATABASE_MAX;
+  }
+
+  // The money rest that holds at `now` (meta rest), or null. A rest is over at its `until`, even before an alarm run
+  // clears it, so a start just after its end goes through.
+  restAt(now) {
     const rest = this.getMeta("rest");
-    if (rest) return { kind: "money", until: rest.until };
+    return rest && now < rest.until ? rest : null;
+  }
+
+  // The spending of the credit month `now` is in, {start, usd, reviews, next}: meta spend while the credit month it
+  // started in lasts, else nothing spent yet, as the spend starts again with each credit month. `next` is when the
+  // credit month ends, at 08:00 Taiwan on the next credit day.
+  spendAt(now) {
+    const { creditDay } = this.config();
     const spend = this.getMeta("spend");
     if (spend) {
-      const { stopUsd, extraUsd, creditDay } = this.config();
-      // The spend counts until the credit month it started in ends; after that it is last month's.
       const { next } = creditMonth(spend.start, creditDay);
-      if (now < next && spend.usd >= stopUsd + extraUsd) return { kind: "money", until: next };
+      if (now < next) return { ...spend, next };
     }
-    return null;
+    const month = creditMonth(now, creditDay);
+    return { start: month.start, usd: 0, reviews: 0, next: month.next };
+  }
+
+  // The money lines in US$ (spec "Money"): at `stop` new reviews and Redo are refused, and at `hard` no more AI calls
+  // are made. COACH_EXTRA_USD raises both.
+  moneyLines() {
+    const { stopUsd, hardUsd, extraUsd } = this.config();
+    return { stop: stopUsd + extraUsd, hard: hardUsd + extraUsd };
   }
 
   // Bryan's Pause, the coach's own stop (ruling R10), or no API key: a break that only a person ends.
@@ -818,16 +859,21 @@ export class Coach extends DurableObject {
     }
   }
 
-  // One run: the oldest review due is taken, the room is asked whether its account is banned, then the AI is called
-  // and what came back is saved (settle). A money rest past its end is over first, so the reviews waiting on it go.
+  // One run. First a call that a cut-off run left on its way is paid (lostCalls), a money rest past its end is over, so
+  // the reviews waiting on it go, and a credit rest's probe, when due, is this run's (probeDue). Then, unless something
+  // holds every call (held), the oldest review due is taken, the room is asked whether its account is banned, the AI
+  // is called, and what came back is saved (settle).
   async runOne(now) {
+    await this.lostCalls(now);
     const rest = this.getMeta("rest");
     if (rest && now >= rest.until) this.setMeta("rest", null);
-    if (this.callsHeld(now)) return;
+    const probe = this.probeDue(now);
+    if (this.held(now, probe)) return;
     const review = this.takeNext(now);
     if (!review) return;
-    // A stale pick's call was cut off midway (a deploy, say), so takeNext() counted it an attempt, and after the last
-    // one the coach gives up on it with no call. (The money limits add a stale pick's worst-case cost here.)
+    // A stale pick's run was cut off midway (a deploy, say), so takeNext() counted it an attempt, and after the last
+    // one the coach gives up on it with no call. If its call had gone out, lostCalls() has just paid it at its worst
+    // case.
     if (review.stale && review.attempts >= MAX_TRIES) return this.gaveUp(review, review.attempts);
     let banned, userId;
     try {
@@ -836,47 +882,79 @@ export class Coach extends DurableObject {
         sha256b64u("coach:" + review.sub_hash),
       ]);
     } catch (err) {
-      // It stays calling, so the alarm comes back for it at its 16-minute mark.
       console.error("coach: the room's ban check failed:", err?.name ?? "error");
-      return;
+      return this.putBack(review, this.now() + NOT_CALLED_WAIT);
     }
     // Everything is looked at again after that await, and there is none from here to the call: the review may have
     // gone, or Bryan paused, meanwhile.
     if (!this.stillCalling(review)) return;
     if (banned) return this.skipBanned(review);
-    if (this.callsHeld(this.now())) return this.putBack(review);
-    const ask = this.requestFor(review, userId);
-    this.settle(review, ask, await this.callAi(ask.body));
+    if (this.held(this.now(), probe)) return this.putBack(review);
+    let ask;
+    try {
+      ask = this.requestFor(review, userId);
+    } catch (err) {
+      console.error("coach: the request couldn't be built:", err?.name ?? "error");
+      return this.putBack(review, this.now() + NOT_CALLED_WAIT);
+    }
+    this.markOut(review, ask.estIn);
+    await this.settle(review, ask, await this.callAi(ask.body));
   }
 
-  // Whether every AI call waits now: while stopFor() says "break" (Pause, the coach stopped itself, no API key, the
-  // free-plan or the size guard), or a money rest holds. The money stop at COACH_STOP_USD + COACH_EXTRA_USD refuses only
-  // new reviews and Redo: the reviews already sent are still called. (The money limits add the hard stop, and a credit
-  // rest's probe every 6 hours.)
-  callsHeld(now) {
-    const stop = this.stopFor(now);
-    return stop !== null && (stop.kind === "break" || this.getMeta("rest") !== null);
+  // What holds every AI call at `now`, or null (spec "Backend" and "Money"):
+  //   "break"     onBreak(): Pause, the coach stopped itself, no API key, the free-plan or the size guard
+  //   "hard"      the credit month's spend at COACH_HARD_USD + COACH_EXTRA_USD, until the next credit month
+  //   "credit", "limit"   a money rest of that kind, until its end; a credit rest lets its probe through (held)
+  // The money stop at COACH_STOP_USD + COACH_EXTRA_USD refuses only new reviews and Redo: the reviews already sent are
+  // still called.
+  callHold(now) {
+    if (this.onBreak()) return "break";
+    if (this.spendAt(now).usd >= this.moneyLines().hard) return "hard";
+    return this.restAt(now)?.kind ?? null;
+  }
+
+  // Whether every AI call waits at `now` (callHold), for a run that is a credit rest's probe (`probe`) or not.
+  held(now, probe) {
+    const hold = this.callHold(now);
+    return hold !== null && !(probe && hold === "credit");
+  }
+
+  // Whether this run is a credit rest's probe (spec "Money"): while the rest lasts, one review is tried every
+  // PROBE_EVERY, which ends the rest early when it is answered. The next probe's time is set as soon as one is due, in
+  // the run it wakes, whatever then holds the call, so the alarm never goes off again at once.
+  probeDue(now) {
+    const rest = this.restAt(now);
+    if (rest?.kind !== "credit" || !Number.isFinite(rest.probe_at) || rest.probe_at > now) return false;
+    this.setMeta("rest", { ...rest, probe_at: now + PROBE_EVERY });
+    return true;
   }
 
   // When the alarm should next go off (spec step 7), never before now: the earliest of the next review's next_try (a
   // queued one's, or a calling one's 16-minute mark), the next daily clean-up (04:00 Taiwan), the hourly email (ruling
-  // R9), and a money rest's next probe and its end. While callsHeld() no review counts, so Pause, a stop and no key
-  // wake nothing, and lifting them brings the alarm back (setPaused, startAgain). The free-plan guard lifts by itself,
-  // so while it alone holds reviews that wait, the alarm comes back at the next 00:00 UTC. Each time here must be moved
-  // on by the run it wakes, or the alarm would go off again at once.
+  // R9), and a money rest's next probe and its end. While callHold() says something holds every call, no review counts,
+  // so Pause, a stop and no key wake nothing, and lifting them brings the alarm back (setPaused, startAgain). Two holds
+  // lift by themselves, so while one of them holds reviews that wait, the alarm comes back when it lifts, or at the
+  // waiting review's next_try if that is later: the free-plan guard at the next 00:00 UTC, and the hard stop when the
+  // credit month ends. Each time here must be moved on by the run it wakes, or the alarm would go off again at once.
   nextAlarmAt(now) {
     const rest = this.getMeta("rest");
     const times = [this.getMeta("next_cleanup") ?? cleanupAfter(now), this.getMeta("digest_due"), rest?.until, rest?.probe_at];
     const waiting = this.one("SELECT min(next_try) AS at FROM reviews WHERE status IN ('queued', 'calling')").at;
-    if (!this.callsHeld(now)) times.push(waiting);
-    else if (waiting !== null && this.usageGuard() && !this.switchedOff()) times.push((Math.floor(now / DAY) + 1) * DAY);
+    const hold = this.callHold(now);
+    if (waiting !== null) {
+      if (hold === null) times.push(waiting);
+      else if (hold === "break" && this.usageGuard() && !this.switchedOff()) {
+        times.push(Math.max((Math.floor(now / DAY) + 1) * DAY, waiting));
+      } else if (hold === "hard") times.push(Math.max(this.spendAt(now).next, waiting));
+    }
     return Math.max(now, Math.min(...times.filter(Number.isFinite)));
   }
 
   // The next review to call, marked calling with next_try at its 16-minute mark (spec step 2): of those queued and due,
   // or left calling past their mark, the one sent first. null when none is due. A review left calling is `stale`: its
-  // call was cut off midway (a deploy can stop one), which counts as an attempt (step 5, like a timeout), so a call that
-  // fails that way every time can't go on paying every 16 minutes. The read and the write have no await between them.
+  // run was cut off midway (a deploy can stop one), which counts as an attempt (step 5, like a timeout), so a call that
+  // fails that way every time can't go on paying every 16 minutes. (A run that couldn't make its call puts its review
+  // back in the queue itself, so it isn't left calling.) The read and the write have no await between them.
   takeNext(now) {
     const next = this.one(
       "SELECT id, status FROM reviews WHERE status IN ('queued', 'calling') AND next_try <= ? ORDER BY sent, id LIMIT 1",
@@ -961,21 +1039,45 @@ export class Coach extends DurableObject {
     }
   }
 
-  // What became of a call (spec steps 4-6 and "Money"), each saved with saveCall(). An answer is checked (answered());
-  // an error goes by its kind:
+  // What became of a call (spec steps 3-6 and "Money"). The call is back first: its mark goes (callBack) and its cost
+  // counts at once (addSpend), before anything is saved, so a reply for a review deleted or redone meanwhile still
+  // costs the month, and the call is paid once. Then its outcome is saved with saveCall(). An answer is checked
+  // (answered()); an error goes by its kind:
   //   "wait"      a 429 or 529: it waits for retry-after, or 30 minutes, with no attempt used, 12 times in a row at most
   //   "attempt"   a 5xx, a timeout or a network error
   //   "fail"      any other 400, or a 413: the coach gives up on it at once
-  //   "pause", "credit", "limit"   the key, the model or the money, not this review's fault
-  settle(review, ask, result) {
+  //   "pause"     the key or the model doesn't work: the coach stops itself (meta stopped, ruling R10)
+  //   "credit", "limit"   the money: a money rest starts (startRest)
+  // After those last three, which are no fault of this review's, it goes back in the queue with no attempt used. A
+  // money line the call's cost reached is acted on last (reached), once the review's own outcome is saved. Bryan is
+  // told after every write (alert).
+  async settle(review, ask, result) {
     const now = this.now();
-    if (result.kind === "ok") return this.answered(review, ask, readReply(result.message), now);
-    if (result.kind === "wait") return this.waited(review, waitFor(result.retryAfter), now);
-    if (result.kind === "attempt") return this.attempted(review, now);
-    if (result.kind === "fail") return this.gaveUp(review, review.attempts + 1);
-    // The review goes back in the queue with no attempt used. The money limits add what each kind starts: "pause"
-    // stops the coach (ruling R10), "credit" and "limit" a money rest.
-    return this.putBack(review, now);
+    const answer = result.kind === "ok" ? readReply(result.message) : null;
+    this.callBack(review);
+    const usd = this.callUsd(result, answer, ask.estIn);
+    const crossed = usd > 0 ? this.addSpend(usd, now) : null;
+    let told = null;
+    if (result.kind === "ok") {
+      // An answer means the credit is back, so it ends a credit rest: only a probe calls during one.
+      if (this.restAt(now)?.kind === "credit") this.setMeta("rest", null);
+      this.answered(review, ask, answer, now);
+    } else if (result.kind === "wait") {
+      this.waited(review, waitFor(result.retryAfter), now);
+    } else if (result.kind === "attempt") {
+      this.attempted(review, now);
+    } else if (result.kind === "fail") {
+      this.gaveUp(review, review.attempts + 1);
+    } else if (result.kind === "pause") {
+      this.putBack(review, now);
+      this.setMeta("stopped", true);
+      told = "stopped";
+    } else {
+      this.putBack(review, now);
+      if (this.startRest(result.kind, now)) told = "resting";
+    }
+    const reached = this.reached(crossed, now);
+    for (const kind of [told, reached]) if (kind) await this.alert(kind);
   }
 
   // An answer, checked in the spec's order. A refusal or a flag first, as a reply of any shape may carry one (ruling
@@ -1050,10 +1152,11 @@ export class Coach extends DurableObject {
     });
   }
 
-  // Back in the queue, due now, with no attempt used: a hold that began while the room was asked, or an error that is
-  // the key's, the model's or the money's, not this review's.
-  putBack(review, now = this.now()) {
-    this.saveCall(review, "status = 'queued', next_try = ?", now);
+  // Back in the queue, due `at` (now by default), with no attempt used: a hold that began while the room was asked; a
+  // call that couldn't be made, a minute later; or an error that is the key's, the model's or the money's, not this
+  // review's.
+  putBack(review, at = this.now()) {
+    this.saveCall(review, "status = 'queued', next_try = ?", at);
   }
 
   // A banned account's review (spec step 2): rejected with no call, its key frames gone, its count not given back.
@@ -1063,13 +1166,122 @@ export class Coach extends DurableObject {
     });
   }
 
-  // What a call cost in US$ at the [vars] prices: from the answer's token counts, or at its worst case (all of the
-  // request, and every token max_tokens allows) when it gave none.
+  // What a call cost in US$ at the [vars] prices: from the answer's token counts, or at its worst case when it gave
+  // none.
   callCost(usage, estIn) {
     const { priceIn, priceOut } = this.config();
-    const prices = { in: priceIn, out: priceOut };
-    return usage ? costUsd(usage, prices) : worstUsd(estIn, MAX_TOKENS, prices);
+    return usage ? costUsd(usage, { in: priceIn, out: priceOut }) : this.worstCost(estIn);
   }
+
+  // What a call that sent `estIn` tokens (estimateIn) could have cost at most: all of the request, and every token
+  // max_tokens allows.
+  worstCost(estIn) {
+    const { priceIn, priceOut } = this.config();
+    return worstUsd(estIn, MAX_TOKENS, { in: priceIn, out: priceOut });
+  }
+
+  // What a call cost the month (spec "Money"): an answer at its token counts, but at its worst case when it was cut
+  // off at max_tokens or gave none; a timeout or an abort (cutOff) at its worst case, as it may have run to the end;
+  // any other error nothing.
+  callUsd(result, answer, estIn) {
+    if (result.kind !== "ok") return result.cutOff ? this.worstCost(estIn) : 0;
+    return answer.stop === "max_tokens" ? this.worstCost(estIn) : this.callCost(answer.usage, estIn);
+  }
+
+  // ---- Money -------------------------------------------------------------------------------------------------------
+
+  // Adds a call's cost to the credit month's spend (meta spend), which starts again with each credit month (spendAt):
+  // every call that cost something counts, whatever was saved of it. Returns the money line (moneyLines) this call took
+  // the spend to: "hard", "stop", or null when it reached neither for the first time this month.
+  addSpend(usd, now = this.now()) {
+    const { start, usd: before, reviews } = this.spendAt(now);
+    const after = before + usd;
+    this.setMeta("spend", { start, usd: after, reviews: reviews + 1 });
+    const { stop, hard } = this.moneyLines();
+    if (before < hard && after >= hard) return "hard";
+    return before < stop && after >= stop ? "stop" : null;
+  }
+
+  // What a money line reached by a call's cost (addSpend) starts: at the hard stop every review waiting waits for the
+  // next credit month (holdForCredit), and either line is a "resting" alert for Bryan, which it returns (else null).
+  reached(crossed, now) {
+    if (crossed === "hard") this.holdForCredit(now);
+    return crossed === null ? null : "resting";
+  }
+
+  // The hard stop (spec "Money"): no more AI calls this credit month, so every review waiting goes back to queued with
+  // no attempt used, waits for the next credit month, and is given back to the month it was sent in (once: giveBack).
+  holdForCredit(now) {
+    const { next } = this.spendAt(now);
+    this.ctx.storage.transactionSync(() => {
+      const held = this.all(
+        "UPDATE reviews SET status = 'queued', next_try = ? WHERE status IN ('queued', 'calling') RETURNING id", next,
+      );
+      for (const { id } of held) this.giveBack(id);
+    });
+  }
+
+  // Starts a money rest of `kind` (spec "Money"), during which every AI call waits: "credit" (the credit ran out) until
+  // the next credit day, with one review tried every PROBE_EVERY to end it early (probeDue); "limit" (the Console's
+  // monthly limit, which counts UTC months) until 08:00 Taiwan on the 1st, with no probe. The reviews waiting are given
+  // back to the month they were sent in (once: giveBack). A rest of the same kind already on goes on as it is: that is
+  // a probe that found no credit again. True when a rest started.
+  startRest(kind, now) {
+    if (this.restAt(now)?.kind === kind) return false;
+    const rest = kind === "credit"
+      ? { kind, until: creditMonth(now, this.config().creditDay).next, probe_at: now + PROBE_EVERY }
+      : { kind, until: nextUtcMonth(now), probe_at: null };
+    this.ctx.storage.transactionSync(() => {
+      this.setMeta("rest", rest);
+      for (const { id } of this.all("SELECT id FROM reviews WHERE status IN ('queued', 'calling')")) this.giveBack(id);
+    });
+    return true;
+  }
+
+  // The calls on their way (meta calls_out): a review's call is marked just before its fetch (markOut), with the tokens
+  // its request sends, and unmarked as soon as it comes back (callBack), so a mark that stays is a call whose run was
+  // cut off (lostCalls). A run that stops before its fetch marks nothing.
+  markOut(review, estIn) {
+    const out = this.getMeta("calls_out") ?? {};
+    out[review.id] = { redos: review.redos, est_in: estIn, at: this.now() };
+    this.setMeta("calls_out", out);
+  }
+
+  callBack(review) {
+    const out = this.getMeta("calls_out") ?? {};
+    delete out[review.id];
+    this.setMeta("calls_out", out);
+  }
+
+  // Pays for each call that went out and never came back, at its worst case, as it may have run to the end (spec
+  // "Money"): its run was cut off midway (a deploy can stop one). A call is known to be lost when its review is left
+  // calling past its 16-minute mark for the same redo number (a stale pick, which this run may be about to make), or
+  // when it went out 16 minutes ago or more, longer than its 10-minute timeout and the 15 minutes a run may take (its
+  // review gone, say). Its mark goes as it is paid, so it is paid once; a call younger than that may still be on its
+  // way. Bryan is told when that reaches a money line.
+  async lostCalls(now) {
+    const out = this.getMeta("calls_out") ?? {};
+    const stale = "SELECT 1 FROM reviews WHERE id = ? AND status = 'calling' AND redos = ? AND next_try <= ?";
+    const lost = Object.keys(out).filter(
+      (id) => now - out[id].at >= CALLING_STALE || this.one(stale, id, out[id].redos, now) !== null,
+    );
+    if (lost.length === 0) return;
+    let crossed = null;
+    for (const id of lost) {
+      crossed = this.addSpend(this.worstCost(out[id].est_in), now) ?? crossed;
+      delete out[id];
+    }
+    this.setMeta("calls_out", out);
+    const reached = this.reached(crossed, now);
+    if (reached) await this.alert(reached);
+  }
+
+  // ---- Alerts ------------------------------------------------------------------------------------------------------
+
+  // Tells Bryan at once (spec "The email"): "stopped" when the coach stopped itself (its key or model setting stopped
+  // working), "resting" when a money rest starts or the credit month's spend reaches US$78 or US$80 (+ extra). Its
+  // callers await it once their writes are done. It must never throw. Nothing is sent yet: the alert emails fill it in.
+  async alert(kind) {}
 
   // ---- Pause and Start again ---------------------------------------------------------------------------------------
 

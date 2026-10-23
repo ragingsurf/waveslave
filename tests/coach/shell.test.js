@@ -47,25 +47,28 @@ const backends = page => page.tried.filter(u => /workers\.dev/.test(u));
 class Skip extends Error {}
 
 // GET /coach/me's answer for a signed-in surfer (getMe in chat/src/coach.js), o's fields over these; and a fake backend that gives it (or,
-// with another status, the backend's refusal: 401 auth, else 503 break) besides /reports. The token the checks give the page is a
-// stand-in: only the fake backend sees it.
+// with another status, the backend's refusal: 401 auth, 403 banned, else 503 break) besides /reports. The token the checks give the page
+// is a stand-in: only the fake backend sees it.
 const me = o => ({ left: 2, sent_left: 4, monthly: 2, month: "2030-11", next_month: Date.UTC(2030, 10, 30, 16), full_today: false, stop: null, profile: null,
   agreed: true, admin: false, reviews: [], account: "u-test", ...o });
-const coachBackend = (o = {}, status = 200) => q => q.pathname === "/coach/me" ? { status, body: status === 200 ? me(o) : { error: status === 401 ? "auth" : "break" } }
+const coachBackend = (o = {}, status = 200) => q => q.pathname === "/coach/me"
+  ? { status, body: status === 200 ? me(o) : { error: status === 401 ? "auth" : status === 403 ? "banned" : "break" } }
   : { body: { reports: [], online: 0, last_id: 0 } };
 const TOKEN = { "waveslave-chat-token": "test-token" };
 
 // ---- New review (web/coach.js's flow), offline. flowBackend(o, {failFrame}) is a fake coach backend for it: GET /coach/me as me(o) (with a
 // profile, so only the move is asked), POST /coach/reviews {id: ID}, each key frame's POST {ok}, GET /coach/reviews/<id> {status:
 // "uploading", have}, and POST …/send {ok, left: 1}. failFrame {n, times} cuts the network on key frame n's first `times` POSTs. It notes
-// each start's body (st.starts), each key frame POST's n and body or failed (st.frames), the GETs of the review and the sends.
+// each start's body (st.starts), each key frame POST's n and body or failed (st.frames), the GETs of the review and the sends. While
+// st.refuse is {status, body}, each start is refused with it; POST /coach/agree answers {ok} (st.agrees counts them).
 const ID = "a".repeat(22), PROFILE = { level: "turning_well", board: "shortboard", stance: "regular" };
 function flowBackend(o = {}, { failFrame = null } = {}) {
-  const st = { starts: [], frames: [], gets: 0, sends: 0, have: new Set(), tries: 0 };
+  const st = { starts: [], frames: [], gets: 0, sends: 0, have: new Set(), tries: 0, refuse: null, agrees: 0 };
   st.backend = (q, req) => {
     const p = q.pathname, m = req.method(), frame = /^\/coach\/reviews\/[\w-]{22}\/frames\/(\d+)$/.exec(p);
     if (p === "/coach/me") return { body: me({ profile: PROFILE, ...o }) };
-    if (p === "/coach/reviews" && m === "POST") { st.starts.push(req.postDataJSON()); st.have.clear(); return { body: { id: ID } }; }
+    if (p === "/coach/agree" && m === "POST") { st.agrees++; return { body: { ok: true } }; }
+    if (p === "/coach/reviews" && m === "POST") { st.starts.push(req.postDataJSON()); if (st.refuse) return st.refuse; st.have.clear(); return { body: { id: ID } }; }
     if (frame && m === "POST") { const n = +frame[1];
       if (failFrame && n === failFrame.n && st.tries++ < failFrame.times) { st.frames.push({ n, failed: true }); return null; }
       st.frames.push({ n, body: req.postData() }); st.have.add(n); return { body: { ok: true } }; }
@@ -75,6 +78,44 @@ function flowBackend(o = {}, { failFrame = null } = {}) {
   };
   return st;
 }
+// ---- The review (web/coach.js's review page), offline. reviewBackend(text, o) is a fake coach backend for it: GET /coach/me as me() with
+// three reviews, one ready (RID) and two not reviewed (one held as not surf, one with o.note, a person's note); GET /coach/reviews/<RID>
+// published, with text, its key frames' times (KEY_MS) and o.checked, or o.get when given (another answer); each of its key frames as a
+// JPEG (Bryan's example's first), noting each ask's number and Authorization (st.frames); POST …/report answering st.report (o.report
+// at first) or {ok} (st.reports notes the bodies) and DELETE {ok} (st.deletes).
+const JPEG = fs.readFileSync(path.join(ROOT, "web", "coach-example", "1.jpg"));
+const RID = "r".repeat(22), KEY_MS = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [i + 1, 10000 + 250 * (i + 1)]));
+const REVIEW_AT = Date.UTC(2030, 10, 2, 2);
+function reviewBackend(text, { checked = true, note = "We couldn't see you. Try filming closer.", get = null, report = null } = {}) {
+  const st = { frames: [], reports: [], deletes: 0, report };
+  const reviews = [{ id: RID, move: "top_turn", created: REVIEW_AT, status: "ready", published: REVIEW_AT + 3600e3, note: null },
+    { id: "n".repeat(22), move: "cutback", created: REVIEW_AT - 86400e3, status: "not_reviewed", published: null, note: "not_surf" },
+    { id: "m".repeat(22), move: "popup", created: REVIEW_AT - 2 * 86400e3, status: "not_reviewed", published: null, note }];
+  st.backend = (q, req) => {
+    const p = q.pathname, m = req.method(), frame = new RegExp(`^/coach/reviews/${RID}/frames/(\\d+)$`).exec(p);
+    if (p === "/coach/me") return { body: me({ profile: PROFILE, reviews }) };
+    if (p === `/coach/reviews/${RID}` && m === "GET") return get || { body: { id: RID, status: "published", move: "top_turn", created: REVIEW_AT, have: Object.keys(KEY_MS).map(Number), note: null,
+      review: { text, times: KEY_MS, checked } } };
+    if (frame && m === "GET") { st.frames.push({ n: +frame[1], auth: req.headers().authorization || null }); return { jpeg: JPEG }; }
+    if (p === `/coach/reviews/${RID}/report` && m === "POST") { st.reports.push(req.postDataJSON()); return st.report || { body: { ok: true } }; }
+    if (p === `/coach/reviews/${RID}` && m === "DELETE") { st.deletes++; return { body: { ok: true } }; }
+    return { body: { reports: [], online: 0, last_id: 0 } };
+  };
+  return st;
+}
+// A published review's text, in the reply's shape: what went well at key frame 2, the main fix at 6, 7 and 8, the drill, and o over it.
+const reviewText = o => ({ is_surf_clip: true, can_see_surfer: true, sexual_content: false, surfer_looks_under_18: false, unusable_frames: [],
+  went_well: { frame: 2, title: "Low and ready going in", detail: "Both knees are bent going into the turn." },
+  main_fix: { frames: [6, 7, 8], title: "Stay over your front foot", what: "Your weight slides back onto the tail.", why: "The board runs away from under you." },
+  drill: { title: "Front-knee turns on the sand", how: "Turn your head and shoulders, push your front knee forward and hold." },
+  heads_up: { text: "", move: "" }, progress: "", ...o });
+// Opens the ready review from the list and waits for its four key frames, each a blob URL that has loaded.
+async function openRid(page) {
+  await page.tap(TAB); await inPanel(page, "the ready review", `[data-k="r-${RID}"]`); await page.click(`.coachpanel [data-k="r-${RID}"]`);
+  await page.waitForFunction(() => { const i = [...document.querySelectorAll(".coachpanel .co-review img")]; return i.length === 4 && i.every(x => x.src.startsWith("blob:") && x.complete && x.naturalWidth > 0); },
+    null, { timeout: 10e3 }).catch(e => { throw new Error(`waited for the review's four key frames: ${e.message.split("\n")[0]}`); });
+}
+const BLOCKED = "This account can't use the coach.", BREAK = "Coach is taking a break. Try again later.";
 const inPanel = (page, what, sel, timeout = 15e3) => page.waitForSelector(".coachpanel " + sel, { timeout }).catch(e => { throw new Error(`waited for ${what}: ${e.message.split("\n")[0]}`); });
 const text = (page, sel) => page.evaluate(s => { const e = document.querySelector(".coachpanel " + s); return e && !e.closest("[hidden]") ? e.textContent : null; }, sel);
 // The video's displayed size, as the coach reads it.
@@ -693,6 +734,156 @@ const CHECKS = {
     const d = await draft(page);
     if (await text(page, '[data-k="move-cutback"]') !== "Cutback" || !d || d.answers.move !== "cutback" || d.answers.note !== typed || d.step !== "find") throw new Error(`back in English: ${JSON.stringify(d && { answers: d.answers, step: d.step })}`);
   },
+  // ---- The review (AI coach spec, "The review") and the error table ("When something goes wrong"), offline.
+  // Review Focus 4: a published review whose every text field, and a person's note in the list, hold <img src=x onerror=alert(1)>: it all
+  // shows as text, and opening the review adds to the page only its four key frames, each a blob URL fetched with the token (the alert
+  // never runs). A held clip says "We couldn't review this clip.". The heads-up names a move, so it has "Get a review of your cutback";
+  // the footer says a person checked it.
+  async reviewMarkup(open) {
+    const X = "<img src=x onerror=alert(1)>", text = reviewText({ went_well: { frame: 2, title: X, detail: X }, main_fix: { frames: [6, 7, 8], title: X, what: X, why: X },
+      drill: { title: X, how: X }, heads_up: { text: X, move: "cutback" }, progress: X });
+    const st = reviewBackend(text, { note: X }), page = await open({ store: TOKEN, backend: st.backend, init: [() => { window.alert = () => { window.__alerted = true; }; }] });
+    await page.tap(TAB); await inPanel(page, "the list", `[data-k="r-${RID}"]`);
+    const notes = await page.$$eval(".coachpanel .co-list .co-rnote", e => e.map(x => x.textContent));
+    if (!eq(notes, ["We couldn't review this clip.", X])) throw new Error(`the list's notes are ${JSON.stringify(notes)}`);
+    await page.tap(".coachpanel .co-x"); const before = await page.evaluate(() => document.images.length);
+    await openRid(page); await wait(300);
+    const got = await page.evaluate(x => { const v = document.querySelector(".coachpanel .co-review");
+      return { added: document.images.length, srcs: [...document.querySelectorAll(".coachpanel img")].map(i => i.src.slice(0, 5)), stray: document.querySelectorAll('img[src="x"], img[src$="/x"]').length,
+        alerted: !!window.__alerted, marks: v.textContent.split(x).length - 1, heads: [...v.querySelectorAll(".co-part h4")].map(h => h.textContent),
+        button: (v.querySelector('[data-k="headsup"]') || {}).textContent, foot: (v.querySelector(".co-foot") || {}).textContent }; }, X);
+    if (got.added !== before + 4 || !eq(got.srcs, ["blob:", "blob:", "blob:", "blob:"]) || got.stray || got.alerted) throw new Error(`the review added ${got.added - before} images (${JSON.stringify(got.srcs)}), ${got.stray} with src x, alert ${got.alerted ? "ran" : "didn't run"}`);
+    if (got.marks !== 9) throw new Error(`the markup shows as text ${got.marks} times, want 9 (every text field)`);
+    if (!eq(got.heads, ["What went well", "The main fix", "Your drill", "Heads-up", "Progress"]) || got.button !== "Get a review of your cutback") throw new Error(`the review's parts: ${JSON.stringify(got)}`);
+    if (got.foot !== "Reviewed by WaveSlave Coach (AI), checked by a person. Surf within your limits.") throw new Error(`the footer says ${JSON.stringify(got.foot)}`);
+    if (!eq(st.frames.map(f => f.n).sort((a, b) => a - b), [2, 6, 7, 8]) || !st.frames.every(f => f.auth === "Bearer test-token")) throw new Error(`the key frames were asked for as ${JSON.stringify(st.frames)}`);
+  },
+  // Tapping a key frame enlarges it over the panel, the same blob URL with its time; Tab stays in it, Escape shuts it (and only it), and the
+  // focus goes back to the key frame; ✕ shuts it too. A review checked by no one (autopilot) has the short footer, and without a heads-up
+  // or progress line neither shows. ‹ Back to the list revokes the key frames' blob URLs, and so does shutting the panel.
+  async enlarge(open) {
+    const st = reviewBackend(reviewText({}), { checked: false }), page = await open({ store: TOKEN, backend: st.backend });
+    await openRid(page);
+    const look = () => page.evaluate(() => { const b = document.querySelector(".coachpanel .co-lb"), shown = !!b && !b.hidden && !!b.getClientRects().length, a = document.activeElement;
+      const r = b && b.getBoundingClientRect(), top = b && document.elementFromPoint(195, 500);
+      return { shown, head: shown ? b.querySelector("h3").textContent : null, src: shown ? b.querySelector("img").src : null, covers: shown && !!top && b.contains(top) && r.width === 390 && r.height === 844,
+        focus: a ? a.getAttribute("data-k") || a.className : null, open: document.documentElement.classList.contains("coach-open") }; });
+    const src = k => page.evaluate(k => document.querySelector(`.coachpanel [data-k="${k}"] img`).src, k);
+    const parts = await page.evaluate(() => ({ heads: [...document.querySelectorAll(".coachpanel .co-review .co-part h4")].map(h => h.textContent), foot: document.querySelector(".coachpanel .co-foot").textContent }));
+    if (!eq(parts, { heads: ["What went well", "The main fix", "Your drill"], foot: "Reviewed by WaveSlave Coach (AI). Surf within your limits." })) throw new Error(`an autopilot review without a heads-up: ${JSON.stringify(parts)}`);
+    await page.click('.coachpanel [data-k="shot-w2"]'); let l = await look();
+    if (!eq(l, { shown: true, head: "Key frame at 0:10.5", src: await src("shot-w2"), covers: true, focus: "bigx", open: true })) throw new Error(`key frame 2 enlarged: ${JSON.stringify(l)}`);
+    for (let i = 0; i < 3; i++) { await page.keyboard.press("Tab"); if (!await page.evaluate(() => document.querySelector(".coachpanel .co-lb").contains(document.activeElement))) throw new Error(`Tab ${i + 1} left the enlarged key frame`); }
+    await page.keyboard.press("Escape"); await settle(page); l = await look();
+    if (l.shown || !l.open || l.focus !== "shot-w2") throw new Error(`after Escape: ${JSON.stringify(l)}`);
+    await page.click('.coachpanel [data-k="shot-f7"]'); l = await look();
+    if (!l.shown || l.head !== "Key frame at 0:11.8" || l.src !== await src("shot-f7")) throw new Error(`key frame 7 enlarged: ${JSON.stringify(l)}`);
+    await page.click(".coachpanel .co-lb .co-x"); await settle(page); l = await look();
+    if (l.shown || !l.open || l.focus !== "shot-f7") throw new Error(`after ✕: ${JSON.stringify(l)}`);
+    const alive = srcs => page.evaluate(srcs => Promise.all(srcs.map(u => fetch(u).then(() => true, () => false))), srcs);
+    for (const [what, shut] of [["‹ Back", () => page.click('.coachpanel [data-k="back"]')], ["✕", () => page.tap(".coachpanel .co-x")]]) {
+      const srcs = await page.$$eval(".coachpanel .co-review img", i => i.map(x => x.src));
+      if (!eq(await alive(srcs), [true, true, true, true])) throw new Error("the key frames' blob URLs don't load (the check itself is off)");
+      await shut(); await settle(page);
+      if (await page.$(".coachpanel .co-review")) throw new Error(`${what} left the review open`);
+      if (!eq(await alive(srcs), [false, false, false, false])) throw new Error(`after ${what} the key frames' blob URLs still load`);
+      if (what === "‹ Back") { await page.tap(".coachpanel .co-x"); await openRid(page); }
+    }
+  },
+  // Something wrong? opens one optional line; Send posts it. invalid (or state) says "Couldn't send. Tap to try again." on the button, which
+  // sends again; a 401 there hands the token back and shows Sign in with LINE. Delete asks first (Cancel keeps it).
+  async reviewActions(open) {
+    const st = reviewBackend(reviewText({})), page = await open({ store: TOKEN, backend: st.backend });
+    await openRid(page);
+    await page.click('.coachpanel [data-k="del"]'); await inPanel(page, "Delete's question", '[data-k="delyes"]');
+    const ask = await text(page, ".co-ask p");
+    if (ask !== "Delete this review? It and its key frames are deleted from WaveSlave.") throw new Error(`Delete asks ${JSON.stringify(ask)}`);
+    await page.click('.coachpanel [data-k="delno"]'); await inPanel(page, "the review's buttons", '[data-k="wrong"]');
+    if (st.deletes) throw new Error("Cancel deleted the review");
+    st.report = { status: 400, body: { error: "invalid" } };
+    await page.click('.coachpanel [data-k="wrong"]'); await page.fill('.coachpanel [data-k="wrongline"]', "The drill doesn't fit my board.");
+    await page.click('.coachpanel [data-k="wrongsend"]');
+    await page.waitForFunction(t => { const b = document.querySelector('.coachpanel [data-k="wrongsend"]'); return !!b && b.textContent === t; }, FAILED, { timeout: 5000 }).catch(() => {});
+    const failed = await text(page, '[data-k="wrongsend"]');
+    if (failed !== FAILED || !eq(st.reports, [{ line: "The drill doesn't fit my board." }])) throw new Error(`invalid says ${JSON.stringify(failed)}; sent ${JSON.stringify(st.reports)}`);
+    st.report = { status: 401, body: { error: "auth" } }; await page.click('.coachpanel [data-k="wrongsend"]'); await inPanel(page, "Sign in with LINE", ".co-signin");
+    if (await page.evaluate(() => localStorage.getItem("waveslave-chat-token")) !== null) throw new Error("a 401 on Something wrong? left the token");
+  },
+  // Every refusal at the start of a send, with its message from the spec's table (a money rest naming its day in Taiwan time: "16
+  // November", 「11月16日」), and the Send button there again; invalid and state say "Couldn't send. Tap to try again." on the button; agree
+  // shows the agreement again, and once it's agreed the check screen is back. The draft keeps its 12 key frames all along, and nothing
+  // is sent but the starts, until one goes through.
+  async sendCodes(open, { tmp }) {
+    const st = flowBackend(), page = await open({ store: TOKEN, backend: st.backend }), b = boxAt(640, 360, 6, 3);
+    await toCheck(page, makeClip(tmp, {}), { at: 3, x: b.x, y: b.y });
+    const look = () => page.evaluate(() => { const q = s => document.querySelector(".coachpanel " + s), s = q('[data-k="send"]');
+      return { said: q(".co-said") && q(".co-said").textContent, retry: q('[data-k="retry"]') && q('[data-k="retry"]').textContent, send: !!s && !s.disabled }; });
+    const refuse = async (status, body) => { st.refuse = { status, body }; const n = st.starts.length;
+      await page.click('.coachpanel [data-k="send"], .coachpanel [data-k="retry"]'); await soon(`the start refused with ${body.error}`, () => st.starts.length > n);
+      await inPanel(page, "the check screen", '.co-grid', 20e3); await settle(page); return look(); };
+    const MONEY = { error: "money", until: Date.UTC(2030, 10, 16) };
+    for (const [status, body, said] of [[503, MONEY, "Coach is resting until 16 November."], [503, { error: "break" }, BREAK], [429, { error: "full_today" }, "Coach is full today. Try again tomorrow."],
+      [429, { error: "no_reviews_left" }, "You've used your 2 reviews for November. More on December 1."], [409, { error: "in_progress" }, "Your last review is still with the coach."],
+      [403, { error: "blocked" }, BLOCKED], [403, { error: "banned" }, BLOCKED], [400, { error: "too_few_frames" }, NEED8], [400, { error: "invalid" }, null], [409, { error: "state" }, null]]) {
+      const got = await refuse(status, body), want = said ? { said, retry: null, send: true } : { said: null, retry: FAILED, send: false };
+      if (!eq(got, want)) throw new Error(`${status} ${body.error} shows ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+    }
+    await page.evaluate(() => setLang("zh")); await settle(page);
+    for (const [status, body, said] of [[503, MONEY, "教練休息到11月16日。"], [429, { error: "no_reviews_left" }, "11月的 2 次講評已經用完了，12月1日起可以再申請。"]]) {
+      const got = await refuse(status, body);
+      if (got.said !== said) throw new Error(`in 中文 ${body.error} says ${JSON.stringify(got.said)}, want ${JSON.stringify(said)}`);
+    }
+    await page.evaluate(() => setLang("en")); await settle(page);
+    st.refuse = { status: 403, body: { error: "agree" } }; const n = st.starts.length;
+    await page.click('.coachpanel [data-k="send"]'); await soon("the start refused with agree", () => st.starts.length > n); await inPanel(page, "the agreement", ".co-agree");
+    if (await page.$(".coachpanel .co-grid")) throw new Error("agree left the check screen showing with the agreement");
+    await page.check('.coachpanel [data-k="adult"]'); await page.click('.coachpanel [data-k="agree"]'); await inPanel(page, "the check screen again", ".co-grid");
+    const back = await look(), d = await draft(page);
+    if (st.agrees !== 1 || !eq(back, { said: null, retry: FAILED, send: false })) throw new Error(`after agreeing again: ${st.agrees} agrees, ${JSON.stringify(back)}`);
+    if (!d || d.frames.length !== 12 || !d.frames.every(f => f.blob > 0) || st.frames.length) throw new Error(`after the refusals the draft has ${d && d.frames.length} key frames, ${st.frames.length} sent`);
+    st.refuse = null; await page.click('.coachpanel [data-k="retry"]'); await inPanel(page, `"${SENT}"`, ".co-ok", 30e3);
+    if (st.frames.length !== 12 || st.sends !== 1) throw new Error(`the send at last: ${st.frames.length} key frames, ${st.sends} sends`);
+  },
+  // A 401 at send (signed out elsewhere) hands the token back through CHAT.token(old) and shows Sign in with LINE, and the draft stays in
+  // IndexedDB with its 12 key frames. Signing in again as the same account brings the check screen back, and the review sends.
+  async sendRefused(open, { tmp }) {
+    const st = flowBackend(), page = await open({ store: TOKEN, backend: st.backend }), b = boxAt(640, 360, 6, 3);
+    await toCheck(page, makeClip(tmp, {}), { at: 3, x: b.x, y: b.y });
+    await soon("the key frames saved", async () => { const d = await draft(page); return !!d && d.step === "check" && d.frames.length === 12; });
+    st.refuse = { status: 401, body: { error: "auth" } };
+    await page.click('.coachpanel [data-k="send"]'); await inPanel(page, "Sign in with LINE", ".co-signin");
+    const d = await draft(page), kept = await page.evaluate(() => localStorage.getItem("waveslave-chat-token"));
+    if (kept !== null || !d || d.account !== "u-test" || d.frames.length !== 12 || !d.frames.every(f => f.blob > 0)) throw new Error(`after a 401 at send: the token ${kept === null ? "gone" : "kept"}, the draft ${JSON.stringify(d && { account: d.account, frames: d.frames.length })}`);
+    st.refuse = null; await page.evaluate(() => { localStorage.setItem("waveslave-chat-token", "test-token"); window.COACH.open(); });
+    await inPanel(page, "the check screen after signing in again", ".co-grid");
+    await page.click('.coachpanel [data-k="send"], .coachpanel [data-k="retry"]'); await inPanel(page, `"${SENT}"`, ".co-ok", 30e3);
+  },
+  // What GET /coach/me says stops a review shows in the panel (money with its Taiwan day, a break, the day full, no reviews left this
+  // server month), in English and 中文; and its refusals: 403 banned "This account can't use the coach." with no Try again, 503 break
+  // "Coach is taking a break. Try again later." with it. I agree answered 503 break says so too.
+  async meCodes(open) {
+    const look = page => page.evaluate(() => { const q = s => document.querySelector(".coachpanel " + s);
+      return { why: q(".co-why") && q(".co-why").textContent, err: q(".co-err:not(.co-why)") && q(".co-err:not(.co-why)").textContent, retry: !!q('[data-k="retry"]') }; });
+    const shown = async (o, status = 200) => { const page = await open({ store: TOKEN, backend: coachBackend(o, status) }); await page.tap(TAB);
+      await page.waitForFunction(() => !!document.querySelector(".coachpanel .co-left, .coachpanel .co-err"), null, { timeout: 5000 }).catch(() => {}); await settle(page); return page; };
+    for (const [o, en, zh] of [[{ stop: { kind: "money", until: Date.UTC(2030, 10, 16) } }, "Coach is resting until 16 November.", "教練休息到11月16日。"], [{ stop: { kind: "break" } }, BREAK, "教練暫時休息中，請稍後再試。"],
+      [{ full_today: true }, "Coach is full today. Try again tomorrow.", "教練今天已經額滿了，明天再試試。"], [{ left: 0 }, "You've used your 2 reviews for November. More on December 1.", "11月的 2 次講評已經用完了，12月1日起可以再申請。"], [{}, null, null]]) {
+      const page = await shown(o); let got = await look(page);
+      if (got.why !== en) throw new Error(`with ${JSON.stringify(o)} the panel says ${JSON.stringify(got.why)}, want ${JSON.stringify(en)}`);
+      await page.evaluate(() => setLang("zh")); await settle(page); got = await look(page);
+      if (got.why !== zh) throw new Error(`in 中文 with ${JSON.stringify(o)} the panel says ${JSON.stringify(got.why)}, want ${JSON.stringify(zh)}`);
+    }
+    for (const [status, want] of [[403, { why: null, err: BLOCKED, retry: false }], [503, { why: null, err: BREAK, retry: true }]]) {
+      const got = await look(await shown({}, status));
+      if (!eq(got, want)) throw new Error(`GET /coach/me answering ${status}: ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+    }
+    const backend = (q, req) => q.pathname === "/coach/agree" ? { status: 503, body: { error: "break" } } : coachBackend({ agreed: false })(q, req);
+    const page = await open({ store: TOKEN, backend }); await page.tap(TAB); await inPanel(page, "the agreement", '[data-k="agree"]');
+    await page.check('.coachpanel [data-k="adult"]'); await page.click('.coachpanel [data-k="agree"]');
+    await page.waitForFunction(() => { const e = [...document.querySelectorAll(".coachpanel .co-agree .co-err")].find(x => !x.hidden); return !!e; }, null, { timeout: 5000 }).catch(() => {});
+    const said = await page.evaluate(() => [...document.querySelectorAll(".coachpanel .co-agree .co-err")].filter(x => !x.hidden).map(x => x.textContent));
+    if (!eq(said, [BREAK])) throw new Error(`I agree answered 503 break says ${JSON.stringify(said)}`);
+  },
   // The page's hooks never throw, whatever they're given, and a spot the page doesn't have leaves the tab as html.tw says.
   async hooksHold(open) {
     const page = await open({}); await wait(300);
@@ -726,7 +917,8 @@ const CHECKS = {
   //   world: developer mode (World mode, the PIN in); pub: window.__chatPublic; coachPub: window.__coachPublic; url: window.__chatUrl;
   //   view: the saved view; test: window.__chatTest; store: localStorage entries; clock: the page's fixed time (page.clock); skew: Date.now
   //   moved on by window.__skew(ms); query: the address's ?… before #<spot>. backend(url, request) answers the fake backend's calls. ua: the
-//   browser's user agent; init: more init scripts, each a function (or [function, its argument]).
+//   browser's user agent; init: more init scripts, each a function (or [function, its argument]). An answer with jpeg (bytes) goes as
+//   image/jpeg.
   async function open({ spot = "donghe", world = true, pub = false, coachPub = false, url = CHAT, view = "fc", test = true, store = {}, chatJs = CHAT_JS, coachJs = COACH_JS,
     clock = null, skew = false, query = "", backend = () => ({ body: { reports: [], online: 0, last_id: 0 } }), ua = null, init = [] }) {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block", ...(ua ? { userAgent: ua } : {}) });
@@ -736,7 +928,7 @@ const CHECKS = {
       if (u.startsWith("file:") && bare.endsWith("/chat.js")) return chatJs == null ? r.abort() : r.fulfill({ contentType: "text/javascript", body: chatJs });
       if (u.startsWith("file:") && bare.endsWith("/coach.js")) return coachJs == null ? r.abort() : r.fulfill({ contentType: "text/javascript", body: coachJs });
       if (u.startsWith(CHAT + "/")) { const q = new URL(u); asked.push(q.pathname + q.search); const a = backend(q, r.request());
-        return a ? r.fulfill({ status: a.status || 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(a.body) }) : r.abort(); }
+        return a ? r.fulfill({ status: a.status || 200, contentType: a.jpeg ? "image/jpeg" : "application/json", headers: { "access-control-allow-origin": "*" }, body: a.jpeg || JSON.stringify(a.body) }) : r.abort(); }
       if (u.startsWith("https:") || u.startsWith("http:") || u.startsWith("wss:")) tried.push(u);
       return r.abort(); });
     await ctx.addInitScript(([o, lock]) => {

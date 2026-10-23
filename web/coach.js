@@ -190,7 +190,17 @@ const STR = {
     notIn: "Not in this one", allFrames: "Back to all key frames", bigger: "Bigger boxes", smaller: "Smaller boxes",
     need8: "We need you in at least 8 key frames. Try a clip filmed closer.",
     send: "Send to your coach", sending: "Sending…", sent: "Sent. Your feedback comes within a day.", sendFailed: "Couldn't send. Tap to try again.",
-    resumeHead: "Pick up where you left off?", resumeFrames: "Your key frames are ready.", pickUp: "Pick up", startOver: "Start over" },
+    resumeHead: "Pick up where you left off?", resumeFrames: "Your key frames are ready.", pickUp: "Pick up", startOver: "Start over",
+    // The review (AI coach spec, "The review").
+    headsUp: "Heads-up", progressHead: "Progress", reviewOf: m => `Get a review of ${m}`, enlarge: t => `Enlarge the key frame at ${t}`,
+    footChecked: "Reviewed by WaveSlave Coach (AI), checked by a person. Surf within your limits.", footAuto: "Reviewed by WaveSlave Coach (AI). Surf within your limits.",
+    wrong: "Something wrong?", wrongLine: "What's wrong? (optional)", wrongSend: "Send", cancel: "Cancel", wrongSent: "Thanks. We'll check this review again.",
+    del: "Delete", delAsk: "Delete this review? It and its key frames are deleted from WaveSlave.", deleted: "Review deleted.",
+    notSurf: "We couldn't review this clip.",
+    // When something goes wrong (the spec's table).
+    noneLeft: (of, m, next) => `You've used your ${of} reviews for ${MONTHS[m]}. More on ${MONTHS[next]} 1.`,
+    fullToday: "Coach is full today. Try again tomorrow.", resting: d => `Coach is resting until ${d}.`, onBreak: "Coach is taking a break. Try again later.",
+    blocked: "This account can't use the coach.", inProgress: "Your last review is still with the coach." },
   zh: { tab: "教練", title: "教練", close: "關閉", tabReady: "教練：有講評可以看了",
     lead: "教練會逐格拆解你的影片：做得好的地方、一個主要修正，再加一個練習。",
     signIn: "使用LINE帳號登入", example: "教練講評範例 · 頂部轉向",
@@ -239,7 +249,15 @@ const STR = {
     notIn: "這格沒有我", allFrames: "回到全部關鍵影格", bigger: "框放大", smaller: "框縮小",
     need8: "至少要有 8 個關鍵影格拍到你。試試拍得近一點的影片。",
     send: "傳送給教練", sending: "傳送中…", sent: "已送出。一天內會收到講評。", sendFailed: "無法傳送，點一下再試一次。",
-    resumeHead: "要從上次中斷的地方繼續嗎？", resumeFrames: "你的關鍵影格已經準備好了。", pickUp: "繼續", startOver: "重新開始" },
+    resumeHead: "要從上次中斷的地方繼續嗎？", resumeFrames: "你的關鍵影格已經準備好了。", pickUp: "繼續", startOver: "重新開始",
+    headsUp: "提醒", progressHead: "和上次相比", reviewOf: m => `讓教練講評${m}`, enlarge: t => `放大 ${t} 的關鍵影格`,
+    footChecked: "由 WaveSlave 教練（AI）講評，並經真人檢查。在自己的能力範圍內衝浪。", footAuto: "由 WaveSlave 教練（AI）講評。在自己的能力範圍內衝浪。",
+    wrong: "哪裡不對嗎？", wrongLine: "哪裡不對？（選填）", wrongSend: "送出", cancel: "取消", wrongSent: "謝謝，我們會再檢查一次這份講評。",
+    del: "刪除", delAsk: "要刪除這份講評嗎？講評和它的關鍵影格都會從 WaveSlave 刪除。", deleted: "講評已刪除。",
+    notSurf: "我們無法講評這段影片。",
+    noneLeft: (of, m, next) => `${m + 1}月的 ${of} 次講評已經用完了，${next + 1}月1日起可以再申請。`,
+    fullToday: "教練今天已經額滿了，明天再試試。", resting: d => `教練休息到${d}。`, onBreak: "教練暫時休息中，請稍後再試。",
+    blocked: "這個帳號無法使用教練。", inProgress: "你的上一份講評，教練還在處理中。" },
 };
 const lang = () => typeof LANG === "string" && LANG === "zh" ? "zh" : "en";
 const S = key => STR[lang()][key];
@@ -347,11 +365,26 @@ button.co-row{cursor:pointer}
 .co-choose:focus-within{outline:2px solid var(--ink);outline-offset:2px}
 .co-big{display:block;width:100%;height:auto;margin-top:12px;border-radius:10px}
 .co-file{position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;overflow:hidden}
+.co-shot{display:block;width:100%;padding:0;border:0;border-radius:8px;background:none;cursor:zoom-in}
+.co-shot-wait{aspect-ratio:1;background:var(--line)}
+.co-rdate{margin-bottom:2px!important;color:var(--muted)}
+.co-heads{margin-top:16px;padding:10px 12px 12px;border:1.5px solid var(--led-amb);border-radius:12px}
+.co-foot{margin-top:18px!important;padding-top:10px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}
+.co-acts{display:flex;gap:10px}.co-acts .co-btn{flex:1;min-width:0}
+.co-ask{margin-top:16px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.co-ask label{display:block;font-weight:700}
+.co-rnote{flex-basis:100%;font-size:14px;color:var(--muted)}
+.co-why{margin:-6px 0 12px!important;font-weight:600;color:var(--led-amb)}
+.co-lb{position:fixed;inset:0;z-index:2;display:flex;flex-direction:column;background:rgba(0,0,0,.94);color:#fff}
+.co-lb-hd{flex:none;display:flex;align-items:center;gap:10px;width:100%;max-width:760px;margin-inline:auto;box-sizing:border-box;padding:calc(12px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 12px calc(16px + env(safe-area-inset-left))}
+.co-lb-hd h3{flex:1;min-width:0;margin:0;font-size:16px}
+.co-lb-pic{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:0 calc(12px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));cursor:zoom-out}
+.co-lb-pic img{display:block;width:100%;height:100%;max-width:784px;max-height:784px;object-fit:contain}
 `;
 
 // What the shell keeps: whether it has started (the page is there, with its Coach tab), an open() asked for before that, the tab, the
-// panel and its parts, whether it's open and what had the focus before.
-const P = { started: false, early: false, open: false, opener: null, tab: null, el: null, title: null, x: null, body: null };
+// panel and its parts (big: a key frame enlarged, openBig), whether it's open and what had the focus before.
+const P = { started: false, early: false, open: false, opener: null, tab: null, el: null, title: null, x: null, body: null, big: null };
 // Whether the coach shows for this visitor now: switched on (developer mode, or PUBLIC), on a Taiwan spot (html.tw, which boot() sets) and
 // with the chat there (window.CHAT), whose LINE sign-in the coach uses.
 const can = () => P.started && on() && document.documentElement.classList.contains("tw") && !!window.CHAT;
@@ -382,10 +415,12 @@ function open() {
   render();
 }
 // ✕ or Escape, or the coach going away: the focus goes back where it was, else to the tab while it shows. A ?coach=drafts link still
-// waiting for GET /coach/me is dropped, so drawing the page again (a new language, a spot) doesn't open the panel again.
+// waiting for GET /coach/me is dropped, so drawing the page again (a new language, a spot) doesn't open the panel again. A review open in
+// it shuts too, its key frames' blob URLs revoked, and so does a key frame enlarged.
 function close() {
   if (!P.open) return;
-  P.open = false; P.el.hidden = true; document.documentElement.classList.remove("coach-open"); V.drafts = false; V.sent = false; stopWork();
+  P.open = false; P.el.hidden = true; document.documentElement.classList.remove("coach-open"); V.drafts = false; V.sent = false; V.said = null; stopWork();
+  if (R.row) { closeReview(); P.body.textContent = ""; } else closeBig(false); // a review's key frames go with it
   const back = P.opener; P.opener = null;
   const to = [back, P.tab].find(e => e && e !== document.body && e.isConnected && e.getClientRects().length);
   if (to) to.focus({ preventScroll: true });
@@ -435,27 +470,45 @@ const EXAMPLE_FRAMES = { 6: { src: "coach-example/1.jpg", ms: 11473 }, 7: { src:
 // out quietly.
 const tokenNow = () => { const t = window.CHAT && typeof window.CHAT.token === "function" ? window.CHAT.token() : null; return typeof t === "string" && t ? t : null; };
 const refused = t => { if (window.CHAT && typeof window.CHAT.token === "function") window.CHAT.token(t); };
-// One call to the backend with the session token, as a Bearer header and no cookies: GET, or POST with body as JSON. Resolves to {status,
-// json}: status 0 when the network fails or after 15 s.
+// One call to the backend with the session token, as a Bearer header and no cookies: GET, or POST with body as JSON, or another method.
+// Resolves to {status, json, code}: status 0 when the network fails or after 15 s, code the backend's error code (null when none). With
+// jpeg, json is null and jpeg the answer's body as an image/jpeg Blob (a key frame), whatever type the answer said.
 const BASE = BACKEND.replace(/\/+$/, "");
-async function call(path, tok, body) {
+async function call(path, tok, body, { method = body === undefined ? "GET" : "POST", jpeg = false } = {}) {
   const ctl = typeof AbortController === "function" ? new AbortController() : null, timer = ctl ? setTimeout(() => ctl.abort(), 15e3) : 0;
   const headers = { Authorization: "Bearer " + tok }; if (body !== undefined) headers["Content-Type"] = "application/json";
   try {
-    const r = await fetch(BASE + path, { method: body === undefined ? "GET" : "POST", headers, body: body === undefined ? undefined : JSON.stringify(body), credentials: "omit",
+    const r = await fetch(BASE + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), credentials: "omit",
       signal: ctl ? ctl.signal : undefined });
+    if (jpeg) return { status: r.status, json: null, code: null, jpeg: r.ok ? new Blob([await r.arrayBuffer()], { type: "image/jpeg" }) : null };
     let json = null; try { json = await r.json(); } catch (e) {}
-    return { status: r.status, json };
-  } catch (e) { return { status: 0, json: null }; } finally { clearTimeout(timer); }
+    return { status: r.status, json, code: json && typeof json === "object" && typeof json.error === "string" ? json.error : null };
+  } catch (e) { return { status: 0, json: null, code: null, jpeg: null }; } finally { clearTimeout(timer); }
 }
+// What a refusal's code means to the surfer (the spec's table, "When something goes wrong"), in the panel's language, or null for a code
+// with no words of its own (the caller says "Couldn't send. Tap to try again." or "Couldn't reach the coach." then). until is a money
+// rest's end: "Coach is resting until 16 November.", that day on Taiwan's calendar. The month a surfer has used up is the server's.
+const SAYS = { break: "onBreak", full_today: "fullToday", in_progress: "inProgress", blocked: "blocked", banned: "blocked", too_few_frames: "need8" };
+function says(code, until) {
+  const me = ME.me;
+  if (code === "money") return Number.isFinite(until) ? S("resting")(day(until, me ? +me.month.slice(0, 4) : 0)) : S("onBreak");
+  if (code === "no_reviews_left") return me ? noneLeft(me) : null;
+  return typeof code === "string" && Object.prototype.hasOwnProperty.call(SAYS, code) ? S(SAYS[code]) : null;
+}
+const noneLeft = me => { const m = +me.month.slice(5) - 1; return S("noneLeft")(me.monthly, m, (m + 1) % 12); };
+// Why GET /coach/me says no review can start now, in the backend's order (stopFor(), then full_today, then none left), or null.
+const why = me => me.stop && me.stop.kind === "money" ? says("money", me.stop.until) : me.stop && me.stop.kind === "break" ? S("onBreak")
+  : me.full_today === true ? S("fullToday") : me.left === 0 ? noneLeft(me) : null;
 
 // What the panel knows of the surfer: GET /coach/me's answer (me) and the token it was asked with, when the last ask went, the number of
-// the newest ask (an answer to an older one is dropped), the token being asked about, and whether the last ask failed.
+// the newest ask (an answer to an older one is dropped), the token being asked about, and whether the last ask failed (false; true; or
+// the backend's code: banned, break).
 const ME = { me: null, token: null, at: -Infinity, n: 0, asking: null, failed: false };
 // What the surfer has done in the panel, kept when it's drawn again: How to film opened or shut by hand (null: as it comes), the 18+ tick,
 // the agreement's lines, an I agree on its way, the control to give the focus to, a ?coach=drafts link waiting to open at Drafts, whether
-// to show the top of the panel (a new screen of New review) and whether a review was just sent ("Sent.", until the panel shuts).
-const V = { film: null, tick: false, adultErr: false, agreeErr: false, busy: false, focus: null, drafts: false, top: false, sent: false };
+// to show the top of the panel (a new screen of New review), whether a review was just sent ("Sent.", until the panel shuts), and a line
+// about the review just reported or deleted (said: its key in STR, until the panel shuts). agreeErr is false, true or the refusal's code.
+const V = { film: null, tick: false, adultErr: false, agreeErr: false, busy: false, focus: null, drafts: false, top: false, sent: false, said: null };
 // GET /coach/me's answer looks right: whole counts, a "YYYY-MM" month, a list of reviews and whose they are (account). Without the account
 // an unsent review can't be kept to its own account (ruling P51), so such an answer is taken as a failure: "Couldn't reach the coach."
 const meOk = j => !!j && typeof j === "object" && Number.isInteger(j.left) && Number.isInteger(j.monthly) && typeof j.month === "string"
@@ -473,7 +526,7 @@ async function ask() {
   ME.asking = null;
   if (r.status === 401) { refused(t); ME.me = null; ME.token = null; ME.failed = false; }
   else if (r.status === 200 && meOk(r.json)) { ME.me = r.json; ME.token = t; ME.failed = false; }
-  else { ME.failed = true; if (ME.token !== t) { ME.me = null; ME.token = t; } }
+  else { ME.failed = r.code || true; if (ME.token !== t || r.code === "banned") { ME.me = null; ME.token = t; } }
   drawDot(); render();
 }
 // Asks when the token kept isn't the one the panel last asked with: at start-up, when developer mode comes on, and after a sign-in.
@@ -498,8 +551,9 @@ function drawDot() {
 
 // The panel's content, drawn again from what the coach knows each time something changes. Only while the panel is open, so the example's
 // key frames load only when it shows. It keeps its place (or goes to the top for a new screen of New review), and the focus stays on the
-// same control where it can (each carries a data-k), else on the panel. Signed in, a New review on its way shows in the panel's place,
-// and the first time the panel shows signed in it reads the draft a reload may have left (loadDraft). A ?coach=drafts link scrolls to
+// same control where it can (each carries a data-k), else on the panel. Signed in, a review opened from the list or a New review on its
+// way shows in the panel's place, and the first time the panel shows signed in it reads the draft a reload may have left (loadDraft). A
+// review open for an account that's no longer the one signed in goes (closeReview). A ?coach=drafts link scrolls to
 // Drafts and puts the focus on it once GET /coach/me has answered (only the admin has it); once it has answered or failed, the link is
 // done with.
 function render() {
@@ -507,17 +561,19 @@ function render() {
   const had = P.body.contains(document.activeElement) ? document.activeElement : null, key = V.focus || (had && had.getAttribute("data-k")), at = P.body.scrollTop;
   V.focus = null;
   const t = tokenNow(), mine = !!t && ME.token === t;
+  if (R.row && !(mine && ME.me && R.owner === account())) closeReview();
   P.body.textContent = "";
   if (!t) { V.drafts = false; P.body.append(...signedOut()); }
   else if (mine && ME.me) {
     forAccount(account());
-    P.body.append(...(F.show && ME.me.agreed === true ? flow(ME.me) : signedIn(ME.me)).filter(Boolean));
+    P.body.append(...(R.row ? reviewScreen(ME.me) : F.show && ME.me.agreed === true ? flow(ME.me) : signedIn(ME.me)).filter(Boolean));
   }
   else if (mine && ME.failed) P.body.append(...failed());
   else P.body.append(el("p", { class: "co-wait" }, S("loading")));
   P.body.scrollTop = V.top ? 0 : at; V.top = false;
   const to = key && P.body.querySelector(`[data-k="${key}"]`);
   if (to) { to.focus({ preventScroll: true }); reveal(to); } else if (had) P.el.focus({ preventScroll: true });
+  drawBig();
   if (V.drafts && mine && (ME.me || ME.failed)) {
     V.drafts = false; const h = P.body.querySelector(".co-drafts h3");
     if (h) { h.focus({ preventScroll: true }); reveal(h, true); }
@@ -539,16 +595,28 @@ function signedOut() {
       reviewParts(EXAMPLE_REVIEW[lang()], n => EXAMPLE_FRAMES[n] || null))];
 }
 // A review's parts, from text in the reply's shape (chat/src/coach-guide.js): what went well with its key frame, the main fix with its key
-// frames, and the drill. frame(n) gives key frame n's {src, ms}, or null. Every word goes in as text.
-function reviewParts(r, frame) {
-  const shots = ns => el("div", { class: "co-kfs" }, ns.map(n => { const f = frame(n), at = f && S("keyFrameAt")(COACHM.fmtTime(f.ms));
-    return f && el("figure", { class: "co-kf" }, el("img", { src: f.src, alt: "", width: "784", height: "784", decoding: "async" }), el("figcaption", null, at)); }));
-  return [
-    el("section", { class: "co-part" }, el("h4", null, S("wentWell")), shots([r.went_well.frame]), el("p", { class: "co-pt" }, r.went_well.title), el("p", null, r.went_well.detail)),
-    el("section", { class: "co-part" }, el("h4", null, S("mainFix")), shots(r.main_fix.frames), el("p", { class: "co-pt" }, r.main_fix.title),
+// frames, the drill, and only when there's one, the heads-up (with "Get a review of your bottom turn" when it names a move, ruling P12:
+// headsUp(move) starts it) and the progress line. frame(n) gives key frame n's {src, ms} (src null while it's on its way), or null to leave
+// it out. Tapping a key frame enlarges it (openBig). Every word goes in as text.
+function reviewParts(r, frame, headsUp) {
+  const shots = (ns, k) => el("div", { class: "co-kfs" }, ns.map(n => { const f = frame(n); if (!f) return null;
+    const t = COACHM.fmtTime(f.ms), cap = el("figcaption", null, S("keyFrameAt")(t));
+    if (!f.src) return el("figure", { class: "co-kf" }, el("div", { class: "co-shot co-shot-wait", "aria-hidden": "true" }), cap);
+    const key = `shot-${k}${n}`, b = el("button", { type: "button", class: "co-shot", "data-k": key, "aria-label": S("enlarge")(t) },
+      el("img", { src: f.src, alt: "", width: String(SIDE), height: String(SIDE), decoding: "async" }));
+    b.addEventListener("click", guard(() => openBig(f.src, f.ms, key)));
+    return el("figure", { class: "co-kf" }, b, cap); }));
+  const out = [
+    el("section", { class: "co-part" }, el("h4", null, S("wentWell")), shots([r.went_well.frame], "w"), el("p", { class: "co-pt" }, r.went_well.title), el("p", null, r.went_well.detail)),
+    el("section", { class: "co-part" }, el("h4", null, S("mainFix")), shots(r.main_fix.frames, "f"), el("p", { class: "co-pt" }, r.main_fix.title),
       el("p", null, el("b", null, S("happening")), r.main_fix.what), el("p", null, el("b", null, S("matters")), r.main_fix.why)),
     el("section", { class: "co-part" }, el("h4", null, S("drill")), el("p", { class: "co-pt" }, r.drill.title), el("p", null, r.drill.how)),
   ];
+  const hu = r.heads_up, mv = hu.move;
+  if (hu.text.trim()) out.push(el("section", { class: "co-part co-heads" }, el("h4", null, S("headsUp")), el("p", null, hu.text),
+    headsUp && MOVES.includes(mv) && mv !== "other" ? button("headsup", S("reviewOf")(S("slideMoves")[mv]), () => headsUp(mv)) : null));
+  if (r.progress.trim()) out.push(el("section", { class: "co-part" }, el("h4", null, S("progressHead")), el("p", null, r.progress)));
+  return out;
 }
 // LINE's own icon for its button, as the chat's: the white speech bubble with "LINE" in green (LINE's button guidelines).
 function lineIcon() { const ns = "http://www.w3.org/2000/svg", svg = document.createElementNS(ns, "svg"), p = document.createElementNS(ns, "path"), t = document.createElementNS(ns, "text");
@@ -558,23 +626,26 @@ function lineIcon() { const ns = "http://www.w3.org/2000/svg", svg = document.cr
   t.setAttribute("font-size", "8.2"); t.setAttribute("font-weight", "800"); t.setAttribute("font-family", "Arial, Helvetica, sans-serif"); t.textContent = "LINE";
   svg.append(p, t); return svg; }
 
-// Signed in: "Sent. Your feedback comes within a day." just after sending, "2 of 2 reviews left in November" (the month is the backend's
-// Taiwan month, whatever the phone's clock says), How to film, the agreement until it's agreed and then New review (or, with a review
-// left halfway, Pick up where you left off?), their reviews newest first, and Drafts for the admin.
+// Signed in: "Sent. Your feedback comes within a day." just after sending (or "Review deleted.", or the thanks for a report), "2 of 2
+// reviews left in November" (the month is the backend's Taiwan month, whatever the phone's clock says) and why none can start now when
+// so (why()), How to film, the agreement until it's agreed and then New review (or, with a review left halfway, Pick up where you left
+// off?), their reviews newest first, and Drafts for the admin.
 function signedIn(me) {
   const reviews = me.reviews.filter(r => !!r && typeof r === "object");
-  const out = [V.sent ? el("p", { class: "co-ok", role: "status", tabindex: "-1", "data-k": "sent" }, S("sent")) : null,
-    el("p", { class: "co-left" }, S("left")(me.left, me.monthly, +me.month.slice(5) - 1)), film(reviews.length > 0),
+  const stop = why(me), out = [V.sent ? el("p", { class: "co-ok", role: "status", tabindex: "-1", "data-k": "sent" }, S("sent"))
+      : V.said ? el("p", { class: "co-ok", role: "status", tabindex: "-1", "data-k": "said" }, S(V.said)) : null,
+    el("p", { class: "co-left" }, S("left")(me.left, me.monthly, +me.month.slice(5) - 1)), stop ? el("p", { class: "co-why", role: "status" }, stop) : null, film(reviews.length > 0),
     me.agreed === true ? (F.draft ? resumeOffer() : newReview()) : agreement()];
   if (reviews.length) out.push(el("h3", { class: "co-h co-yours" }, S("yours")), el("ul", { class: "co-list" }, reviews.map(r => row(r, +me.month.slice(0, 4)))));
   if (me.admin === true) out.push(el("section", { class: "co-drafts" }, el("h3", { class: "co-h", tabindex: "-1" }, S("drafts"))));
   return out;
 }
-// GET /coach/me failed (the network, or the backend having a break): say so, with Try again.
+// GET /coach/me failed: "Couldn't reach the coach." (the network, or an answer that doesn't look right), or what the refusal means: a
+// break says so, and a banned account "This account can't use the coach.", with no Try again. Else Try again asks again.
 function failed() {
-  const b = el("button", { type: "button", class: "co-btn", "data-k": "retry" }, S("retry"));
-  b.addEventListener("click", guard(() => { ME.failed = false; ME.token = null; render(); ask(); }));
-  return [el("p", { class: "co-err" }, S("failed")), b];
+  const said = says(ME.failed), out = [el("p", { class: "co-err" }, said || S("failed"))];
+  if (ME.failed !== "banned") out.push(button("retry", S("retry"), () => { ME.failed = false; ME.token = null; render(); return ask(); }));
+  return out;
 }
 // How to film (the spec's list): open until there's a review, then folded to its one line. Opened or shut by hand, it stays so.
 function film(folded) {
@@ -584,10 +655,10 @@ function film(folded) {
   return d;
 }
 // New review, once the agreement is agreed: it starts the flow below (startNew).
-function newReview() { const b = el("button", { type: "button", class: "co-btn co-new", "data-k": "new" }, S("newReview")); b.addEventListener("click", guard(startNew)); return b; }
+function newReview() { return button("new", S("newReview"), () => startNew(), "co-btn co-new"); }
 // The coach agreement, before the first review (the spec's points and the 18+ tick), agreed once for this version.
 function agreement() {
-  const tick = el("input", { type: "checkbox", "data-k": "adult" }), err = el("p", { class: "co-err", role: "alert" }, S("adultOnly")), fail = el("p", { class: "co-err", role: "alert" }, S("failed"));
+  const tick = el("input", { type: "checkbox", "data-k": "adult" }), err = el("p", { class: "co-err", role: "alert" }, S("adultOnly")), fail = el("p", { class: "co-err", role: "alert" }, says(V.agreeErr) || S("failed"));
   tick.checked = V.tick; err.hidden = !V.adultErr; fail.hidden = !V.agreeErr;
   tick.addEventListener("change", guard(() => { V.tick = tick.checked; if (V.tick) { V.adultErr = false; err.hidden = true; } }));
   const ok = el("button", { type: "button", class: "co-btn", "data-k": "agree" }, S("agree"));
@@ -596,7 +667,8 @@ function agreement() {
     el("ul", null, S("agreeList").map(t => el("li", null, t))), el("label", { class: "co-tick" }, tick, el("span", null, S("adult"))), err, fail, ok);
 }
 // I agree: without the 18+ tick it says who the coach is for and sends nothing; with it, POST /coach/agree {ver, adult: true}, and New
-// review takes the agreement's place.
+// review takes the agreement's place (or the review on its way, when a send was refused for an agreement out of date). Agreed while
+// GET /coach/me was being asked again (another token, or none yet), it asks again for what to show. Refused, it says why.
 async function agree() {
   if (V.busy) return;
   if (!V.tick) { V.adultErr = true; V.focus = "adult"; return render(); }
@@ -605,19 +677,21 @@ async function agree() {
   const r = await call("/coach/agree", t, { ver: AGREE_VER, adult: true });
   V.busy = false;
   if (r.status === 401) { refused(t); ME.me = null; ME.token = null; }
-  else if (r.status === 200 && ME.me && ME.token === t) { ME.me.agreed = true; V.tick = false; V.focus = "new"; }
-  else V.agreeErr = true;
+  else if (r.status === 200) { V.tick = false;
+    if (ME.me && ME.token === t) { ME.me.agreed = true; V.focus = F.show ? "fh" : F.draft ? "pickup" : "new"; } else { render(); return ask(); } }
+  else V.agreeErr = r.code || true;
   render();
 }
 // A review in the list: its move, the Taiwan day it was sent (year: this year by the server), and its status in the surfer's words. A ready
-// one opens (and one this phone hasn't opened yet carries a dot, as the tab does).
+// one opens (and one this phone hasn't opened yet carries a dot, as the tab does); one not reviewed says why: "We couldn't review this
+// clip." for a clip held as not surf or flagged, else the note it was given back with.
 function row(r, year) {
-  const st = STATUS.includes(r.status) ? r.status : "reviewing", moves = S("moves");
-  const kids = [el("span", { class: "co-mv" }, Object.prototype.hasOwnProperty.call(moves, r.move) ? moves[r.move] : moves.other), el("span", { class: "co-date" }, day(r.created, year)),
-    el("span", { class: "co-st co-st-" + st }, S("status")[st])];
-  if (st !== "ready") return el("li", null, el("div", { class: "co-row" }, kids));
+  const st = STATUS.includes(r.status) ? r.status : "reviewing", why = st === "not_reviewed" && typeof r.note === "string" && r.note.trim() ? r.note : null;
+  const kids = [el("span", { class: "co-mv" }, moveName(r.move)), el("span", { class: "co-date" }, day(r.created, year)), el("span", { class: "co-st co-st-" + st }, S("status")[st]),
+    why ? el("span", { class: "co-rnote" }, why === "not_surf" ? S("notSurf") : why) : null];
+  if (st !== "ready" || typeof r.id !== "string" || !REVIEW_ID.test(r.id)) return el("li", null, el("div", { class: "co-row" }, kids));
   if (isNew(r)) kids.push(el("i", { class: "co-fresh", "aria-hidden": "true" }));
-  const b = el("button", { type: "button", class: "co-row", "data-k": /^[A-Za-z0-9_-]{1,64}$/.test(r.id) ? "r-" + r.id : null }, kids);
+  const b = el("button", { type: "button", class: "co-row", "data-k": "r-" + r.id }, kids);
   b.addEventListener("click", guard(() => openReview(r)));
   return el("li", null, b);
 }
@@ -628,11 +702,146 @@ function day(ms, year) {
   const d = new Date(ms + TW), y = d.getUTCFullYear();
   return S("date")(y === year ? 0 : y, d.getUTCMonth(), d.getUTCDate());
 }
+// A move as the list and the review name it.
+const moveName = m => { const moves = S("moves"); return Object.prototype.hasOwnProperty.call(moves, m) ? moves[m] : moves.other; };
+// A token the backend refused (401): it goes back to the chat, and the panel shows Sign in with LINE. An unsent review stays kept.
+function signOut(t) { refused(t); ME.me = null; ME.token = null; render(); }
+
+// ---- The review (AI coach spec, "The review"). A ready review opened from the list shows in the panel's place, in the words it was written
+// in, under the panel's own headings: the move and the day it was sent, its parts (reviewParts), the footer (ruling R20: "checked by a
+// person" only when someone did), then Something wrong? and Delete. GET /coach/reviews/{id} gives its text, its key frames' times and
+// checked; each key frame comes with the session token (an <img> can't send it) into a blob URL, and those are revoked as the review shuts
+// (closeReview: ‹ Back, the panel shutting, signing out or another account).
+// R: the review's row from the list and the account it's of, GET /coach/reviews/{id}'s answer ({text, times, checked}; null until then)
+// or why it failed (true or the code), the number of the newest load (an answer to an older one is dropped), each key frame's blob URL as
+// it comes (null: it didn't), what's open under it ("wrong": Something wrong?'s line; "del": Delete's question), the line typed, a report
+// or delete on its way, and one that failed (true or the code).
+const R = { row: null, owner: null, view: null, failed: false, n: 0, shots: new Map(), ask: null, wrongline: "", busy: false, fail: false };
+const REVIEW_ID = /^[A-Za-z0-9_-]{22}$/, REPORT_MAX = 200; // a review's id, and the characters in Something wrong?'s line
 // Opening a ready review: this phone has seen it now, so the dot goes (waveslave-coach-seen keeps the newest published time opened).
 function openReview(r) {
   if (isNew(r)) { seenHere = r.published; save(SEEN, r.published); }
-  drawDot(); render();
+  closeReview(); R.row = r; R.owner = account(); V.said = null; V.sent = false;
+  drawDot(); V.top = true; V.focus = "fh"; render(); return loadReview();
 }
+async function loadReview() {
+  const t = tokenNow(), r = R.row, n = ++R.n;
+  if (!t || !r) return;
+  const g = await call(`/coach/reviews/${r.id}`, t);
+  if (n !== R.n) return;
+  if (g.status === 401) return signOut(t);
+  // Gone (deleted elsewhere), or no longer published (reported elsewhere, or withdrawn): back to the list, asked for again.
+  if (g.status === 404 || (g.status === 200 && isObj(g.json) && g.json.status !== "published")) { closeReview(); V.top = true; render(); return ask(); }
+  const v = g.status === 200 ? readReview(g.json) : null;
+  if (!v) { R.failed = g.code || true; return render(); }
+  R.view = v; render();
+  const ns = [...new Set([v.text.went_well.frame, ...v.text.main_fix.frames])].filter(k => Number.isInteger(v.times[k]));
+  const got = await Promise.all(ns.map(k => call(`/coach/reviews/${r.id}/frames/${k}`, t, undefined, { jpeg: true })));
+  if (n !== R.n) return;
+  if (got.some(x => x.status === 401)) return signOut(t);
+  ns.forEach((k, i) => { let u = null; if (got[i].jpeg) try { u = URL.createObjectURL(got[i].jpeg); } catch (e) {} R.shots.set(k, u); });
+  render();
+}
+// GET /coach/reviews/{id}'s answer as {text, times: {n: ms}, checked}, or null unless it's a published review that looks right. Its owner
+// gets review: {text, times, checked}; the admin, opening his own, gets the row (final, frames [{n, ms, box}], checked 0 or 1).
+function readReview(j) {
+  if (!j || typeof j !== "object" || j.status !== "published") return null;
+  const own = !!j.review && typeof j.review === "object", text = own ? j.review.text : j.final, times = {};
+  const at = (n, ms) => { n = Number(n); if (isFrame(n) && Number.isInteger(ms) && ms >= 0) times[n] = ms; };
+  if (own) { const ts = j.review.times; if (ts && typeof ts === "object") for (const n of Object.keys(ts)) at(n, ts[n]); }
+  else if (Array.isArray(j.frames)) for (const f of j.frames) if (f && typeof f === "object") at(f.n, f.ms);
+  return textOk(text) ? { text, times, checked: own ? j.review.checked === true : j.checked === 1 } : null;
+}
+const isFrame = n => Number.isInteger(n) && n >= 1 && n <= 12, isText = v => typeof v === "string", isObj = v => !!v && typeof v === "object";
+// The text has the reply's shape (shapeOk in chat/src/coach-guide.js), so drawing it can't throw.
+const textOk = t => isObj(t) && isObj(t.went_well) && isFrame(t.went_well.frame) && isText(t.went_well.title) && isText(t.went_well.detail)
+  && isObj(t.main_fix) && Array.isArray(t.main_fix.frames) && t.main_fix.frames.length >= 1 && t.main_fix.frames.length <= 3 && t.main_fix.frames.every(isFrame)
+  && isText(t.main_fix.title) && isText(t.main_fix.what) && isText(t.main_fix.why) && isObj(t.drill) && isText(t.drill.title) && isText(t.drill.how)
+  && isObj(t.heads_up) && isText(t.heads_up.text) && isText(t.heads_up.move) && isText(t.progress);
+// The review let go: a load on its way is dropped, the enlarged key frame shuts and every blob URL is revoked.
+function closeReview() {
+  R.n++; closeBig(false);
+  for (const u of R.shots.values()) if (u) try { URL.revokeObjectURL(u); } catch (e) {}
+  Object.assign(R, { row: null, owner: null, view: null, failed: false, shots: new Map(), ask: null, wrongline: "", busy: false, fail: false });
+}
+function reviewScreen(me) {
+  const r = R.row, v = R.view, out = [button("back", S("back"), backToList, "co-back"), heading(moveName(r.move)), el("p", { class: "co-rdate" }, day(r.created, +me.month.slice(0, 4)))];
+  if (v) out.push(...reviewParts(v.text, n => { const ms = v.times[n]; return !Number.isInteger(ms) ? null : !R.shots.has(n) ? { src: null, ms } : R.shots.get(n) && { src: R.shots.get(n), ms }; }, headsUpGo),
+    el("p", { class: "co-foot" }, S(v.checked ? "footChecked" : "footAuto")), reviewActs());
+  else if (R.failed) out.push(el("p", { class: "co-err", role: "alert" }, says(R.failed) || S("failed")), button("retry", S("retry"), () => { R.failed = false; render(); return loadReview(); }));
+  else out.push(el("p", { class: "co-wait" }, S("loading")));
+  return [el("section", { class: "co-review" }, out)];
+}
+// ‹ Back to the list, with the focus on the review's row.
+function backToList() { const id = R.row && R.row.id; closeReview(); V.top = true; V.focus = id ? "r-" + id : null; render(); }
+// The heads-up's "Get a review of your bottom turn": New review with that move picked (ruling P12), kept as a draft at once. A draft
+// already waiting isn't replaced: the panel offers to pick it up.
+function headsUpGo(move) {
+  closeReview();
+  if (F.draft) { V.top = true; V.focus = "pickup"; return render(); }
+  startNew(move);
+}
+// Something wrong? (one optional line, sent back to the coach's check) and Delete (asked first).
+function reviewActs() {
+  const fail = R.fail, said = fail && fail !== true ? says(fail) : null, err = t => el("p", { class: "co-err", role: "alert" }, t);
+  const shut = k => () => { R.ask = null; R.fail = false; V.focus = k; render(); };
+  if (R.ask === "wrong") { const i = line("wrongline", REPORT_MAX, { id: "coWrong", enterkeyhint: "send" }, R, () => {});
+    i.addEventListener("keydown", guard(e => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); return report(); } }));
+    return el("div", { class: "co-ask" }, el("label", { class: "co-h", for: "coWrong" }, S("wrongLine")), i, said ? err(said) : null,
+      button("wrongsend", R.busy ? S("sending") : fail && !said ? S("sendFailed") : S("wrongSend"), report), button("wrongno", S("cancel"), shut("wrong"), "co-btn co-btn2")); }
+  if (R.ask === "del") return el("div", { class: "co-ask" }, el("p", null, S("delAsk")), fail ? err(said || S("failed")) : null,
+    button("delyes", S("del"), remove), button("delno", S("cancel"), shut("del"), "co-btn co-btn2"));
+  const ask = (k, focus) => () => { R.ask = k; R.fail = false; V.focus = focus; render(); };
+  return el("div", { class: "co-acts" }, button("wrong", S("wrong"), ask("wrong", "wrongline"), "co-btn co-btn2"), button("del", S("del"), ask("del", "delno"), "co-btn co-btn2"));
+}
+// Something wrong?'s Send: POST /coach/reviews/{id}/report {line}. The review goes back to the coach's check (Coach is reviewing in the
+// list), and the panel thanks the surfer. Refused, it says why, or "Couldn't send. Tap to try again." on the button.
+async function report() {
+  const t = tokenNow(), r = R.row, n = R.n;
+  if (R.busy || !t || !r || !R.view) return;
+  R.busy = true; R.fail = false; render();
+  const res = await call(`/coach/reviews/${r.id}/report`, t, { line: upTo(R.wrongline.trim(), REPORT_MAX) });
+  if (n !== R.n) return;
+  R.busy = false;
+  if (res.status === 401) return signOut(t);
+  if (res.status !== 200) { R.fail = res.code || true; V.focus = "wrongsend"; return render(); }
+  return done(r.id, "wrongSent", x => { x.status = "reviewing"; });
+}
+// Delete's yes: DELETE /coach/reviews/{id} (one the backend no longer has is gone already), and the list without it.
+async function remove() {
+  const t = tokenNow(), r = R.row, n = R.n;
+  if (R.busy || !t || !r) return;
+  R.busy = true; R.fail = false;
+  const res = await call(`/coach/reviews/${r.id}`, t, undefined, { method: "DELETE" });
+  if (n !== R.n) return;
+  R.busy = false;
+  if (res.status === 401) return signOut(t);
+  if (res.status !== 200 && res.status !== 404) { R.fail = res.code || true; V.focus = "delyes"; return render(); }
+  return done(r.id, "deleted", null);
+}
+// Back to the list after a report or a delete, saying so, with the list as it is now (change(row), or the row gone) until GET /coach/me
+// answers again.
+function done(id, said, change) {
+  if (ME.me) { const rows = ME.me.reviews; if (change) rows.filter(x => x && x.id === id).forEach(change); else ME.me.reviews = rows.filter(x => !x || x.id !== id); }
+  closeReview(); V.said = said; V.top = true; V.focus = "said"; render(); return ask();
+}
+
+// ---- A key frame enlarged (tapping one in a review, or in the example): over the whole panel, with its time and ✕. ✕ or Escape shuts it,
+// and the focus goes back to the key frame; Tab stays inside it while it's open, and a tap on it shuts it too. P.big is built at start-up:
+// its parts are P.big.head, .pic (which holds the key frame's <img> only while it's open) and .x, and .from the key frame's data-k, .ms
+// its time.
+function openBig(src, ms, from) {
+  const b = P.big; if (!b || !P.open) return;
+  b.from = from; b.ms = ms; b.pic.textContent = ""; b.pic.append(el("img", { src, alt: "", width: String(SIDE), height: String(SIDE) }));
+  b.el.hidden = false; drawBig(); b.x.focus({ preventScroll: true });
+}
+function closeBig(back) {
+  const b = P.big; if (!b || b.el.hidden) return;
+  b.el.hidden = true; b.pic.textContent = ""; const k = b.from; b.from = null;
+  const to = back && k && P.body.querySelector(`[data-k="${k}"]`); if (to) to.focus({ preventScroll: true });
+}
+const bigOpen = () => !!P.big && !P.big.el.hidden;
+function drawBig() { const b = P.big; if (!bigOpen()) return; b.head.textContent = S("keyFrameAt")(COACHM.fmtTime(b.ms)); b.x.setAttribute("aria-label", S("close")); }
 
 // ---- New review (AI coach spec, "New review", steps 1-6): pick a clip, the questions, find the move with the slider and Here, tap
 // yourself, the check screen with the 12 close-ups, and sending. The clip is read here and never leaves the phone: only the close-ups the
@@ -682,9 +891,9 @@ function setBlob(f, blob) { revoke(f); f.blob = blob; try { f.src = URL.createOb
 function revoke(f) { if (f.src) try { URL.revokeObjectURL(f.src); } catch (e) {} f.src = null; }
 
 // ---- Storage: the draft in IndexedDB (database waveslave-coach, store draft), kept until it's sent or Start over clears it: under
-// "current" {account, flow, answers, step, here, tap, side, frames}, saved as each answer is given and when the key frames are cut (and
-// when they change); and under "progress" {account, flow, id, sent}, saved as the review starts and each key frame lands, so that never
-// writes the 12 key frames again. Every step is in try/catch: where IndexedDB is missing or throws (a private window), the review can
+// "current" {account, flow, stamp, answers, step, here, tap, side, frames}, saved as each answer is given and when the key frames are cut
+// (and when they change); and under "progress" {account, flow, stamp, id, sent}, saved as the review starts and each key frame lands, so
+// that never writes the 12 key frames again. Every step is in try/catch: where IndexedDB is missing or throws (a private window), the review can
 // still be sent, only not picked up after a reload. Writes go one after another, in order.
 let dbOpen = null, dbQueue = Promise.resolve();
 // The connection, opened when first needed. One that failed to open, or that the browser closed (Safari can, in the background) or asked
@@ -778,11 +987,13 @@ function forAccount(acc) {
 
 // ---- Starting, leaving and picking up.
 // New review: a fresh review of the signed-in account, the level, board and stance from last time (GET /coach/me's profile) when there are
-// some.
-function startNew() {
+// some. From a review's heads-up, with its move picked, and kept as a draft at once.
+function startNew(move) {
   resetFlow(); const p = ME.me && ME.me.profile; F.owner = account(); F.flow = newFlow();
   F.answers = noAnswers(p); F.profiled = !!F.answers.level && !!F.answers.board && !!F.answers.stance;
-  F.show = true; F.screen = "pick"; V.sent = false; go();
+  F.show = true; F.screen = "pick"; V.sent = false; V.said = null;
+  if (MOVES.includes(move) && move !== "other") { F.answers.move = move; saveDraft(); }
+  go();
 }
 // Everything of the review let go: the clip, the key frames' blob URLs, and the work on its way.
 function resetFlow() {
@@ -904,11 +1115,12 @@ function questionsScreen() {
   return out;
 }
 // A one-line answer, cut to max characters as the backend counts them (a textarea's maxlength counts UTF-16 units, which would cut an
-// emoji short), but not while an input method is still composing.
-function line(key, max, attrs) {
+// emoji short), but not while an input method is still composing. It's kept in box[key] (the answers, or Something wrong?'s line), and
+// then() runs as it changes (the answers are saved).
+function line(key, max, attrs, box = F.answers, then = saveDraft) {
   const i = el("input", { type: "text", class: "co-line", "data-k": key, autocomplete: "off", enterkeyhint: "done", ...attrs });
-  i.value = F.answers[key];
-  const take = () => { if ([...i.value].length > max) i.value = upTo(i.value, max); if (F.answers[key] !== i.value) { F.answers[key] = i.value; saveDraft(); } };
+  i.value = box[key];
+  const take = () => { if ([...i.value].length > max) i.value = upTo(i.value, max); if (box[key] !== i.value) { box[key] = i.value; then(); } };
   i.addEventListener("input", guard(e => { if (!e.isComposing) take(); }));
   i.addEventListener("compositionend", guard(take)); i.addEventListener("change", guard(take));
   return i;
@@ -1084,7 +1296,9 @@ function checkScreen() {
     const minus = button("smaller", "−", () => resizeAll(-1), "", S("smaller")), plus = button("bigger", "+", () => resizeAll(1), "", S("bigger"));
     minus.disabled = !fits(-1); plus.disabled = !fits(1); out.push(el("div", { class: "co-size" }, minus, plus)); }
   if (n < KEPT_MIN) out.push(note(S("need8"), true));
-  if (F.fail) out.push(button("retry", S("sendFailed"), send, "co-btn co-retry"));
+  const said = F.fail && F.fail !== true ? says(F.fail.code, F.fail.until) : null;
+  if (said) out.push(el("p", { class: "co-err co-said", role: "alert" }, said));
+  if (F.fail && !said) out.push(button("retry", S("sendFailed"), send, "co-btn co-retry"));
   else { const b = button("send", S("send"), send); b.disabled = n < KEPT_MIN; out.push(b); }
   return out;
 }
@@ -1118,8 +1332,10 @@ function leaveOut(i) { const f = F.frames[i], wasLost = f.lost; f.box = null; f.
 // POST /coach/reviews/{id}/send. A review already started is asked about first (GET /coach/reviews/{id}): its have says which key frames
 // are there, and one no longer uploading went through already. bad_frame, too_big, not_uploading and missing_frames go round once more by
 // themselves; a review the server no longer has (not_found: any 404) is started again once without asking, as when another tab of the
-// same account started one (ruling R12). Anything else, or the same again, ends on "Couldn't send. Tap to try again.", with the draft
-// still kept. A refused token (401) goes back to the chat, as everywhere in the coach.
+// same account started one (ruling R12). A refusal with words of its own says them over Send (the spec's table: says()) and the panel asks
+// GET /coach/me again; agree (an agreement out of date) shows the agreement, and once agreed the check screen again. Anything else, or the
+// same again, ends on "Couldn't send. Tap to try again.". The draft is kept whatever happens. A refused token (401) goes back to the chat,
+// as everywhere in the coach, and Sign in with LINE shows; signed in again as the same account, the check screen is back.
 const AGAIN = new Set(["bad_frame", "too_big", "not_uploading", "missing_frames"]);
 async function send() {
   const t = tokenNow(), kept = keptFrames();
@@ -1137,9 +1353,11 @@ async function send() {
   }
   F.busy = false;
   if (r.ok) { dropDraft(); resetFlow(); V.sent = true; if (ME.me && Number.isInteger(r.left)) ME.me.left = r.left; V.top = true; V.focus = "sent"; render(); return ask(); }
-  F.screen = "check"; F.fail = true;
+  F.screen = "check"; F.fail = { code: r.code, until: r.json && r.json.until };
   if (r.status === 401) { refused(t); ME.me = null; ME.token = null; }
+  else if (r.code === "agree" && ME.me) ME.me.agreed = false;
   go();
+  if (says(r.code, F.fail.until)) return ask();
 }
 async function sendRound(t, kept, run) {
   F.progress[0] = 0; if (F.bar) F.bar.value = 0;
@@ -1218,17 +1436,23 @@ function start() {
   P.x = el("button", { type: "button", class: "co-x" }, "✕");
   P.x.addEventListener("click", guard(() => close()));
   P.body = el("div", { class: "co-body" });
+  const big = { head: el("h3", { id: "coachBig" }), pic: el("div", { class: "co-lb-pic" }), x: el("button", { type: "button", class: "co-x", "data-k": "bigx" }, "✕"), from: null, ms: 0 };
+  big.el = el("div", { class: "co-lb", role: "dialog", "aria-modal": "true", "aria-labelledby": "coachBig", hidden: "" }, el("div", { class: "co-lb-hd" }, big.head, big.x), big.pic);
+  big.x.addEventListener("click", guard(() => closeBig(true))); big.pic.addEventListener("click", guard(() => closeBig(true)));
+  P.big = big;
   P.el = el("div", { class: "coachpanel", role: "dialog", "aria-modal": "true", "aria-labelledby": "coachTitle", tabindex: "-1", hidden: "" },
-    el("div", { class: "co-hd" }, P.title, P.x), P.body);
+    el("div", { class: "co-hd" }, P.title, P.x), P.body, big.el);
   document.head.append(el("style", null, CSS));
   document.body.append(P.el);
-  // Escape shuts the panel and nothing else (not the map behind it); Tab stays inside it. The chat's room has Escape while it's open.
+  // Escape shuts the panel and nothing else (not the map behind it), or only the key frame enlarged in it; Tab stays inside it (inside
+  // the key frame enlarged, while it's open). The chat's room has Escape while it's open.
   addEventListener("keydown", guard(e => {
     if (!P.open || document.documentElement.classList.contains("chat-open")) return;
-    if (e.key === "Escape" && !e.isComposing) { e.preventDefault(); e.stopImmediatePropagation(); close(); return; }
+    if (e.key === "Escape" && !e.isComposing) { e.preventDefault(); e.stopImmediatePropagation(); if (bigOpen()) closeBig(true); else close(); return; }
     if (e.key !== "Tab") return;
-    const all = [...P.el.querySelectorAll('button, input, a[href], textarea, select, summary, [tabindex]:not([tabindex="-1"])')].filter(x => !x.disabled && x.getClientRects().length);
-    if (!all.length) { e.preventDefault(); P.el.focus(); return; }
+    const root = bigOpen() ? P.big.el : P.el;
+    const all = [...root.querySelectorAll('button, input, a[href], textarea, select, summary, [tabindex]:not([tabindex="-1"])')].filter(x => !x.disabled && x.getClientRects().length);
+    if (!all.length) { e.preventDefault(); root.focus(); return; }
     const i = all.indexOf(document.activeElement);
     if (e.shiftKey && i <= 0) { e.preventDefault(); all[all.length - 1].focus(); } else if (!e.shiftKey && (i === -1 || i === all.length - 1)) { e.preventDefault(); all[0].focus(); }
   }), true);

@@ -35,18 +35,21 @@ const CONTACT = { name: "Test Operator", email: "chat@example.com" }, DAY = 864e
 const TAB = '.tabs button[data-v="coach"]';
 
 // A session token for a seeded account, as chat/src/auth.js signToken makes one: base64url {uid, tv, exp}, a dot, its HMAC-SHA256
-// (tests/chat/room.test.js's token()).
-const token = uid => { const p = Buffer.from(JSON.stringify({ uid, tv: 0, exp: Date.now() + DAY })).toString("base64url");
+// (tests/chat/room.test.js's token()). tv is the account's token version: 0 as seeded, one more after each ban or Sign out everywhere.
+const token = (uid, tv = 0) => { const p = Buffer.from(JSON.stringify({ uid, tv, exp: Date.now() + DAY })).toString("base64url");
   return p + "." + crypto.createHmac("sha256", SECRETS.SESSION_SECRET).update(p).digest("base64url"); };
 
-// ---- The servers (tests/chat/servers.js), with the fake LINE and the fake AI.
-let srv = null, line = null, ai = null;
+// ---- The servers (tests/chat/servers.js), with the fake LINE and the fake AI. The fake AI answers a good review (goodAnswer) unless a
+// step sets aiReply(request) to answer in its place; FX holds the fake's and the backend fixtures' helpers.
+let srv = null, line = null, ai = null, aiReply = null, FX = null;
 const ORIGIN = () => srv.origin, CHAT = () => srv.chat;
 async function setUp() {
   const { startFakeLine } = await import(path.join(ROOT, "tests", "chat", "fake-line.mjs"));
-  const { startFakeAi } = await import(path.join(__dirname, "fake-ai.mjs"));
+  const { startFakeAi, goodAnswer, sentOf, langOf } = await import(path.join(__dirname, "fake-ai.mjs"));
+  const { apiMessage, goodReply } = await import(path.join(ROOT, "chat", "test", "coach-fixtures.mjs"));
+  FX = { goodAnswer, sentOf, langOf, apiMessage, goodReply };
   line = await startFakeLine({ channelId: SECRETS.LINE_CHANNEL_ID, secret: SECRETS.LINE_CHANNEL_SECRET });
-  ai = await startFakeAi();
+  ai = await startFakeAi({ reply: r => (aiReply || goodAnswer)(r) });
   srv = await start({ file, name: "coach", line, ai });
   await srv.startWrangler();
 }
@@ -56,7 +59,7 @@ async function tearDown() { if (srv) await srv.tearDown(); if (line) await line.
 // role admin and the room's meta admin_uid, and wrangler dev starts again on it (tests/chat/room.test.js seeds its room the same way).
 // Its session token is token("u-bryan"). The New review checks' surfers (SURFERS) go in the same way, with role user. Doing it again
 // changes nothing.
-const SURFERS = ["u-ana", "u-ben", "u-cho", "u-dan", "u-eve", "u-fay", "u-gus"];
+const SURFERS = ["u-ana", "u-ben", "u-cho", "u-dan", "u-eve", "u-fay", "u-gus", "u-hal", "u-ivy", "u-kim"];
 const ADMIN = String.raw`
 import json, sqlite3, sys
 d = json.load(sys.stdin); c = sqlite3.connect(d["db"])
@@ -76,27 +79,30 @@ async function makeAdmin() {
   if (run.status !== 0) throw new Error("making u-bryan the admin failed: " + run.stderr);
   await srv.startWrangler();
 }
-// The coach's own SQLite file (its Durable Object's), while wrangler dev is stopped; and its meta "today" (the reviews sent this Taiwan
-// day) read, or written when value is given, with wrangler dev stopped and started again round it. Resolves to the value before.
+// The coach's own SQLite file (its Durable Object's), while wrangler dev is stopped; and one of its meta values (JSON text) read, or
+// written when value is given (and the meta values in `also` with it), with wrangler dev stopped and started again round it:
+// coachToday is "today" (the reviews sent this Taiwan day). Resolves to the value before.
 function coachDb() {
   const dos = path.join(srv.tmp, "state", "v3", "do"), dir = fs.existsSync(dos) && fs.readdirSync(dos).find(n => /-Coach$/.test(n));
   const db = dir && fs.readdirSync(path.join(dos, dir)).find(n => /^[0-9a-f]{64}\.sqlite$/.test(n));
   if (!db) throw new Error("wrangler dev made no coach database"); return path.join(dos, dir, db);
 }
-const TODAY = String.raw`
+const META = String.raw`
 import json, sqlite3, sys
 d = json.load(sys.stdin); c = sqlite3.connect(d["db"])
-row = c.execute("SELECT value FROM meta WHERE key = 'today'").fetchone()
+row = c.execute("SELECT value FROM meta WHERE key = ?", (d["key"],)).fetchone()
 with c:
-    if d["value"] is not None: c.execute("INSERT INTO meta (key, value) VALUES ('today', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", (d["value"],))
+    for k, v in d["set"].items():
+        if v is not None: c.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", (k, v))
 c.close(); print(json.dumps(row[0] if row else None))
 `;
-async function coachToday(value) {
+async function coachMeta(key, value, also = {}) {
   await srv.stopWrangler();
-  try { const run = spawnSync("python3", ["-I", "-c", TODAY], { encoding: "utf8", input: JSON.stringify({ db: coachDb(), value }) });
-    if (run.status !== 0) throw new Error("the coach's meta today: " + run.stderr); return JSON.parse(run.stdout); }
+  try { const run = spawnSync("python3", ["-I", "-c", META], { encoding: "utf8", input: JSON.stringify({ db: coachDb(), key, set: { ...also, [key]: value } }) });
+    if (run.status !== 0) throw new Error(`the coach's meta ${key}: ${run.stderr}`); return JSON.parse(run.stdout); }
   finally { await srv.startWrangler(); }
 }
+const coachToday = value => coachMeta("today", value);
 
 // ---- Helpers on a page.
 // Waits up to 15 s for fn(arg) in the page to come true, and says what it waited for when it doesn't.
@@ -272,21 +278,47 @@ async function coachApi(tok, p, { method = "GET", body, text } = {}) {
   const r = await fetch(CHAT() + p, { method, headers, body: text !== undefined ? text : body !== undefined ? JSON.stringify(body) : undefined });
   return { status: r.status, json: await r.json().catch(() => null) };
 }
-// Sends a review for tok's account straight through the backend's routes, as the New review flow does: the agreement, the start with 8
-// key frames (a stand-in 784x784 JPEG each), each frame, then send. Resolves to its id once the fake AI's draft is in (status drafted, as
-// GET /coach/reviews/<id> tells its owner).
-async function sendReview(tok) {
+// Sends a top-turn review for tok's account straight through the backend's routes, as the New review flow does: the agreement, the start
+// with 8 key frames (a stand-in 784x784 JPEG each, at 10.25 s to 12.0 s), each frame, then send, in lang. Resolves to its id once the
+// fake AI's answer is in: status want (drafted, or published on autopilot, or rejected), as GET /coach/reviews/<id> tells its owner.
+async function sendReview(tok, { lang = "en", want = "drafted" } = {}) {
   const { jpegB64 } = await import(path.join(ROOT, "chat", "test", "coach-fixtures.mjs"));
   const b64 = jpegB64(), frames = [1, 2, 3, 4, 5, 6, 7, 8].map(n => ({ n, ms: 10000 + 250 * n, box: [100, 100, 360] }));
   const must = async (what, r) => { r = await r; if (r.status !== 200) throw new Error(`${what} answered ${r.status} ${JSON.stringify(r.json)}`); return r.json; };
   await must("POST /coach/agree", coachApi(tok, "/coach/agree", { method: "POST", body: { ver: "c1", adult: true } }));
   const { id } = await must("POST /coach/reviews", coachApi(tok, "/coach/reviews", { method: "POST",
-    body: { lang: "en", move: "top_turn", move_other: "", level: "turning_well", board: "shortboard", stance: "regular", note: "", frames } }));
+    body: { lang, move: "top_turn", move_other: "", level: "turning_well", board: "shortboard", stance: "regular", note: "", frames } }));
   for (const f of frames) await must(`key frame ${f.n}`, coachApi(tok, `/coach/reviews/${id}/frames/${f.n}`, { method: "POST", text: b64 }));
   await must("send", coachApi(tok, `/coach/reviews/${id}/send`, { method: "POST", body: {} }));
-  for (let i = 0; i < 60; i++) { const r = await coachApi(tok, `/coach/reviews/${id}`); if (r.json && r.json.status === "drafted") return id; await wait(500); }
-  throw new Error(`review ${id} wasn't drafted within 30 s`);
+  for (let i = 0; i < 60; i++) { const r = await coachApi(tok, `/coach/reviews/${id}`); if (r.json && r.json.status === want) return id; await wait(500); }
+  throw new Error(`review ${id} wasn't ${want} within 30 s`);
 }
+// Bryan's action on a review (POST /admin/coach/drafts/<id>), and his settings (POST /admin/coach/settings), each refused at anything but
+// 200; and his Drafts list.
+const act = async (id, body) => { const r = await coachApi(token("u-bryan"), `/admin/coach/drafts/${id}`, { method: "POST", body });
+  if (r.status !== 200) throw new Error(`${body.action} on ${id} answered ${r.status} ${JSON.stringify(r.json)}`); };
+const settings = async body => { const r = await coachApi(token("u-bryan"), "/admin/coach/settings", { method: "POST", body });
+  if (r.status !== 200) throw new Error(`settings ${JSON.stringify(body)} answered ${r.status} ${JSON.stringify(r.json)}`); };
+const draftsList = async () => { const r = await coachApi(token("u-bryan"), "/admin/coach/drafts"); if (r.status !== 200) throw new Error(`GET /admin/coach/drafts answered ${r.status}`); return r.json; };
+// A fake AI answer: a good review of the key frames the request carries, in its language, with `more` over it and, for a 中文 one, `en`
+// over its English copy.
+const replyWith = (more, en = {}) => r => { const m = FX.goodReply(FX.sentOf(r.body), FX.langOf(r.body)); Object.assign(m, more); if (m.english) Object.assign(m.english, en); return FX.apiMessage(m); };
+// The review open in the panel: its heading and date, each part's heading, its lines, its key frames (caption, and whether the image is a
+// blob URL) and its button, the footer, and the buttons under it.
+const reviewView = page => page.evaluate(() => { const v = document.querySelector(".coachpanel .co-review"); if (!v) return null;
+  const t = s => { const e = v.querySelector(s); return e ? e.textContent : null; };
+  return { head: t('[data-k="fh"]'), date: t(".co-rdate"), parts: [...v.querySelectorAll(".co-part")].map(p => ({ h: p.querySelector("h4").textContent,
+      lines: [...p.querySelectorAll("p")].map(e => e.textContent), frames: [...p.querySelectorAll(".co-kf")].map(f => [f.querySelector("figcaption").textContent, !!f.querySelector('img[src^="blob:"]')]),
+      button: p.querySelector("button.co-btn") && p.querySelector("button.co-btn").textContent })),
+    foot: t(".co-foot"), acts: [...v.querySelectorAll(".co-acts button")].map(b => b.textContent) }; });
+// Opens review id from the list (asking GET /coach/me again first when it isn't there yet) and waits for its key frames, n of them.
+async function openReview(page, id, n = 4) {
+  await until(page, `review ${id} in the list`, k => !!document.querySelector(`.coachpanel [data-k="${k}"]`), "r-" + id);
+  await page.click(`.coachpanel [data-k="r-${id}"]`);
+  await until(page, `the review's ${n} key frames`, n => { const i = [...document.querySelectorAll(".coachpanel .co-review .co-kf img")]; return i.length === n && i.every(x => x.src.startsWith("blob:")); }, n);
+}
+// This Taiwan day as the list writes it, in English and 中文.
+const twDate = () => { const d = new Date(Date.now() + 8 * 3600e3); return { en: `${d.getUTCDate()} ${d.toLocaleString("en", { month: "long", timeZone: "UTC" })}`, zh: `${d.getUTCMonth() + 1}月${d.getUTCDate()}日` }; };
 // The Coach tab's dot: there, and drawn.
 const tabDot = page => page.evaluate(t => { const b = document.querySelector(t); return b.classList.contains("co-dot") && getComputedStyle(b, "::after").content !== "none"; }, TAB);
 
@@ -783,7 +815,8 @@ const STEPS = {
     if (r.status !== 200 || r.json.status === "uploading" || !eq(r.json.have, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])) throw new Error(`the server's review: ${r.status} ${JSON.stringify(r.json)}`);
   },
   // The day fills up (meta today at the daily limit) between the start and send (u-dan's account): send answers 429 full_today and the
-  // page says "Couldn't send. Tap to try again.", the draft still in IndexedDB with all 12 key frames, the review's id and every frame sent.
+  // page says "Coach is full today. Try again tomorrow." over Send, the draft still in IndexedDB with all 12 key frames, the review's id
+  // and every frame sent.
   async fullToday(s) {
     const tok = token("u-dan"); await agreeFor(tok);
     const page = await coachPage(s, tok), calls = watchCalls(page);
@@ -793,7 +826,8 @@ const STEPS = {
     const old = await coachToday(JSON.stringify({ day: twDay(), n: 10 }));
     try {
       v.open();
-      await until(page, "Couldn't send", t => { const e = document.querySelector('.coachpanel [data-k="retry"]'); return !!e && e.textContent === t; }, FAILED, 30e3);
+      await until(page, "Coach is full today", t => { const e = document.querySelector(".coachpanel .co-said"), b = document.querySelector('.coachpanel [data-k="send"]');
+        return !!e && e.textContent === t && !!b && !b.disabled; }, "Coach is full today. Try again tomorrow.", 30e3);
       const sends = calls.filter(c => /\/send$/.test(c.path)).map(c => c.status);
       if (!eq(sends, [429])) throw new Error(`send answered ${JSON.stringify(sends)}`);
       const d = await draft(page);
@@ -889,7 +923,177 @@ const STEPS = {
     const tiles = await page.$$eval(".coachpanel .co-tile", t => t.length), posts = calls.slice(mark).filter(c => c.method === "POST");
     if (tiles !== 12 || posts.length) throw new Error(`u-fay's draft back: ${tiles} close-ups; sent meanwhile ${JSON.stringify(posts.map(c => c.path))}`);
   },
+  // ---- The review (AI coach spec, "The review"), u-hal's. The fake AI answers with a heads-up about the bottom turn, and Bryan approves
+  // it through the admin route with an edit that adds a progress line. In the list it's Ready; opened, it shows the move and the date,
+  // What went well with its key frame and time, The main fix with its three, Your drill, the Heads-up with "Get a review of your bottom
+  // turn", Progress, and "Reviewed by WaveSlave Coach (AI), checked by a person. Surf within your limits.", then Something wrong? and
+  // Delete. Each key frame is a blob URL, fetched with the session token.
+  async reviewEn(s) {
+    const tok = token("u-hal"), g = FX.goodReply([1, 2, 3, 4, 5, 6, 7, 8], "en");
+    aiReply = replyWith({ heads_up: { text: HEADS_EN, move: "bottom_turn" } });
+    try { s.halEn = await sendReview(tok); } finally { aiReply = null; }
+    await act(s.halEn, { action: "approve", edits: { progress: PROGRESS_EN } });
+    const page = s.hal = await coachPage(s, tok), asks = [];
+    page.on("request", r => { if (/\/coach\/reviews\/[\w-]{22}\/frames\/\d+$/.test(r.url()) && r.method() === "GET") asks.push([+r.url().split("/").pop(), r.headers().authorization]); });
+    await openReview(page, s.halEn);
+    const got = await reviewView(page), when = twDate().en;
+    const want = { head: "Top turn", date: when, parts: [
+      { h: "What went well", lines: [g.went_well.title, g.went_well.detail], frames: [["Key frame at 0:10.3", true]], button: null },
+      { h: "The main fix", lines: [g.main_fix.title, "What's happening: " + g.main_fix.what, "Why it matters: " + g.main_fix.why],
+        frames: [["Key frame at 0:11.5", true], ["Key frame at 0:11.8", true], ["Key frame at 0:12.0", true]], button: null },
+      { h: "Your drill", lines: [g.drill.title, g.drill.how], frames: [], button: null },
+      { h: "Heads-up", lines: [HEADS_EN], frames: [], button: "Get a review of your bottom turn" },
+      { h: "Progress", lines: [PROGRESS_EN], frames: [], button: null }],
+      foot: "Reviewed by WaveSlave Coach (AI), checked by a person. Surf within your limits.", acts: ["Something wrong?", "Delete"] };
+    if (!eq(got, want)) throw new Error(`the review shows ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+    const bearer = "Bearer " + tok;
+    if (!eq(asks.map(a => a[0]).sort((a, b) => a - b), [1, 6, 7, 8]) || !asks.every(a => a[1] === bearer)) throw new Error(`the key frames were asked for as ${JSON.stringify(asks.map(a => [a[0], a[1] === bearer ? "the token" : a[1]]))}`);
+  },
+  // A review asked for in 中文 (u-hal's second top turn, so with a progress line from the AI, and a heads-up about the cutback), approved
+  // as it is, opened in 中文: every part with its heading in 中文 and the review's own words, 「讓教練講評你的回切」 and the checked
+  // footer in 中文.
+  async reviewZh(s) {
+    const tok = token("u-hal"), g = FX.goodReply([1, 2, 3, 4, 5, 6, 7, 8], "zh"), page = s.hal;
+    aiReply = replyWith({ heads_up: { text: HEADS_ZH, move: "cutback" }, progress: PROGRESS_ZH }, { heads_up: { text: "Your back knee locks straight on your cutback." }, progress: "Better than last time." });
+    try { s.halZh = await sendReview(tok, { lang: "zh" }); } finally { aiReply = null; }
+    await act(s.halZh, { action: "approve" });
+    await page.reload({ waitUntil: "load" }); await page.evaluate(() => setLang("zh")); await page.tap(TAB); await panelOpen(page);
+    await openReview(page, s.halZh);
+    const got = await reviewView(page);
+    const want = { head: "頂部轉向", date: twDate().zh, parts: [
+      { h: "做得好的地方", lines: [g.went_well.title, g.went_well.detail], frames: [["0:10.3 的關鍵影格", true]], button: null },
+      { h: "主要修正", lines: [g.main_fix.title, "發生了什麼：" + g.main_fix.what, "為什麼重要：" + g.main_fix.why],
+        frames: [["0:11.5 的關鍵影格", true], ["0:11.8 的關鍵影格", true], ["0:12.0 的關鍵影格", true]], button: null },
+      { h: "你的練習", lines: [g.drill.title, g.drill.how], frames: [], button: null },
+      { h: "提醒", lines: [HEADS_ZH], frames: [], button: "讓教練講評你的回切" },
+      { h: "和上次相比", lines: [PROGRESS_ZH], frames: [], button: null }],
+      foot: "由 WaveSlave 教練（AI）講評，並經真人檢查。在自己的能力範圍內衝浪。", acts: ["哪裡不對嗎？", "刪除"] };
+    if (!eq(got, want)) throw new Error(`the 中文 review shows ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+    await page.evaluate(() => setLang("en")); await page.click('.coachpanel [data-k="back"]');
+  },
+  // Autopilot (u-ivy): a review published at once, checked by no one, has the short footer, "Reviewed by WaveSlave Coach (AI). Surf within
+  // your limits.", and no heads-up or progress.
+  async reviewAuto(s) {
+    const tok = token("u-ivy");
+    await settings({ autopilot: true });
+    try { s.ivyReview = await sendReview(tok, { want: "published" }); } finally { await settings({ autopilot: false }); }
+    const page = await coachPage(s, tok); await openReview(page, s.ivyReview);
+    const got = await reviewView(page);
+    if (got.foot !== "Reviewed by WaveSlave Coach (AI). Surf within your limits." || !eq(got.parts.map(p => p.h), ["What went well", "The main fix", "Your drill"])) throw new Error(`the autopilot review shows ${JSON.stringify(got)}`);
+  },
+  // The heads-up's "Get a review of your bottom turn" starts New review with the bottom turn picked (ruling P12): the picker, then, once the
+  // clip is chosen, the questions with the bottom turn already pressed.
+  async headsUp(s) {
+    const page = s.hal; await openReview(page, s.halEn);
+    await page.click('.coachpanel [data-k="headsup"]'); await inPanel(page, "the picker", ".co-choose");
+    if (await text(page, '[data-k="fh"]') !== "New review") throw new Error(`the heads-up's button opened ${JSON.stringify(await text(page, '[data-k="fh"]'))}`);
+    await pick(page, clip()); await inPanel(page, "the questions", '[data-k="move-bottom_turn"]');
+    const pressed = await page.$$eval('.coachpanel [data-k^="move-"][aria-pressed="true"]', b => b.map(x => x.getAttribute("data-k")));
+    if (!eq(pressed, ["move-bottom_turn"])) throw new Error(`New review from the heads-up has ${JSON.stringify(pressed)} picked`);
+    await page.click('.coachpanel [data-k="back"]'); await inPanel(page, "Pick up where you left off?", ".co-resume");
+    await page.click('.coachpanel [data-k="over"]'); await inPanel(page, "the picker", ".co-choose"); await page.click('.coachpanel [data-k="back"]'); await inPanel(page, "New review", '[data-k="new"]');
+  },
+  // Something wrong? sends the review back with its line: the panel thanks the surfer and the list says Coach is reviewing; Bryan's
+  // Drafts list has it waiting, reported, with the line. Something wrong? on a review that was reported meanwhile (elsewhere) answers
+  // 409 state: "Couldn't send. Tap to try again.". Bryan approves both again.
+  async reportReview(s) {
+    const page = s.hal, tok = token("u-hal"), said = "The drill doesn't fit my board.";
+    await openReview(page, s.halEn);
+    await page.click('.coachpanel [data-k="wrong"]'); await page.fill('.coachpanel [data-k="wrongline"]', said); await page.click('.coachpanel [data-k="wrongsend"]');
+    await until(page, "the thanks", t => { const e = document.querySelector('.coachpanel [data-k="said"]'); return !!e && e.textContent === t; }, "Thanks. We'll check this review again.");
+    await until(page, "the review back with the coach", k => { const b = document.querySelector(`.coachpanel [data-k="${k}"]`), li = [...document.querySelectorAll(".coachpanel .co-list li")].find(l => /Top turn/.test(l.textContent) && !l.querySelector("button"));
+      return !b && !!li && li.querySelector(".co-st").textContent === "Coach is reviewing"; }, "r-" + s.halEn);
+    const back = (await draftsList()).waiting.find(r => r.id === s.halEn);
+    if (!back || back.reported !== true || back.report !== said || back.status !== "drafted") throw new Error(`Bryan's Drafts have it as ${JSON.stringify(back && { status: back.status, reported: back.reported, report: back.report })}`);
+    await openReview(page, s.halZh);
+    const elsewhere = await coachApi(tok, `/coach/reviews/${s.halZh}/report`, { method: "POST", body: { line: "" } });
+    if (elsewhere.status !== 200) throw new Error(`reporting it elsewhere answered ${elsewhere.status}`);
+    await page.click('.coachpanel [data-k="wrong"]'); await page.click('.coachpanel [data-k="wrongsend"]');
+    await until(page, "Couldn't send", t => { const b = document.querySelector('.coachpanel [data-k="wrongsend"]'); return !!b && b.textContent === t; }, FAILED);
+    await page.click('.coachpanel [data-k="back"]');
+    for (const id of [s.halEn, s.halZh]) await act(id, { action: "approve" });
+  },
+  // Delete asks first ("Delete this review? It and its key frames are deleted from WaveSlave."); Cancel keeps it, and Delete removes the
+  // review and its key frames from the backend: the panel says "Review deleted." and the list no longer has it.
+  async deleteReview(s) {
+    const page = s.hal, tok = token("u-hal");
+    await page.reload({ waitUntil: "load" }); await page.tap(TAB); await panelOpen(page); await openReview(page, s.halEn);
+    await page.click('.coachpanel [data-k="del"]'); await inPanel(page, "Delete's question", '[data-k="delyes"]');
+    const ask = await text(page, ".co-ask p");
+    if (ask !== "Delete this review? It and its key frames are deleted from WaveSlave.") throw new Error(`Delete asks ${JSON.stringify(ask)}`);
+    await page.click('.coachpanel [data-k="delno"]'); await inPanel(page, "the review's buttons", '[data-k="del"]');
+    if ((await coachApi(tok, `/coach/reviews/${s.halEn}`)).status !== 200) throw new Error("Cancel deleted the review");
+    await page.click('.coachpanel [data-k="del"]'); await page.click('.coachpanel [data-k="delyes"]');
+    await until(page, "Review deleted", t => { const e = document.querySelector('.coachpanel [data-k="said"]'); return !!e && e.textContent === t; }, "Review deleted.");
+    const rows = await page.$$eval(".coachpanel .co-list button", b => b.map(x => x.getAttribute("data-k")));
+    const gone = [(await coachApi(tok, `/coach/reviews/${s.halEn}`)).status, (await coachApi(tok, `/coach/reviews/${s.halEn}/frames/1`)).status];
+    if (rows.includes("r-" + s.halEn) || !rows.includes("r-" + s.halZh) || !eq(gone, [404, 404])) throw new Error(`after Delete the list has ${JSON.stringify(rows)}, the backend answers ${gone}`);
+  },
+  // ---- The backend's refusals at send (AI coach spec, "When something goes wrong"), each with its message on the check screen and Send
+  // there again (u-kim's account, one clip): Bryan's Pause (503 break), a money rest (meta rest, until a day ahead: "Coach is resting until
+  // <that Taiwan day>."), a review already with the coach (409 in_progress), a flagged clip (403 blocked; the list then says "We couldn't
+  // review this clip." and the panel that no reviews are left), and once Bryan clears it, no reviews left (429 no_reviews_left, naming the
+  // server's month and the next). The draft keeps its key frames all along. (The day's count starts again with the rest's end, as the
+  // checks before have sent nearly the coach's 10 a day.)
+  async refusals(s) {
+    const tok = token("u-kim"); await agreeFor(tok);
+    const page = s.kim = await coachPage(s, tok), calls = watchCalls(page), m = twMonth();
+    await toCheck(page);
+    const refused = async (what, status, said) => { const n = startsOf(calls).length;
+      await page.click('.coachpanel [data-k="send"], .coachpanel [data-k="retry"]');
+      await soon(`the start for ${what}`, () => startsOf(calls).length > n);
+      await until(page, what, t => { const e = document.querySelector(".coachpanel .co-said"), b = document.querySelector('.coachpanel [data-k="send"]'); return !!e && e.textContent === t && !!b && !b.disabled; }, said, 30e3);
+      const got = startsOf(calls).slice(n).map(c => c.status); if (got[got.length - 1] !== status) throw new Error(`${what}: the start answered ${JSON.stringify(got)}, want ${status}`); };
+    await settings({ paused: true });
+    try { await refused("a break", 503, "Coach is taking a break. Try again later."); } finally { await settings({ paused: false }); }
+    const ends = Date.now() + 5 * DAY, d = new Date(ends + 8 * 3600e3), y = new Date(Date.now() + 8 * 3600e3).getUTCFullYear();
+    const day = `${d.getUTCDate()} ${d.toLocaleString("en", { month: "long", timeZone: "UTC" })}${d.getUTCFullYear() !== y ? " " + d.getUTCFullYear() : ""}`;
+    await coachMeta("rest", JSON.stringify({ kind: "limit", until: ends, probe_at: null }));
+    try { await refused("a money rest", 503, `Coach is resting until ${day}.`); }
+    finally { await coachMeta("rest", "null", { today: JSON.stringify({ day: twDay(), n: 0 }) }); }
+    const first = await sendReview(tok);
+    await refused("a review with the coach", 409, "Your last review is still with the coach.");
+    await act(first, { action: "approve" });
+    aiReply = replyWith({ sexual_content: true });
+    try { s.kimFlagged = await sendReview(tok, { want: "rejected" }); } finally { aiReply = null; }
+    await refused("a flagged clip", 403, "This account can't use the coach.");
+    const next = new Date(Date.UTC(new Date(Date.now() + 8 * 3600e3).getUTCFullYear(), m.n, 1)).toLocaleString("en", { month: "long", timeZone: "UTC" });
+    const none = `You've used your 2 reviews for ${m.name}. More on ${next} 1.`;
+    await page.click('.coachpanel [data-k="back"]'); await inPanel(page, "Pick up where you left off?", ".co-resume");
+    await until(page, "the flagged review in the list", k => { const li = [...document.querySelectorAll(".coachpanel .co-list li")].find(l => l.querySelector(".co-st-not_reviewed"));
+      return !!li && li.querySelector(".co-rnote").textContent === k; }, "We couldn't review this clip.");
+    const why = await text(page, ".co-why");
+    if (why !== none) throw new Error(`with no reviews left the panel says ${JSON.stringify(why)}, want ${JSON.stringify(none)}`);
+    await act(s.kimFlagged, { action: "clear" });
+    await page.click('.coachpanel [data-k="pickup"]'); await inPanel(page, "the check screen", ".co-grid");
+    await refused("no reviews left", 429, none);
+    const kept = await draft(page);
+    if (!kept || kept.frames.length !== 12 || kept.id !== null) throw new Error(`after the refusals the draft is ${JSON.stringify(kept && { frames: kept.frames.length, id: kept.id })}`);
+  },
+  // A sign-in that has gone (signed out everywhere): Send answers 401, the page hands the token back (CHAT.token(old)) and shows Sign in
+  // with LINE, and the draft stays in IndexedDB with its 12 key frames.
+  async refusedAuth(s) {
+    const page = s.kim, tok = token("u-kim");
+    const out = await fetch(CHAT() + "/me/signout", { method: "POST", headers: { Origin: ORIGIN(), Authorization: "Bearer " + tok } });
+    if (out.status !== 200) throw new Error(`signing out answered ${out.status}`);
+    await page.click('.coachpanel [data-k="send"]'); await inPanel(page, "Sign in with LINE", ".co-signin", 30e3);
+    const st = await page.evaluate(() => localStorage.getItem("waveslave-chat-token")), d = await draft(page);
+    if (st !== null || !d || d.account !== "u-kim" || d.frames.length !== 12 || !d.frames.every(f => f.blob > 0)) throw new Error(`after a 401 at send: the token ${st === null ? "gone" : "kept"}, the draft ${JSON.stringify(d && { account: d.account, frames: d.frames.length })}`);
+  },
+  // A banned account (Bryan's Ban, on u-ivy's review): the ban ends its sign-ins (its token version goes up), so a page signed in with
+  // the old token shows Sign in with LINE; with a token of the new version GET /coach/me answers 403 banned, and the panel says "This
+  // account can't use the coach." with no Try again.
+  async banned(s) {
+    await act(s.ivyReview, { action: "ban" });
+    let page = await s.open({ store: { "waveslave-chat-token": token("u-ivy") } }); await page.tap(TAB); await panelOpen(page);
+    await inPanel(page, "Sign in with LINE", ".co-signin");
+    page = await s.open({ store: { "waveslave-chat-token": token("u-ivy", 1) } }); await page.tap(TAB); await panelOpen(page);
+    await until(page, "the banned line", t => { const e = document.querySelector(".coachpanel .co-err"); return !!e && e.textContent === t; }, "This account can't use the coach.");
+    if (await page.$('.coachpanel [data-k="retry"]') || await page.$(".coachpanel .co-left")) throw new Error("a banned account gets Try again or the count");
+  },
 };
+const HEADS_EN = "On your bottom turn your back knee locks straight, which can hurt a knee.", PROGRESS_EN = "Your front knee stays bent longer than last time.";
+const HEADS_ZH = "你回切時後膝打直，容易受傷。", PROGRESS_ZH = "比上次好：前膝彎得更久。";
 
 (async () => {
   let browser, bad = false, ctxs = [], errs = [];

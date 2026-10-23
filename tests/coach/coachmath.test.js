@@ -45,13 +45,28 @@ function followed(got, want, side) {
   });
 }
 
-test("coach.js runs on a page with no coach markup, logs nothing and adds no global", () => {
+// A bare page: no document and none of the page's state, only console and window. coachUrl sets window.__chatUrl.
+function runBare(coachUrl) {
   const logged = [], note = (...a) => logged.push(a);
   const page = { console: { error: note, warn: note, log: note, info: note } }; page.window = page; page.self = page; page.globalThis = page;
-  const ctx = vm.createContext(page), before = Object.getOwnPropertyNames(ctx).sort();
+  if (coachUrl !== undefined) page.__chatUrl = coachUrl;
+  const ctx = vm.createContext(page), before = Object.getOwnPropertyNames(ctx);
   vm.runInContext(fs.readFileSync(FILE, "utf8"), ctx, { filename: "coach.js" });
+  return { ctx, logged, added: Object.getOwnPropertyNames(ctx).filter(k => !before.includes(k)).sort() };
+}
+
+test("coach.js runs on a page with no coach markup, logs nothing and adds only window.COACH, whose hooks do nothing there", () => {
+  const { ctx, logged, added } = runBare();
+  assert.deepEqual(added, ["COACH"]);
+  assert.deepEqual(Object.keys(ctx.COACH).sort(), ["dev", "open", "relang", "spot"]);
+  for (const k of ["dev", "relang", "spot", "open"]) assert.equal(ctx.COACH[k]("donghe"), undefined);
   assert.deepEqual(logged, []);
-  assert.deepEqual(Object.getOwnPropertyNames(ctx).sort(), before);
+});
+
+test("coach.js with the backend address empty adds nothing at all", () => {
+  const { logged, added } = runBare("");
+  assert.deepEqual(added, []);
+  assert.deepEqual(logged, []);
 });
 
 test("COACHM has exactly the maths the page uses", () => {

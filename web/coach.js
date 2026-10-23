@@ -1,8 +1,14 @@
 // The AI surf coach on the page (docs/superpowers/specs/2026-10-22-ai-coach-design.md, "Front end: web/coach.js"). The surfer picks a
 // clip, finds the move and taps themselves once; the phone cuts 12 close-up key frames and follows the surfer through them, and only those
 // key frames are sent: the video never leaves the phone (Bryan, Oct 22).
-// One classic script, loaded with defer. So far it holds only the maths the key-frame cutter needs (COACHM below); it declares no global
-// names and never throws into the page.
+// One classic script, loaded with defer before chat.js, with no dependencies. It reads the page's LANG, CUR, VIEW, WORLD and setView by
+// bare name, as chat.js does, and gives the page only window.COACH = {dev, relang, spot, open}: template.html calls them from keepWorld()
+// (developer mode came on or went off), setLang() (the language changed), boot() (a spot is shown) and the Coach tab. It brings its own
+// <style> and its own English and 中文.
+// - It never throws into the page: each way in is wrapped, and while the backend address is empty it does nothing at all, so the page
+//   works exactly as it does without it. While the coach isn't on for this visitor it asks the backend nothing.
+// - Everything from the network goes in through textContent or setAttribute, never as HTML, and no coach element carries data-zh or
+//   data-ja (the page's applyLang() rewrites those as HTML); relang() writes the new language itself.
 (function () { "use strict"; try {
 
 // ---- Coach maths: plain functions with no page state, tested in Node (tests/coach/coachmath.test.js). A box is {x, y, side}: whole
@@ -112,5 +118,120 @@ const COACHM = (() => {
   return {keyTimes, startBox, resize, clampBox, nextQuality, grey, track, fmtTime};
 })();
 // ---- end coach maths
+
+// ---- The page shell: the Coach tab, its full-screen panel and the page's hooks.
+// Where the backend runs: the chat's Worker, which serves the coach too. Tests set window.__chatUrl in its place, and an empty one switches
+// the coach off with the chat. Only a string counts, as in chat.js, so an element that happens to be called __chatUrl can't.
+const BACKEND = typeof window.__chatUrl === "string" ? window.__chatUrl : "https://waveslave-chat.waveslave050.workers.dev";
+if (!/^https?:\/\/./i.test(BACKEND)) return;
+// Who sees it (Bryan, Oct 22): only developer mode (the page's World mode, behind the PIN on the W in the logo) until Bryan says "go live";
+// then PUBLIC goes to true, with or after chat.js's own. Tests set window.__coachPublic to see the coach as everyone will. While neither
+// holds, the tab stays hidden and the coach asks the backend nothing; keepWorld() calls COACH.dev() each time the mode changes.
+const PUBLIC = window.__coachPublic === true;
+const on = () => PUBLIC || (typeof WORLD === "boolean" && WORLD);
+
+// Runs f and keeps any error inside the coach: the page carries on whatever happens here, and an async f's failure never reaches it as an
+// unhandled rejection. Only the error's name is logged.
+const oops = err => { try { console.error("coach:", err?.name ?? "error"); } catch (e) {} };
+const guard = f => (...a) => { try { const r = f(...a); if (r && typeof r.then === "function") r.then(null, oops); return r; } catch (err) { oops(err); } };
+
+// ---- Strings: every word the coach shows, in English and 中文 (Taiwan usage). Any other language gets the English.
+const STR = {
+  en: { tab: "Coach", title: "COACH", close: "Close" },
+  zh: { tab: "教練", title: "教練", close: "關閉" },
+};
+const S = key => (typeof LANG === "string" && LANG === "zh" ? STR.zh : STR.en)[key];
+// A new element: attributes go in with setAttribute, children as nodes or as text (append makes a text node of a string), never as HTML.
+function el(tag, attrs, ...kids) { const e = document.createElement(tag);
+  for (const k in attrs || {}) if (attrs[k] != null) e.setAttribute(k, attrs[k]);
+  for (const c of kids.flat(Infinity)) if (c != null) e.append(c);
+  return e; }
+
+// The panel covers the whole screen above everything, the full-screen map (z-index 100) and the CHAT button included, like the chat's room.
+const CSS = `
+html.coach-open,html.coach-open body{overflow:hidden}
+.coachpanel{position:fixed;inset:0;z-index:110;display:flex;flex-direction:column;background:var(--bg);color:var(--ink);font:15px/1.45 var(--body);overscroll-behavior:contain;outline:none;-webkit-text-size-adjust:100%}
+.coachpanel[hidden],.coachpanel [hidden]{display:none!important}
+.coachpanel button{font-family:var(--body);-webkit-tap-highlight-color:transparent}
+.co-hd,.co-body{width:100%;max-width:760px;margin-inline:auto;box-sizing:border-box}
+.co-hd{flex:none;display:flex;align-items:center;gap:10px;padding:calc(12px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 12px calc(16px + env(safe-area-inset-left));border-bottom:1px solid var(--line)}
+.co-title{margin:0;flex:1;min-width:0;font:400 31px/1 VT323,var(--mono);letter-spacing:.07em;color:var(--led-amb);text-shadow:0 0 calc(10px*var(--led-glow)) rgba(255,170,40,.65);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.co-x{flex:none;width:36px;height:36px;padding:0;display:grid;place-items:center;border-radius:50%;border:1.5px solid var(--led-amb);background:none;color:var(--led-amb);font-size:16px;font-weight:700;line-height:1;cursor:pointer}
+.co-body{flex:1;min-height:0;overflow-y:auto;padding:16px calc(16px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left))}
+`;
+
+// What the shell keeps: whether it has started (the page is there, with its Coach tab), the tab, the panel and its parts, whether it's
+// open and what had the focus before.
+const P = { started: false, open: false, opener: null, tab: null, el: null, title: null, x: null };
+// Whether the coach shows for this visitor now: switched on (developer mode, or PUBLIC), on a Taiwan spot (html.tw, which boot() sets) and
+// with the chat there (window.CHAT), whose LINE sign-in the coach uses.
+const can = () => P.started && on() && document.documentElement.classList.contains("tw") && !!window.CHAT;
+
+// The tab and the panel's words, in the page's language; the tab shows while the coach does, and the panel shuts when the coach goes.
+function draw() {
+  if (!P.started) return;
+  const show = can();
+  P.tab.hidden = !show; if (P.tab.textContent !== S("tab")) P.tab.textContent = S("tab");
+  if (P.title.textContent !== S("title")) P.title.textContent = S("title"); P.x.setAttribute("aria-label", S("close"));
+  if (!show) close();
+}
+// Opens the panel over the Forecast view: from the map, the page goes back to Forecast first, as it does for the chat's room.
+function open() {
+  if (!can()) return;
+  if (VIEW !== "fc") setView("fc", true);
+  if (P.open) return;
+  P.open = true; P.opener = document.activeElement; P.el.hidden = false; document.documentElement.classList.add("coach-open");
+  P.el.focus({ preventScroll: true });
+}
+// ✕ or Escape, or the coach going away: the focus goes back where it was, else to the tab while it shows.
+function close() {
+  if (!P.open) return;
+  P.open = false; P.el.hidden = true; document.documentElement.classList.remove("coach-open");
+  const back = P.opener; P.opener = null;
+  const to = [back, P.tab].find(e => e && e !== document.body && e.isConnected && e.getClientRects().length);
+  if (to) to.focus({ preventScroll: true });
+}
+
+// ---- The page's hooks (template.html). The coach is for the whole of Taiwan, so a spot only matters for html.tw, which boot() sets
+// just before it calls spot().
+window.COACH = {
+  dev: guard(() => draw()),
+  relang: guard(() => draw()),
+  spot: guard(() => draw()),
+  open: guard(() => open()),
+};
+
+// ---- Start-up, once the page is parsed (DOMContentLoaded): by then chat.js, loaded after this, has run, so window.CHAT is there if
+// the chat is. boot() ran before this script loaded, so the shell draws for the spot already up. Without the page's state or its Coach
+// tab (another page, or a template from before the coach) it stays off.
+function start() {
+  if (P.started) return;
+  const tab = document.querySelector('.tabs button[data-v="coach"]');
+  if (!tab || !document.body || typeof LANG !== "string" || typeof CUR !== "string" || typeof VIEW !== "string" || typeof setView !== "function") return;
+  P.tab = tab;
+  P.title = el("h2", { class: "co-title", id: "coachTitle" });
+  P.x = el("button", { type: "button", class: "co-x" }, "✕");
+  P.x.addEventListener("click", guard(() => close()));
+  P.el = el("div", { class: "coachpanel", role: "dialog", "aria-modal": "true", "aria-labelledby": "coachTitle", tabindex: "-1", hidden: "" },
+    el("div", { class: "co-hd" }, P.title, P.x), el("div", { class: "co-body" }));
+  document.head.append(el("style", null, CSS));
+  document.body.append(P.el);
+  // Escape shuts the panel and nothing else (not the map behind it); Tab stays inside it. The chat's room has Escape while it's open.
+  addEventListener("keydown", guard(e => {
+    if (!P.open || document.documentElement.classList.contains("chat-open")) return;
+    if (e.key === "Escape" && !e.isComposing) { e.preventDefault(); e.stopImmediatePropagation(); close(); return; }
+    if (e.key !== "Tab") return;
+    const all = [...P.el.querySelectorAll("button, input, a[href], textarea, select")].filter(x => !x.disabled && x.getClientRects().length);
+    if (!all.length) { e.preventDefault(); P.el.focus(); return; }
+    const i = all.indexOf(document.activeElement);
+    if (e.shiftKey && i <= 0) { e.preventDefault(); all[all.length - 1].focus(); } else if (!e.shiftKey && (i === -1 || i === all.length - 1)) { e.preventDefault(); all[0].focus(); }
+  }), true);
+  P.started = true;
+  window.COACH.spot(CUR); window.COACH.dev();
+}
+if (typeof document === "object" && document) {
+  if (document.readyState === "complete") guard(start)();
+  else { document.addEventListener("DOMContentLoaded", guard(start), { once: true }); addEventListener("load", guard(start), { once: true }); }
+}
 
 } catch (err) { try { console.error("coach: start-up failed", err?.name ?? "error"); } catch (e) {} } })();

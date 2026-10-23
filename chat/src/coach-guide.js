@@ -29,7 +29,7 @@ export const BOARDS = Object.freeze(["shortboard", "midlength", "longboard", "fo
 export const STANCES = Object.freeze(["regular", "goofy", "unsure"]);
 // A review is written in the site's language when the clip is sent: English or 中文 (Traditional, Taiwan usage).
 export const LANGS = Object.freeze(["en", "zh"]);
-// A heads-up points to a review of its own, so it names a move the surfer can pick: any but "other".
+// A heads-up that points to a review of its own names a move the surfer can pick: any but "other".
 export const HEADS_UP_MOVES = Object.freeze(MOVES.filter((move) => move !== "other"));
 // The coach agreement's version. A surfer agrees once, and agrees again only when this changes.
 export const AGREE_VER = "c1";
@@ -202,9 +202,11 @@ Only the surfer being reviewed
 The heads-up
 - Only for something serious outside this move: a habit likely to hurt them, or one that will badly hold them back.
   Most reviews have none.
-- heads_up.text is one line about it, and heads_up.move names the move it belongs to (one of popup, bottom_turn,
-  top_turn, cutback, down_the_line, and not the move reviewed here), so they can get a review of its own. With no
-  heads-up, both are "".
+- heads_up.text is one line about it.
+- When the habit belongs to one of these moves, heads_up.move names it, so they can get a review of its own: popup,
+  bottom_turn, top_turn, cutback or down_the_line (not the move reviewed here). heads_up.move is "" when the habit
+  belongs to none of them, like how they fall or how close they ride to other surfers.
+- With no heads-up, both are "".
 
 Progress
 - Only when you are given earlier reviews of this move: one or two sentences on how this compares with last time, from
@@ -424,8 +426,10 @@ const exactly = (value, keys) =>
 const frameList = (value) => Array.isArray(value) && value.every(Number.isInteger);
 
 // Whether the reply has the schema's shape, which structured outputs should already make sure of; `english` is left to
-// its own check. On top of the schema: a heads-up has both its text and its move or neither, and a reply that would
-// become a draft (a surf clip, the surfer seen, nothing flagged) has text in every field but the heads-up and progress.
+// its own check. On top of the schema: a heads-up that names a move has text (text with no move is fine: a serious habit,
+// such as falling head first, may belong to no move, and then the heads-up has no button for a review of its own), and a
+// reply that would become a draft (a surf clip, the surfer seen, nothing flagged) has text in every field but the
+// heads-up and progress.
 function shapeOk(r, zh) {
   const allowed = zh ? [...REPLY_KEYS, "english"] : REPLY_KEYS;
   if (!REPLY_KEYS.every((key) => Object.hasOwn(r, key)) || !Object.keys(r).every((key) => allowed.includes(key))) return false;
@@ -436,7 +440,7 @@ function shapeOk(r, zh) {
   if (!exactly(drill, ["title", "how"]) || !exactly(heads, ["text", "move"])) return false;
   if (!TEXT_FIELDS.every((path) => isString(at(r, path)))) return false;
   if (heads.move !== "" && !HEADS_UP_MOVES.includes(heads.move)) return false;
-  if (blank(heads.text) !== (heads.move === "")) return false;
+  if (heads.move !== "" && blank(heads.text)) return false;
   const draft = r.is_surf_clip && r.can_see_surfer && !r.sexual_content && !r.surfer_looks_under_18;
   const needed = TEXT_FIELDS.filter((path) => path !== "heads_up.text" && path !== "progress");
   return !draft || needed.every((path) => !blank(at(r, path)));

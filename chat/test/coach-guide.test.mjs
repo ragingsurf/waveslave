@@ -389,8 +389,8 @@ test("checkReply: the reply's shape", () => {
     (r) => delete r.drill.how,
     (r) => { r.heads_up.move = "air"; },
     (r) => { r.heads_up.move = "other"; },
-    (r) => { r.heads_up = { text: "Pop up sooner", move: "" }; }, // a heads-up names its move
-    (r) => { r.heads_up = { text: "", move: "popup" }; },
+    (r) => { r.heads_up = { text: "", move: "popup" }; }, // a move with nothing to say about it
+    (r) => { r.heads_up = { text: "  ", move: "popup" }; },
     (r) => { r.went_well.title = " "; }, // a review to publish has every text
     (r) => { r.main_fix.why = ""; },
     (r) => { r.progress = null; },
@@ -402,6 +402,9 @@ test("checkReply: the reply's shape", () => {
   for (const reply of [null, undefined, "text", [], 5]) assert.deepEqual(checkReply(reply, EN), { ...EMPTY, errors: ["shape"] });
   const headsUp = goodReply(); headsUp.heads_up = { text: "Pop up sooner so you don't nose-dive.", move: "popup" };
   assert.deepEqual(checkReply(headsUp, EN), EMPTY);
+  // A serious habit that belongs to no move is still a heads-up: it just has no button for a review of its own.
+  const noMove = goodReply(); noMove.heads_up = { text: "Cover your head with your arms when you fall.", move: "" };
+  assert.deepEqual(checkReply(noMove, EN), EMPTY);
 });
 
 test("checkReply: a clip that isn't surfing, or a surfer who can't be seen, may leave the text empty", () => {
@@ -452,6 +455,7 @@ test("autopilotOk: only a reply that passes every check", () => {
     "sexual": [(r) => { r.sexual_content = true; }],
     "under 18": [(r) => { r.surfer_looks_under_18 = true; }],
     "a heads-up": [(r) => { r.heads_up = { text: "Pop up sooner.", move: "popup" }; }],
+    "a heads-up with no move": [(r) => { r.heads_up = { text: "Cover your head when you fall.", move: "" }; }],
     "a banned word": [(r) => { r.drill.title = "Practise from a picture"; }],
     "中文 without its copy": [(r) => { delete r.english; }, "zh"],
     "an error": [(r) => { r.went_well.frame = 13; }],
@@ -501,6 +505,8 @@ test("systemPrompt: covers every part of the guide", () => {
     assert.ok(prompt.includes(term), term);
   }
   assert.ok(/only the surfer/i.test(prompt));
+  // What heads_up.move is when the habit belongs to no move. A bullet's wrapped lines are joined first.
+  assert.ok(prompt.replace(/\n {2,}(?! *- )/g, " ").includes('heads_up.move is "" when the habit belongs to none of them'));
   assert.ok(/never instructions/i.test(prompt));
   assert.ok(!/worked example/i.test(prompt)); // none until Bryan OKs his
 });

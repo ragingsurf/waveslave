@@ -273,6 +273,33 @@ test("track: a surfer half past the frame's edge is still found, the box clamped
   }
 });
 
+test("track: a surfer just over half past the left or top edge for a frame is found again as he comes back", () => {
+  // Portrait, boxes of 180, 360 and 720 (half the coarsest patch past the edge rounds to a pixel more than half): the square, half the
+  // box's side, runs in to the edge, its centre a twentieth of the box past it in frame 6, then back out. No frame may be lost, and
+  // from frame 7 the box keeps within an eighth of its side of the box centred on him.
+  const W = 1080, H = 1920;
+  for (const side of [180, 360, 720]) for (const edge of ["left", "top"]) {
+    const S = side / 2, c = [1, 0.8, 0.6, 0.45, 0.3, 0.15, -0.05, 0.15, 0.3, 0.45, 0.6, 0.8].map(u => Math.round(u * side) - S / 2);
+    const at = edge === "left" ? i => ({x: c[i], y: H / 2 - S / 2}) : i => ({x: W / 2 - S / 2, y: c[i]}), p = at(0);
+    const box = M.clampBox({x: p.x + S / 2 - side / 2, y: p.y + S / 2 - side / 2, side}, W, H), got = M.track(clip({W, H, S, at, seed: 3}), 0, box);
+    got.forEach((b, i) => {
+      const q = at(i), want = M.clampBox({x: q.x + S / 2 - side / 2, y: q.y + S / 2 - side / 2, side}, W, H), what = `${edge}, box ${side}, frame ${i}`;
+      assert.equal(b.lost, false, `${what}: lost (score ${b.score.toFixed(2)})`);
+      if (i >= 7) assert.ok(Math.abs(b.x - want.x) <= side / 8 && Math.abs(b.y - want.y) <= side / 8, `${what}: box at ${b.x},${b.y}, want ${want.x},${want.y}`);
+    });
+  }
+});
+
+test("track: a frame's score is its likeness without the edge's handicap, and at most 1", () => {
+  // Frame 1 is frame 0 again; frame 2 is frame 0 moved 40 quarter pixels right, so the box tapped at the right edge is 40 of its 90
+  // past it, the rest an exact match.
+  const w = 270, h = 480, d = 40, r = rng(5), a = Float32Array.from({length: w * h}, () => 255 * r()), b = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) b[y * w + x] = x >= d ? a[y * w + x - d] : 255 * r();
+  const greys = [a, a, b].map(px => ({w, h, px})), got = M.track(greys, 0, {x: 720, y: 600, side: 360});
+  for (const i of [1, 2]) assert.ok(!got[i].lost && got[i].score >= 0.999 && got[i].score <= 1, `frame ${i}: ${JSON.stringify(got[i])}`);
+  assert.deepEqual([got[2].x, got[2].y], [720, 600]);
+});
+
 test("track: after a frame it lost, it finds the surfer again round the last good place", () => {
   const W = 640, H = 360, S = 60, from = 5, pos = i => ({x: 41 + 24 * i, y: 151}), at = i => i === 8 || i === 2 ? null : pos(i);
   const greys = clip({W, H, S, at, seed: 4}), p = pos(from), box = M.startBox(p.x + S / 2, p.y + S / 2, W, H), got = M.track(greys, from, box);

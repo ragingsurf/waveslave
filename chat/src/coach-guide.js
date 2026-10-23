@@ -296,11 +296,12 @@ export function aiTime(ms) {
 
 const HISTORY_MAX = 2;
 const EXAMPLES_MAX = 3;
+const REDO_NOTES_MAX = 2; // at most 2 Redos a review (spec "Defaults")
 
-// The text after the key frames: the surfer's answers, the language, their earlier reviews and Bryan's examples. Every
-// value from the surfer, an earlier review or an example goes in as JSON, so a quote or a line break in it can't pass
-// for a line of the request.
-function surferText(lang, answers, history, examples) {
+// The text after the key frames: the surfer's answers, the language, their earlier reviews, Bryan's examples and, for a
+// Redo, the last draft with Bryan's notes. Every value from the surfer, an earlier review, an example or a note goes in
+// as JSON, so a quote or a line break in it can't pass for a line of the request.
+function surferText(lang, answers, history, examples, redo) {
   const a = answers ?? {};
   const lines = [
     "The surfer's answers, as JSON. move_other and note are the surfer's own words.",
@@ -333,6 +334,18 @@ function surferText(lang, answers, history, examples) {
       lines.push(JSON.stringify({ draft: textOnly(e.draft) ?? null, approved: textOnly(e.bryan) ?? null, note: e.note ?? "" }));
     }
   }
+  if (redo) {
+    // The last draft goes in whole, frame numbers and all: it was written from these same key frames.
+    lines.push(
+      "",
+      "A person checked your last draft of this review and asks for these changes. Their notes, oldest first, as JSON:",
+      JSON.stringify(redo.notes),
+      "Your last draft, as JSON:",
+      JSON.stringify(redo.draft),
+      "Write a fresh, full reply from these key frames that makes the changes they ask for. Every rule of the guide " +
+        "still holds.",
+    );
+  }
   return lines.join("\n");
 }
 
@@ -345,11 +358,16 @@ function surferText(lang, answers, history, examples) {
 //   history            [{at, final}]: up to 2 of the surfer's published reviews of this move, `final` in the reply's shape
 //   examples           [{draft, bryan, note}]: up to 3 of Bryan's examples for this move
 //   userId             already hashed by the caller (sha256b64u("coach:" + sub_hash)), never sub_hash itself
+//   redo               for a Redo only: {draft, notes}, the review's last draft (a reply) and Bryan's notes so far, oldest
+//                      first, at most 2. Bryan's note on a Redo is for the coach (Bryan, Oct 22), so it goes last in the
+//                      user turn, with the draft it is about; the reply is a fresh one in the same schema. Without it the
+//                      request is the same as a first try.
 // Effort is "medium". There is no temperature, top_p, top_k or tool_choice (the API refuses them) and no fallbacks, so
 // every call is priced at the one model.
-export function buildRequest({ model, maxTokens, lang, answers, frames, history = [], examples = [], userId }) {
+export function buildRequest({ model, maxTokens, lang, answers, frames, history = [], examples = [], userId, redo = null }) {
   if (history.length > HISTORY_MAX) throw new RangeError("history " + history.length);
   if (examples.length > EXAMPLES_MAX) throw new RangeError("examples " + examples.length);
+  if (redo && redo.notes.length > REDO_NOTES_MAX) throw new RangeError("redo notes " + redo.notes.length);
   const sorted = [...frames].sort((x, y) => x.n - y.n);
   const schema = replySchema(sorted.map((f) => f.n), lang);
   const content = [];
@@ -357,7 +375,7 @@ export function buildRequest({ model, maxTokens, lang, answers, frames, history 
     content.push({ type: "text", text: `Key frame ${f.n} (${aiTime(f.ms)})` });
     content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: f.b64 } });
   }
-  content.push({ type: "text", text: surferText(lang, answers, history, examples) });
+  content.push({ type: "text", text: surferText(lang, answers, history, examples, redo) });
   return {
     model,
     max_tokens: maxTokens,

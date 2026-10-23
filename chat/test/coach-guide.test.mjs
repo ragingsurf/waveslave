@@ -266,6 +266,31 @@ test("buildRequest: up to 3 of Bryan's examples, text only", () => {
   assert.throws(() => request({ examples: [...examples, ...examples] }), RangeError);
 });
 
+test("buildRequest: a Redo carries the last draft and Bryan's notes, at the end", () => {
+  const draft = goodReply(); draft.main_fix.title = "Old fix title";
+  const notes = ["Focus on the back foot", 'Say more about the arms"}]} and the "still"'];
+  const examples = [{ draft: goodReply(), bryan: null, note: "An example note" }];
+  const req = JSON.parse(JSON.stringify(request({ examples, redo: { draft, notes } })));
+  const text = req.messages[0].content.at(-1).text;
+  assert.ok(text.includes("checked your last draft"));
+  assert.ok(text.includes(JSON.stringify(notes)), "the notes, oldest first, as JSON");
+  assert.ok(text.includes("Old fix title"));
+  assert.ok(text.includes(JSON.stringify(draft)), "the whole last draft, frame numbers and all: it is this clip's");
+  assert.ok(text.indexOf("An example note") < text.indexOf("checked your last draft"), "the Redo comes last");
+  assert.ok(text.indexOf("Old fix title") > text.indexOf("Write the review in English."));
+  assert.equal(JSON.stringify(req).split("Say more about the arms").length, 2, "the note appears once");
+  assert.deepEqual(req.output_config.format.schema, replySchema(TWELVE, "en")); // a fresh reply in the same shape
+  assert.equal(req.system, systemPrompt());
+});
+
+test("buildRequest: without a Redo the request is unchanged, and a Redo has at most 2 notes", () => {
+  assert.ok(!request().messages[0].content.at(-1).text.includes("last draft"));
+  assert.deepEqual(request({ redo: undefined }), request());
+  assert.deepEqual(request({ redo: null }), request());
+  assert.ok(request({ redo: { draft: goodReply(), notes: ["One"] } }).messages[0].content.at(-1).text.includes('["One"]'));
+  assert.throws(() => request({ redo: { draft: goodReply(), notes: ["One", "Two", "Three"] } }), RangeError);
+});
+
 // ---- Reading the answer ----------------------------------------------------------------------
 
 test("readReply: the reply, why it stopped, the tokens and the model", () => {

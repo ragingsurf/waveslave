@@ -707,28 +707,21 @@ export class Room extends DurableObject {
     return { uid: user.id, sub_hash: user.sub_hash, role: user.role };
   }
 
-  // Drafts' Ban: what the chat's ban (onBan) does once it has found the author, with no message to go by. The LINE
-  // account is marked banned in subs, with a row made for it when the room has none, so the ban holds whether or not it
-  // has an account here. When it has one, tv goes up, so its tokens stop working; its sockets close with 4403; and its
-  // messages from the last 24 hours are hidden ("ban"). It shows in Bryan's Unban list like any other ban. Bryan's own
-  // account can't be banned: {error: "admin"}, and nothing changes. Otherwise {ok: true}.
+  // Drafts' Ban: the chat's ban (onBan) once it has found the author, with no message to go by (banWrites() and
+  // banAfter()). The LINE account is marked banned in subs, with a row made for it when the room has none, so the ban
+  // holds whether or not it has an account here. When it has one, tv goes up, so its tokens stop working; its sockets
+  // close with 4403; and its messages from the last 24 hours are hidden ("ban"). It shows in Bryan's Unban list like
+  // any other ban. Bryan's own account can't be banned: {error: "admin"}, and nothing changes. Otherwise {ok: true}.
   async banAccount(sub_hash) {
     this.usage("req");
     const banned = this.ctx.storage.transactionSync(() => {
       const target = this.one("SELECT id, role FROM users WHERE sub_hash = ?", sub_hash);
       if (target?.role === "admin") return null;
-      this.all("INSERT INTO subs (sub_hash, banned) VALUES (?, 1) ON CONFLICT (sub_hash) DO UPDATE SET banned = 1", sub_hash);
-      if (!target) return { uid: null, hidden: [] };
-      this.all("UPDATE users SET tv = tv + 1 WHERE id = ?", target.id);
-      const hidden = this.all(
-        `UPDATE messages SET hidden_by = 'ban' WHERE uid = ? AND hidden_by IS NULL AND ts > ? RETURNING ${MSG_COLS}`,
-        target.id, this.now() - BAN_HIDES,
-      );
-      return { uid: target.id, hidden };
+      const uid = target?.id ?? null;
+      return { uid, hidden: this.banWrites(sub_hash, uid) };
     });
     if (!banned) return { error: "admin" };
-    if (banned.uid !== null) this.closeUser(banned.uid, CLOSE_BANNED);
-    this.announceHidden(banned.hidden, "ban");
+    this.banAfter(banned.uid, banned.hidden);
     return { ok: true };
   }
 
@@ -1546,17 +1539,30 @@ export class Room extends DurableObject {
     );
     if (!target) return "gone";
     if (target.role === "admin") return "invalid";
-    const hidden = this.ctx.storage.transactionSync(() => {
-      this.all("INSERT INTO subs (sub_hash, banned) VALUES (?, 1) ON CONFLICT (sub_hash) DO UPDATE SET banned = 1", target.sub_hash);
-      this.all("UPDATE users SET tv = tv + 1 WHERE id = ?", target.id);
-      return this.all(
-        `UPDATE messages SET hidden_by = 'ban' WHERE uid = ? AND hidden_by IS NULL AND (ts > ? OR id = ?) RETURNING ${MSG_COLS}`,
-        target.id, this.now() - BAN_HIDES, frame.msg_id,
-      );
-    });
-    this.closeUser(target.id, CLOSE_BANNED);
-    this.announceHidden(hidden, "ban");
+    const hidden = this.ctx.storage.transactionSync(() => this.banWrites(target.sub_hash, target.id, frame.msg_id));
+    this.banAfter(target.id, hidden);
     this.send(ws, { type: "ok", for: "ban", msg_id: frame.msg_id, sub_hash: target.sub_hash });
+  }
+
+  // A ban's writes, for onBan and the coach's banAccount, inside the caller's transaction. LINE account `sub` is marked
+  // banned in subs (a row is made when the room has none). When it has an account here (uid, else null), tv goes up and
+  // its messages from the last 24 hours are hidden ("ban"), and so is message msgId whatever its age (null for none:
+  // "id = NULL" matches nothing). Returns the rows it hid, as MSG_COLS reads them, for banAfter().
+  banWrites(sub, uid, msgId = null) {
+    this.all("INSERT INTO subs (sub_hash, banned) VALUES (?, 1) ON CONFLICT (sub_hash) DO UPDATE SET banned = 1", sub);
+    if (uid === null) return [];
+    this.all("UPDATE users SET tv = tv + 1 WHERE id = ?", uid);
+    return this.all(
+      `UPDATE messages SET hidden_by = 'ban' WHERE uid = ? AND hidden_by IS NULL AND (ts > ? OR id = ?) RETURNING ${MSG_COLS}`,
+      uid, this.now() - BAN_HIDES, msgId,
+    );
+  }
+
+  // What a ban does once banWrites() is stored: the account's sockets close with 4403 (uid null: it has none), and
+  // everyone hears that the rows it hid are hidden.
+  banAfter(uid, hidden) {
+    if (uid !== null) this.closeUser(uid, CLOSE_BANNED);
+    this.announceHidden(hidden, "ban");
   }
 
   // unban {sub_hash}: lifts a LINE account's ban. Its hidden messages stay hidden until Bryan restores them, and its old

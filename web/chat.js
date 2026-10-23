@@ -1001,8 +1001,9 @@ document.addEventListener("visibilitychange", guard(() => {
   else { if (!tokenMoved()) check(); markSeen(); drawBar(); }
 }));
 // Back on the page with a sign-in for the coach still waiting, no token, and the Coach panel open (the home-screen app's way: LINE
-// finished it in Safari, which shows the pin), the room opens over the panel for its code box. With the panel shut, or in another tab,
-// nothing opens.
+// finished it in Safari, which shows the pin), the room opens over the panel for its code box, which says "Finishing your LINE sign-in…"
+// while the app asks to finish by itself (autoTry(), below); once that does, the room shuts again on the Coach panel. With the panel shut,
+// or in another tab, nothing opens.
 document.addEventListener("visibilitychange", guard(() => {
   if (document.visibilityState === "visible" && !R.open && on() && document.documentElement.classList.contains("coach-open") && pendingThen() && !signedIn()) enter({}); }));
 addEventListener("storage", guard(e => { if (e.key === KEYS.token || e.key === null) { if (!tokenMoved() && R.built) drawBar(); } }));
@@ -1034,7 +1035,9 @@ function enter(o) {
 // home-screen app, so the person still switches back themselves.
 // The Coach panel signs in the same way (AI coach spec, "Sign-in"): CHAT.signIn("coach") keeps then: "coach" beside v. Back from LINE that
 // sign-in finishes without the room, which opens only when it needs the surfer (the sign-up sheet, the pin, an error, or the code box when
-// the page comes back with the sign-in still waiting); once the token is kept, the room shuts and the Coach panel opens.
+// the page comes back with the sign-in still waiting); once the token is kept, the room shuts and the Coach panel opens. Finished by itself
+// ({v, auto: true}), it goes the same way: a token lands on the Coach panel with the room never opened, and "net" opens the room over the
+// panel for the code box.
 const V_MS = 10 * 60e3, CONSENT = "v1"; // how long a sign-in waits; the version of the house rules and privacy note the tick agrees to
 const b64u = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 // This page's v while its sign-in can still finish, else null.
@@ -1044,8 +1047,12 @@ function pendingV() {
 }
 // What this page's waiting sign-in is for: "coach" when the Coach panel started it, else null. Read before v is let go.
 function pendingThen() { try { const o = JSON.parse(load(KEYS.v) || "null"); return pendingV() && o.then === "coach" ? "coach" : null; } catch (e) { return null; } }
-// Back from LINE (at start-up, or once developer mode comes on): a sign-in for the coach finishes without the room; any other opens it.
-function arrive(o) { if (o.signin && pendingThen()) { if (HOOK.signin) HOOK.signin(o.signin); } else enter(o); }
+// What a sign-in to finish is for: an answer to the app's own ask carries the then autoTry() read before asking (by the time it comes back,
+// the code from LINE may have finished the same sign-in and let v go); one back from LINE has none, so it's pendingThen().
+const thenOf = s => s && typeof s === "object" && "then" in s ? s.then : pendingThen();
+// Back from LINE (at start-up, or once developer mode comes on), or finished by itself (landing()): a sign-in for the coach finishes without
+// the room; any other opens it.
+function arrive(o) { if (o.signin && thenOf(o.signin)) { if (HOOK.signin) HOOK.signin(o.signin); } else enter(o); }
 // A sign-in for the coach that needs the surfer: the room opens first, over the Coach panel, which opens under it (at start-up, once
 // coach.js has started), so shutting the room lands on the panel.
 function roomFor(then) { if (!then || R.open) return; coachOpen(); enter({}); }
@@ -1064,7 +1071,7 @@ async function login(then) {
 const AUTO_MS = 3e3, auto = { t: 0, busy: false, net: false };
 function autoWatch() { clearInterval(auto.t); auto.t = 0; if (!pendingV() || auto.net) return; auto.t = setInterval(guard(autoTry), AUTO_MS); autoTry(); }
 async function autoTry() {
-  const v = pendingV();
+  const v = pendingV(), then = pendingThen();
   if (!v || auto.net || signedIn()) { clearInterval(auto.t); auto.t = 0; return; }
   if (auto.busy || R.pinBusy || document.visibilityState === "hidden") return;
   auto.busy = true;
@@ -1072,11 +1079,13 @@ async function autoTry() {
     const j = await api("/auth/redeem", { method: "POST", body: { v, auto: true } });
     clearInterval(auto.t); auto.t = 0;
     if (j && typeof j.token === "string") save(KEYS.token, j.token); // kept at once, even if the room can't open yet
-    landing({ got: j, v });
+    landing({ got: j, v, then });
   } catch (e) {
     const code = e && e.body && e.body.error;
-    if (code === "net") { auto.net = true; clearInterval(auto.t); auto.t = 0; landing({ net: true }); }
-    else if (code === "banned") { clearInterval(auto.t); auto.t = 0; landing({ error: "banned" }); }
+    // A "net" that comes back after this sign-in has finished another way (the code from LINE, or the code box: v gone or new) has nothing
+    // left to open: the room would only open again over the Coach panel the coach's sign-in has just landed on.
+    if (code === "net") { auto.net = true; clearInterval(auto.t); auto.t = 0; if (pendingV() === v) landing({ net: true, then }); }
+    else if (code === "banned") { clearInterval(auto.t); auto.t = 0; landing({ error: "banned", then }); }
     // "expired" (LINE hasn't finished yet), offline or resting: ask again on the next tick.
   } finally { auto.busy = false; }
 }
@@ -1085,9 +1094,9 @@ addEventListener("pageshow", guard(() => autoTry()));
 addEventListener("focus", guard(() => autoTry()));
 function finishSignin(s) {
   if (!s || typeof s !== "object") return;
-  const then = pendingThen();
-  if (s.got) { try { return landed(s.got, s.v, { auto: true }); } catch (e) { return note(S("loginFailed"), true); } }
-  if (s.net) { drawBar(); if (R.el.pinIn && !R.el.pinBox.hidden) R.el.pinIn.focus({ preventScroll: true }); return; }
+  const then = thenOf(s);
+  if (s.got) { try { return landed(s.got, s.v, { auto: true }, then); } catch (e) { roomFor(then); return note(S("loginFailed"), true); } }
+  if (s.net) { roomFor(then); drawBar(); if (R.el.pinIn && !R.el.pinBox.hidden) R.el.pinIn.focus({ preventScroll: true }); return; }
   if (typeof s.error === "string") { save(KEYS.v, null); roomFor(then); drawBar(); return note(s.error === "banned" ? S("banned") : s.error === "resting" ? S("resting") : S("loginFailed"), true); }
   const v = pendingV(), code = typeof s.code === "string" && /^[A-Za-z0-9_-]{22}$/.test(s.code) ? s.code : null, pin = typeof s.pin === "string" && /^\d{6}$/.test(s.pin) ? s.pin : null;
   if (v && code) return redeem(v, { code }, pin, then);
@@ -1655,9 +1664,10 @@ document.addEventListener("click", guard(e => { const a = e.target instanceof El
 if (signin) { const back = load(KEYS.ret, true); save(KEYS.ret, null, true); if (back && own(ALL.spots, back) && inTaiwan(back) && back !== CUR) switchSpot(back); }
 window.CHAT.spot(CUR);
 showChat();
-// The room with a sign-in to finish: at once while the chat is on, else once developer mode is (the PIN box first, when it's locked).
+// The room with a sign-in to finish: at once while the chat is on, else once developer mode is (the PIN box first, when it's locked). A
+// sign-in for the coach goes through arrive(), so it opens the room only when it needs the surfer.
 function landing(signin) {
-  if (on()) return enter({ signin });
+  if (on()) return arrive({ signin });
   if (typeof setWorld !== "function") return;
   waiting = { signin };
   if (typeof worldLocked === "function" && worldLocked() && typeof wsPin === "function") wsPin(guard(() => setWorld(true)), guard(() => { waiting = null; }));

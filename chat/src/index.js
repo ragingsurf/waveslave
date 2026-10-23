@@ -30,10 +30,8 @@
 export { Room } from "./room.js";
 import { verifyLineIdToken } from "./auth.js";
 import { SPOTS } from "./mod.js";
-
-// One room for all of Taiwan (Bryan, Oct 21). Every route reaches it through here: only the first call that creates
-// the room places it, so a stub made without the hint could put it somewhere else.
-const room = (env) => env.ROOM.getByName("taiwan", { locationHint: "apac-ne" });
+// One room for all of Taiwan (Bryan, Oct 21). Every route reaches it through room(env), with its location hint.
+import { room } from "./stubs.js";
 
 // How a route treats the page that calls it:
 //   open     anyone may read the answer, from any page (CORS "*"), and the browser may keep it for a minute

@@ -21,11 +21,16 @@
 //   mySessions ... deleteAccount   the /me routes: the surf diary, the user's own data, and deleting the account
 //   shareSession, onShare      a log from the diary as a session card in the room, and out of it again (onUnshare)
 //   rest()                     the free-plan guard: past 90% of a daily limit the chat rests until 00:00 UTC
+//   whoIs, banAccount, isBanned   the coach's calls over RPC (AI coach spec, "Backend"): who a token stands for, a ban
+//                              with no message, and whether a LINE account is banned
+//   coachStub()                the coach's stub (stubs.js), which tests replace
 //
-// Times are epoch milliseconds. The Worker calls the room as https://room/<route> with a JSON body.
+// Times are epoch milliseconds. The Worker calls the room as https://room/<route> with a JSON body, or over RPC for the
+// coach's calls.
 import { DurableObject } from "cloudflare:workers";
 import { hmacB64u, pin6, randomB64u, readToken, sameText, sha256b64u, signToken, subHash } from "./auth.js";
 import { blocked, checkNick, normalise, REASONS, SPOTS, validReport, validSession } from "./mod.js";
+import { coach } from "./stubs.js";
 import BLOCKLIST from "../blocklist.json";
 
 const SECOND = 1000;
@@ -685,6 +690,59 @@ export class Room extends DurableObject {
     }
   }
 
+  // ---- Calls from the Worker and the coach (RPC) ---------------------------------------------------------------
+  //
+  // The coach's routes and its alarm call these on the room's stub (AI coach spec, "Backend": "New Room RPC methods").
+  // A call over RPC skips fetch(), where every other request is counted, so each one counts itself as a room request
+  // against the free plan's daily limit, refused or not.
+
+  // Who a session token stands for, for the Worker's coach routes: {uid, sub_hash, role}, or {error}: "auth" or "banned"
+  // as signedIn() says, or "resting" while the chat rests (rest()). Bryan never gets "resting", so his Pause and his
+  // Drafts always work. The sign-in is checked first, since only it tells Bryan apart.
+  async whoIs(token) {
+    this.usage("req");
+    const { user, error } = await this.signedIn(token);
+    if (error) return { error };
+    if (user.role !== "admin" && this.rest()) return { error: "resting" };
+    return { uid: user.id, sub_hash: user.sub_hash, role: user.role };
+  }
+
+  // Drafts' Ban: what the chat's ban (onBan) does once it has found the author, with no message to go by. The LINE
+  // account is marked banned in subs, with a row made for it when the room has none, so the ban holds whether or not it
+  // has an account here. When it has one, tv goes up, so its tokens stop working; its sockets close with 4403; and its
+  // messages from the last 24 hours are hidden ("ban"). It shows in Bryan's Unban list like any other ban. Bryan's own
+  // account can't be banned: {error: "admin"}, and nothing changes. Otherwise {ok: true}.
+  async banAccount(sub_hash) {
+    this.usage("req");
+    const banned = this.ctx.storage.transactionSync(() => {
+      const target = this.one("SELECT id, role FROM users WHERE sub_hash = ?", sub_hash);
+      if (target?.role === "admin") return null;
+      this.all("INSERT INTO subs (sub_hash, banned) VALUES (?, 1) ON CONFLICT (sub_hash) DO UPDATE SET banned = 1", sub_hash);
+      if (!target) return { uid: null, hidden: [] };
+      this.all("UPDATE users SET tv = tv + 1 WHERE id = ?", target.id);
+      const hidden = this.all(
+        `UPDATE messages SET hidden_by = 'ban' WHERE uid = ? AND hidden_by IS NULL AND ts > ? RETURNING ${MSG_COLS}`,
+        target.id, this.now() - BAN_HIDES,
+      );
+      return { uid: target.id, hidden };
+    });
+    if (!banned) return { error: "admin" };
+    if (banned.uid !== null) this.closeUser(banned.uid, CLOSE_BANNED);
+    this.announceHidden(banned.hidden, "ban");
+    return { ok: true };
+  }
+
+  // Whether a LINE account (its sub_hash) is banned. The coach's alarm asks before each AI call.
+  async isBanned(sub_hash) {
+    this.usage("req");
+    return this.bannedSub(sub_hash);
+  }
+
+  // The coach's stub (stubs.js). Tests replace it, as they replace now().
+  coachStub() {
+    return coach(this.env);
+  }
+
   // ---- Signing in (spec "Login (LINE, web flow)") -----------------------------------------------------------
   //
   // The Worker talks to LINE; the room keeps the rows. Every answer is JSON, and a refusal is {error} with one of:
@@ -736,7 +794,7 @@ export class Room extends DurableObject {
     const code = randomB64u(16);
     const codeHash = await sha256b64u(code);
     const pin = pin6();
-    if (this.isBanned(account)) return refuse(403, "banned");
+    if (this.bannedSub(account)) return refuse(403, "banned");
     const created = this.now();
     this.all(
       `INSERT INTO handoffs (code_hash, h, sub_hash, line_name, pin, created, tries) VALUES (?, ?, ?, ?, ?, ?, 0)`,
@@ -830,7 +888,7 @@ export class Room extends DurableObject {
   // last_seen comes up to now (signing in is what keeps an account from the 24-month clean-up). Returns "banned", the
   // user {id, tv}, or null for a new person, whose handoff stays.
   signInKnown(row) {
-    if (this.isBanned(row.sub_hash)) {
+    if (this.bannedSub(row.sub_hash)) {
       this.all("DELETE FROM handoffs WHERE code_hash = ?", row.code_hash);
       return "banned";
     }
@@ -848,7 +906,8 @@ export class Room extends DurableObject {
     return Response.json({ token: await this.tokenFor(known, this.now()) });
   }
 
-  isBanned(account) {
+  // Whether LINE account `account` (its sub_hash) is banned. The coach asks through isBanned(), which counts the call.
+  bannedSub(account) {
     return Boolean(this.one("SELECT banned FROM subs WHERE sub_hash = ?", account)?.banned);
   }
 

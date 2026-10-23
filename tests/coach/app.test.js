@@ -199,13 +199,13 @@ async function tapYourself(page) {
   const lost = await page.$$eval(".coachpanel .co-tile.co-lost", e => e.length);
   if (lost) throw new Error(`the tracker lost the white box in ${lost} key frames`);
 }
-// The draft in IndexedDB (waveslave-coach, draft: "current", with the id and sent of "progress" when it's the same flow's), each key
-// frame's blob as its size; null when there's none.
+// The draft in IndexedDB (waveslave-coach, draft: "current", with the id and sent of "progress" when it's the same flow's and save's),
+// each key frame's blob as its size; null when there's none.
 const draft = page => page.evaluate(() => new Promise(ok => { const q = indexedDB.open("waveslave-coach");
   q.onerror = () => ok({ error: String(q.error) });
   q.onsuccess = () => { const d = q.result; if (!d.objectStoreNames.contains("draft")) { d.close(); return ok(null); }
     const tx = d.transaction("draft"), g = tx.objectStore("draft").get("current"), p = tx.objectStore("draft").get("progress");
-    tx.oncomplete = () => { const r = g.result, pr = p.result && r && p.result.flow === r.flow ? p.result : null; d.close();
+    tx.oncomplete = () => { const r = g.result, pr = p.result && r && p.result.flow === r.flow && p.result.stamp === r.stamp ? p.result : null; d.close();
       ok(r ? { ...r, frames: r.frames.map(f => ({ ...f, blob: f.blob instanceof Blob ? f.blob.size : null })), id: pr ? pr.id : null, sent: pr ? pr.sent : [] } : null); };
     tx.onerror = () => ok({ error: String(tx.error) }); }; }));
 // An init script counting the coach's IndexedDB writes by key (window.__puts): "current" holds the key frames, "progress" the id and sent.

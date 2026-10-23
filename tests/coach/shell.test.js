@@ -102,14 +102,14 @@ async function slideTo(page, at) {
   await page.evaluate(t => { const r = document.querySelector('.coachpanel [data-k="slider"]'); r.value = String(t); r.dispatchEvent(new Event("input", { bubbles: true })); }, at);
   await page.waitForFunction(t => { const v = document.querySelector(".coachpanel video"); return !!v && !v.seeking && Math.abs(v.currentTime - t) < 0.02; }, at);
 }
-// The draft in IndexedDB (waveslave-coach, draft: "current", with the id and sent of "progress" when it's the same flow's), with each key
-// frame's blob as its size: null when there's none, or the error.
+// The draft in IndexedDB (waveslave-coach, draft: "current", with the id and sent of "progress" when it's the same flow's and save's, and
+// "progress" itself), with each key frame's blob as its size: null when there's none, or the error.
 const draft = page => page.evaluate(() => new Promise(ok => { const q = indexedDB.open("waveslave-coach");
   q.onerror = () => ok({ error: String(q.error) });
   q.onsuccess = () => { const d = q.result; if (!d.objectStoreNames.contains("draft")) { d.close(); return ok(null); }
     const tx = d.transaction("draft"), g = tx.objectStore("draft").get("current"), p = tx.objectStore("draft").get("progress");
-    tx.oncomplete = () => { const r = g.result, pr = p.result && r && p.result.flow === r.flow ? p.result : null; d.close();
-      ok(r ? { ...r, frames: r.frames.map(f => ({ ...f, blob: f.blob instanceof Blob ? f.blob.size : null })), id: pr ? pr.id : null, sent: pr ? pr.sent : [] } : null); };
+    tx.oncomplete = () => { const r = g.result, pr = p.result && r && p.result.flow === r.flow && p.result.stamp === r.stamp ? p.result : null; d.close();
+      ok(r ? { ...r, frames: r.frames.map(f => ({ ...f, blob: f.blob instanceof Blob ? f.blob.size : null })), id: pr ? pr.id : null, sent: pr ? pr.sent : [], progress: p.result || null } : null); };
     tx.onerror = () => ok({ error: String(tx.error) }); }; }));
 // Each key frame sent (base64 text), decoded in the page: its size, its bytes, and where its white pixels are (their count and centre).
 const decode = (page, bodies) => page.evaluate(async bodies => Promise.all(bodies.map(async b => {
@@ -554,6 +554,58 @@ const CHECKS = {
     const before = await opens(); await page.click('.coachpanel [data-k="next"]');
     await soon("IndexedDB opened again after the connection closed", async () => await opens() === before + 1);
     await soon("the next save", async () => (d = await draft(page)) && d.step === "find" && d.answers.move === "cutback");
+  },
+  // The write of changed key frames failing once (+ makes every box bigger, and that save's put throws): the send then writes the whole
+  // draft again, so when it stops part-way (key frame 5 failing 3 times) and the page reloads, the key frames picked up are the bigger
+  // ones, with the review's id and the 4 the server has. Sending again sends only the other 8, each a close-up of a bigger box (fewer
+  // white pixels than the first boxes' gave), and ends; the review was started once.
+  async failedSave(open, { tmp }) {
+    const failOnce = () => { window.__failPut = false; const put = IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put = function (v, k) { if (window.__failPut && k === "current") { window.__failPut = false; throw new DOMException("The quota has been exceeded.", "QuotaExceededError"); } return put.call(this, v, k); }; };
+    const st = flowBackend({}, { failFrame: { n: 5, times: 3 } }), page = await open({ store: TOKEN, backend: st.backend, init: [failOnce] }), b = boxAt(640, 360, 6, 3);
+    await toCheck(page, makeClip(tmp, {}), { at: 3, x: b.x, y: b.y });
+    let d = null; await soon("the key frames saved", async () => (d = await draft(page)) && d.step === "check" && d.frames.length === 12);
+    await page.evaluate(() => { window.__failPut = true; }); await page.click('.coachpanel [data-k="bigger"]');
+    await soon("the bigger boxes' failed save", () => page.evaluate(() => !window.__failPut)); await inPanel(page, "the 12 close-ups", ".co-grid");
+    d = await draft(page);
+    if (d.frames[0].box[2] !== 120) throw new Error(`the failed save still stored boxes of ${d.frames[0].box[2]}`);
+    await page.click('.coachpanel [data-k="send"]'); await inPanel(page, `"${FAILED}"`, '[data-k="retry"]', 30e3);
+    d = await draft(page);
+    if (!d.frames.every(f => f.box[2] === 144) || d.id !== ID || !eq(d.sent, [1, 2, 3, 4])) throw new Error(`after the send stopped the draft is ${JSON.stringify({ sides: [...new Set(d.frames.map(f => f.box[2]))], id: d.id, sent: d.sent, progress: d.progress && { ...d.progress, same: d.progress.stamp === d.stamp } })}`);
+    const before = st.frames.length;
+    await page.reload({ waitUntil: "load" }); await settle(page);
+    await page.tap(TAB); await inPanel(page, "Pick up", '[data-k="pickup"]'); await page.click('.coachpanel [data-k="pickup"]');
+    await inPanel(page, "the check screen", '[data-k="send"]'); await page.click('.coachpanel [data-k="send"]'); await inPanel(page, `"${SENT}"`, ".co-ok", 30e3);
+    const again = st.frames.slice(before), sent = st.frames.filter(f => !f.failed);
+    if (st.starts.length !== 1 || st.gets !== 1 || !eq(again.map(f => f.n), [5, 6, 7, 8, 9, 10, 11, 12]) || st.sends !== 1)
+      throw new Error(`after the reload: ${st.starts.length} starts, ${st.gets} asks, key frames ${JSON.stringify(again.map(f => f.n))}, ${st.sends} sends`);
+    if (!st.starts[0].frames.every(f => f.box[2] === 144)) throw new Error(`the review started with boxes ${JSON.stringify(st.starts[0].frames.map(f => f.box))}`);
+    const crops = await decode(page, sent.map(f => f.body)), stale = crops.map((c, i) => ({ n: sent[i].n, white: c.white })).filter(c => !(c.white > 40e3 && c.white < 65e3));
+    if (sent.length !== 12 || stale.length) throw new Error(`close-ups sent that aren't of the bigger boxes (about 53,000 white pixels; the first boxes give about 77,000): ${JSON.stringify(stale)}`);
+  },
+  // A GET /coach/me answer without the account (ruling P51, failing closed): "Couldn't reach the coach." and Try again, no New review
+  // and no Pick up, though a draft of this account is stored, and it stays stored; once the answer has the account again, Try again
+  // offers it.
+  async noAccount(open, { tmp }) {
+    let withAccount = true; const st = flowBackend();
+    const backend = (q, req) => q.pathname === "/coach/me" ? { body: me({ profile: PROFILE, ...(withAccount ? {} : { account: undefined }) }) } : st.backend(q, req);
+    const page = await open({ store: TOKEN, backend });
+    await page.tap(TAB); await inPanel(page, "New review", '[data-k="new"]'); await page.click('.coachpanel [data-k="new"]');
+    await page.setInputFiles('.coachpanel input[type="file"]', makeClip(tmp, {}));
+    await inPanel(page, "the questions", '[data-k="move-top_turn"]'); await page.click('.coachpanel [data-k="move-top_turn"]');
+    let d = null; await soon("the draft", async () => (d = await draft(page)) && d.answers && d.answers.move === "top_turn");
+    withAccount = false; await page.reload({ waitUntil: "load" }); await settle(page);
+    await page.tap(TAB); await inPanel(page, "Try again", '[data-k="retry"]'); await wait(500);
+    const look = () => page.evaluate(() => { const q = s => document.querySelector(".coachpanel " + s);
+      return { err: q(".co-err") && q(".co-err").textContent, retry: q('[data-k="retry"]') && q('[data-k="retry"]').textContent, newReview: !!q('[data-k="new"]'), resume: !!q(".co-resume"), left: !!q(".co-left") }; });
+    let got = await look();
+    if (!eq(got, { err: "Couldn't reach the coach.", retry: "Try again", newReview: false, resume: false, left: false })) throw new Error(`without the account the panel shows ${JSON.stringify(got)}`);
+    await page.click('.coachpanel [data-k="retry"]'); await wait(500); got = await look();
+    if (got.retry !== "Try again" || got.newReview || got.resume) throw new Error(`Try again, still without the account: ${JSON.stringify(got)}`);
+    d = await draft(page);
+    if (!d || d.account !== "u-test" || d.answers.move !== "top_turn") throw new Error(`without the account the draft became ${JSON.stringify(d && { account: d.account, answers: d.answers })}`);
+    withAccount = true; await page.click('.coachpanel [data-k="retry"]'); await inPanel(page, "Pick up where you left off?", ".co-resume");
+    if (st.starts.length || st.frames.length) throw new Error(`without the account the page sent ${st.starts.length} starts and ${st.frames.length} key frames`);
   },
   // Picked up after a reload at the check screen, the key frame the tracker lost opens first, as before the reload (spec step 5):
   // without the clip, its close-up and "Not in this one", which leaves it out.

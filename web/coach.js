@@ -456,9 +456,10 @@ const ME = { me: null, token: null, at: -Infinity, n: 0, asking: null, failed: f
 // the agreement's lines, an I agree on its way, the control to give the focus to, a ?coach=drafts link waiting to open at Drafts, whether
 // to show the top of the panel (a new screen of New review) and whether a review was just sent ("Sent.", until the panel shuts).
 const V = { film: null, tick: false, adultErr: false, agreeErr: false, busy: false, focus: null, drafts: false, top: false, sent: false };
-// GET /coach/me's answer looks right: whole counts, a "YYYY-MM" month and a list of reviews.
+// GET /coach/me's answer looks right: whole counts, a "YYYY-MM" month, a list of reviews and whose they are (account). Without the account
+// an unsent review can't be kept to its own account (ruling P51), so such an answer is taken as a failure: "Couldn't reach the coach."
 const meOk = j => !!j && typeof j === "object" && Number.isInteger(j.left) && Number.isInteger(j.monthly) && typeof j.month === "string"
-  && /^\d{4}-(0[1-9]|1[0-2])$/.test(j.month) && Array.isArray(j.reviews);
+  && /^\d{4}-(0[1-9]|1[0-2])$/.test(j.month) && Array.isArray(j.reviews) && typeof j.account === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(j.account);
 
 // GET /coach/me, while the coach shows for this visitor and they're signed in: what the panel shows and the tab's dot. It is asked once a
 // page load for each token (sync), and again, at most once a minute, on coming back to the page or opening the panel. A refused token
@@ -660,8 +661,8 @@ const noAnswers = p => ({ move: null, move_other: "", note: "", level: p && LEVE
 const F = { loadedFor: undefined, owner: null, flow: null, draft: false, show: false, screen: null, resumed: false, answers: noAnswers(null), profiled: false,
   here: null, tap: null, side: null, frames: [], id: null, sent: [], input: null, video: null, url: null, ready: false, unlocked: false, dur: 0, vw: 0, vh: 0, pos: 0,
   err: null, missing: false, editProfile: false, open: null, zoom: null, seeking: false, seekN: 0, busy: false, cutting: null, redo: null, progress: [0, 1], bar: null,
-  fail: false, run: 0 };
-// The signed-in account, as GET /coach/me said for the token kept now (null before it has answered for it, or when it gave none).
+  fail: false, run: 0, stamp: null, dirty: false };
+// The signed-in account, as GET /coach/me said for the token kept now (null before it has answered for it).
 const account = () => { const t = tokenNow(), a = t && ME.token === t && ME.me ? ME.me.account : null; return typeof a === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(a) ? a : null; };
 // A new flow's id: random, only ever compared with the stored draft's.
 function newFlow() {
@@ -709,18 +710,30 @@ function idb(mode, run) {
   }));
 }
 const queued = f => (dbQueue = dbQueue.then(f).catch(() => {}));
-const progressRec = () => ({ account: F.owner, flow: F.flow, id: F.id, sent: [...F.sent] });
-// The whole draft. Nothing is kept for a review with no account (a backend that doesn't say whose it is).
+// Each saveDraft has a stamp of its own, written into both records, and loadDraft takes "progress" with "current" only when their stamps
+// match: so after a save of the key frames that failed, the id and sent of a later review are never paired with older key frames. A
+// write that fails (a closed connection, the storage full) makes the next one, whichever it is, write the whole draft again (dirty).
+function draftRec() {
+  const step = F.frames.length === 12 ? "check" : F.screen === "find" || F.screen === "tap" ? F.screen : F.screen === "cut" ? "tap" : "questions";
+  return { account: F.owner, flow: F.flow, stamp: F.stamp, answers: { ...F.answers }, step, here: F.here, tap: F.tap && { x: F.tap.x, y: F.tap.y }, side: F.side,
+    frames: F.frames.map(f => ({ n: f.n, ms: f.ms, box: f.box && [f.box.x, f.box.y, f.box.side], lost: f.lost, blob: f.blob })) };
+}
+const progressRec = () => ({ account: F.owner, flow: F.flow, stamp: F.stamp, id: F.id, sent: [...F.sent] });
+const writeAll = (rec, prog) => idb("readwrite", st => { st.put(rec, "current"); st.put(prog, "progress"); }).then(() => { F.dirty = false; });
+const saving = f => queued(() => f().catch(e => { F.dirty = true; throw e; }));
+// The whole draft. Nothing is kept for a review with no account.
 function saveDraft() {
   if (!F.owner) return;
-  F.draft = true;
-  const step = F.frames.length === 12 ? "check" : F.screen === "find" || F.screen === "tap" ? F.screen : F.screen === "cut" ? "tap" : "questions";
-  const rec = { account: F.owner, flow: F.flow, answers: { ...F.answers }, step, here: F.here, tap: F.tap && { x: F.tap.x, y: F.tap.y }, side: F.side,
-    frames: F.frames.map(f => ({ n: f.n, ms: f.ms, box: f.box && [f.box.x, f.box.y, f.box.side], lost: f.lost, blob: f.blob })) }, prog = progressRec();
-  queued(() => idb("readwrite", st => { st.put(rec, "current"); st.put(prog, "progress"); }));
+  F.draft = true; F.stamp = newFlow();
+  const rec = draftRec(), prog = progressRec();
+  saving(() => writeAll(rec, prog));
 }
-// The review's id and the key frames the server has, alone.
-function saveProgress() { if (!F.owner) return; const prog = progressRec(); queued(() => idb("readwrite", st => { st.put(prog, "progress"); })); }
+// The review's id and the key frames the server has, alone (the whole draft when a write has failed since the last whole one).
+function saveProgress() {
+  if (!F.owner) return;
+  const rec = draftRec(), prog = progressRec();
+  saving(() => F.dirty ? writeAll(rec, prog) : idb("readwrite", st => { st.put(prog, "progress"); }));
+}
 // This flow's own draft goes; one another account or another tab saved since stays.
 function dropDraft() {
   F.draft = false; const acc = F.owner, flow = F.flow;
@@ -739,7 +752,7 @@ async function loadDraft(acc) {
   if (!a || r.account !== acc || typeof r.flow !== "string" || F.loadedFor !== acc || F.draft || F.show) return;
   const pick = (v, list) => list.includes(v) ? v : null, str = (v, max) => typeof v === "string" ? upTo(v, max) : "";
   const isBox = b => Array.isArray(b) && b.length === 3 && b.every(Number.isInteger) && b[0] >= 0 && b[1] >= 0 && b[2] >= 1;
-  F.owner = acc; F.flow = r.flow;
+  F.owner = acc; F.flow = r.flow; F.stamp = typeof r.stamp === "string" ? r.stamp : null;
   F.answers = { move: pick(a.move, MOVES), move_other: str(a.move_other, OTHER_MAX), note: str(a.note, NOTE_MAX), level: pick(a.level, LEVELS), board: pick(a.board, BOARDS), stance: pick(a.stance, STANCES) };
   F.here = Number.isFinite(r.here) && r.here >= 0 ? r.here : null; F.pos = F.here || 0;
   F.tap = r.tap && Number.isFinite(r.tap.x) && Number.isFinite(r.tap.y) ? { x: r.tap.x, y: r.tap.y } : null;
@@ -747,7 +760,7 @@ async function loadDraft(acc) {
   const fs = Array.isArray(r.frames) ? r.frames : [];
   const good = (f, i) => !!f && f.n === i + 1 && Number.isInteger(f.ms) && f.ms >= 0 && f.blob instanceof Blob && (f.box === null || isBox(f.box));
   if (r.step === "check" && fs.length === 12 && fs.every(good) && F.side) F.frames = fs.map(f => newFrame(f.n, f.ms, f.box && { x: f.box[0], y: f.box[1], side: f.box[2] }, f.lost === true, f.blob));
-  const mine = !!p && typeof p === "object" && p.account === acc && p.flow === r.flow;
+  const mine = !!p && typeof p === "object" && p.account === acc && p.flow === r.flow && !!F.stamp && p.stamp === F.stamp;
   F.id = mine && F.frames.length && typeof p.id === "string" && /^[A-Za-z0-9_-]{22}$/.test(p.id) ? p.id : null;
   F.sent = F.id && Array.isArray(p.sent) ? p.sent.filter(n => Number.isInteger(n) && n >= 1 && n <= 12) : [];
   F.draft = true; F.resumed = true; F.screen = F.frames.length ? "check" : "pick";
@@ -776,7 +789,7 @@ function resetFlow() {
   F.run++; dropClip(); for (const f of F.frames) revoke(f);
   Object.assign(F, { draft: false, show: false, screen: null, resumed: false, answers: noAnswers(null), profiled: false, here: null, tap: null, side: null, frames: [],
     id: null, sent: [], err: null, missing: false, editProfile: false, open: null, zoom: null, seeking: false, busy: false, cutting: null, redo: null, fail: false,
-    owner: null, flow: null });
+    owner: null, flow: null, stamp: null });
 }
 // A new screen: drawn from the top, with the focus on its heading.
 function go() { F.zoom = null; V.top = true; V.focus = F.show ? "fh" : F.draft ? "pickup" : "new"; render(); }
@@ -1110,7 +1123,7 @@ function leaveOut(i) { const f = F.frames[i], wasLost = f.lost; f.box = null; f.
 const AGAIN = new Set(["bad_frame", "too_big", "not_uploading", "missing_frames"]);
 async function send() {
   const t = tokenNow(), kept = keptFrames();
-  if (F.busy || !t || F.owner !== account() || kept.length < KEPT_MIN || !answered(F.answers)) return;
+  if (F.busy || !t || !F.owner || F.owner !== account() || kept.length < KEPT_MIN || !answered(F.answers)) return;
   const run = ++F.run; F.busy = true; F.fail = false; F.screen = "send"; F.open = null; F.progress = [0, kept.length + 2]; go();
   let r = { status: 0, code: null };
   for (let restarts = 0, again = 0; ;) {
@@ -1118,7 +1131,7 @@ async function send() {
     if (run !== F.run) return;
     if (r.ok) break;
     // The silent restart is only for the signed-in account's own review, with the token it started with.
-    if (r.code === "not_found" && restarts < 1 && F.owner === account() && tokenNow() === t) { restarts++; F.id = null; F.sent = []; saveProgress(); continue; }
+    if (r.code === "not_found" && restarts < 1 && !!F.owner && F.owner === account() && tokenNow() === t) { restarts++; F.id = null; F.sent = []; saveProgress(); continue; }
     if (AGAIN.has(r.code) && again < 1) { again++; continue; }
     break;
   }

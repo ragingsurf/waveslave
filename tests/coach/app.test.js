@@ -705,7 +705,7 @@ const STEPS = {
     if (asks.length !== 1 || await page.evaluate(() => document.documentElement.classList.contains("coach-open"))) throw new Error(`the page asked GET /coach/me ${asks.length} times, the panel ${await page.evaluate(() => document.documentElement.classList.contains("coach-open")) ? "open" : "shut"}`);
     await page.tap(TAB); await panelOpen(page);
     await until(page, "the review ready in the list", () => { const st = document.querySelector(".coachpanel .co-list .co-st"); return !!st && st.textContent === "Ready"; });
-    await page.click(".coachpanel .co-list button");
+    await page.click(".coachpanel .co-list button.co-row");
     await page.tap(".coachpanel .co-x"); await until(page, "the panel to shut", () => !document.documentElement.classList.contains("coach-open"));
     const seen = await page.evaluate(() => localStorage.getItem("waveslave-coach-seen"));
     if (await tabDot(page) || seen !== String(published)) throw new Error(`after opening the review the dot is ${await tabDot(page) ? "still there" : "gone"} and waveslave-coach-seen is ${seen}, want ${published}`);
@@ -1082,7 +1082,7 @@ const STEPS = {
     await openReview(page, s.halEn);
     await page.click('.coachpanel [data-k="wrong"]'); await page.fill('.coachpanel [data-k="wrongline"]', said); await page.click('.coachpanel [data-k="wrongsend"]');
     await until(page, "the thanks", t => { const e = document.querySelector('.coachpanel [data-k="said"]'); return !!e && e.textContent === t; }, "Thanks. We'll check this review again.");
-    await until(page, "the review back with the coach", k => { const b = document.querySelector(`.coachpanel [data-k="${k}"]`), li = [...document.querySelectorAll(".coachpanel .co-list li")].find(l => /Top turn/.test(l.textContent) && !l.querySelector("button"));
+    await until(page, "the review back with the coach", k => { const b = document.querySelector(`.coachpanel [data-k="${k}"]`), li = [...document.querySelectorAll(".coachpanel .co-list li")].find(l => /Top turn/.test(l.textContent) && !l.querySelector("button.co-row"));
       return !b && !!li && li.querySelector(".co-st").textContent === "Coach is reviewing"; }, "r-" + s.halEn);
     const back = (await draftsList()).waiting.find(r => r.id === s.halEn);
     if (!back || back.reported !== true || back.report !== said || back.status !== "drafted") throw new Error(`Bryan's Drafts have it as ${JSON.stringify(back && { status: back.status, reported: back.reported, report: back.report })}`);
@@ -1091,7 +1091,7 @@ const STEPS = {
     if (elsewhere.status !== 200) throw new Error(`reporting it elsewhere answered ${elsewhere.status}`);
     await page.click('.coachpanel [data-k="wrong"]'); await page.click('.coachpanel [data-k="wrongsend"]');
     await until(page, "the list, both reviews back with the coach", () => !document.querySelector(".coachpanel .co-review")
-      && [...document.querySelectorAll(".coachpanel .co-list li")].filter(l => /Top turn/.test(l.textContent) && !l.querySelector("button") && l.querySelector(".co-st").textContent === "Coach is reviewing").length === 2);
+      && [...document.querySelectorAll(".coachpanel .co-list li")].filter(l => /Top turn/.test(l.textContent) && !l.querySelector("button.co-row") && l.querySelector(".co-st").textContent === "Coach is reviewing").length === 2);
     for (const id of [s.halEn, s.halZh]) await act(id, { action: "approve" });
   },
   // Delete asks first ("Delete this review? It and its key frames are deleted from WaveSlave."); Cancel keeps it, and Delete removes the
@@ -1106,15 +1106,16 @@ const STEPS = {
     if ((await coachApi(tok, `/coach/reviews/${s.halEn}`)).status !== 200) throw new Error("Cancel deleted the review");
     await page.click('.coachpanel [data-k="del"]'); await page.click('.coachpanel [data-k="delyes"]');
     await until(page, "Review deleted", t => { const e = document.querySelector('.coachpanel [data-k="said"]'); return !!e && e.textContent === t; }, "Review deleted.");
-    const rows = await page.$$eval(".coachpanel .co-list button", b => b.map(x => x.getAttribute("data-k")));
+    const rows = await page.$$eval(".coachpanel .co-list button.co-row", b => b.map(x => x.getAttribute("data-k")));
     const gone = [(await coachApi(tok, `/coach/reviews/${s.halEn}`)).status, (await coachApi(tok, `/coach/reviews/${s.halEn}/frames/1`)).status];
     if (rows.includes("r-" + s.halEn) || !rows.includes("r-" + s.halZh) || !eq(gone, [404, 404])) throw new Error(`after Delete the list has ${JSON.stringify(rows)}, the backend answers ${gone}`);
   },
   // ---- The backend's refusals at send (AI coach spec, "When something goes wrong"), each with its message on the check screen and Send
   // there again (u-kim's account, one clip): Bryan's Pause (503 break), a money rest (meta rest, until a day ahead: "Coach is resting until
   // <that Taiwan day>."), a review already with the coach (409 in_progress), a flagged clip (403 blocked; the list then says "We couldn't
-  // review this clip." and the panel that no reviews are left), and once Bryan clears it, no reviews left (429 no_reviews_left, naming the
-  // server's month and the next). The draft keeps its key frames all along. (The day's count starts again with the rest's end, as the
+  // review this clip." and the panel "This account can't use the coach." in place of Pick up, as GET /coach/me says blocked), and once
+  // Bryan clears it and the surfer comes back, Pick up, the panel saying no reviews are left, and no reviews left at send (429
+  // no_reviews_left, naming the server's month and the next). The draft keeps its key frames all along. (The day's count starts again with the rest's end, as the
   // checks before have sent nearly the coach's 10 a day.)
   async refusals(s) {
     const tok = token("u-kim"); await agreeFor(tok);
@@ -1140,12 +1141,18 @@ const STEPS = {
     await refused("a flagged clip", 403, "This account can't use the coach.");
     const next = new Date(Date.UTC(new Date(Date.now() + 8 * 3600e3).getUTCFullYear(), m.n, 1)).toLocaleString("en", { month: "long", timeZone: "UTC" });
     const none = `You've used your 2 reviews for ${m.name}. More on ${next} 1.`;
-    await page.click('.coachpanel [data-k="back"]'); await inPanel(page, "Pick up where you left off?", ".co-resume");
+    // ‹ Back with the clip there goes to Find the move, then the questions, then the panel.
+    await page.click('.coachpanel [data-k="back"]'); await inPanel(page, "Find the move", '[data-k="slider"]');
+    await page.click('.coachpanel [data-k="back"]'); await inPanel(page, "the questions", '[data-k="next"]');
+    await page.click('.coachpanel [data-k="back"]');
+    await until(page, "the blocked line", t => { const e = document.querySelector(".coachpanel .co-why"); return !!e && e.textContent === t; }, "This account can't use the coach.");
     await until(page, "the flagged review in the list", k => { const li = [...document.querySelectorAll(".coachpanel .co-list li")].find(l => l.querySelector(".co-st-not_reviewed"));
       return !!li && li.querySelector(".co-rnote").textContent === k; }, "We couldn't review this clip.");
+    if (await page.$('.coachpanel .co-resume, .coachpanel [data-k="new"]')) throw new Error("blocked, the panel still offers Pick up or New review");
+    await act(s.kimFlagged, { action: "clear" });
+    await page.reload({ waitUntil: "load" }); await page.tap(TAB); await panelOpen(page); await inPanel(page, "Pick up where you left off?", ".co-resume");
     const why = await text(page, ".co-why");
     if (why !== none) throw new Error(`with no reviews left the panel says ${JSON.stringify(why)}, want ${JSON.stringify(none)}`);
-    await act(s.kimFlagged, { action: "clear" });
     await page.click('.coachpanel [data-k="pickup"]'); await inPanel(page, "the check screen", ".co-grid");
     await refused("no reviews left", 429, none);
     const kept = await draft(page);
@@ -1234,7 +1241,7 @@ const STEPS = {
     await recheck(page, calls); await hasCard(page, id, "u-dan's draft with its 8 key frames", { blobs: 8 });
     const r = (await draftsList()).waiting.find(x => x.id === id), got = await dcard(page, id);
     const want = { note: `Their note: “${MARKUP}”`, fields: Object.fromEntries(PATHS.map(p => [p, at(r.draft, p)])), imgs: Array(8).fill(true),
-      warn: ["The coach couldn't see the surfer.", "The coach marked key frames as unusable.", "It used a word surfers shouldn't see. Find it and change it before you approve."] };
+      warn: ["The coach couldn't see the surfer.", "The coach marked key frames as unusable.", "It used a word surfers shouldn't see. Find it and change it before you approve. Found: “photo”."] };
     const have = Object.fromEntries(Object.keys(want).map(k => [k, got[k]]));
     if (!eq(have, want) || !PATHS.filter(p => p !== "progress").every(p => got.fields[p].startsWith(MARKUP))) throw new Error(`the markup draft shows ${JSON.stringify(have)}, want ${JSON.stringify(want)}`);
     if (got.frames[1][0] !== fmt(10500) + " · unusable") throw new Error(`key frame 2 says ${JSON.stringify(got.frames[1])}`);
@@ -1356,7 +1363,7 @@ const STEPS = {
     let from = calls.length;
     await hasCard(page, id, "u-eve's draft", { handled: false });
     await page.fill(box("drill.title"), "   "); await page.click(`.coachpanel [data-k="act-${id}-approve"]`);
-    await hasCard(page, id, "the empty line's red line", { err: "Each line needs 1 to 1,000 characters." }); await wait(300);
+    await hasCard(page, id, "the empty line's red line", { err: "Each line needs 1 to 1,000 characters. Only the heads-up and progress may be left empty." }); await wait(300);
     if (posts(calls, from).length) throw new Error(`an empty line sent ${JSON.stringify(posts(calls, from))}`);
     const full = i => "浪".repeat(999) + i;
     await page.fill(box("progress"), "浪".repeat(1001));

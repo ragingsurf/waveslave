@@ -10,6 +10,7 @@
 //   config()                   the coach's [vars] from wrangler.toml as numbers, with the spec's for a bad one
 //   usage(kind, n)             approximate daily counts of coach requests and SQL rows, for the free-plan guard
 //   stopFor(now)               why no new review may start or send now: a break, money, or nothing
+//   switchedOff, usageGuard    the breaks only a person ends (Pause, a stop, no key), and the free-plan guard
 //   dailyLimit(), sentToday(now)   how many reviews a Taiwan day takes, and how many were sent today
 //   counts(sub_hash, month)    a LINE account's reviews used and sent in a Taiwan month
 //   giveBack(id)               a review's count given back, once: the only way any count goes back
@@ -38,7 +39,7 @@ import {
   AGREE_VER, BOARDS, LANGS, LEVELS, MOVES, STANCES, autopilotOk, buildRequest, checkReply, readReply,
 } from "./coach-guide.js";
 import {
-  ATTEMPT_WAITS, CALLING_STALE, MAX_TRIES, MAX_WAITS, checkFrame, cleanupAfter, costUsd, creditMonth, estimateIn,
+  ATTEMPT_WAITS, CALLING_STALE, DAY, MAX_TRIES, MAX_WAITS, checkFrame, cleanupAfter, costUsd, creditMonth, estimateIn,
   nextTwMonth, sortError, twDay, twMonth, waitFor, worstUsd,
 } from "./coach-rules.js";
 import { colo, room } from "./stubs.js";
@@ -446,10 +447,7 @@ export class Coach extends DurableObject {
   //                     at COACH_STOP_USD + COACH_EXTRA_USD, until the next credit day, when the spend starts again
   // A break says more than money, so it comes first.
   stopFor(now) {
-    if (this.getMeta("paused") || this.getMeta("stopped")) return BREAK;
-    if (String(this.env.ANTHROPIC_API_KEY ?? "").trim() === "") return BREAK;
-    const used = this.usage("req", 0);
-    if (Object.entries(FREE_DAILY).some(([kind, limit]) => used[kind] >= COACH_GUARD * limit)) return BREAK;
+    if (this.switchedOff() || this.usageGuard()) return BREAK;
     if ((this.getMeta("frame_bytes") ?? 0) > FRAME_BYTES_MAX || this.sql.databaseSize > DATABASE_MAX) return BREAK;
     const rest = this.getMeta("rest");
     if (rest) return { kind: "money", until: rest.until };
@@ -461,6 +459,18 @@ export class Coach extends DurableObject {
       if (now < next && spend.usd >= stopUsd + extraUsd) return { kind: "money", until: next };
     }
     return null;
+  }
+
+  // Bryan's Pause, the coach's own stop (ruling R10), or no API key: a break that only a person ends.
+  switchedOff() {
+    return Boolean(this.getMeta("paused") || this.getMeta("stopped")) || String(this.env.ANTHROPIC_API_KEY ?? "").trim() === "";
+  }
+
+  // The free-plan guard: true while today's count (usage(), a UTC day, ruling R8) has reached 8% of any of the account's
+  // daily limits. It lifts by itself at 00:00 UTC, when the counts start again.
+  usageGuard() {
+    const used = this.usage("req", 0);
+    return Object.entries(FREE_DAILY).some(([kind, limit]) => used[kind] >= COACH_GUARD * limit);
   }
 
   // How many reviews a Taiwan day takes: COACH_DAILY, or COACH_DAILY_AUTO while autopilot is on.
@@ -816,6 +826,9 @@ export class Coach extends DurableObject {
     if (this.callsHeld(now)) return;
     const review = this.takeNext(now);
     if (!review) return;
+    // A stale pick's call was cut off midway (a deploy, say), so takeNext() counted it an attempt, and after the last
+    // one the coach gives up on it with no call. (The money limits add a stale pick's worst-case cost here.)
+    if (review.stale && review.attempts >= MAX_TRIES) return this.gaveUp(review, review.attempts);
     let banned, userId;
     try {
       [banned, userId] = await Promise.all([
@@ -847,27 +860,36 @@ export class Coach extends DurableObject {
 
   // When the alarm should next go off (spec step 7), never before now: the earliest of the next review's next_try (a
   // queued one's, or a calling one's 16-minute mark), the next daily clean-up (04:00 Taiwan), the hourly email (ruling
-  // R9), and a money rest's next probe and its end. While callsHeld() no review counts, so Pause and a stop wake
-  // nothing, and lifting them brings the alarm back (setPaused, startAgain). Each time here must be moved on by the run
-  // it wakes, or the alarm would go off again at once.
+  // R9), and a money rest's next probe and its end. While callsHeld() no review counts, so Pause, a stop and no key
+  // wake nothing, and lifting them brings the alarm back (setPaused, startAgain). The free-plan guard lifts by itself,
+  // so while it alone holds reviews that wait, the alarm comes back at the next 00:00 UTC. Each time here must be moved
+  // on by the run it wakes, or the alarm would go off again at once.
   nextAlarmAt(now) {
     const rest = this.getMeta("rest");
     const times = [this.getMeta("next_cleanup") ?? cleanupAfter(now), this.getMeta("digest_due"), rest?.until, rest?.probe_at];
-    if (!this.callsHeld(now)) {
-      times.push(this.one("SELECT min(next_try) AS at FROM reviews WHERE status IN ('queued', 'calling')").at);
-    }
+    const waiting = this.one("SELECT min(next_try) AS at FROM reviews WHERE status IN ('queued', 'calling')").at;
+    if (!this.callsHeld(now)) times.push(waiting);
+    else if (waiting !== null && this.usageGuard() && !this.switchedOff()) times.push((Math.floor(now / DAY) + 1) * DAY);
     return Math.max(now, Math.min(...times.filter(Number.isFinite)));
   }
 
   // The next review to call, marked calling with next_try at its 16-minute mark (spec step 2): of those queued and due,
-  // or left calling past their mark (a deploy can stop a call midway), the one sent first. null when none is due.
+  // or left calling past their mark, the one sent first. null when none is due. A review left calling is `stale`: its
+  // call was cut off midway (a deploy can stop one), which counts as an attempt (step 5, like a timeout), so a call that
+  // fails that way every time can't go on paying every 16 minutes. The read and the write have no await between them.
   takeNext(now) {
-    return this.one(
-      `UPDATE reviews SET status = 'calling', next_try = ? WHERE id = (
-         SELECT id FROM reviews WHERE status IN ('queued', 'calling') AND next_try <= ? ORDER BY sent, id LIMIT 1)
-       RETURNING *`,
-      now + CALLING_STALE, now,
+    const next = this.one(
+      "SELECT id, status FROM reviews WHERE status IN ('queued', 'calling') AND next_try <= ? ORDER BY sent, id LIMIT 1",
+      now,
     );
+    if (!next) return null;
+    const stale = next.status === "calling";
+    const counted = stale ? ", attempts = attempts + 1, waits = 0" : "";
+    const review = this.one(
+      `UPDATE reviews SET status = 'calling', next_try = ?${counted} WHERE id = ? RETURNING *`,
+      now + CALLING_STALE, next.id,
+    );
+    return { ...review, stale };
   }
 
   // Whether a review taken by takeNext() is still calling for the redo number it was taken with (spec step 3).
@@ -893,10 +915,13 @@ export class Coach extends DurableObject {
   // the key frames' numbers, hadHistory, estIn: the tokens it sends, as estimateIn() reckons them}.
   requestFor(review, userId) {
     const frames = this.all("SELECT n, ms, b64 FROM frames WHERE review_id = ? AND b64 IS NOT NULL ORDER BY n", review.id);
+    const answers = JSON.parse(review.answers);
+    // Two "other" moves are the same move only when the surfer named them the same.
     const history = this.all(
       `SELECT published AS at, final FROM reviews WHERE sub_hash = ? AND move = ? AND status = 'published'
+         AND (move != 'other' OR json_extract(answers, '$.move_other') = ?)
        ORDER BY published DESC LIMIT 2`,
-      review.sub_hash, review.move,
+      review.sub_hash, review.move, answers.move_other ?? "",
     ).map((h) => ({ at: h.at, final: fromJson(h.final) }));
     const examples = this.all(
       "SELECT draft, bryan, note FROM examples WHERE move = ? AND review_id IS NOT ? ORDER BY at DESC, id DESC LIMIT 3",
@@ -904,17 +929,18 @@ export class Coach extends DurableObject {
     ).map((e) => ({ draft: fromJson(e.draft), bryan: fromJson(e.bryan), note: e.note }));
     const redo = review.redos > 0 ? { draft: fromJson(review.draft), notes: fromJson(review.redo_note) } : null;
     const body = buildRequest({
-      model: this.env.COACH_MODEL, maxTokens: MAX_TOKENS, lang: review.lang, answers: JSON.parse(review.answers), frames,
-      history, examples, userId, redo,
+      model: this.env.COACH_MODEL, maxTokens: MAX_TOKENS, lang: review.lang, answers, frames, history, examples, userId,
+      redo,
     });
     const text = [body.system, ...body.messages[0].content.map((block) => block.text ?? "")].join("");
     return { body, nums: frames.map((f) => f.n), hadHistory: history.length > 0, estIn: estimateIn(frames.length, text.length) };
   }
 
   // One call to the Messages API with a request body, not streaming, with a 10-minute timeout (spec "The AI request"):
-  // {kind: "ok", message}, the answer, or {kind, retryAfter}, what sortError() makes of the error and the answer's
-  // retry-after header. A network error, the timeout or an answer that isn't JSON is "attempt" (sortError() would take a
-  // missing answer for "fail"). The alarm never calls it without an API key (stopFor).
+  // {kind: "ok", message}, the answer, or {kind, retryAfter, cutOff}, what sortError() makes of the error and the
+  // answer's retry-after header. A network error, the timeout or an answer that isn't JSON is "attempt" (sortError()
+  // would take a missing answer for "fail"); cutOff is true only for the timeout or an abort, a call that may have run
+  // to its worst case (spec "Money"). The alarm never calls it without an API key (stopFor).
   async callAi(body) {
     try {
       const res = await fetch(this.env.COACH_API_URL, {
@@ -928,16 +954,16 @@ export class Coach extends DurableObject {
         signal: AbortSignal.timeout(CALL_TIMEOUT),
       });
       if (res.ok) return { kind: "ok", message: await res.json() };
-      return { kind: sortError(res.status, await res.text()), retryAfter: res.headers.get("retry-after") };
+      return { kind: sortError(res.status, await res.text()), retryAfter: res.headers.get("retry-after"), cutOff: false };
     } catch (err) {
       console.error("coach: the AI call failed:", err?.name ?? "error");
-      return { kind: "attempt", retryAfter: null };
+      return { kind: "attempt", retryAfter: null, cutOff: err?.name === "TimeoutError" || err?.name === "AbortError" };
     }
   }
 
   // What became of a call (spec steps 4-6 and "Money"), each saved with saveCall(). An answer is checked (answered());
   // an error goes by its kind:
-  //   "wait"      a 429 or 529: it waits for retry-after, or 30 minutes, with no attempt used; the 12th wait counts as one
+  //   "wait"      a 429 or 529: it waits for retry-after, or 30 minutes, with no attempt used, 12 times in a row at most
   //   "attempt"   a 5xx, a timeout or a network error
   //   "fail"      any other 400, or a 413: the coach gives up on it at once
   //   "pause", "credit", "limit"   the key, the model or the money, not this review's fault
@@ -954,8 +980,8 @@ export class Coach extends DurableObject {
 
   // An answer, checked in the spec's order. A refusal or a flag first, as a reply of any shape may carry one (ruling
   // R16); then a reply cut off or failing a check counts an attempt; then a clip that isn't surfing is held for Bryan
-  // (ruling R16); and the rest is a draft, published at once on autopilot when autopilotOk(). The call's model, tokens
-  // and cost are saved with what it gave.
+  // (ruling R16); and the rest is a draft, published at once on autopilot when autopilotOk(), but for a Redo's, which
+  // Bryan asked for and sees first (ruling P24). The call's model, tokens and cost are saved with what it gave.
   answered(review, ask, { reply, stop, usage, model }, now) {
     const call = [model, usage?.input_tokens ?? null, usage?.output_tokens ?? null, this.callCost(usage, ask.estIn)];
     if (stop === "refusal") return this.flagged(review, ["refusal"], [], call);
@@ -971,7 +997,7 @@ export class Coach extends DurableObject {
     if (!reply.is_surf_clip) {
       // Not published, and held for Bryan, who may give it back or ban the account. Its key frames stay for him.
       this.saveCall(review, `status = 'rejected', hold = 1, ${set}`, ...saved);
-    } else if (this.getMeta("autopilot") && autopilotOk(reply, checked)) {
+    } else if (review.redos === 0 && this.getMeta("autopilot") && autopilotOk(reply, checked)) {
       this.saveCall(review, `status = 'published', published = ?, final = ?, checked = 0, ${set}`, now, saved[0], ...saved);
     } else {
       this.saveCall(review, `status = 'drafted', ${set}`, ...saved);
@@ -980,13 +1006,13 @@ export class Coach extends DurableObject {
 
   // A refusal, or a reply flagged sexual or under 18 (ruling R16), is never retried or published: the review is
   // rejected and held for Bryan with its flags, its key frames go at once, the account starts no new review until he
-  // clears or bans it, and the count is kept. Its reply isn't kept as a draft: Bryan sees only the warning.
+  // clears or bans it, and the count is kept. Its reply isn't kept as a draft: Bryan sees only the warning. The block is
+  // the account's, so it holds even when the review was deleted or redone during the call and nothing else is saved.
   flagged(review, flags, warnings, call) {
     this.ctx.storage.transactionSync(() => {
-      const set = `status = 'rejected', hold = 1, next_try = NULL, flags = ?, warnings = ?, ${CALL_SET}`;
-      if (!this.saveCall(review, set, JSON.stringify(flags), JSON.stringify(warnings), ...call)) return;
-      this.dropFrames(review.id);
       this.all("UPDATE people SET blocked = 1 WHERE sub_hash = ?", review.sub_hash);
+      const set = `status = 'rejected', hold = 1, next_try = NULL, flags = ?, warnings = ?, ${CALL_SET}`;
+      if (this.saveCall(review, set, JSON.stringify(flags), JSON.stringify(warnings), ...call)) this.dropFrames(review.id);
     });
   }
 
@@ -1000,10 +1026,11 @@ export class Coach extends DurableObject {
     this.saveCall(review, "status = 'queued', attempts = ?, waits = 0, next_try = ?", attempts, next);
   }
 
-  // A 429 or 529 (spec step 5): the review waits `ms` with no attempt used, until the 12th wait, which counts as one.
+  // A 429 or 529 (spec step 5): the review waits `ms` with no attempt used, at most 12 times in a row (MAX_WAITS); the
+  // 13th counts as an attempt.
   waited(review, ms, now) {
     const waits = review.waits + 1;
-    if (waits >= MAX_WAITS) return this.attempted(review, now, ms);
+    if (waits > MAX_WAITS) return this.attempted(review, now, ms);
     this.saveCall(review, "status = 'queued', waits = ?, next_try = ?", waits, now + ms);
   }
 

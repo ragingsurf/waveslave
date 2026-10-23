@@ -319,7 +319,29 @@ describe("attempts and waits", () => {
     expect(await reviewRow(c, id)).toMatchObject({ status: "failed", attempts: 3 });
   });
 
-  it("a 429 waits for its retry-after and a 529 30 minutes, with no attempt used; the 12th wait counts as one", async () => {
+  it("callAi marks a timeout or an abort as cut off, and no other attempt", async () => {
+    const c = await freshCoach();
+    const thrown = (err) => () => {
+      throw err;
+    };
+    ai.push(
+      thrown(new DOMException("The operation was aborted due to timeout", "TimeoutError")),
+      thrown(new DOMException("The operation was aborted", "AbortError")),
+      thrown(new TypeError("Network connection lost.")),
+      () => new Response("<html>bad gateway</html>", { status: 200 }),
+      fail500,
+    );
+    const results = await c.inCoach(async (coach) => {
+      const out = [];
+      for (let i = 0; i < 5; i++) out.push(await coach.callAi({ test: i }));
+      return out;
+    });
+    const attempt = (cutOff) => ({ kind: "attempt", retryAfter: null, cutOff });
+    expect(results).toEqual([attempt(true), attempt(true), attempt(false), attempt(false), attempt(false)]);
+    expect(logged.splice(0).map((args) => args[1])).toEqual(["TimeoutError", "AbortError", "TypeError", "SyntaxError"]);
+  });
+
+  it("a 429 waits for its retry-after and a 529 30 minutes, with no attempt used; after 12 waits the 13th counts as one", async () => {
     const c = await freshCoach();
     const a = surfer();
     const id = await insertReview(c, a);
@@ -333,12 +355,12 @@ describe("attempts and waits", () => {
     await runAlarm(c);
     expect(await reviewRow(c, id)).toMatchObject({ status: "queued", attempts: 0, waits: 2, next_try: T + 120 * SEC + 30 * MIN });
 
-    // The 11th wait is still a wait; the 12th counts as an attempt, and the waits start again.
-    await c.rows("UPDATE reviews SET waits = 10 WHERE id = ?", id);
+    // The 12th wait is still a plain wait; the 13th in a row counts as an attempt, and the waits start again.
+    await c.rows("UPDATE reviews SET waits = 11 WHERE id = ?", id);
     c.clock.t = T + HOUR;
     ai.push(apiError(429, "rate_limit_error", "Rate limited", { "retry-after": "30" }));
     await runAlarm(c);
-    expect(await reviewRow(c, id)).toMatchObject({ status: "queued", attempts: 0, waits: 11, next_try: T + HOUR + 30 * SEC });
+    expect(await reviewRow(c, id)).toMatchObject({ status: "queued", attempts: 0, waits: 12, next_try: T + HOUR + 30 * SEC });
     c.clock.t = T + HOUR + 30 * SEC;
     ai.push(apiError(429, "rate_limit_error", "Rate limited", { "retry-after": "30" }));
     await runAlarm(c);
@@ -375,16 +397,30 @@ describe("attempts and waits", () => {
 // ---- Calls that went astray -----------------------------------------------------------------------------------------
 
 describe("a call that went astray", () => {
-  it("a review left calling past its 16-minute mark runs again; one still inside it waits for its mark", async () => {
+  it("a review left calling past its 16-minute mark counts an attempt and runs again; one inside its mark waits for it", async () => {
     const c = await freshCoach();
-    const stale = await insertReview(c, surfer(), { status: "calling", next_try: T - SEC, sent: T - HOUR });
+    const stale = await insertReview(c, surfer(), { status: "calling", next_try: T - SEC, sent: T - HOUR, waits: 3 });
     const fresh = await insertReview(c, surfer(), { status: "calling", next_try: T + 5 * MIN, sent: T - 2 * HOUR });
     ai.push(ok(goodReply()));
     await runAlarm(c);
     expect(calls).toHaveLength(1);
-    expect((await reviewRow(c, stale)).status).toBe("drafted");
-    expect(await reviewRow(c, fresh)).toMatchObject({ status: "calling", next_try: T + 5 * MIN });
+    expect(await reviewRow(c, stale)).toMatchObject({ status: "drafted", attempts: 1, waits: 0 });
+    expect(await reviewRow(c, fresh)).toMatchObject({ status: "calling", attempts: 0, next_try: T + 5 * MIN });
     expect(await alarmAt(c)).toBe(T + 5 * MIN);
+  });
+
+  it("a third stale pick fails the review and gives it back once, with no call", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    const id = await insertReview(c, a, { status: "calling", next_try: T - SEC, attempts: 2 });
+    await runAlarm(c);
+    expect(calls).toEqual([]);
+    expect(c.asked).toEqual([]);
+    expect(await reviewRow(c, id)).toMatchObject({ status: "failed", attempts: 3, next_try: null, given: 1 });
+    expect(await quota(c, a)).toEqual({ used: 0, sent: 1 });
+    expect(await c.inCoach((coach) => coach.giveBack(id))).toBe(false);
+    expect(await quota(c, a)).toEqual({ used: 0, sent: 1 });
+    expect(await alarmAt(c)).toBe(CLEANUP);
   });
 
   it("a review being called is marked calling until its 16-minute mark", async () => {
@@ -427,6 +463,34 @@ describe("a call that went astray", () => {
     });
     expect(await reviewRow(c, gone)).toBeUndefined();
     expect(await quota(c, b)).toEqual({ used: 1, sent: 1 });
+  });
+
+  it("a flagged reply still blocks the account when its review was deleted or redone during the call", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    const gone = await insertReview(c, a);
+    await c.inCoach(async (coach) => {
+      ai.push(() => {
+        coach.sql.exec("DELETE FROM reviews WHERE id = ?", gone);
+        return Response.json(apiMessage({ ...goodReply(), sexual_content: true }));
+      });
+      await coach.alarm();
+    });
+    expect(await reviewRow(c, gone)).toBeUndefined();
+    expect(await blocked(c, a)).toBe(1);
+
+    const b = surfer();
+    const redone = await insertReview(c, b);
+    await c.inCoach(async (coach) => {
+      ai.push(() => {
+        coach.sql.exec("UPDATE reviews SET redos = 1 WHERE id = ?", redone);
+        return Response.json(apiMessage(null, { stop_reason: "refusal" }));
+      });
+      await coach.alarm();
+    });
+    expect(await reviewRow(c, redone)).toMatchObject({ status: "calling", redos: 1, hold: 0, flags: "[]" });
+    expect(await frameCount(c, redone)).toBe(12);
+    expect(await blocked(c, b)).toBe(1);
   });
 
   it("a review deleted, or a Pause set, while the room is asked about the account makes no call", async () => {
@@ -535,6 +599,29 @@ describe("a Redo", () => {
     expect(JSON.parse(row.warnings)).toEqual([]);
   });
 
+  it("on autopilot, a passing Redo result still waits for Bryan (ruling P24)", async () => {
+    const c = await freshCoach();
+    const { id } = await redone(c, surfer());
+    await setMeta(c, "autopilot", true);
+    ai.push(ok(goodReply()));
+    await runAlarm(c);
+    expect(await reviewRow(c, id)).toMatchObject({ status: "drafted", published: null, final: null });
+  });
+
+  it("a third stale pick of a Redo goes back to drafted with its old draft and redo_failed, with no call", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    const { id, old } = await redone(c, a);
+    await c.rows("UPDATE reviews SET status = 'calling', next_try = ?, attempts = 2 WHERE id = ?", T - SEC, id);
+    await runAlarm(c);
+    expect(calls).toEqual([]);
+    const row = await reviewRow(c, id);
+    expect(row).toMatchObject({ status: "drafted", attempts: 3, next_try: null, given: 0 });
+    expect(JSON.parse(row.draft)).toEqual(old);
+    expect(JSON.parse(row.warnings)).toEqual(["unusable", "redo_failed"]);
+    expect(await quota(c, a)).toEqual({ used: 1, sent: 1 });
+  });
+
   it("that fails 3 times goes back to drafted with its old draft and redo_failed, the count unchanged", async () => {
     const c = await freshCoach();
     const a = surfer();
@@ -557,7 +644,7 @@ describe("a Redo", () => {
 // ---- Autopilot ------------------------------------------------------------------------------------------------------
 
 describe("autopilot", () => {
-  it("publishes a draft that passes every check at once, with checked 0", async () => {
+  it("publishes a first draft that passes every check at once, with checked 0", async () => {
     const c = await freshCoach();
     const a = surfer();
     const id = await insertReview(c, a);
@@ -619,6 +706,29 @@ describe("history and examples", () => {
   });
 });
 
+describe("history of an \"other\" move", () => {
+  it("counts only earlier reviews of an \"other\" move the surfer named the same", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    const other = (move_other) => JSON.stringify({ ...ANSWERS, move: "other", move_other });
+    for (const [move_other, title, daysAgo] of [["duck dive", "The duck dive one", 9], ["snap", "The snap one", 8]]) {
+      const reply = goodReply();
+      reply.went_well.title = title;
+      await insertReview(c, a, {
+        move: "other", answers: other(move_other), status: "published", frames: false, counted: false,
+        sent: T - daysAgo * DAY - HOUR, published: T - daysAgo * DAY, final: JSON.stringify(reply), next_try: null,
+      });
+    }
+    const id = await insertReview(c, a, { move: "other", answers: other("snap") });
+    ai.push(ok(goodReply()));
+    await runAlarm(c);
+    const text = userText(calls[0]);
+    expect(text).toContain("The snap one");
+    expect(text).not.toContain("The duck dive one");
+    expect((await reviewRow(c, id)).status).toBe("drafted");
+  });
+});
+
 // ---- When the alarm goes off ----------------------------------------------------------------------------------------
 
 describe("when the alarm next goes off", () => {
@@ -648,6 +758,32 @@ describe("when the alarm next goes off", () => {
     expect(await getMeta(c, "stopped")).toBe(false);
     expect(await getMeta(c, "paused")).toBe(false);
     expect(await alarmAt(c)).toBe(T);
+    ai.push(ok(goodReply()));
+    expect(await runDurableObjectAlarm(c.stub)).toBe(true);
+    expect((await reviewRow(c, id)).status).toBe("drafted");
+  });
+
+  it("while the free-plan guard holds, no call, and the alarm comes back at 00:00 UTC, when it lifts (not while paused)", async () => {
+    const NIGHT = Date.UTC(2030, 5, 3, 21); // 05:00 in Taiwan on 4 June, after that day's clean-up
+    const MIDNIGHT = Date.UTC(2030, 5, 4);
+    const c = await freshCoach(NIGHT);
+    const id = await insertReview(c, surfer());
+    await c.inCoach((coach) => {
+      coach.usage("req", 0);
+      coach.used.req = 8_000; // 8% of the free plan's 100,000 requests a day
+    });
+    await runAlarm(c);
+    expect(await reviewRow(c, id)).toMatchObject({ status: "queued" });
+    expect(await alarmAt(c)).toBe(MIDNIGHT);
+    // Paused as well: Pause wakes nothing, so the alarm waits for the clean-up.
+    await setMeta(c, "paused", true);
+    await runAlarm(c);
+    expect(await alarmAt(c)).toBe(Date.UTC(2030, 5, 4, 20));
+    await setMeta(c, "paused", false);
+    await runAlarm(c);
+    expect(await alarmAt(c)).toBe(MIDNIGHT);
+    // At 00:00 UTC the counts start again, and the review goes.
+    c.clock.t = MIDNIGHT;
     ai.push(ok(goodReply()));
     expect(await runDurableObjectAlarm(c.stub)).toBe(true);
     expect((await reviewRow(c, id)).status).toBe("drafted");

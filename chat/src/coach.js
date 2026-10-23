@@ -85,8 +85,8 @@ const USAGE_SAVE_MS = 30_000; // ...or time, whichever comes first
 //   digest_due     when the hourly email is due (ruling R9), null when none is; and last_digest, when the last one went
 //   mail_day       {day, n, alerts}: this Taiwan day's emails, for the cap of 20 a day, and the alerts sent on it
 //
-// Every table in the spec ("Storage (Coach's SQLite)") but meta, which migrate() makes first. The JSON columns hold text
-// written with JSON.stringify.
+// Every table in the spec ("Storage (Coach's SQLite)") but meta, which migrate() makes first, and kept_blocks (ruling
+// P47). The JSON columns hold text written with JSON.stringify.
 const SCHEMA_V1 = [
   // One clip review, from its start to its last state. status goes uploading -> queued -> calling -> drafted ->
   // published, rejected or failed: drafted -> queued on a Redo, published -> drafted on a report, published -> rejected
@@ -184,6 +184,14 @@ const SCHEMA_V1 = [
     note TEXT,
     review_id TEXT,
     at INTEGER NOT NULL
+  )`,
+  // A block after a flagged clip, kept for a LINE account whose chat account was deleted while blocked (ruling P47):
+  // only that it is blocked and when this was kept (forget). A remade account is refused as the blocked one was, until
+  // the block lapses 90 days later (cleanRules), as its flagged review went with the account and Bryan has no Clear
+  // for it. The coach has never been deployed, so this is still the first schema.
+  `CREATE TABLE kept_blocks (
+    sub_hash TEXT PRIMARY KEY,
+    kept_at INTEGER NOT NULL
   )`,
 ];
 
@@ -478,6 +486,9 @@ const SHORT_KEEP = 7 * DAY; // the key frames of a failed review, and of a clip 
 const LONG_KEEP = 30 * DAY;
 // What the surfer is told about a draft the clean-up closed.
 const LATE_NOTE = "Sorry, we couldn't review this in time";
+// A block forget() kept for a LINE account (ruling P47), from when it was kept. It holds no more after this, even before
+// the clean-up deletes it.
+const KEPT_BLOCK = 90 * DAY;
 
 // ---- Routes -------------------------------------------------------------------------------------------------------
 
@@ -838,7 +849,8 @@ export class Coach extends DurableObject {
   }
 
   // POST /coach/reviews {lang, move, move_other, level, board, stance, note, frames: [{n, ms, box}]}: starts a review,
-  // {id}. Refused, in this order: agree, banned (the room's isBanned), blocked, stopFor(), in_progress (one queued,
+  // {id}. Refused, in this order: agree, banned (the room's isBanned), blocked (after a flagged clip, or by a block
+  // forget() kept for the LINE account under 90 days ago: ruling P47), stopFor(), in_progress (one queued,
   // calling or drafted), full_today, no_reviews_left, then too_few_frames and invalid (readStart). Nothing counts yet:
   // that is send's. Only once every check passes does it write, all in one transaction: the account's own review still
   // uploading goes (another tab's, ruling R12), the new one goes in with its listed key frames waiting, and the level,
@@ -851,7 +863,8 @@ export class Coach extends DurableObject {
     const now = this.now();
     const person = this.person(who.sub_hash);
     if (person?.agreed_ver !== AGREE_VER) return refuse(403, "agree");
-    if (person.blocked) return refuse(403, "blocked");
+    const kept = "SELECT 1 FROM kept_blocks WHERE sub_hash = ? AND kept_at > ?";
+    if (person.blocked || this.one(kept, who.sub_hash, now - KEPT_BLOCK)) return refuse(403, "blocked");
     const stop = this.stopFor(now);
     if (stop) return stopped(stop);
     const open = "SELECT 1 FROM reviews WHERE sub_hash = ? AND status IN ('queued', 'calling', 'drafted') LIMIT 1";
@@ -1251,11 +1264,16 @@ export class Coach extends DurableObject {
 
   // Forgets a chat account before the room deletes it: every review of it goes with its key frames (dropFrames(), so
   // frame_bytes stays right), and so do Bryan's examples that came from those reviews and the LINE account's people row
-  // (its saved level, board and stance, the agreement, and a block). The reviews are found by the account's uid and by
-  // its LINE account's sub_hash, so any an earlier account of the same LINE account left go too. The current Taiwan
-  // month's quota row stays, so an account deleted and made again inside the month has the reviews left it had, not 2
-  // more; the rows of earlier months go, as the daily clean-up's would. No count goes back. All in one transaction, and
-  // {ok: true} once it is done: the room deletes the account only then.
+  // (its saved level, board and stance, and the agreement). The reviews are found by the account's uid and by its LINE
+  // account's sub_hash, so any an earlier account of the same LINE account left go too. Two things of the LINE account
+  // stay, so deleting and remaking the account undoes neither:
+  //   - the current Taiwan month's quota row, so a remade account has the reviews left it had, not 2 more; the rows of
+  //     earlier months go, as the daily clean-up's would. No count goes back.
+  //   - a block after a flagged clip (ruling P47), as the chat's ban outlives the account: kept_blocks keeps that the
+  //     LINE account is blocked and when, and nothing else. The flagged review goes, so Bryan has no Clear for it, and
+  //     the block lapses 90 days later (KEPT_BLOCK). A block kept already stays as it was, so it lapses when it would
+  //     have; one blocked again, after it lapsed, is kept from now.
+  // All in one transaction, and {ok: true} once it is done: the room deletes the account only then.
   //
   // A review whose AI call is out goes at once like the rest. Its answer is dropped when it comes back, as saveCall()
   // finds no review calling, and a flag's block makes no people row again (flagged() only updates one). Its mark stays
@@ -1263,13 +1281,22 @@ export class Coach extends DurableObject {
   // lost: forgetting an account never leaves a call unpaid.
   async forget(uid, sub_hash) {
     this.usage("req");
+    const now = this.now();
     this.ctx.storage.transactionSync(() => {
       for (const { id } of this.all("SELECT id FROM reviews WHERE uid = ? OR sub_hash = ?", uid, sub_hash)) {
         this.all("DELETE FROM examples WHERE review_id = ?", id);
         this.dropReview(id);
       }
+      // A remade account under a block kept already can't be blocked again (it can't start a review), so a people row
+      // that is blocked means any kept block has lapsed: this block is kept from now.
+      if (this.person(sub_hash)?.blocked) {
+        this.all(
+          "INSERT INTO kept_blocks (sub_hash, kept_at) VALUES (?, ?) ON CONFLICT (sub_hash) DO UPDATE SET kept_at = excluded.kept_at",
+          sub_hash, now,
+        );
+      }
       this.all("DELETE FROM people WHERE sub_hash = ?", sub_hash);
-      this.all("DELETE FROM quota WHERE sub_hash = ? AND month < ?", sub_hash, twMonth(this.now()));
+      this.all("DELETE FROM quota WHERE sub_hash = ? AND month < ?", sub_hash, twMonth(now));
     });
     return { ok: true };
   }
@@ -2034,6 +2061,9 @@ export class Coach extends DurableObject {
     // Quota rows of past Taiwan months: only this month's counts are read (counts). The table holds about one row an
     // account that used the coach this month, so reading it all is cheap.
     this.all("DELETE FROM quota WHERE month < ?", twMonth(now));
+    // Blocks forget() kept (ruling P47), 90 days after they were kept: the LINE account may start reviews again. The
+    // table holds only the accounts deleted while blocked, so reading it all is cheap too.
+    this.all("DELETE FROM kept_blocks WHERE kept_at <= ?", now - KEPT_BLOCK);
   }
 
   // ---- Pause and Start again ---------------------------------------------------------------------------------------

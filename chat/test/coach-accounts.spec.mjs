@@ -1,7 +1,8 @@
 // Tests for accounts reaching the coach (docs/superpowers/specs/2026-10-22-ai-coach-design.md, "Backend", "Accounts", and
-// "Testing", "Accounts"; rulings R1, R5 and R6): the coach's forget() and exportFor(), which the room calls over RPC;
-// the room's DELETE /me, which awaits forget() before deleting the account; GET /me/export, which adds the coach's part;
-// and the room's 24-month clean-up of accounts, which deletes only those the coach confirmed. They run inside the
+// "Testing", "Accounts"; rulings R1, R5, R6 and P47): the coach's forget() and exportFor(), which the room calls over
+// RPC, and the block forget() keeps for a LINE account blocked after a flagged clip, until it lapses; the room's
+// DELETE /me, which awaits forget() before deleting the account; GET /me/export, which adds the coach's part; and the
+// room's 24-month clean-up of accounts, which deletes only those the coach confirmed. They run inside the
 // Workers runtime (see vitest.config.mjs). Run from chat/:
 // npx vitest run --no-isolate --max-workers=1 test/coach-accounts.spec.mjs
 //
@@ -12,6 +13,7 @@
 // key, so it sends no email. The AI is a mocked fetch of env.COACH_API_URL that gives the answers a test queued in
 // `ai`, in turn; any other fetch, or one more AI call than was queued, throws. After each test, every queued answer was
 // used, nothing else was fetched and nothing was logged that the test didn't expect.
+import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256b64u } from "../src/auth.js";
@@ -262,6 +264,106 @@ describe("Coach.forget(uid, sub_hash)", () => {
     expect(spend.reviews).toBe(1);
     expect(await getMeta(c, "calls_out")).toEqual({});
     expect(await c.rows("SELECT month, used, sent FROM quota")).toEqual([{ month: MONTH, used: 1, sent: 1 }]);
+  });
+});
+
+// ---- A block kept for a LINE account (ruling P47) --------------------------------------------------------------------
+
+describe("a block forget() keeps (ruling P47)", () => {
+  const start = (c, who) => route(c, who, "POST", "/coach/reviews", { lang: "en", ...ANSWERS, frames: listed() });
+  const agree = (c, who) => route(c, who, "POST", "/coach/agree", { ver: AGREE_VER, adult: true });
+  const BLOCKED = Object.freeze({ status: 403, json: { error: "blocked" } });
+
+  // A clip flagged an hour ago and held for Bryan, as the alarm leaves it: rejected, hold 1, its flags, no key frames,
+  // its count kept, and the account blocked.
+  async function flaggedAccount(c) {
+    const a = surfer();
+    await insertReview(c, a, {
+      status: "rejected", hold: 1, flags: JSON.stringify(["under_18"]), handled_at: c.clock.t - HOUR, frames: false,
+    });
+    await quotaRow(c, a, MONTH, 1);
+    await c.rows("UPDATE people SET blocked = 1 WHERE sub_hash = ?", a.sub_hash);
+    return a;
+  }
+
+  it("a flagged account forgotten: only the block and when it was kept stay, and its remade account is still refused", async () => {
+    const c = await freshCoach();
+    const a = await flaggedAccount(c);
+    expect(await start(c, a)).toEqual(BLOCKED);
+
+    expect(await c.stub.forget(a.uid, a.sub_hash)).toEqual({ ok: true });
+
+    // The flagged review and the people row go; the block stays, with nothing else of the account.
+    expect(await c.rows("SELECT id FROM reviews")).toEqual([]);
+    expect(await c.rows("SELECT * FROM people")).toEqual([]);
+    expect(await c.rows("SELECT * FROM kept_blocks")).toEqual([{ sub_hash: a.sub_hash, kept_at: T }]);
+    // The remade account agrees afresh and is refused as the blocked one was, with the month's kept count.
+    const again = { ...a, uid: `u-${hex(6)}` };
+    expect((await route(c, again, "GET", "/coach/me")).json).toMatchObject({ left: 1, agreed: false, reviews: [] });
+    expect(await agree(c, again)).toEqual({ status: 200, json: { ok: true } });
+    expect(await start(c, again)).toEqual(BLOCKED);
+    expect(await c.rows("SELECT month, used, sent FROM quota")).toEqual([{ month: MONTH, used: 1, sent: 1 }]);
+    // Deleting the remade account too keeps the block as it was: it lapses when it would have.
+    c.clock.t = T + 10 * DAY;
+    expect(await c.stub.forget(again.uid, again.sub_hash)).toEqual({ ok: true });
+    expect(await c.rows("SELECT * FROM kept_blocks")).toEqual([{ sub_hash: a.sub_hash, kept_at: T }]);
+    expect(await c.rows("SELECT * FROM people")).toEqual([]);
+  });
+
+  it("an account that isn't blocked: its people row goes entirely, no block is kept, and a remade account may start", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    await insertReview(c, a, { status: "published", final: JSON.stringify(goodReply()), frames: false });
+    await quotaRow(c, a, MONTH, 1);
+    expect(await c.rows("SELECT level, board, stance, agreed_ver, blocked FROM people")).toEqual([
+      { level: "starting_turns", board: "shortboard", stance: "regular", agreed_ver: AGREE_VER, blocked: 0 },
+    ]);
+
+    expect(await c.stub.forget(a.uid, a.sub_hash)).toEqual({ ok: true });
+
+    expect(await c.rows("SELECT * FROM people")).toEqual([]);
+    expect(await c.rows("SELECT * FROM kept_blocks")).toEqual([]);
+    const again = { ...a, uid: `u-${hex(6)}` };
+    await agree(c, again);
+    expect(await start(c, again)).toMatchObject({ status: 200 });
+  });
+
+  it("a LINE account blocked again after its kept block lapsed, and forgotten again: the block is kept from now", async () => {
+    const c = await freshCoach();
+    const a = await flaggedAccount(c);
+    // Its block kept 91 days ago has lapsed (the clean-up hasn't run yet), and the account was flagged again since.
+    await c.rows("INSERT INTO kept_blocks (sub_hash, kept_at) VALUES (?, ?)", a.sub_hash, T - 91 * DAY);
+    expect(await c.stub.forget(a.uid, a.sub_hash)).toEqual({ ok: true });
+    expect(await c.rows("SELECT * FROM kept_blocks")).toEqual([{ sub_hash: a.sub_hash, kept_at: T }]);
+  });
+
+  it("lapses 90 days after it was kept: the daily clean-up deletes it at 90 and 91 days, not 89, and the start goes", async () => {
+    // 04:00 Taiwan on 2 September, a daily clean-up's time, months after T.
+    const CLEAN = Date.UTC(2030, 8, 1, 20);
+    const c = await freshCoach(CLEAN);
+    const [d89, d90, d91] = [surfer(), surfer(), surfer()];
+    for (const [who, days] of [[d89, 89], [d90, 90], [d91, 91]]) {
+      await c.rows("INSERT INTO kept_blocks (sub_hash, kept_at) VALUES (?, ?)", who.sub_hash, CLEAN - days * DAY);
+      await agree(c, who);
+    }
+    // Lapsed by itself at 90 days, even before the clean-up has deleted it.
+    expect(await start(c, d89)).toEqual(BLOCKED);
+    expect(await start(c, d90)).toMatchObject({ status: 200 });
+
+    await c.inCoach((coach) => {
+      coach.setMeta("next_cleanup", CLEAN);
+      return coach.ctx.storage.setAlarm(CLEAN);
+    });
+    expect(await runDurableObjectAlarm(c.stub)).toBe(true);
+
+    expect(await c.rows("SELECT sub_hash FROM kept_blocks")).toEqual([{ sub_hash: d89.sub_hash }]);
+    expect(await start(c, d89)).toEqual(BLOCKED);
+    expect(await start(c, d91)).toMatchObject({ status: 200 });
+    // A day later it is 90 days old, and goes too.
+    c.clock.t = CLEAN + DAY;
+    await c.inCoach((coach) => coach.ctx.storage.setAlarm(CLEAN + DAY));
+    expect(await runDurableObjectAlarm(c.stub)).toBe(true);
+    expect(await c.rows("SELECT sub_hash FROM kept_blocks")).toEqual([]);
   });
 });
 

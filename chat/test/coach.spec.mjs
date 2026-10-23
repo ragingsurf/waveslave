@@ -72,6 +72,7 @@ const TABLES = {
   people: ["sub_hash", "level", "board", "stance", "agreed_ver", "agreed_at", "blocked"],
   quota: ["sub_hash", "month", "used", "sent"],
   examples: ["id", "move", "level", "draft", "bryan", "note", "review_id", "at"],
+  kept_blocks: ["sub_hash", "kept_at"],
   meta: ["key", "value"],
 };
 const KEYS = {
@@ -80,6 +81,7 @@ const KEYS = {
   people: ["sub_hash"],
   quota: ["sub_hash", "month"],
   examples: ["id"],
+  kept_blocks: ["sub_hash"],
   meta: ["key"],
 };
 
@@ -121,7 +123,7 @@ describe("tables", () => {
       // The held ones' index is partial: only the clips held for Bryan are in it (ruling R16).
       const held = rows(coach, "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'reviews_held'")[0].sql;
       expect(held).toMatch(/WHERE hold = 1$/);
-      for (const table of ["frames", "people", "quota", "examples", "meta"]) expect(indexes(coach, table), table).toEqual([]);
+      for (const table of ["frames", "people", "quota", "examples", "kept_blocks", "meta"]) expect(indexes(coach, table), table).toEqual([]);
     });
   });
 

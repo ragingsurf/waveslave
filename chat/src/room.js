@@ -2150,7 +2150,9 @@ export class Room extends DurableObject {
          SELECT id FROM messages WHERE kind = 'report' AND ts < ? AND uid IS NOT NULL LIMIT ${BATCH})`,
       now - KEEP_REPORT_POSTER,
     );
-    // Accounts not seen for 24 months, with their logs, once the coach has forgotten them.
+    // Accounts not seen for 24 months, with their logs, once the coach has forgotten them. The room takes other
+    // requests while it waits on the coach, so the memory copies follow the messages deleted so far first.
+    this.messagesChanged();
     await this.deleteStaleAccounts(now - KEEP_ACCOUNT, now);
     // What pointed at messages that are gone now: shared session cards, likes and flags.
     this.batched(

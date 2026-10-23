@@ -1,9 +1,9 @@
 // Tests for accounts reaching the coach (docs/superpowers/specs/2026-10-22-ai-coach-design.md, "Backend", "Accounts", and
-// "Testing", "Accounts"; rulings R1, R5, R6 and P47): the coach's forget() and exportFor(), which the room calls over
-// RPC, and the block forget() keeps for a LINE account blocked after a flagged clip, until it lapses; the room's
-// DELETE /me, which awaits forget() before deleting the account; GET /me/export, which adds the coach's part; and the
-// room's 24-month clean-up of accounts, which deletes only those the coach confirmed. They run inside the
-// Workers runtime (see vitest.config.mjs). Run from chat/:
+// "Testing", "Accounts"; rulings R1, R5, R6, P47 and P48): the coach's forget() and exportFor(), which the room calls
+// over RPC, and the block kept for a LINE account blocked after a flagged clip, by forget() or by a flag that comes
+// back after it, until the block lapses; the room's DELETE /me, which awaits forget() before deleting the account;
+// GET /me/export, which adds the coach's part; and the room's 24-month clean-up of accounts, which deletes only those
+// the coach confirmed. They run inside the Workers runtime (see vitest.config.mjs). Run from chat/:
 // npx vitest run --no-isolate --max-workers=1 test/coach-accounts.spec.mjs
 //
 // Each test has a coach of its own (newCoach), and a room of its own (newRoom) when it needs one, each with its clock
@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256b64u } from "../src/auth.js";
 import { AGREE_VER } from "../src/coach-guide.js";
 import { apiMessage, goodReply, jpegB64 } from "./coach-fixtures.mjs";
-import { DAY, HOUR, MIN, addUser, hex, insertUser, newCoach, newRoom } from "./helpers.mjs";
+import { DAY, HOUR, MIN, addMessages, addUser, hex, insertUser, newCoach, newRoom } from "./helpers.mjs";
 
 // 12:00 UTC (20:00 in Taiwan) on 3 June, years ahead. The room's daily clean-up runs at 19:00 UTC (T19).
 const T = Date.UTC(2030, 5, 3, 12, 0);
@@ -140,6 +140,10 @@ const getMeta = (c, key) => c.inCoach((coach) => coach.getMeta(key));
 const coachRequests = (c) => c.inCoach((coach) => coach.usage("req", 0).req);
 const route = (c, who, method, path, body = "") =>
   c.stub.route({ method, path, who, body: typeof body === "string" ? body : JSON.stringify(body) });
+// The surfer starts a review, and agrees to the coach's terms; and how a blocked account's start is refused.
+const start = (c, who) => route(c, who, "POST", "/coach/reviews", { lang: "en", ...ANSWERS, frames: listed() });
+const agree = (c, who) => route(c, who, "POST", "/coach/agree", { ver: AGREE_VER, adult: true });
+const BLOCKED = Object.freeze({ status: 403, json: { error: "blocked" } });
 
 // The bytes of key frames the table holds: meta frame_bytes must say the same.
 async function expectBytesRight(c) {
@@ -238,24 +242,26 @@ describe("Coach.forget(uid, sub_hash)", () => {
     expect(start).toEqual({ status: 429, json: { error: "no_reviews_left" } });
   });
 
-  it("during the review's AI call: the review goes at once, the answer is dropped, and the call still costs the month", async () => {
+  it("during the review's AI call: the review goes at once, the answer is dropped but its flag (ruling P48), and the call still costs the month", async () => {
     const c = await freshCoach();
     const a = surfer();
     await insertReview(c, a);
     await quotaRow(c, a, MONTH, 1);
     await c.inCoach(async (coach) => {
       ai.push(async () => {
-        // forget arrives while the call is out. Its answer flags the clip, which would block the account.
+        // forget arrives while the call is out. Its answer flags the clip.
         expect(await coach.forget(a.uid, a.sub_hash)).toEqual({ ok: true });
         expect(coach.sql.exec("SELECT count(*) AS n FROM reviews").one().n).toBe(0);
         return Response.json(apiMessage({ ...goodReply(), sexual_content: true }));
       });
       await coach.alarm();
     });
-    // Nothing came back: no review, no key frames, no block (people row), and nothing for Bryan's email.
+    // Nothing came back but the flag: no review, no key frames, no people row, and nothing for Bryan's email. The flag
+    // blocks the LINE account as forget() would have, had it come first: the block is kept, from when it came back.
     expect(await c.rows("SELECT id FROM reviews")).toEqual([]);
     expect(await c.rows("SELECT review_id FROM frames")).toEqual([]);
     expect(await c.rows("SELECT sub_hash FROM people")).toEqual([]);
+    expect(await c.rows("SELECT * FROM kept_blocks")).toEqual([{ sub_hash: a.sub_hash, kept_at: T }]);
     expect(await getMeta(c, "digest_due")).toBeNull();
     await expectBytesRight(c);
     // The call was paid as it came back: forget left its mark in calls_out, so nothing goes unpaid.
@@ -267,13 +273,9 @@ describe("Coach.forget(uid, sub_hash)", () => {
   });
 });
 
-// ---- A block kept for a LINE account (ruling P47) --------------------------------------------------------------------
+// ---- A block kept for a LINE account (rulings P47 and P48) ----------------------------------------------------------
 
-describe("a block forget() keeps (ruling P47)", () => {
-  const start = (c, who) => route(c, who, "POST", "/coach/reviews", { lang: "en", ...ANSWERS, frames: listed() });
-  const agree = (c, who) => route(c, who, "POST", "/coach/agree", { ver: AGREE_VER, adult: true });
-  const BLOCKED = Object.freeze({ status: 403, json: { error: "blocked" } });
-
+describe("a block kept for a LINE account (rulings P47 and P48)", () => {
   // A clip flagged an hour ago and held for Bryan, as the alarm leaves it: rejected, hold 1, its flags, no key frames,
   // its count kept, and the account blocked.
   async function flaggedAccount(c) {
@@ -308,6 +310,66 @@ describe("a block forget() keeps (ruling P47)", () => {
     expect(await c.stub.forget(again.uid, again.sub_hash)).toEqual({ ok: true });
     expect(await c.rows("SELECT * FROM kept_blocks")).toEqual([{ sub_hash: a.sub_hash, kept_at: T }]);
     expect(await c.rows("SELECT * FROM people")).toEqual([]);
+  });
+
+  it("a flag that comes back after forget(), the account remade and agreed meanwhile: the block is kept, not set on the remade account's row (ruling P48)", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    await insertReview(c, a);
+    await quotaRow(c, a, MONTH, 1);
+    const again = { ...a, uid: `u-${hex(6)}` };
+    await c.inCoach(async (coach) => {
+      ai.push(async () => {
+        // While the call is out, the account is deleted and made again, and the remade account agrees.
+        expect(await coach.forget(a.uid, a.sub_hash)).toEqual({ ok: true });
+        const body = JSON.stringify({ ver: AGREE_VER, adult: true });
+        expect(await coach.route({ method: "POST", path: "/coach/agree", who: again, body })).toEqual({ status: 200, json: { ok: true } });
+        return Response.json(apiMessage({ ...goodReply(), surfer_looks_under_18: true }));
+      });
+      await coach.alarm();
+    });
+    // The remade account's people row is its own, and isn't blocked: the block is kept for the LINE account, and
+    // lapses 90 days after the flag came back. The remade account is refused all the same.
+    expect(await c.rows("SELECT sub_hash, agreed_ver, blocked FROM people")).toEqual([{ sub_hash: a.sub_hash, agreed_ver: AGREE_VER, blocked: 0 }]);
+    expect(await c.rows("SELECT * FROM kept_blocks")).toEqual([{ sub_hash: a.sub_hash, kept_at: T }]);
+    expect(await start(c, again)).toEqual(BLOCKED);
+    expect(await c.rows("SELECT id FROM reviews")).toEqual([]);
+    expect(await getMeta(c, "digest_due")).toBeNull();
+  });
+
+  it("a flag that comes back after forget() while a lapsed block is kept still (the clean-up hasn't run): kept from now", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    await c.rows("INSERT INTO kept_blocks (sub_hash, kept_at) VALUES (?, ?)", a.sub_hash, T - 91 * DAY);
+    await insertReview(c, a);
+    await c.inCoach(async (coach) => {
+      ai.push(async () => {
+        expect(await coach.forget(a.uid, a.sub_hash)).toEqual({ ok: true });
+        return Response.json(apiMessage(null, { stop_reason: "refusal" }));
+      });
+      await coach.alarm();
+    });
+    expect(await c.rows("SELECT * FROM kept_blocks")).toEqual([{ sub_hash: a.sub_hash, kept_at: T }]);
+    const again = { ...a, uid: `u-${hex(6)}` };
+    await agree(c, again);
+    expect(await start(c, again)).toEqual(BLOCKED);
+  });
+
+  it("a flag that comes back after forget() while a block kept still holds: the block stays as it was", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    await insertReview(c, a);
+    // Blocked while this review is out, as a flag on a review redone during its call leaves it (ruling P28).
+    await c.rows("UPDATE people SET blocked = 1 WHERE sub_hash = ?", a.sub_hash);
+    await c.inCoach(async (coach) => {
+      ai.push(async () => {
+        expect(await coach.forget(a.uid, a.sub_hash)).toEqual({ ok: true });
+        c.clock.t = T + HOUR;
+        return Response.json(apiMessage({ ...goodReply(), sexual_content: true }));
+      });
+      await coach.alarm();
+    });
+    expect(await c.rows("SELECT * FROM kept_blocks")).toEqual([{ sub_hash: a.sub_hash, kept_at: T }]);
   });
 
   it("an account that isn't blocked: its people row goes entirely, no block is kept, and a remade account may start", async () => {
@@ -433,6 +495,27 @@ describe("DELETE /me reaches the coach", () => {
     expect(await c.rows("SELECT count(*) AS n FROM frames WHERE review_id = ?", id)).toEqual([{ n: 0 }]);
     expect(await c.rows("SELECT sub_hash FROM people")).toEqual([{ sub_hash: v.sub }]);
     expect(await c.rows("SELECT sub_hash, month, used FROM quota")).toEqual([{ sub_hash: u.sub, month: MONTH, used: 1 }]);
+  });
+
+  it("a blocked account deleted: the coach keeps its block (ruling P47), and the LINE account signed up again is refused", async () => {
+    const c = await freshCoach();
+    const r = await roomFor(c);
+    const u = await addUser(r);
+    await insertReview(c, whoOf(u), {
+      status: "rejected", hold: 1, flags: JSON.stringify(["sexual"]), handled_at: T - HOUR, frames: false,
+    });
+    await quotaRow(c, whoOf(u), MONTH, 1);
+    await c.rows("UPDATE people SET blocked = 1 WHERE sub_hash = ?", u.sub);
+
+    expect(await me(r, u, "DELETE")).toEqual({ status: 200, data: { ok: true } });
+
+    expect(await userIds(r)).toEqual([]);
+    expect(await c.rows("SELECT id FROM reviews")).toEqual([]);
+    expect(await c.rows("SELECT * FROM people")).toEqual([]);
+    expect(await c.rows("SELECT * FROM kept_blocks")).toEqual([{ sub_hash: u.sub, kept_at: T }]);
+    const again = { uid: crypto.randomUUID(), sub_hash: u.sub, role: "user" };
+    expect(await agree(c, again)).toEqual({ status: 200, json: { ok: true } });
+    expect(await start(c, again)).toEqual(BLOCKED);
   });
 
   it("when the coach's forget throws or doesn't confirm: 503 {error: coach}, and nothing is deleted", async () => {
@@ -576,6 +659,41 @@ describe("the room's 24-month clean-up reaches the coach (ruling R6)", () => {
     await retention(r);
     expect(await userIds(r)).toEqual([user.id]);
     expect(await r.rows("SELECT deleted_at FROM subs WHERE sub_hash = ?", user.sub)).toEqual([{ deleted_at: null }]);
+  });
+
+  it("keeps an account whose forget the coach doesn't confirm ({ok: false}), and logs nothing", async () => {
+    const r = await newRoom("accounts", T19);
+    const user = await addUser(r, { age: STALE });
+    await addLog(r, user.id);
+    const asked = [];
+    await fakeCoach(r, () => ({
+      async forget(uid, sub_hash) {
+        asked.push([uid, sub_hash]);
+        return { ok: false };
+      },
+    }));
+    await retention(r);
+    expect(asked).toEqual([[user.id, user.sub]]);
+    expect(await userIds(r)).toEqual([user.id]);
+    expect(await r.rows("SELECT uid FROM sessions")).toEqual([{ uid: user.id }]);
+    expect(await r.rows("SELECT deleted_at FROM subs WHERE sub_hash = ?", user.sub)).toEqual([{ deleted_at: null }]);
+  });
+
+  it("follows the messages it deleted before it waits on the coach: a text message gone no longer lights the CHAT dot", async () => {
+    const r = await newRoom("accounts", T19);
+    await addUser(r, { age: STALE });
+    const writer = await addUser(r);
+    const [old] = await addMessages(r, writer.id, 1, { ts: T19 - 31 * DAY });
+    let dot;
+    await fakeCoach(r, (room) => ({
+      async forget() {
+        dot = room.reportsFor("jinshan", T19).last_id;
+        return { ok: true };
+      },
+    }));
+    expect(await r.inRoom((room) => room.reportsFor("jinshan", T19).last_id)).toBe(old);
+    await retention(r);
+    expect(dot).toBe(0);
   });
 
   it("with 1,001 stale accounts whose forget throws, still ends: each is asked once and every one is kept", async () => {

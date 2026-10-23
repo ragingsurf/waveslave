@@ -469,7 +469,7 @@ describe("a call that went astray", () => {
     expect(await quota(c, b)).toEqual({ used: 1, sent: 1 });
   });
 
-  it("a flagged reply still blocks the account when its review was deleted or redone during the call", async () => {
+  it("a flagged reply still blocks when its review was deleted or redone during the call: a kept block, or the account", async () => {
     const c = await freshCoach();
     const a = surfer();
     const gone = await insertReview(c, a);
@@ -481,7 +481,10 @@ describe("a call that went astray", () => {
       await coach.alarm();
     });
     expect(await reviewRow(c, gone)).toBeUndefined();
-    expect(await blocked(c, a)).toBe(1);
+    // The review may have gone with its account (forget), and the people row may be a remade account's, so the block
+    // is kept for the LINE account (ruling P48), and lapses 90 days later, as forget()'s.
+    expect(await blocked(c, a)).toBe(0);
+    expect(await c.rows("SELECT * FROM kept_blocks")).toEqual([{ sub_hash: a.sub_hash, kept_at: T }]);
 
     const b = surfer();
     const redone = await insertReview(c, b);

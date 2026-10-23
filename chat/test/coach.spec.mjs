@@ -297,9 +297,11 @@ describe("route()", () => {
   it("answers 404 not_found for a path or method it doesn't serve", async () => {
     const c = await freshCoach();
     const asks = [
-      { method: "POST", path: "/coach/reviews/AAAAAAAAAAAAAAAAAAAAAA/report", who: WHO, body: "{}" },
-      { method: "GET", path: "/admin/coach/drafts", who: { ...WHO, role: "admin" }, body: "" },
-      { method: "POST", path: "/admin/coach/settings", who: { ...WHO, role: "admin" }, body: "{}" },
+      { method: "GET", path: "/coach/reviews/AAAAAAAAAAAAAAAAAAAAAA/report", who: WHO, body: "" },
+      { method: "POST", path: "/admin/coach/drafts", who: { ...WHO, role: "admin" }, body: "{}" },
+      { method: "DELETE", path: "/admin/coach/drafts/AAAAAAAAAAAAAAAAAAAAAA", who: { ...WHO, role: "admin" }, body: "" },
+      { method: "GET", path: "/admin/coach/settings", who: { ...WHO, role: "admin" }, body: "" },
+      { method: "GET", path: "/admin/coach/nothing", who: { ...WHO, role: "admin" }, body: "" },
       { method: "PUT", path: "/coach/me", who: WHO, body: "" },
       { method: "GET", path: "/nowhere", who: WHO, body: "" },
     ];

@@ -23,6 +23,10 @@
 //     postFrame, getFrame      POST and GET /coach/reviews/{id}/frames/{n}
 //     postSend                 POST /coach/reviews/{id}/send
 //     getReview, deleteReview  GET and DELETE /coach/reviews/{id}
+//     postReport               POST /coach/reviews/{id}/report: the surfer's "Something wrong?"
+//     getDrafts                GET /admin/coach/drafts: Bryan's Drafts list and his settings
+//     postDraft                POST /admin/coach/drafts/{id}: Bryan's actions on a review (ACTIONS)
+//     postSettings             POST /admin/coach/settings
 //   where()                    the second line of GET /admin/where: which Cloudflare data centre the coach lives in
 //   roomStub()                 the room's stub (stubs.js), which tests replace
 //   alarmBy(at)                makes sure the coach's one alarm goes off by `at`
@@ -40,7 +44,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { randomB64u, sha256b64u } from "./auth.js";
 import {
-  AGREE_VER, BOARDS, LANGS, LEVELS, MOVES, STANCES, autopilotOk, buildRequest, checkReply, readReply,
+  AGREE_VER, BOARDS, LANGS, LEVELS, MOVES, STANCES, TEXT_FIELDS, autopilotOk, buildRequest, checkReply, readReply,
 } from "./coach-guide.js";
 import {
   ATTEMPT_WAITS, CALLING_STALE, DAY, MAX_TRIES, MAX_WAITS, PROBE_EVERY, checkFrame, cleanupAfter, costUsd, creditMonth,
@@ -205,6 +209,8 @@ export const readConfig = (env) =>
 const refuse = (status, error, more = {}) => ({ status, json: { error, ...more } });
 const OK = Object.freeze({ status: 200, json: { ok: true } });
 const NOT_FOUND = refuse(404, "not_found");
+const INVALID = refuse(400, "invalid");
+const STATE = refuse(409, "state"); // an action the review's status doesn't allow
 
 // ---- Limits -------------------------------------------------------------------------------------------------------
 
@@ -300,6 +306,77 @@ const noteFor = (review) => (review.hold ? "not_surf" : review.surfer_note ?? nu
 const JSON_COLUMNS = Object.freeze(["answers", "draft", "english", "final", "flags", "warnings", "redo_note"]);
 const fromJson = (text) => (text === null ? null : JSON.parse(text));
 
+// ---- Bryan's Drafts -----------------------------------------------------------------------------------------------
+
+const ADMIN_NOTE_MAX = 200; // characters in Bryan's note on an action, and in a surfer's report line
+const EDIT_MAX = 1_000; // characters in one field Bryan edits, after trimming (Review Focus 4)
+const REDOS_MAX = 2; // Redos a review may have, as each costs a new AI call (spec "Defaults")
+const HANDLED_MAX = 50; // the handled reviews the Drafts list shows after those waiting
+const UNCHANGED_OF = 20; // the approved reviews "Approved without changes: 14 of the last 20" looks back over
+
+// Bryan's actions on a review (spec "What Bryan sees"), POST /admin/coach/drafts/{id}: [whether it needs a note, the
+// method that does it]. Every method takes the review's row and the action's body (readAction).
+const ACTIONS = Object.freeze({
+  approve: [false, "approve"],
+  redo: [true, "redo"],
+  reject: [true, "reject"],
+  giveback: [false, "giveBackHeld"],
+  clear: [false, "clearBlock"],
+  ban: [false, "ban"],
+  withdraw: [true, "withdraw"],
+});
+
+// An action's body, checked: {action, note, edits}, or null when it is invalid: an action not in ACTIONS, a note that
+// isn't text or runs over 200 characters, or is missing where the action needs one, or edits that aren't good
+// (readEdits) or come with any action but approve. note is "" when there is none; edits is {} when there are none.
+function readAction(body) {
+  if (body === null || typeof body.action !== "string" || !Object.hasOwn(ACTIONS, body.action)) return null;
+  const [needsNote] = ACTIONS[body.action];
+  const note = ownLine(body.note, ADMIN_NOTE_MAX);
+  if (note === null || (needsNote && note === "")) return null;
+  if (body.edits === undefined || body.edits === null) return { action: body.action, note, edits: {} };
+  const edits = body.action === "approve" ? readEdits(body.edits) : null;
+  return edits && { action: body.action, note, edits };
+}
+
+// Bryan's edits to a draft, checked (Review Focus 4): an object of the surfer's text fields he changed, each by its
+// path ("went_well.title", "progress": TEXT_FIELDS), to text of 1 to 1,000 characters after trimming, counted as
+// characters, so nine full 中文 fields fit. Returns them trimmed, or null when any isn't so. They are only ever stored
+// as text: markup in them stays the characters it is.
+function readEdits(edits) {
+  if (!isObject(edits)) return null;
+  const out = {};
+  for (const [path, value] of Object.entries(edits)) {
+    if (!TEXT_FIELDS.includes(path) || typeof value !== "string") return null;
+    const text = value.trim();
+    const length = [...text].length;
+    if (length < 1 || length > EDIT_MAX) return null;
+    out[path] = text;
+  }
+  return out;
+}
+
+// A review's text (a reply's shape, as JSON) with Bryan's edits put in at their paths, as JSON. The same text when they
+// change nothing, so an approval is "without changes" exactly when its final text is its draft's.
+function withEdits(text, edits) {
+  const review = JSON.parse(text);
+  for (const [path, value] of Object.entries(edits)) {
+    const [part, field] = path.split(".");
+    if (field === undefined) review[part] = value;
+    else review[part] = { ...(isObject(review[part]) ? review[part] : {}), [field]: value };
+  }
+  const edited = JSON.stringify(review);
+  return edited === JSON.stringify(JSON.parse(text)) ? text : edited;
+}
+
+// The settings Bryan may change (POST /admin/coach/settings), each true or false.
+const SETTING_KEYS = Object.freeze(["autopilot", "paused", "start_again", "test_email"]);
+
+// When a review was handled, for the Drafts list's order: when it was published, else when it was sent or started.
+const handledAt = (review) => review.published ?? review.sent ?? review.created;
+// Whether a review was flagged (ruling R16): a refusal, sexual content or a surfer who looks under 18.
+const isFlagged = (review) => fromJson(review.flags).length > 0;
+
 // ---- The AI call --------------------------------------------------------------------------------------------------
 
 // The Messages API call (spec "The AI request"): the API version it is written for, room for the model's thinking as
@@ -325,8 +402,9 @@ function fromBase64(text) {
 
 // ---- Routes -------------------------------------------------------------------------------------------------------
 
-// Every route the coach serves so far: [method, path, the method that answers it]. The path's groups (a review's id, a
-// key frame's number) come after who and the body. The Worker has already matched the same shapes (index.js).
+// Every route the coach serves: [method, path, the method that answers it, and "admin" for Bryan's own]. The path's
+// groups (a review's id, a key frame's number) come after who and the body. The Worker has already matched the same
+// shapes (index.js).
 const ID = "([A-Za-z0-9_-]{22})";
 const N = "([1-9]|1[0-2])";
 const ROUTES = [
@@ -338,7 +416,11 @@ const ROUTES = [
   ["GET", `/coach/reviews/${ID}/frames/${N}`, "getFrame"],
   ["POST", `/coach/reviews/${ID}/frames/${N}`, "postFrame"],
   ["POST", `/coach/reviews/${ID}/send`, "postSend"],
-].map(([method, path, run]) => ({ method, path: new RegExp(`^${path}$`), run }));
+  ["POST", `/coach/reviews/${ID}/report`, "postReport"],
+  ["GET", "/admin/coach/drafts", "getDrafts", "admin"],
+  ["POST", `/admin/coach/drafts/${ID}`, "postDraft", "admin"],
+  ["POST", "/admin/coach/settings", "postSettings", "admin"],
+].map(([method, path, run, admin]) => ({ method, path: new RegExp(`^${path}$`), run, admin: admin === "admin" }));
 
 export class Coach extends DurableObject {
   constructor(ctx, env) {
@@ -591,13 +673,16 @@ export class Coach extends DurableObject {
 
   // Every coach route, from the Worker, as route({method, path, who, body}): who = {uid, sub_hash, role} is the
   // signed-in caller as the room's whoIs() gave it (never anything the surfer sent), and body is the request's text.
-  // A path it doesn't serve is 404 not_found (ROUTES).
+  // A path it doesn't serve is 404 not_found (ROUTES). Bryan's own paths are 403 admin to anyone else: the Worker
+  // checks that too, and the coach checks again.
   async route({ method, path, who, body } = {}) {
     this.usage("req");
     if (typeof who?.uid !== "string" || typeof who?.sub_hash !== "string") return refuse(401, "auth");
     for (const route of ROUTES) {
       const match = route.method === method ? route.path.exec(path) : null;
-      if (match) return this[route.run](who, body, ...match.slice(1));
+      if (!match) continue;
+      if (route.admin && who.role !== "admin") return refuse(403, "admin");
+      return this[route.run](who, body, ...match.slice(1));
     }
     return NOT_FOUND;
   }
@@ -809,6 +894,241 @@ export class Coach extends DurableObject {
   deleteReview(who, body, id) {
     if (!this.reviewFor(who, id)) return NOT_FOUND;
     this.ctx.storage.transactionSync(() => this.dropReview(id));
+    return OK;
+  }
+
+  // POST /coach/reviews/{id}/report {line}, for its owner ("Something wrong?", spec "The review"): {ok: true}. A
+  // published review goes back to Bryan's Drafts, drafted again and marked Reported, with the surfer's line of up to
+  // 200 characters ("" when they gave none). It keeps its publish time, which tells Bryan's Withdraw it was published.
+  // Refused: not_found (not the caller's own), state (not published), invalid.
+  postReport(who, body, id) {
+    const review = this.reviewFor(who, id);
+    if (!review) return NOT_FOUND;
+    if (review.status !== "published") return STATE;
+    const ask = parseObject(body);
+    const line = ask === null ? null : ownLine(ask.line, ADMIN_NOTE_MAX);
+    if (line === null) return INVALID;
+    this.all("UPDATE reviews SET status = 'drafted', report = ? WHERE id = ?", line, id);
+    return OK;
+  }
+
+  // ---- Bryan's Drafts (spec "What Bryan sees") ---------------------------------------------------------------------
+  //
+  // Only Bryan's account reaches these: route() answers anyone else 403 admin. The review is his to act on by its id,
+  // whoever's it is.
+
+  // GET /admin/coach/drafts: {waiting, handled, settings}. waiting is every review Bryan has to act on, the one sent
+  // first first: the drafts, those reported among them, and the clips held as not surf or flagged (ruling R16). handled
+  // is the last 50 handled, published, rejected or failed, the newest first. Each is as draftView() shows it.
+  getDrafts() {
+    const now = this.now();
+    const waiting = this.all(
+      "SELECT * FROM reviews WHERE status = 'drafted' OR (status = 'rejected' AND hold = 1) ORDER BY sent, id",
+    );
+    // The 50 started last (by rowid, read backwards with no index, so the query reads about as many rows as it shows,
+    // not every review kept for 24 months), then the newest handled first.
+    const handled = this.all(
+      `SELECT * FROM reviews NOT INDEXED WHERE status IN ('published', 'rejected', 'failed') AND hold = 0
+       ORDER BY rowid DESC LIMIT ?`,
+      HANDLED_MAX,
+    ).sort((a, b) => handledAt(b) - handledAt(a));
+    return {
+      status: 200,
+      json: {
+        waiting: waiting.map((review) => this.draftView(review, now)),
+        handled: handled.map((review) => this.draftView(review, now)),
+        settings: this.settingsView(now),
+      },
+    };
+  }
+
+  // A review as the Drafts list shows it: adminView() (every column, but never a key frame's text), with the account's
+  // saved profile {level, board, stance, blocked}, its key frames' times in ms by number, how long the surfer has waited
+  // since sending it (waited_ms: "waiting 5 h"), and whether the surfer reported it.
+  draftView(review, now) {
+    const view = this.adminView(review);
+    const person = this.person(review.sub_hash);
+    view.profile = person && {
+      level: person.level, board: person.board, stance: person.stance, blocked: person.blocked === 1,
+    };
+    view.times = Object.fromEntries(view.frames.map((f) => [f.n, f.ms]));
+    view.waited_ms = now - (review.sent ?? review.created);
+    view.reported = review.report !== null;
+    return view;
+  }
+
+  // Bryan's settings as the Drafts list shows them (spec "Settings"): autopilot, paused and stopped (ruling R10); the
+  // credit month's spend, its stop line and its answers (ruling P36: "US$12.40 of US$78, 96 reviews"); and unchanged:
+  // of the last 20 reviews Bryan approved that are still published, how many he approved without an edit and with no
+  // Redo, which tells him when autopilot is ready.
+  settingsView(now) {
+    const spend = this.spendAt(now);
+    // The last approved by rowid, read as getDrafts() reads handled.
+    const approved = this.all(
+      `SELECT draft, final, redos FROM reviews NOT INDEXED WHERE status = 'published' AND checked = 1
+       ORDER BY rowid DESC LIMIT ?`,
+      UNCHANGED_OF,
+    );
+    return {
+      autopilot: Boolean(this.getMeta("autopilot")),
+      paused: Boolean(this.getMeta("paused")),
+      stopped: Boolean(this.getMeta("stopped")),
+      spend: { usd: spend.usd, stop: this.moneyLines().stop, reviews: spend.reviews },
+      unchanged: { n: approved.filter((r) => r.redos === 0 && r.final === r.draft).length, of: approved.length },
+    };
+  }
+
+  // POST /admin/coach/drafts/{id} {action, note, edits}: one of Bryan's actions on a review (ACTIONS), {ok: true}.
+  // Refused: invalid (readAction), not_found, then by the action: state when the review's status doesn't allow it.
+  // Every action but Ban checks and writes with no await between.
+  postDraft(who, body, id) {
+    const ask = readAction(parseObject(body));
+    if (!ask) return INVALID;
+    const review = this.one("SELECT * FROM reviews WHERE id = ?", id);
+    if (!review) return NOT_FOUND;
+    return this[ACTIONS[ask.action][1]](review, ask, this.now());
+  }
+
+  // Approve, a draft or a published review (to check or edit one autopilot published): publishes its text with Bryan's
+  // edits put in (withEdits), on the text published before when there is one, else on the draft, and marks it checked
+  // (ruling R20). One published before keeps its publish time. An approval that changed the text keeps the draft,
+  // Bryan's version and his note as an example (spec "Your fixes teach the coach").
+  approve(review, { note, edits }, now) {
+    if (review.status !== "drafted" && review.status !== "published") return STATE;
+    const was = review.final ?? review.draft;
+    if (was === null) return STATE;
+    const final = withEdits(was, edits);
+    this.ctx.storage.transactionSync(() => {
+      this.all(
+        `UPDATE reviews SET status = 'published', published = coalesce(published, ?), final = ?, checked = 1,
+         next_try = NULL WHERE id = ?`,
+        now, final, review.id,
+      );
+      if (final !== was) this.addExample(review, final, note, now);
+    });
+    return OK;
+  }
+
+  // Redo, a draft, with Bryan's note for the coach (spec "Backend", step 6): back in the queue, due now, with one more
+  // redo and no attempts used. The old draft stays: the alarm sends it with his notes, and a Redo that fails goes back
+  // to it. The note joins redo_note and is kept as an example. Text published before a report goes, so the next
+  // approval starts from the new draft. At most 2 a review (redo_limit), and refused while stopFor() stops new reviews:
+  // money at the stop line, or a break.
+  async redo(review, { note }, now) {
+    if (review.status !== "drafted") return STATE;
+    if (review.redos >= REDOS_MAX) return refuse(409, "redo_limit");
+    const stop = this.stopFor(now);
+    if (stop) return stopped(stop);
+    const notes = JSON.stringify([...fromJson(review.redo_note), note]);
+    this.ctx.storage.transactionSync(() => {
+      this.all(
+        `UPDATE reviews SET status = 'queued', next_try = ?, redos = redos + 1, attempts = 0, waits = 0, redo_note = ?,
+         final = NULL WHERE id = ?`,
+        now, notes, review.id,
+      );
+      this.addExample(review, null, note, now);
+    });
+    await this.alarmBy(now);
+    return OK;
+  }
+
+  // One of Bryan's examples (spec "Your fixes teach the coach"), text only: the review's move and the surfer's level,
+  // the coach's draft, Bryan's version (null for a Redo) and his note (null when he gave none).
+  addExample(review, bryan, note, now) {
+    this.all(
+      "INSERT INTO examples (move, level, draft, bryan, note, review_id, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      review.move, JSON.parse(review.answers).level ?? null, review.draft, bryan, note || null, review.id, now,
+    );
+  }
+
+  // Reject, a draft, with a short note to the surfer: never published, and given back.
+  reject(review, { note }) {
+    if (review.status !== "drafted") return STATE;
+    return this.turnDown(review, note);
+  }
+
+  // Withdraw, with a note (ruling R17): a published review, or one the surfer reported (drafted again, with its report
+  // and publish time), is taken down and given back.
+  withdraw(review, { note }) {
+    const reported = review.status === "drafted" && review.report !== null && review.published !== null;
+    if (review.status !== "published" && !reported) return STATE;
+    return this.turnDown(review, note);
+  }
+
+  // A review Bryan turned down: rejected, his note for the surfer, and its count given back (once: giveBack).
+  turnDown(review, note) {
+    this.ctx.storage.transactionSync(() => {
+      this.all("UPDATE reviews SET status = 'rejected', surfer_note = ?, next_try = NULL WHERE id = ?", note, review.id);
+      this.giveBack(review.id);
+    });
+    return OK;
+  }
+
+  // Give back, a clip held as not surf (ruling R16) that Bryan thinks was an honest mistake: the hold ends, its key
+  // frames go and its count goes back. A flagged clip is Clear's or Ban's.
+  giveBackHeld(review) {
+    if (review.status !== "rejected" || review.hold !== 1 || isFlagged(review)) return STATE;
+    this.ctx.storage.transactionSync(() => {
+      this.all("UPDATE reviews SET hold = 0 WHERE id = ?", review.id);
+      this.dropFrames(review.id);
+      this.giveBack(review.id);
+    });
+    return OK;
+  }
+
+  // Clear, a flagged clip (ruling R16): the account may start reviews again, and every flagged clip of it held for
+  // Bryan is let go. The count stays used; the key frames went when it was flagged.
+  clearBlock(review) {
+    if (review.status !== "rejected" || review.hold !== 1 || !isFlagged(review)) return STATE;
+    this.ctx.storage.transactionSync(() => {
+      this.all("UPDATE people SET blocked = 0 WHERE sub_hash = ?", review.sub_hash);
+      this.all(
+        "UPDATE reviews SET hold = 0 WHERE sub_hash = ? AND status = 'rejected' AND hold = 1 AND flags != '[]'",
+        review.sub_hash,
+      );
+    });
+    return OK;
+  }
+
+  // Ban, from any review: first the room bans its LINE account, the chat's own ban (banAccount). Then every review of
+  // that account still open (uploading, queued, calling or drafted) or held is rejected with its key frames deleted,
+  // and so is this one if it was published. No count goes back. When the room fails, nothing changes here (503 break),
+  // so there is never half a ban; the room refuses an admin's account (409 state).
+  async ban(review) {
+    const { sub_hash } = review;
+    let banned;
+    try {
+      banned = await this.roomStub().banAccount(sub_hash);
+    } catch (err) {
+      console.error("coach: the room's ban failed:", err?.name ?? "error");
+      return refuse(503, "break");
+    }
+    if (banned?.error === "admin") return STATE;
+    if (banned?.ok !== true) return refuse(503, "break");
+    // The account's reviews are read again after that await, by the write itself: they may have moved on meanwhile.
+    this.ctx.storage.transactionSync(() => {
+      const gone = this.all(
+        `UPDATE reviews SET status = 'rejected', hold = 0, next_try = NULL
+         WHERE sub_hash = ? AND (status IN ('uploading', 'queued', 'calling', 'drafted') OR hold = 1
+           OR (id = ? AND status = 'published'))
+         RETURNING id`,
+        sub_hash, review.id,
+      );
+      for (const { id } of gone) this.dropFrames(id);
+    });
+    return OK;
+  }
+
+  // POST /admin/coach/settings {autopilot, paused, start_again, test_email}, each true or false and each left out
+  // when unchanged: {ok: true}. Autopilot on or off; Pause on or off (setPaused); Start again (startAgain, ruling R10).
+  // test_email is taken, and the coach's email will send it and answer with `email`. Anything else is invalid.
+  async postSettings(who, body) {
+    const ask = parseObject(body);
+    const good = ([key, value]) => SETTING_KEYS.includes(key) && typeof value === "boolean";
+    if (ask === null || !Object.entries(ask).every(good)) return INVALID;
+    if (ask.autopilot !== undefined) this.setMeta("autopilot", ask.autopilot);
+    if (ask.paused !== undefined) await this.setPaused(ask.paused);
+    if (ask.start_again) await this.startAgain();
     return OK;
   }
 

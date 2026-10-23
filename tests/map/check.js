@@ -338,6 +338,17 @@ const CHECKS = {
         if (out.length) throw new Error(`on ${name}'s first open ${out.join(", ")} sits under a button`);
       }
   },
+  // A saved view near the home view that left the south of Taiwan under the time bar (Nanwan and Jialeshui on a laptop, Bryan, Oct 23)
+  // opens slid up, zoomed out just enough, so each Taiwan dot sits between the top buttons and the time bar.
+  async savedViewClearsTimeBar(open) {
+    for (const size of [{ width: 1600, height: 960 }, { width: 1280, height: 720 }, null]) {
+      const page = await open({ spot: "donghe", world: false, size, saved: { key: "waveslave-mapview", view: { cx: 121.2, cy: 23.15, k: 1 } } }), at = size ? `${size.width}x${size.height}` : "the phone";
+      const out = await page.evaluate(() => { const rect = e => e.getBoundingClientRect(), fx = rect(document.getElementById("wsFx"));
+        const top = Math.max(...[...document.querySelectorAll("#wsLayers button")].map(b => rect(b).bottom)), bot = Math.min(...["wsPlay", "wsTime", "wsTl"].map(i => rect(document.getElementById(i)).top));
+        return countrySpots("tw").filter(id => { const s = ALL.spots[id], [, y] = window.__ws.px(MAPM.E(s.lon), s.lat); return fx.top + y < top || fx.top + y > bot; }); });
+      if (out.length) throw new Error(`on ${at} ${out.join(", ")} sits under the top buttons or the time bar`);
+    }
+  },
   // Pacific NW: with nothing saved, Cox Bay opens on its old box; California then opens on its home view with the Pacific NW view kept
   // under its own key, and the map's own Pacific NW button brings it back to the Pacific NW home view.
   async pacificNorthwest(open) {

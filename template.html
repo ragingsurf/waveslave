@@ -466,7 +466,7 @@ html{overscroll-behavior-y:none}
 .wsmap #wsBase{transform-origin:0 0}
 /* Android phones blur what's behind a see-through panel afresh on every frame the streaks move, which slows the whole map (Oct 22): there the
    panels over the map are solid enough to read without the blur. */
-html.android .wsmap.fs .wsbar button,html.android .wsmap.fs .tl{-webkit-backdrop-filter:none;backdrop-filter:none;background-color:rgba(21,13,51,.88)}
+html.android .wsmap.fs .tl{-webkit-backdrop-filter:none;backdrop-filter:none;background-color:rgba(12,7,32,.92)}
 html.android .wsmap.fs .sheet{-webkit-backdrop-filter:none;backdrop-filter:none;background:rgba(14,8,36,.9)}
 html.android .wsmap.fs .sh-scroll th{-webkit-backdrop-filter:none;backdrop-filter:none;background:rgba(21,13,51,.95)}
 .wsmap .zoom{position:absolute;top:8px;right:8px;display:grid;gap:6px}
@@ -519,12 +519,14 @@ html.android .wsmap.fs .sh-scroll th{-webkit-backdrop-filter:none;backdrop-filte
 .wsmap.fs .sh-scroll{background:transparent}
 .wsmap.fs .sh-scroll th{background:rgba(21,13,51,.55);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
 .wsmap.fs:has(.sheet:not([hidden])) .time,.wsmap.fs:has(.sheet:not([hidden])) .tl{display:none}
-/* The top buttons have no strip behind them: each sits on the map on its own frosted glass (as dark as the time bar's, so white words read even
-   over a pressure line), the layers on the left and Pressure on the right. A finger between the buttons drags the map. */
+/* The top buttons have no strip behind them: each sits on the map as its own near-black pill with a white edge and a shadow, so it reads over
+   any map colour (Bryan, Oct 23), the layers on the left and Pressure on the right; a little bigger on a laptop. A finger between the buttons drags the map. */
 .wsmap.fs .wsbar{position:absolute;z-index:5;top:calc(10px + env(safe-area-inset-top));left:calc(10px + env(safe-area-inset-left));right:calc(10px + env(safe-area-inset-right));margin:0;justify-content:flex-end;pointer-events:none}
-.wsmap.fs .wsbar button{flex:none;padding:6px 8px;pointer-events:auto;border-color:rgba(207,196,255,.4);background:rgba(21,13,51,.6);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);color:#fff;text-shadow:0 1px 2px #000}
-.wsmap.fs .wsbar button[data-o][aria-pressed="true"]{background:rgba(59,15,79,.7)}
-.wsmap.fs .wsbar .tog[aria-pressed="true"]{background:rgba(42,32,80,.7)}
+.wsmap.fs .wsbar button{flex:none;padding:6px 8px;pointer-events:auto;border:1.5px solid rgba(255,255,255,.55);background:rgba(12,7,32,.92);box-shadow:0 2px 10px rgba(0,0,0,.65);color:#fff;text-shadow:0 1px 2px #000}
+.wsmap.fs .wsbar button[data-o][aria-pressed="true"]{background:#3b0f4f}
+.wsmap.fs .wsbar .tog[aria-pressed="true"]{background:#1a1238}
+.wsmap.fs .zoom button{background:rgba(12,7,32,.95);box-shadow:0 2px 10px rgba(0,0,0,.65)}
+@media (min-width:900px) and (hover:hover){.wsmap.fs .wsbar button{font-size:14px;padding:8px 13px}.wsmap.fs .zoom button{width:40px;height:40px;font-size:20px}}
 /* The countries stand down the left side as their outlines, a column to match the map tools down the right, from under the top buttons to above
    the time bar (a second column if they ever run out of room). The map's own country glows amber like the picked one in the switch above the spot
    picker; a country with no outline yet shows its name. A finger between them drags the map. */
@@ -557,7 +559,7 @@ html.android .wsmap.fs .sh-scroll th{-webkit-backdrop-filter:none;backdrop-filte
 .wsmap.fs #wsFs{margin-top:10px;border-color:#ffb347;background:#0a0f12;color:#ffb347;font-size:20px;text-shadow:0 0 6px rgba(255,140,0,.8);box-shadow:0 0 8px rgba(255,140,0,.4)}
 .wsmap.fs .zoom{top:calc(var(--barb,calc(40px + env(safe-area-inset-top))) + 16px);right:calc(8px + env(safe-area-inset-right))}
 .wsmap.fs .time{position:absolute;z-index:5;margin:0;left:calc(10px + env(safe-area-inset-left));right:calc(10px + env(safe-area-inset-right));bottom:calc(72px + env(safe-area-inset-bottom))}
-.wsmap.fs .tl{position:absolute;z-index:5;margin:0;left:calc(10px + env(safe-area-inset-left));right:calc(10px + env(safe-area-inset-right));bottom:calc(20px + env(safe-area-inset-bottom));background:rgba(21,13,51,.6);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+.wsmap.fs .tl{position:absolute;z-index:5;margin:0;left:calc(10px + env(safe-area-inset-left));right:calc(10px + env(safe-area-inset-right));bottom:calc(20px + env(safe-area-inset-bottom));background:rgba(12,7,32,.88);box-shadow:0 -2px 14px rgba(0,0,0,.5);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
 @media (orientation:landscape) and (max-height:540px){
   .wsmap.fs .time{right:auto;bottom:calc(12px + env(safe-area-inset-bottom))}
   .wsmap.fs .tl{height:40px;left:calc(176px + env(safe-area-inset-left));bottom:calc(12px + env(safe-area-inset-bottom))}
@@ -1321,7 +1323,7 @@ const WS = (() => {
     // Vietnam, Papua New Guinea, Vanuatu and Baja, which never had one) its home view.
     // A view another country left under the same key (Taiwan's and Japan's) doesn't open here, nor the old map: the home view does.
     if (z === 1) { const LAST = lastView(), mine = LAST && (!LAST.c || LAST.c === MC), k = mine && LAST.k > 0 ? LAST.k : 0, OLD = !LAST && MAPM.OLDBOX[MC];
-      if (k) { z = k*homeZ(HOME); cx = LAST.cx; cy = LAST.cy; } else if (!OLD) { z = z0; cx = HV.cx; cy = HV.cy; } else { z = MC === "au" ? Math.max(MAPM.cover(OLD, W, H), z0) : MAPM.cover(OLD, W, H); [cx, cy] = MAPM.clampTo(OLD, W, H, z, HOME.cx, HOME.cy); offButtons(OLD); } }
+      if (k) { z = k*homeZ(HOME); cx = LAST.cx; cy = LAST.cy; offBars(); } else if (!OLD) { z = z0; cx = HV.cx; cy = HV.cy; } else { z = MC === "au" ? Math.max(MAPM.cover(OLD, W, H), z0) : MAPM.cover(OLD, W, H); [cx, cy] = MAPM.clampTo(OLD, W, H, z, HOME.cx, HOME.cy); offButtons(OLD); } }
     else if (was) z = was*z0; clampView();
     if (parts.length) { const n = Math.min(4000, Math.round(W*H/260)); while (parts.length < n) { const p = {}; spawn(p); parts.push(p); } parts.length = n; } } // same streak density at any size, capped so big full screens stay smooth
   // The view stays inside the Pacific box, between the box filling the screen and ten times the country's home zoom.
@@ -1427,6 +1429,14 @@ const WS = (() => {
     if (pl && pr || !pl && !pr) return;
     const dx = pr ? Math.min(pr, Math.max(0, W-x1)) : -Math.min(pl, Math.max(0, x0));
     [cx, cy] = MAPM.clampTo(B, W, H, z, cx - dx/z, cy); }
+  // The saved view slid up or down until each of the country's dots sits ROOM or more inside the clear map between the top buttons and the
+  // time bar, so a spot by the bottom edge (Nanwan, Jialeshui on a laptop) isn't left under the time bar. A view zoomed in too far for all
+  // of them to fit stays put, unless it is near the home view (a quarter further in or less), which zooms out just enough (Bryan, Oct 23).
+  function offBars() { const A = clearArea(), lo = A.t + ROOM, hi = A.b - ROOM; let Y = my(cy), y0 = Infinity, y1 = -Infinity;
+    for (const s of SP) { if (spotCountry(s.id) !== MC || PARTS[MC] && (s.lon < PARTS[MC].at) !== (HOME.cx < PARTS[MC].at)) continue; const y = H/2 - (my(s.lat)-Y)*z; y0 = Math.min(y0, y-6); y1 = Math.max(y1, y+6); }
+    if (!(y1 > y0) || hi <= lo) return;
+    if (y1 - y0 > hi - lo) { if (z > z0*1.25) return; const f = (hi - lo - 12)/(y1 - y0 - 12); y0 = H/2 + (y0 + 6 - H/2)*f - 6; y1 = H/2 + (y1 - 6 - H/2)*f + 6; z *= f; }
+    const dy = y1 > hi ? hi - y1 : y0 < lo ? lo - y0 : 0; if (dy) cy = iy(Y + dy/z); }
   // The home view worked out again whenever the map takes its size, another country (or the other part of one) or language is picked
   // or the tags' font arrives: a map sitting on the old home view moves to the new one.
   const refit = () => { const at = z0 > 1 && z === z0 && cx === HV.cx && cy === HV.cy, f = fitHome(); HV = {cx: f.cx, cy: f.cy}; z0 = f.z; if (at) { cx = HV.cx; cy = HV.cy; z = z0; } };

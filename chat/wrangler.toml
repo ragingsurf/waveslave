@@ -28,6 +28,10 @@ new_sqlite_classes = ["Room"]
 tag = "v2"
 new_sqlite_classes = ["Coach"]
 
+# The Workers Logs the go-live CPU check reads: free up to 200,000 events a day, kept 3 days, in WaveSlave's account.
+[observability]
+enabled = true
+
 # The five secrets (LINE_CHANNEL_ID, LINE_CHANNEL_SECRET, SESSION_SECRET, SUB_PEPPER, ADMIN_CODE), and the coach's two
 # (ANTHROPIC_API_KEY, RESEND_API_KEY), are never listed here. The deploy workflow sets them; `wrangler dev` reads them
 # from .dev.vars, which is not committed, and the Vitest tests use stand-in values from vitest.config.mjs.

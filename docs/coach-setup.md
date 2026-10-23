@@ -5,16 +5,18 @@ minutes, plus the checks at the end. It costs nothing beyond your Claude Max pla
 credit, with no card anywhere, and the email service is free.
 
 The coach lives in the same Cloudflare Worker as the chat, so it uses the chat's LINE sign-in and the chat's **Deploy chat**
-workflow. Until the two keys below are in, the coach just says it's taking a break, and the chat carries on as normal. The
-**Coach** tab shows only in developer mode (the PIN on the W) until you say "go live", so nothing here changes waveslave.tw
-for visitors. You can stop at any point and carry on later.
+workflow. Until the AI key below is in, the coach just says it's taking a break; without the email key it works but sends
+no email. The chat carries on as normal either way. The **Coach** tab shows only in developer mode (the PIN on the W)
+until you say "go live", so nothing here changes waveslave.tw for visitors. You can stop at any point and carry on later.
 
 **What you need:** a computer with Chrome, your phone with LINE on it, your claude.ai account (the one with the Max plan), the
 WaveSlave Gmail (waveslave050@gmail.com), your GitHub account, and your developer PIN.
 
-**Keep the two keys private.** You'll make two keys below: the AI key and the email key. Keep them in your private note while
-you work (a password manager is best). They only ever go into GitHub's secret boxes. Never paste them into a chat with Claude,
-an email, a screenshot or the repo. Claude never needs them, and can't add secrets to GitHub for you.
+**Keep the two keys private.** You'll make two keys below: the AI key and the email key. Each one is shown only once, and it
+only ever goes into GitHub's secret box. So before you make each key, open GitHub's **New repository secret** page in another
+tab (step 8 shows how), and paste the key straight in there. If you must hold a key for a moment, keep it in a password
+manager, and delete it from there, and from anywhere else you pasted it, once it's in GitHub. Never paste the keys into a chat
+with Claude, an email, a screenshot or the repo. Claude never needs them, and can't add secrets to GitHub for you.
 
 ## How the money works
 
@@ -54,8 +56,10 @@ an email, a screenshot or the repo. Claude never needs them, and can't add secre
    4. Set the monthly spend limit to **US$80** and save. (You can also add an alert there, at US$60 say, to get an email from
       Anthropic.)
 
-   This limit counts calendar months (it starts again on the 1st), not your plan's month, so it only catches a mistake in
-   the coach's own counter. The coach stops itself at US$78 and US$80 first.
+   This limit counts calendar months (it starts again on the 1st), not your plan's month. It's there to catch a mistake in
+   the coach's own counter, and the coach's own limits (US$78 and US$80, counted from the 16th) usually stop it first. But a
+   calendar month takes in parts of two of the coach's months, so in a busy stretch the Console limit can be reached first.
+   The coach then rests until 08:00 Taiwan time on the 1st (see "If something goes wrong").
 
 4. **Make the AI key.**
    1. Go to **Settings** > **API keys** (or open https://platform.claude.com/settings/keys) and select **Create key**.
@@ -63,8 +67,8 @@ an email, a screenshot or the repo. Claude never needs them, and can't add secre
    3. For the expiration, pick **Never**. (A key that expires stops the coach, and you'd get a "Coach stopped" email.)
    4. Leave **Linked account** as yourself.
    5. Set the workspace to **WaveSlave Coach**. This matters: a key that isn't in that workspace makes every review fail.
-   6. Create it, and copy the key straight away (the Console shows it only once). It starts with `sk-ant-`. Paste it into
-      your note as `ANTHROPIC_API_KEY`.
+   6. Create it. The Console shows the key only once (it starts with `sk-ant-`): copy it and paste it straight into GitHub's
+      **New repository secret** page as `ANTHROPIC_API_KEY` (step 8).
 
 ## Part 2: The email key (Resend)
 
@@ -81,8 +85,8 @@ you signed up with. That's why the account must be the WaveSlave Gmail.
    1. In Resend, go to **API Keys** (or open https://resend.com/api-keys) and select **Create API Key**.
    2. Name it `WaveSlave coach`.
    3. For **Permission**, pick **Sending access**. Leave **Domain** as it is.
-   4. Create it, and copy the key straight away (Resend shows it only once). It starts with `re_`. Paste it into your note as
-      `RESEND_API_KEY`.
+   4. Create it. Resend shows the key only once (it starts with `re_`): copy it and paste it straight into GitHub's **New
+      repository secret** page as `RESEND_API_KEY` (step 8).
 
 7. **Keep the coach's emails out of spam.** Open Gmail as waveslave050@gmail.com on a computer.
    1. In the search box at the top, select **Show search options** (the sliders button at its right).
@@ -92,12 +96,13 @@ you signed up with. That's why the account must be the WaveSlave Gmail.
 
 ## Part 3: GitHub
 
-8. **Add the two secrets to GitHub,** the same way as the chat's seven. Open
-   https://github.com/ragingsurf/waveslave/settings/secrets/actions (or: the repository's **Settings**, then **Secrets and
-   variables** > **Actions** in the **Security** part of the menu). On the **Secrets** tab, for each of the two:
+8. **Add the two secrets to GitHub,** the same way as the chat's seven, each one while you make its key (steps 4 and 6). In
+   another tab, open https://github.com/ragingsurf/waveslave/settings/secrets/actions (or: the repository's **Settings**,
+   then **Secrets and variables** > **Actions** in the **Security** part of the menu). On the **Secrets** tab, for each of
+   the two:
    1. Select **New repository secret**.
    2. In **Name**, type the name exactly as below.
-   3. In **Secret**, paste the key from your note: only its characters, with no space or line break at the end.
+   3. In **Secret**, paste the key you just copied: only its characters, with no space or line break at the end.
    4. Select **Add secret**.
 
    | Name | From step |
@@ -129,7 +134,8 @@ the first deploy, before you try the Coach tab.
     3. Sign in with LINE using your own LINE account, with your LINE email and password or the QR code.
 
     You became the chat's admin when it went live, by sending `/admin`, a space and your `ADMIN_CODE` once in the chat. If
-    you never did, do it now (step 1 of "When the chat is live" in [the chat guide](chat-setup.md)).
+    you never did, do it now (step 1 of "When the chat is live" in
+    [the chat guide](https://github.com/ragingsurf/waveslave/blob/main/docs/chat-setup.md)).
 
     Once you're signed in, Chrome remembers it. Developer mode can be off for the next step.
 
@@ -172,9 +178,14 @@ Do these with developer mode on, and note how each one went. On your phone, the 
 developer mode is on, next to **Forecast** and **Map**. The **Drafts** list in it shows only when you're signed in with your
 own LINE account.
 
-Your account gets 2 reviews a month like everyone's, and can send 4 at most, counting ones given back. Rejecting a draft gives
-it back. So send a review only in the two checks that say **Send**. For the other clips, go as far as the "Is this you in each
-key frame?" screen and stop there without sending.
+Your account gets 2 reviews a month like everyone's, and can send 4 at most, counting ones given back. So send a review only
+in the two checks that say **Send**. For the other clips, go as far as the "Is this you in each key frame?" screen and stop
+there without sending.
+
+The coach also takes one review per account at a time. Until a sent review's draft has been handled, a new Send is refused
+with "Your last review is still with the coach." So once a draft is in **Drafts** and you've checked it, **Approve** it, or
+**Reject** it with a short note, before your next Send. Approving publishes it, and it stays counted. Rejecting gives the
+review back for that month, but it still counts toward the 4 sends.
 
 - [ ] **Where the coach lives.** Step 12 showed the coach in Japan, Korea or Taiwan (after the "taiwan-2" change, if it
       needed one).
@@ -183,20 +194,24 @@ key frame?" screen and stop there without sending.
       address, the Resend account isn't on waveslave050@gmail.com: go back to step 5.)
 - [ ] **Send: your clip test through the site's coach.** Send your trial clip as a review, for the same move as the example
       review you OK'd. The draft must name the same main fix as that example, with its key frames within half a second of it.
-- [ ] **CPU time,** right after that send. Open the Cloudflare dashboard: **Workers & Pages**, select **waveslave-chat**, then
-      **Observability**. On the **Invocations** tab (or **Events**), find:
+      Once you've checked the draft, **Approve** it or **Reject** it with a short note, so the next Send isn't refused.
+- [ ] **CPU time,** right after that send. In the Cloudflare dashboard, look in two places:
+      - **Workers & Pages**, select **waveslave-chat**, then **Observability**;
+      - the **Durable Objects** page, select the coach's namespace (**Coach**, in **waveslave-chat**), then **Observability**.
+
+      On the **Invocations** tab (or **Events**), find:
       - a key frame upload: a `POST` to an address ending in `/frames/` and a number;
       - an alarm run: the coach's alarm, a few seconds after you pressed **Send to your coach**.
 
-      Open each one and note its CPU time (shown as **CPU time**, `cpuTime` or `$workers.cpuTimeMs`, in milliseconds). On
-      Cloudflare's free plan, the Worker's own part of a request may use 10 ms, and the coach's part 30,000 ms (30 seconds).
-      Write the numbers down for Claude, rather than sending screenshots of the log. If **Observability** says the logs are
-      switched off, tell Claude: it's a one-line change in the chat's settings file.
+      Open each one and note its CPU time (shown as **CPU time**, `cpuTime` or `$workers.cpuTimeMs`, in milliseconds), and
+      whether its outcome says **Exceeded CPU** (`exceededCpu`). Send Claude those numbers and any "Exceeded CPU" outcome,
+      written down rather than as screenshots of the log; Claude checks them against Cloudflare's limits. If there are no
+      logs, tell Claude, and read the numbers on your next Send instead.
 - [ ] **Send: an iPhone clip from Safari.** Pick a surf clip of yourself filmed on an iPhone held upright (iPhones film in
       HEVC), and send it from Safari. It must be surfing: a clip the coach finds isn't surfing still counts. Sending at all
       shows its key frames came out at 784 × 784, because the coach refuses any other size. On the "Is this you in each key
       frame?" screen, and again in **Drafts**, check that every key frame shows you inside it, the right way up, not squashed
-      or cut off.
+      or cut off. Then **Approve** or **Reject** this draft too.
 - [ ] **Real phones, real clips (no sending).** On your iPhone in Safari, in the WaveSlave app on your home screen and inside
       LINE's own browser, try a 1080p clip, a 4K clip, a slow-motion clip and an HDR clip. For each, note:
       - how long the iPhone shows "Preparing…" before the site gets the clip;
@@ -231,12 +246,18 @@ key frame?" screen and stop there without sending.
   open **Drafts** > **Settings** and select **Start again**.
 - **The coach says "Coach is resting until 16 …":** the month's money is used. It comes back by itself on the 16th at 08:00
   Taiwan time. If the new credit lands late that day, the coach tries again every 6 hours by itself.
+- **The coach says "Coach is resting until 1 …":** the Console's US$80 limit for the calendar month was reached (step 3),
+  which can happen before the coach's own limits because a calendar month takes in parts of two of the coach's months. It
+  comes back by itself at 08:00 Taiwan time on the 1st.
 - **To switch the coach off at once:** **Pause** in **Drafts** > **Settings** stops new reviews and AI calls. To stop it from
-  outside the site, select **Disable** next to the key on the Console's **API keys** page (you can **Re-enable** it later).
-  Deleting the GitHub secret alone doesn't take the key off Cloudflare.
+  outside the site, select **Disable** next to the key on the Console's **API keys** page. You can **Re-enable** it later;
+  if the coach tried the key while it was disabled, it stopped itself, so then also select **Start again** in **Drafts** >
+  **Settings**. Deleting the GitHub secret alone doesn't take the key off Cloudflare.
 - **You think a key has leaked:** **Disable** it in the Console (or, for the email key, remove it on Resend's **API Keys**
   page), make a new one (step 4 or 6), replace the secret in GitHub (step 8: select the pencil button next to it) and run
-  **Deploy chat** again (step 9). Tell Claude which one, without pasting it.
+  **Deploy chat** again (step 9). Once the coach has tried a disabled AI key, it stops itself, and it stays stopped even
+  after the new key is deployed, until you open **Drafts** > **Settings** and select **Start again**. Tell Claude which key
+  it was, without pasting it.
 - **Spending more later:** buy credit in the Console (this needs a card, so from then on it can charge), raise the workspace's
   spend limit (step 3), and tell Claude the extra monthly amount. Claude changes one setting, and the coach's two limits go up
   by that amount.

@@ -1,9 +1,11 @@
 name: Deploy chat
 
-# Deploys the Taiwan chat backend in chat/ (one Worker and its Durable Object room) to Cloudflare's free plan.
-# The design is in docs/superpowers/specs/2026-10-21-taiwan-chat-design.md, and Bryan's setup steps are in docs/chat-setup.md.
-# Until every secret below is set, the first step stops the run with a notice instead of a failure, so the chat code can
-# merge before the Cloudflare and LINE setup is done.
+# Deploys the Taiwan chat backend in chat/ (one Worker and its two Durable Objects, the chat's room and the AI coach) to
+# Cloudflare's free plan. The designs are in docs/superpowers/specs/2026-10-21-taiwan-chat-design.md and
+# docs/superpowers/specs/2026-10-22-ai-coach-design.md, and Bryan's setup steps in docs/chat-setup.md and docs/coach-setup.md.
+# Until each of the chat's seven secrets is set, the first step stops the run with a notice instead of a failure, so the
+# chat code can merge before the Cloudflare and LINE setup is done. The coach's two secrets are optional: see "Write the
+# secrets file".
 on:
   push:
     branches: [main]
@@ -61,10 +63,11 @@ jobs:
         if: steps.guard.outputs.ready == 'true'
         working-directory: chat
         run: npm ci && npm test
-      # The five Worker secrets go up with the deploy itself, from a file only this job's user can read, kept outside the
-      # checkout. jq writes it, so no secret is ever pasted into a command line or quoted by hand. It also trims any
-      # space or line break at either end that a paste brought along: one on ADMIN_CODE would make every claim fail,
-      # and one on LINE_CHANNEL_ID every sign-in. (chat/test/deploy.test.mjs runs this step and the check above.)
+      # The Worker secrets (the chat's five, and the coach's two when they are set) go up with the deploy itself, from a
+      # file only this job's user can read, kept outside the checkout. jq writes it, so no secret is ever pasted into a
+      # command line or quoted by hand. It also trims any space or line break at either end that a paste brought along:
+      # one on ADMIN_CODE would make every claim fail, and one on LINE_CHANNEL_ID every sign-in. (chat/test/deploy.test.mjs
+      # runs this step and the check above.)
       # The AI coach's two secrets, ANTHROPIC_API_KEY and RESEND_API_KEY, are optional (AI coach spec, "Deploy"): each
       # goes in only when it holds something once trimmed, since GitHub gives a secret that isn't set as an empty
       # string. The check above doesn't ask for them, so chat deploys never wait on the coach; without the AI key the

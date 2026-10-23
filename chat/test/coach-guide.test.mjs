@@ -538,7 +538,11 @@ function tenths(ms) {
 // The example the signed-out page shows, read from web/coach.js: EXAMPLE_REVIEW (en and zh) and EXAMPLE_FRAMES.
 function pageExample() {
   const source = readFileSync(new URL("../../web/coach.js", import.meta.url), "utf8");
-  const literal = (name) => new Function("return " + source.match(new RegExp(`const ${name} = (\\{[\\s\\S]*?\\});`))[1])();
+  const literal = (name) => {
+    const m = source.match(new RegExp(`const ${name} = (\\{[\\s\\S]*?\\});`));
+    assert.ok(m, `${name} not found in web/coach.js`);
+    return new Function("return " + m[1])();
+  };
   return { review: literal("EXAMPLE_REVIEW"), frames: literal("EXAMPLE_FRAMES") };
 }
 
@@ -577,7 +581,7 @@ test("EXAMPLE: Bryan's OK'd wording, word for word", () => {
   assert.equal(r.went_well.title, "Low and ready going in");
   assert.equal(r.went_well.detail,
     "Going into the turn, both knees are bent and your head is up, looking ahead. The board is flat on the face under you. " +
-    "That's a good, balanced start."); // three sentences, though the guide says a sentence or two: he OK'd it as it is (Oct 23)
+    "That's a good, balanced start."); // three sentences, which the guide allows (one to three): he OK'd it as it is (Oct 23)
   assert.equal(r.main_fix.title, "Stay over your front foot");
   assert.equal(r.main_fix.what,
     "As you hit the top, your weight slides back onto the tail. Your front leg goes straight and you sit down over your " +
@@ -591,6 +595,14 @@ test("EXAMPLE: Bryan's OK'd wording, word for word", () => {
     "Stand in your surf stance on the beach with your knees bent. Turn your head and shoulders as if you're at the top of " +
     "the wave. As you turn, push your front knee forward, bring your chest over it and hold for three seconds. If you " +
     "feel your weight in your back heel, reset and go again. Do 10 slow ones before you paddle out.");
+});
+
+test("the guide allows a went-well detail of one to three short sentences, as Bryan's example has (Ruling P54)", () => {
+  const guide = systemPrompt(null).replace(/\n {2,}(?! *- )/g, " ");
+  assert.ok(guide.includes("went_well.detail is one to three short sentences;"));
+  assert.ok(!guide.includes("a sentence or two"));
+  const sentences = EXAMPLE.reply.went_well.detail.match(/[^.!?]+[.!?]/g);
+  assert.equal(sentences.length, 3);
 });
 
 test("EXAMPLE: its times are its key frames' times to the nearest tenth, as the page shows them", () => {
@@ -634,7 +646,9 @@ test("EXAMPLE: no banned word in the reply, and the page's English and 中文 co
 test("EXAMPLE: the page shows key frames 6, 7, 8 and 9 at the times the guide gives them", () => {
   const { frames } = pageExample();
   assert.deepEqual(Object.keys(frames), ["6", "7", "8", "9"]);
-  assert.deepEqual(Object.values(frames).map((f) => f.src), ["coach-example/1.jpg", "coach-example/2.jpg", "coach-example/3.jpg", "coach-example/4.jpg"]);
+  // The file names only: a later ?v= cache-bust on them is fine.
+  assert.deepEqual(Object.values(frames).map((f) => f.src.split("?")[0]),
+    ["coach-example/1.jpg", "coach-example/2.jpg", "coach-example/3.jpg", "coach-example/4.jpg"]);
   for (const [n, f] of Object.entries(frames)) assert.equal(f.ms, EXAMPLE.times[n - 1], "key frame " + n);
 });
 

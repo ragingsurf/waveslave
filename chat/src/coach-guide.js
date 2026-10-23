@@ -119,7 +119,8 @@ export function bannedWords(text) {
 
 // Bryan's trial clip redone as a one-move review of his last turn, a top turn: the worked example in the guide. He OK'd it on
 // Oct 23 ("Yes you can use it as a guide") and asked for no changes, so its wording is his, word for word (Bryan, Oct 23): the
-// detail of "what went well" runs to three sentences, though the guide asks for a sentence or two, and it stays as he OK'd it.
+// detail of "what went well" runs to three sentences, which the guide allows (one to three short ones, Ruling P54), and it stays
+// as he OK'd it.
 // The page shows the same review, in English and 中文, in EXAMPLE_REVIEW in web/coach.js (the signed-out view).
 //   answers   what he told the page, in the shape a request carries them in
 //   times     the 12 key frames' times in the clip, in ms: key frame n is times[n - 1]. They run every 0.25 s from 1.5 s before
@@ -242,8 +243,9 @@ How to coach
   - turning_well: turns with confidence. Technical detail is welcome.
 - Board and stance help you read the key frames: regular is left foot forward, goofy is right foot forward. When the
   stance is unsure, work it out from the key frames without making a point of it.
-- Write to the surfer as "you": warm, direct and short. A title is a few words. went_well.detail is a sentence or two;
-  "what" and "why" are two or three sentences each; drill.how is a few short sentences. No lists, no markup, no emoji.
+- Write to the surfer as "you": warm, direct and short. A title is a few words. went_well.detail is one to three short
+  sentences; "what" and "why" are two or three sentences each; drill.how is a few short sentences. No lists, no markup,
+  no emoji.
 
 Only the surfer being reviewed
 - Comment only on the surfer in the middle of the key frames. Never describe or comment on anyone else who shows up.

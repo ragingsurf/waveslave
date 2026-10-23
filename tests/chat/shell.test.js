@@ -313,6 +313,30 @@ const CHECKS = {
     if (shut !== 0) throw new Error(`a pull with the chat open shows the refresh sign (opacity ${shut})`);
     if (!(shown > 0)) throw new Error("a pull with the chat shut doesn't show the refresh sign (the check itself is off)");
   },
+  // The page holds still under the room (Bryan's iPhone, Oct 23: with the keyboard up, a drag moved the page, the room's top went off the
+  // screen and the Forecast showed under the box). Opened from halfway down the page: the page is pinned where it was, the room covers just
+  // the part of the screen that shows (the visual viewport) and follows it when that changes (zoomed in here, the keyboard on an iPhone), a drag
+  // on the room's header moves nothing, and closing puts the page back where it was.
+  async roomHoldsPage(open) {
+    const page = await open({}); await wait(300);
+    await page.evaluate(() => scrollTo({ top: 1500, behavior: "instant" })); await settle(page);
+    const at = await page.evaluate(() => Math.round(document.body.getBoundingClientRect().top));
+    await page.evaluate(() => document.querySelector(".chatfab").click()); await wait(200);
+    const where = () => page.evaluate(() => { const r = document.querySelector(".chatroom").getBoundingClientRect(), v = visualViewport;
+      return { top: Math.round(r.top), h: Math.round(r.height), vTop: Math.round(v.offsetTop), vH: Math.round(v.height), body: Math.round(document.body.getBoundingClientRect().top), y: Math.round(scrollY) }; });
+    let w = await where();
+    if (w.top !== w.vTop || w.h !== w.vH) throw new Error(`the room is at ${w.top}, ${w.h} tall, the screen shows ${w.vTop}, ${w.vH} tall`);
+    if (w.body !== at) throw new Error(`the page under the room is at ${w.body}, want ${at} (pinned where it was)`);
+    const s = await dragDown(page, [200, 40], -200); await settle(page); const d = await where();
+    if (d.y !== w.y || d.body !== w.body || d.top !== d.vTop) throw new Error(`a drag on the room's header moved the page (${JSON.stringify(w)} → ${JSON.stringify(d)})`);
+    await s.send("Emulation.setPageScaleFactor", { pageScaleFactor: 2 }); await wait(100); await settle(page);
+    w = await where();
+    if (!(w.vH < 844)) throw new Error(`zooming in didn't change the visual viewport (the check itself is off): ${JSON.stringify(w)}`);
+    if (w.top !== w.vTop || w.h !== w.vH) throw new Error(`after the screen moved the room is at ${w.top}, ${w.h} tall, the screen shows ${w.vTop}, ${w.vH} tall`);
+    await page.evaluate(() => document.querySelector(".chatroom .cr-hd .cr-x").click()); await settle(page);
+    w = await where();
+    if (w.y !== 1500 || w.body !== at) throw new Error(`closed, the page is at ${w.y} (body ${w.body}), want 1500 (body ${at}) where it was`);
+  },
   // Every string is there in English, 中文 and 日本語, with the same codes and the same number of house rules, none empty, and the privacy
   // note names the operator (CONTACT) in each.
   async everyLanguage(open) {

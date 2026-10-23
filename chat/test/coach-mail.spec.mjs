@@ -300,6 +300,8 @@ describe("the hourly email", () => {
     resend.push(() => new Response('{"statusCode":500,"message":"Internal","name":"internal_server_error"}', { status: 500 }));
     await runAlarm(c);
     expect(mails).toHaveLength(1);
+    // A refusal is logged by a fixed line: never its status or what Resend said.
+    expect(logged.splice(0)).toEqual([["coach: the email was refused"]]);
     expect(await getMeta(c, "digest_due")).toBeNull();
     expect(await getMeta(c, "last_digest")).toBe(T);
     expect(await alarmAt(c)).toBe(FAR);
@@ -318,24 +320,21 @@ describe("the hourly email", () => {
     expect(await alarmAt(c)).toBe(FAR);
   });
 
-  it("reads through its indexes, never every review kept for 24 months", async () => {
-    const c = await freshCoach();
-    const a = surfer();
-    // 300 reviews handled before the last email: published, rejected and failed.
-    await c.inCoach((coach) => {
+  // 300 handled reviews written straight into the table, each `status(k)`, handled at `handledAt(k)`.
+  const insertHandled = (c, who, status, handledAt) =>
+    c.inCoach((coach) => {
       for (let k = 0; k < 300; k++) {
-        const status = ["published", "rejected", "failed"][k % 3];
         coach.sql.exec(
           `INSERT INTO reviews (id, uid, sub_hash, lang, move, answers, status, created, sent, handled_at)
            VALUES (?, ?, ?, 'en', 'top_turn', ?, ?, ?, ?, ?)`,
-          hex(11), a.uid, a.sub_hash, JSON.stringify(ANSWERS), status, T - 3 * DAY, T - 3 * DAY, T - 2 * DAY + k,
+          hex(11), who.uid, who.sub_hash, JSON.stringify(ANSWERS), status(k), T - 40 * DAY, T - 40 * DAY, handledAt(k),
         );
       }
-      coach.setMeta("last_digest", T - DAY);
-      coach.setMeta("digest_due", T);
     });
-    await insertReview(c, a, { status: "drafted" });
-    await insertReview(c, a, { status: "drafted" });
+
+  // The hourly email, due at T and sent then, with each statement's rows read while the coach drew it.
+  async function digestReads(c) {
+    await setMeta(c, "digest_due", T);
     resend.push(accepted);
     const reads = await c.inCoach(async (coach) => {
       const real = coach.sql;
@@ -354,7 +353,39 @@ describe("the hourly email", () => {
       }
       return seen.map(({ query, cursor }) => ({ query, read: cursor.rowsRead }));
     });
+    // The two waiting queries (the Drafts list's) and the failed count were all made.
+    for (const asks of [/status = 'drafted'/, /reviews_held/, /status = 'failed'/]) {
+      expect(reads.some(({ query }) => asks.test(query)), String(asks)).toBe(true);
+    }
+    return reads;
+  }
+
+  it("reads through its indexes, never every review kept for 24 months", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    // 300 reviews handled before the last email: published, rejected and failed.
+    await insertHandled(c, a, (k) => ["published", "rejected", "failed"][k % 3], (k) => T - 2 * DAY + k);
+    await setMeta(c, "last_digest", T - DAY);
+    await insertReview(c, a, { status: "drafted" });
+    await insertReview(c, a, { status: "drafted" });
+    const reads = await digestReads(c);
     expect(subjects()).toEqual(["WaveSlave Coach: 2 drafts waiting (oldest under 1 h)"]);
+    expect(mails[0].body.text).not.toMatch(/Failed/);
+    for (const { query, read } of reads) expect(read, query).toBeLessThan(50);
+  });
+
+  it("looks back 7 days at most for failures, however old the last email is (ruling P43)", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    // The last email a month ago; since then, autopilot published 300 reviews 20 to 8 days ago, which bring no email,
+    // and one review failed 8 days ago (its email went missing, say). One failed 2 days ago.
+    await setMeta(c, "last_digest", T - 30 * DAY);
+    await insertHandled(c, a, () => "published", (k) => T - 20 * DAY + k * HOUR);
+    await insertReview(c, a, { status: "failed", next_try: null, handled_at: T - 8 * DAY });
+    await insertReview(c, a, { status: "failed", next_try: null, handled_at: T - 2 * DAY });
+    const reads = await digestReads(c);
+    expect(subjects()).toEqual(["WaveSlave Coach: 1 review failed"]);
+    expect(mails[0].body.text).toMatch(/Failed since the last email: 1\b/);
     for (const { query, read } of reads) expect(read, query).toBeLessThan(50);
   });
 });
@@ -473,6 +504,11 @@ describe("the stopped and resting alerts", () => {
 describe("at most 20 emails a Taiwan day", () => {
   it("the 21st isn't sent, the test email counting; a digest due then goes when the day turns", async () => {
     const c = await freshCoach();
+    // A report just before: its email is due now.
+    const b = surfer();
+    const reported = await insertPublished(c, b);
+    expect((await report(c, b, reported, "")).status).toBe(200);
+    expect(await getMeta(c, "digest_due")).toBe(T);
     for (let k = 0; k < 20; k++) resend.push(accepted);
     for (let k = 0; k < 20; k++) {
       expect((await settings(c, { test_email: true })).json.email.status).toBe(200);
@@ -482,20 +518,40 @@ describe("at most 20 emails a Taiwan day", () => {
       status: 200, json: { ok: true, email: { status: 0, text: "daily limit" } },
     });
     await alert(c, "stopped");
-    // A draft: its email is due now, and waits for the next Taiwan day, carrying what happened since the last one.
+    // The alarm runs with a draft: the email due now waits for the next Taiwan day, carrying what happened since the
+    // last one.
     await insertReview(c, surfer());
     ai.push(ok());
     await runAlarm(c);
     expect(mails).toHaveLength(20);
     expect(await getMeta(c, "digest_due")).toBe(NEXT_TW_DAY);
     expect(await alarmAt(c)).toBe(NEXT_TW_DAY);
+    // More that day doesn't bring it back to now, which would only wake the alarm to put it off again.
+    c.clock.t = T + 10 * MIN;
+    await insertReview(c, surfer());
+    ai.push(ok());
+    await runAlarm(c);
+    const again = await insertPublished(c, b);
+    expect((await report(c, b, again, "")).status).toBe(200);
+    expect(await getMeta(c, "digest_due")).toBe(NEXT_TW_DAY);
+    expect(await alarmAt(c)).toBe(NEXT_TW_DAY);
 
     c.clock.t = NEXT_TW_DAY;
     resend.push(accepted);
     await runAlarm(c);
-    expect(subjects()[20]).toBe("WaveSlave Coach: 1 draft waiting (oldest 4 h)");
+    expect(subjects()[20]).toBe("WaveSlave Coach: 4 drafts waiting (oldest 4 h)");
     expect(await getMeta(c, "digest_due")).toBeNull();
     expect(await alarmAt(c)).toBe(FAR);
+  });
+
+  it("a report on a capped day sets the email for the next day, so the alarm isn't woken for nothing", async () => {
+    const c = await freshCoach();
+    await setMeta(c, "mail_day", { day: "2030-06-03", n: 20, alerts: [] });
+    const b = surfer();
+    const reported = await insertPublished(c, b);
+    expect((await report(c, b, reported, "")).status).toBe(200);
+    expect(await getMeta(c, "digest_due")).toBe(NEXT_TW_DAY);
+    expect(await alarmAt(c)).toBe(NEXT_TW_DAY);
   });
 });
 
@@ -531,13 +587,19 @@ describe("Send a test email", () => {
     expect(await settings(c, { test_email: true })).toEqual({
       status: 200, json: { ok: true, email: { status: 403, text: RESEND_403 } },
     });
+    expect(logged.splice(0)).toEqual([["coach: the email was refused"]]);
     expect(mails[0].body).toMatchObject({ from: FROM, to: [env.COACH_ALERT_TO], subject: "WaveSlave Coach: test email" });
+    // A long answer, a gateway's error page say, is cut at 2,000 characters for Settings.
+    const page = "<html>" + "x".repeat(3_000) + "</html>";
+    resend.push(() => new Response(page, { status: 502, headers: { "content-type": "text/html" } }));
+    expect((await settings(c, { test_email: true })).json.email).toEqual({ status: 502, text: page.slice(0, 2_000) });
+    expect(logged.splice(0)).toEqual([["coach: the email was refused"]]);
     resend.push(accepted);
     const { json } = await settings(c, { autopilot: true, test_email: true });
     expect(json).toEqual({ ok: true, email: { status: 200, text: '{"id":"4ef9a417-02e9-4d39-ad75-9611e0fcc33c"}' } });
     expect(await getMeta(c, "autopilot")).toBe(true);
     // Without test_email, nothing is sent and there is no email in the answer.
     expect(await settings(c, { autopilot: false, test_email: false })).toEqual({ status: 200, json: { ok: true } });
-    expect(mails).toHaveLength(2);
+    expect(mails).toHaveLength(3);
   });
 });

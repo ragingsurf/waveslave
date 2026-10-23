@@ -428,7 +428,11 @@ const MAIL_FROM = "WaveSlave Coach <onboarding@resend.dev>";
 const MAIL_AGENT = "waveslave-coach/1";
 const MAIL_DAILY = 20;
 const MAIL_TIMEOUT = 30_000;
+const MAIL_ANSWER_MAX = 2_000; // characters of Resend's answer passed on to Settings
 const DRAFTS_LINK = "https://waveslave.tw/?coach=drafts";
+// How far back the hourly email looks for failed reviews, at most (ruling P43). The email that follows a failure comes
+// within about a day, but on autopilot the last one may be weeks old, and the handled reviews since then are read.
+const FAILED_SINCE_MAX = 7 * DAY;
 
 // The alerts sent at once (alert), [subject, text]. "resting" says when the rest ends, when the coach knows (restLine).
 const ALERTS = Object.freeze({
@@ -1713,10 +1717,11 @@ export class Coach extends DurableObject {
   // ---- The email (spec "The email") --------------------------------------------------------------------------------
 
   // One email to Bryan: POSTed to COACH_MAIL_URL (Resend) with RESEND_API_KEY, from Resend's own address to
-  // COACH_ALERT_TO, as plain text (MAIL_FROM). Returns Resend's answer as it came, {status, text}, or {status: 0, text}
-  // when nothing was sent: "no key" without RESEND_API_KEY (Bryan may not have set one: then nothing is ever sent, and
-  // the Drafts list works the same), "daily limit" once this Taiwan day's 20 have gone (mailDay), or the error's name
-  // when the fetch threw. Each email counts in the 20 as it goes. It never throws.
+  // COACH_ALERT_TO, as plain text (MAIL_FROM). Returns Resend's answer as it came, {status, text}, its text cut at
+  // 2,000 characters for Settings, or {status: 0, text} when nothing was sent: "no key" without RESEND_API_KEY (Bryan
+  // may not have set one: then nothing is ever sent, and the Drafts list works the same), "daily limit" once this
+  // Taiwan day's 20 have gone (mailDay), or the error's name when the fetch threw. A refusal is logged by a fixed line,
+  // never its status or text. Each email counts in the 20 as it goes. It never throws.
   async mail(subject, text) {
     const key = String(this.env.RESEND_API_KEY ?? "").trim();
     if (key === "") return { status: 0, text: "no key" };
@@ -1732,7 +1737,8 @@ export class Coach extends DurableObject {
         }),
         signal: AbortSignal.timeout(MAIL_TIMEOUT),
       });
-      return { status: res.status, text: await res.text() };
+      if (!res.ok) console.error("coach: the email was refused");
+      return { status: res.status, text: (await res.text()).slice(0, MAIL_ANSWER_MAX) };
     } catch (err) {
       console.error("coach: the email failed:", err?.name ?? "error");
       return { status: 0, text: err?.name ?? "error" };
@@ -1777,11 +1783,14 @@ export class Coach extends DurableObject {
   }
 
   // The hourly email (ruling R9) is due after a draft, a failure or a report: now, or an hour after the last one went,
-  // unless it is due sooner already. Returns when it is due. The alarm sends it (digest): the alarm's own run sets its
-  // time at the end (nextAlarmAt), and a route brings the alarm forward to it (alarmBy).
+  // unless it is due sooner already. Once this Taiwan day's 20 emails have gone, it is due when the day turns, as the
+  // alarm would put it off till then anyway (digest), so no event wakes the alarm for nothing. Returns when it is due.
+  // The alarm sends it (digest): the alarm's own run sets its time at the end (nextAlarmAt), and a route brings the
+  // alarm forward to it (alarmBy).
   digestAfter(now) {
     const last = this.getMeta("last_digest");
-    const at = last === null ? now : Math.max(now, last + HOUR);
+    const from = this.mailDay(now).n >= MAIL_DAILY ? nextTwDay(now) : now;
+    const at = last === null ? from : Math.max(from, last + HOUR);
     const due = this.getMeta("digest_due");
     if (due !== null && due <= at) return due;
     this.setMeta("digest_due", at);
@@ -1804,7 +1813,7 @@ export class Coach extends DurableObject {
         return;
       }
       this.setMeta("digest_due", null);
-      const email = this.digestMail(now, this.getMeta("last_digest") ?? 0);
+      const email = this.digestMail(now, Math.max(this.getMeta("last_digest") ?? 0, now - FAILED_SINCE_MAX));
       if (email === null) return;
       this.setMeta("last_digest", now);
       await this.mail(email.subject, email.text);
@@ -1815,8 +1824,8 @@ export class Coach extends DurableObject {
 
   // The hourly email's {subject, text}, or null when there is nothing to tell. Its waiting reviews are the Drafts
   // list's (waiting), with how long the surfer of the one sent first has waited, in whole hours, as the list counts
-  // it (draftView); the failed ones are those handled since `since` (the last email), read through the handled index.
-  // Counts and times only.
+  // it (draftView); the failed ones are those handled since `since` (the last email, or 7 days ago at most), read
+  // through the handled index. Counts and times only.
   digestMail(now, since) {
     const waiting = this.waiting("id, sent, created, hold, report");
     const failed = this.one(

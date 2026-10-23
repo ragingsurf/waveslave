@@ -981,6 +981,22 @@ const STEPS = {
     const got = await reviewView(page);
     if (got.foot !== "Reviewed by WaveSlave Coach (AI). Surf within your limits." || !eq(got.parts.map(p => p.h), ["What went well", "The main fix", "Your drill"])) throw new Error(`the autopilot review shows ${JSON.stringify(got)}`);
   },
+  // Bryan's own review (u-bryan's, approved in dot), opened in the panel: GET /coach/reviews/<id> gives him, the admin, the row (final,
+  // frames, checked as 1) rather than the surfer's view, and the page draws it all the same: every part, its four key frames as blob
+  // URLs, and the checked footer.
+  async adminReview(s) {
+    const t = token("u-bryan"), row = await coachApi(t, `/coach/reviews/${s.review}`), g = FX.goodReply([1, 2, 3, 4, 5, 6, 7, 8], "en");
+    if (row.status !== 200 || !row.json || row.json.review !== undefined || row.json.checked !== 1 || !row.json.final || !Array.isArray(row.json.frames)) throw new Error(`the admin's GET /coach/reviews/<id> answered ${row.status} ${JSON.stringify(row.json && { review: row.json.review, checked: row.json.checked, final: !!row.json.final, frames: row.json.frames && row.json.frames.length })}`);
+    const page = await s.open({ store: { "waveslave-chat-token": t } }); await page.tap(TAB); await panelOpen(page);
+    await openReview(page, s.review);
+    const got = await reviewView(page), want = { head: "Top turn", date: twDate().en, parts: [
+      { h: "What went well", lines: [g.went_well.title, g.went_well.detail], frames: [["Key frame at 0:10.3", true]], button: null },
+      { h: "The main fix", lines: [g.main_fix.title, "What's happening: " + g.main_fix.what, "Why it matters: " + g.main_fix.why],
+        frames: [["Key frame at 0:11.5", true], ["Key frame at 0:11.8", true], ["Key frame at 0:12.0", true]], button: null },
+      { h: "Your drill", lines: [g.drill.title, g.drill.how], frames: [], button: null }],
+      foot: "Reviewed by WaveSlave Coach (AI), checked by a person. Surf within your limits.", acts: ["Something wrong?", "Delete"] };
+    if (!eq(got, want)) throw new Error(`Bryan's own review shows ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+  },
   // The heads-up's "Get a review of your bottom turn" starts New review with the bottom turn picked (ruling P12): the picker, then, once the
   // clip is chosen, the questions with the bottom turn already pressed.
   async headsUp(s) {
@@ -995,7 +1011,8 @@ const STEPS = {
   },
   // Something wrong? sends the review back with its line: the panel thanks the surfer and the list says Coach is reviewing; Bryan's
   // Drafts list has it waiting, reported, with the line. Something wrong? on a review that was reported meanwhile (elsewhere) answers
-  // 409 state: "Couldn't send. Tap to try again.". Bryan approves both again.
+  // 409 state, and the panel goes back to the list, asked for again, where it's Coach is reviewing too (ruling P56). Bryan approves both
+  // again.
   async reportReview(s) {
     const page = s.hal, tok = token("u-hal"), said = "The drill doesn't fit my board.";
     await openReview(page, s.halEn);
@@ -1009,8 +1026,8 @@ const STEPS = {
     const elsewhere = await coachApi(tok, `/coach/reviews/${s.halZh}/report`, { method: "POST", body: { line: "" } });
     if (elsewhere.status !== 200) throw new Error(`reporting it elsewhere answered ${elsewhere.status}`);
     await page.click('.coachpanel [data-k="wrong"]'); await page.click('.coachpanel [data-k="wrongsend"]');
-    await until(page, "Couldn't send", t => { const b = document.querySelector('.coachpanel [data-k="wrongsend"]'); return !!b && b.textContent === t; }, FAILED);
-    await page.click('.coachpanel [data-k="back"]');
+    await until(page, "the list, both reviews back with the coach", () => !document.querySelector(".coachpanel .co-review")
+      && [...document.querySelectorAll(".coachpanel .co-list li")].filter(l => /Top turn/.test(l.textContent) && !l.querySelector("button") && l.querySelector(".co-st").textContent === "Coach is reviewing").length === 2);
     for (const id of [s.halEn, s.halZh]) await act(id, { action: "approve" });
   },
   // Delete asks first ("Delete this review? It and its key frames are deleted from WaveSlave."); Cancel keeps it, and Delete removes the

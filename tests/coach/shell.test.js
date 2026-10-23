@@ -1,7 +1,7 @@
 // Browser checks of the AI coach's page shell on a built page (build one with tests/map/tool.py): web/coach.js, served for the page's
 // coach.js, and its hooks in template.html (the hidden Coach tab, the tab handler, the language, developer mode and spot hooks, and the
 // Escape and pull-to-refresh guards), and the test clips tests/coach/clips.js makes.
-// Usage: node tests/coach/shell.test.js <page.html>
+// Usage: node tests/coach/shell.test.js <page.html> [check ...]   (the checks named, or every one)
 // Prints ok / FAIL for each check, and exits 1 on any FAIL or page error.
 // Only what the real backend can't give runs here (ruling R15): every page opens in its own fresh browser context, offline. Only the page,
 // chat.js and coach.js load (page.tried lists the other web addresses it asked for), and a fake backend at https://chat.test answers
@@ -16,7 +16,7 @@ const { chromium } = (() => { try { return require("playwright"); } catch (e) { 
 const fs = require("fs"), os = require("os"), path = require("path"), { pathToFileURL } = require("url");
 const { makeClip } = require("./clips.js");
 
-const [file] = process.argv.slice(2);
+const [file, ...ONLY] = process.argv.slice(2);
 if (!file) { console.error("usage: node tests/coach/shell.test.js <page.html>"); process.exit(2); }
 const ROOT = path.join(__dirname, "..", ".."), PAGE = pathToFileURL(path.resolve(file)).href, HTML = fs.readFileSync(file, "utf8");
 const CHAT_JS = fs.readFileSync(path.join(ROOT, "web", "chat.js"), "utf8"), COACH_JS = fs.readFileSync(path.join(ROOT, "web", "coach.js"), "utf8");
@@ -81,13 +81,13 @@ function flowBackend(o = {}, { failFrame = null } = {}) {
 // ---- The review (web/coach.js's review page), offline. reviewBackend(text, o) is a fake coach backend for it: GET /coach/me as me() with
 // three reviews, one ready (RID) and two not reviewed (one held as not surf, one with o.note, a person's note); GET /coach/reviews/<RID>
 // published, with text, its key frames' times (KEY_MS) and o.checked, or o.get when given (another answer); each of its key frames as a
-// JPEG (Bryan's example's first), noting each ask's number and Authorization (st.frames); POST …/report answering st.report (o.report
-// at first) or {ok} (st.reports notes the bodies) and DELETE {ok} (st.deletes).
+// JPEG (Bryan's example's first), or what o.frame(n) answers in its place when it answers, noting each ask's number and Authorization
+// (st.frames); POST …/report answering st.report (o.report at first) or {ok} (st.reports notes the bodies) and DELETE {ok} (st.deletes).
 const JPEG = fs.readFileSync(path.join(ROOT, "web", "coach-example", "1.jpg"));
 const RID = "r".repeat(22), KEY_MS = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [i + 1, 10000 + 250 * (i + 1)]));
 const REVIEW_AT = Date.UTC(2030, 10, 2, 2);
-function reviewBackend(text, { checked = true, note = "We couldn't see you. Try filming closer.", get = null, report = null } = {}) {
-  const st = { frames: [], reports: [], deletes: 0, report };
+function reviewBackend(text, { checked = true, note = "We couldn't see you. Try filming closer.", get = null, report = null, frame = null } = {}) {
+  const st = { frames: [], reports: [], deletes: 0, report }, frameAnswer = frame;
   const reviews = [{ id: RID, move: "top_turn", created: REVIEW_AT, status: "ready", published: REVIEW_AT + 3600e3, note: null },
     { id: "n".repeat(22), move: "cutback", created: REVIEW_AT - 86400e3, status: "not_reviewed", published: null, note: "not_surf" },
     { id: "m".repeat(22), move: "popup", created: REVIEW_AT - 2 * 86400e3, status: "not_reviewed", published: null, note }];
@@ -96,7 +96,7 @@ function reviewBackend(text, { checked = true, note = "We couldn't see you. Try 
     if (p === "/coach/me") return { body: me({ profile: PROFILE, reviews }) };
     if (p === `/coach/reviews/${RID}` && m === "GET") return get || { body: { id: RID, status: "published", move: "top_turn", created: REVIEW_AT, have: Object.keys(KEY_MS).map(Number), note: null,
       review: { text, times: KEY_MS, checked } } };
-    if (frame && m === "GET") { st.frames.push({ n: +frame[1], auth: req.headers().authorization || null }); return { jpeg: JPEG }; }
+    if (frame && m === "GET") { st.frames.push({ n: +frame[1], auth: req.headers().authorization || null }); return (frameAnswer && frameAnswer(+frame[1])) || { jpeg: JPEG }; }
     if (p === `/coach/reviews/${RID}/report` && m === "POST") { st.reports.push(req.postDataJSON()); return st.report || { body: { ok: true } }; }
     if (p === `/coach/reviews/${RID}` && m === "DELETE") { st.deletes++; return { body: { ok: true } }; }
     return { body: { reports: [], online: 0, last_id: 0 } };
@@ -790,8 +790,9 @@ const CHECKS = {
       if (what === "‹ Back") { await page.tap(".coachpanel .co-x"); await openRid(page); }
     }
   },
-  // Something wrong? opens one optional line; Send posts it. invalid (or state) says "Couldn't send. Tap to try again." on the button, which
-  // sends again; a 401 there hands the token back and shows Sign in with LINE. Delete asks first (Cancel keeps it).
+  // Something wrong? opens one optional line; Send posts it. invalid says "Couldn't send. Tap to try again." on the button, which sends
+  // again; a review gone (404) or no longer published (409 state) goes back to the list, asking GET /coach/me again (ruling P56); a 401
+  // there hands the token back and shows Sign in with LINE. Delete asks first (Cancel keeps it).
   async reviewActions(open) {
     const st = reviewBackend(reviewText({})), page = await open({ store: TOKEN, backend: st.backend });
     await openRid(page);
@@ -806,15 +807,86 @@ const CHECKS = {
     await page.waitForFunction(t => { const b = document.querySelector('.coachpanel [data-k="wrongsend"]'); return !!b && b.textContent === t; }, FAILED, { timeout: 5000 }).catch(() => {});
     const failed = await text(page, '[data-k="wrongsend"]');
     if (failed !== FAILED || !eq(st.reports, [{ line: "The drill doesn't fit my board." }])) throw new Error(`invalid says ${JSON.stringify(failed)}; sent ${JSON.stringify(st.reports)}`);
+    for (const [status, error] of [[404, "not_found"], [409, "state"]]) {
+      st.report = { status, body: { error } }; const asks = page.asked.filter(a => a === "/coach/me").length;
+      await page.click('.coachpanel [data-k="wrongsend"]'); await inPanel(page, `the list after ${error}`, `[data-k="r-${RID}"]`);
+      if (await page.$(".coachpanel .co-review")) throw new Error(`${error} left the review open`);
+      await soon(`GET /coach/me again after ${error}`, () => page.asked.filter(a => a === "/coach/me").length > asks);
+      await page.tap(".coachpanel .co-x"); await openRid(page); await page.click('.coachpanel [data-k="wrong"]');
+    }
     st.report = { status: 401, body: { error: "auth" } }; await page.click('.coachpanel [data-k="wrongsend"]'); await inPanel(page, "Sign in with LINE", ".co-signin");
     if (await page.evaluate(() => localStorage.getItem("waveslave-chat-token")) !== null) throw new Error("a 401 on Something wrong? left the token");
   },
+  // The heads-up's button with no draft waiting starts New review with its move picked, kept at once as a draft with no clip yet (step
+  // "pick"): ‹ Back and Pick up, or a reload and Pick up, go to the picker without "Choose the same clip again", and the clip then brings
+  // the questions with the move pressed. With a draft waiting the button doesn't replace it: the panel offers Pick up / Start over (ruling
+  // P55). Pick up brings the waiting draft back as it was, and forgets the heads-up's move, so a Start over after it picks none; Start
+  // over from the heads-up's own offer has its move pressed.
+  async headsUpDraft(open, { tmp }) {
+    const st = reviewBackend(reviewText({ heads_up: { text: "Your back knee locks straight on your cutback.", move: "cutback" } }));
+    const page = await open({ store: TOKEN, backend: st.backend }), clip = makeClip(tmp, {}), SAME = "Choose the same clip again to pick up where you left off.";
+    const picker = async what => { await inPanel(page, `the picker (${what})`, ".co-choose");
+      if ((await page.$$eval(".coachpanel .co-note", e => e.map(x => x.textContent))).includes(SAME)) throw new Error(`${what}: the picker asks for the same clip`); };
+    const pressed = async (what, want) => { await inPanel(page, `the questions (${what})`, '[data-k="move-popup"]');
+      const got = await page.$$eval('.coachpanel [data-k^="move-"][aria-pressed="true"]', b => b.map(x => x.getAttribute("data-k")));
+      if (!eq(got, want)) throw new Error(`${what}: the questions have ${JSON.stringify(got)} pressed, want ${JSON.stringify(want)}`); };
+    const choose = () => page.setInputFiles('.coachpanel input[type="file"]', clip);
+    const offer = async what => { await page.click('.coachpanel [data-k="back"]'); await inPanel(page, `Pick up where you left off? (${what})`, ".co-resume"); };
+    const headsUp = async () => { await page.tap(".coachpanel .co-x"); await openRid(page); await page.click('.coachpanel [data-k="headsup"]'); };
+    await openRid(page); await page.click('.coachpanel [data-k="headsup"]'); await picker("from the heads-up");
+    let d = null; await soon("the heads-up's draft", async () => (d = await draft(page)) && d.step === "pick" && d.answers.move === "cutback" && d.account === "u-test");
+    await offer("from the picker"); await page.click('.coachpanel [data-k="pickup"]'); await picker("Pick up after ‹ Back");
+    await choose(); await pressed("Pick up after ‹ Back", ["move-cutback"]);
+    await page.reload({ waitUntil: "load" }); await settle(page); await page.tap(TAB); await inPanel(page, "Pick up after a reload", ".co-resume");
+    await page.click('.coachpanel [data-k="pickup"]'); await picker("Pick up after a reload");
+    await choose(); await pressed("Pick up after a reload", ["move-cutback"]);
+    await page.click('.coachpanel [data-k="move-top_turn"]');
+    await soon("the draft with the top turn", async () => (d = await draft(page)) && d.answers.move === "top_turn" && d.step === "questions");
+    const waiting = d.flow;
+    await offer("the top turn's draft"); await headsUp(); await inPanel(page, "the offer from the heads-up", ".co-resume");
+    if (await page.$(".coachpanel .co-choose")) throw new Error("the heads-up's button left the waiting draft for New review");
+    d = await draft(page); if (!d || d.flow !== waiting || d.answers.move !== "top_turn") throw new Error(`the heads-up's button changed the waiting draft: ${JSON.stringify(d && { flow: d.flow === waiting, move: d.answers.move })}`);
+    await page.click('.coachpanel [data-k="pickup"]'); await pressed("Pick up from the heads-up's offer", ["move-top_turn"]);
+    d = await draft(page); if (!d || d.flow !== waiting || d.answers.move !== "top_turn") throw new Error(`Pick up changed the waiting draft: ${JSON.stringify(d && { flow: d.flow === waiting, move: d.answers.move })}`);
+    await offer("after Pick up"); await page.click('.coachpanel [data-k="over"]'); await picker("Start over after Pick up"); await choose(); await pressed("Start over after Pick up", []);
+    await page.click('.coachpanel [data-k="move-top_turn"]'); await soon("a new draft", async () => (d = await draft(page)) && d.answers.move === "top_turn" && d.flow !== waiting);
+    await offer("a new draft"); await headsUp(); await inPanel(page, "the offer from the heads-up again", ".co-resume");
+    await page.click('.coachpanel [data-k="over"]'); await picker("Start over from the heads-up's offer"); await choose(); await pressed("Start over from the heads-up's offer", ["move-cutback"]);
+  },
+  // A key frame that doesn't load (here 503 break, the first time) shows its place with "Tap to try again", and a tap loads it; one the
+  // backend no longer has (404, as after the 30-day clean-up) is left out. Every load has the session token.
+  async frameAgain(open) {
+    let tries = 0;
+    const st = reviewBackend(reviewText({}), { frame: n => n === 7 && tries++ === 0 ? { status: 503, body: { error: "break" } } : n === 8 ? { status: 404, body: { error: "not_found" } } : null });
+    const page = await open({ store: TOKEN, backend: st.backend });
+    await page.tap(TAB); await inPanel(page, "the ready review", `[data-k="r-${RID}"]`); await page.click(`.coachpanel [data-k="r-${RID}"]`);
+    await inPanel(page, "key frame 7 to try again", '[data-k="again-f7"]'); await settle(page);
+    const look = () => page.evaluate(() => [...document.querySelectorAll(".coachpanel .co-review .co-kf")].map(f => { const a = f.querySelector("button.co-again");
+      return [f.querySelector("figcaption").textContent, f.querySelector('img[src^="blob:"]') ? "img" : a ? `${a.textContent} (${a.getAttribute("aria-label")})` : "waiting"]; }));
+    let got = await look();
+    const failed = ["Key frame at 0:11.8", "Tap to try again (The key frame at 0:11.8 didn't load. Tap to try again.)"];
+    if (!eq(got, [["Key frame at 0:10.5", "img"], ["Key frame at 0:11.5", "img"], failed])) throw new Error(`with key frame 7 failing and 8 gone the review shows ${JSON.stringify(got)}`);
+    await page.click('.coachpanel [data-k="again-f7"]'); await inPanel(page, "key frame 7 again", '[data-k="shot-f7"] img[src^="blob:"]'); got = await look();
+    if (!eq(got, [["Key frame at 0:10.5", "img"], ["Key frame at 0:11.5", "img"], ["Key frame at 0:11.8", "img"]])) throw new Error(`after the tap the review shows ${JSON.stringify(got)}`);
+    if (!eq(st.frames.map(f => f.n).sort((a, b) => a - b), [2, 6, 7, 7, 8]) || !st.frames.every(f => f.auth === "Bearer test-token")) throw new Error(`the key frames were asked for as ${JSON.stringify(st.frames)}`);
+  },
+  // GET /coach/reviews/{id} refused: 403 banned says "This account can't use the coach." with no Try again, as GET /coach/me's does; 503
+  // break says the coach is taking a break, with Try again.
+  async reviewRefused(open) {
+    for (const [status, error, err, retry] of [[403, "banned", BLOCKED, false], [503, "break", BREAK, true]]) {
+      const st = reviewBackend(reviewText({}), { get: { status, body: { error } } }), page = await open({ store: TOKEN, backend: st.backend });
+      await page.tap(TAB); await inPanel(page, "the ready review", `[data-k="r-${RID}"]`); await page.click(`.coachpanel [data-k="r-${RID}"]`);
+      await inPanel(page, `the review answered ${status}`, ".co-review .co-err");
+      const got = await page.evaluate(() => ({ err: document.querySelector(".coachpanel .co-review .co-err").textContent, retry: !!document.querySelector('.coachpanel .co-review [data-k="retry"]') }));
+      if (!eq(got, { err, retry })) throw new Error(`GET /coach/reviews/<id> answering ${status} ${error} shows ${JSON.stringify(got)}, want ${JSON.stringify({ err, retry })}`);
+    }
+  },
   // Every refusal at the start of a send, with its message from the spec's table (a money rest naming its day in Taiwan time: "16
-  // November", 「11月16日」), and the Send button there again; invalid and state say "Couldn't send. Tap to try again." on the button; agree
-  // shows the agreement again, and once it's agreed the check screen is back. The draft keeps its 12 key frames all along, and nothing
-  // is sent but the starts, until one goes through.
+  // November", 「11月16日」, on a phone in Los Angeles, where it's still the 15th), and the Send button there again; invalid and state say
+  // "Couldn't send. Tap to try again." on the button; agree shows the agreement again, and once it's agreed the check screen is back with
+  // Send, no failure left. The draft keeps its 12 key frames all along, and nothing is sent but the starts, until one goes through.
   async sendCodes(open, { tmp }) {
-    const st = flowBackend(), page = await open({ store: TOKEN, backend: st.backend }), b = boxAt(640, 360, 6, 3);
+    const st = flowBackend(), page = await open({ store: TOKEN, backend: st.backend, tz: "America/Los_Angeles" }), b = boxAt(640, 360, 6, 3);
     await toCheck(page, makeClip(tmp, {}), { at: 3, x: b.x, y: b.y });
     const look = () => page.evaluate(() => { const q = s => document.querySelector(".coachpanel " + s), s = q('[data-k="send"]');
       return { said: q(".co-said") && q(".co-said").textContent, retry: q('[data-k="retry"]') && q('[data-k="retry"]').textContent, send: !!s && !s.disabled }; });
@@ -839,9 +911,9 @@ const CHECKS = {
     if (await page.$(".coachpanel .co-grid")) throw new Error("agree left the check screen showing with the agreement");
     await page.check('.coachpanel [data-k="adult"]'); await page.click('.coachpanel [data-k="agree"]'); await inPanel(page, "the check screen again", ".co-grid");
     const back = await look(), d = await draft(page);
-    if (st.agrees !== 1 || !eq(back, { said: null, retry: FAILED, send: false })) throw new Error(`after agreeing again: ${st.agrees} agrees, ${JSON.stringify(back)}`);
+    if (st.agrees !== 1 || !eq(back, { said: null, retry: null, send: true })) throw new Error(`after agreeing again: ${st.agrees} agrees, ${JSON.stringify(back)}`);
     if (!d || d.frames.length !== 12 || !d.frames.every(f => f.blob > 0) || st.frames.length) throw new Error(`after the refusals the draft has ${d && d.frames.length} key frames, ${st.frames.length} sent`);
-    st.refuse = null; await page.click('.coachpanel [data-k="retry"]'); await inPanel(page, `"${SENT}"`, ".co-ok", 30e3);
+    st.refuse = null; await page.click('.coachpanel [data-k="send"]'); await inPanel(page, `"${SENT}"`, ".co-ok", 30e3);
     if (st.frames.length !== 12 || st.sends !== 1) throw new Error(`the send at last: ${st.frames.length} key frames, ${st.sends} sends`);
   },
   // A 401 at send (signed out elsewhere) hands the token back through CHAT.token(old) and shows Sign in with LINE, and the draft stays in
@@ -858,13 +930,14 @@ const CHECKS = {
     await inPanel(page, "the check screen after signing in again", ".co-grid");
     await page.click('.coachpanel [data-k="send"], .coachpanel [data-k="retry"]'); await inPanel(page, `"${SENT}"`, ".co-ok", 30e3);
   },
-  // What GET /coach/me says stops a review shows in the panel (money with its Taiwan day, a break, the day full, no reviews left this
-  // server month), in English and 中文; and its refusals: 403 banned "This account can't use the coach." with no Try again, 503 break
-  // "Coach is taking a break. Try again later." with it. I agree answered 503 break says so too.
+  // What GET /coach/me says stops a review shows in the panel (money with its Taiwan day, on a phone in Los Angeles; a break, the day full,
+  // no reviews left this server month), in English and 中文; and its refusals: 403 banned "This account can't use the coach." with no Try
+  // again, 503 break "Coach is taking a break. Try again later." with it. I agree answered 503 break says so too, and 403 agree (the
+  // page's agreement older than the backend's, ruling P57) asks for a reload.
   async meCodes(open) {
     const look = page => page.evaluate(() => { const q = s => document.querySelector(".coachpanel " + s);
       return { why: q(".co-why") && q(".co-why").textContent, err: q(".co-err:not(.co-why)") && q(".co-err:not(.co-why)").textContent, retry: !!q('[data-k="retry"]') }; });
-    const shown = async (o, status = 200) => { const page = await open({ store: TOKEN, backend: coachBackend(o, status) }); await page.tap(TAB);
+    const shown = async (o, status = 200) => { const page = await open({ store: TOKEN, backend: coachBackend(o, status), tz: "America/Los_Angeles" }); await page.tap(TAB);
       await page.waitForFunction(() => !!document.querySelector(".coachpanel .co-left, .coachpanel .co-err"), null, { timeout: 5000 }).catch(() => {}); await settle(page); return page; };
     for (const [o, en, zh] of [[{ stop: { kind: "money", until: Date.UTC(2030, 10, 16) } }, "Coach is resting until 16 November.", "教練休息到11月16日。"], [{ stop: { kind: "break" } }, BREAK, "教練暫時休息中，請稍後再試。"],
       [{ full_today: true }, "Coach is full today. Try again tomorrow.", "教練今天已經額滿了，明天再試試。"], [{ left: 0 }, "You've used your 2 reviews for November. More on December 1.", "11月的 2 次講評已經用完了，12月1日起可以再申請。"], [{}, null, null]]) {
@@ -877,12 +950,15 @@ const CHECKS = {
       const got = await look(await shown({}, status));
       if (!eq(got, want)) throw new Error(`GET /coach/me answering ${status}: ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
     }
-    const backend = (q, req) => q.pathname === "/coach/agree" ? { status: 503, body: { error: "break" } } : coachBackend({ agreed: false })(q, req);
-    const page = await open({ store: TOKEN, backend }); await page.tap(TAB); await inPanel(page, "the agreement", '[data-k="agree"]');
-    await page.check('.coachpanel [data-k="adult"]'); await page.click('.coachpanel [data-k="agree"]');
-    await page.waitForFunction(() => { const e = [...document.querySelectorAll(".coachpanel .co-agree .co-err")].find(x => !x.hidden); return !!e; }, null, { timeout: 5000 }).catch(() => {});
-    const said = await page.evaluate(() => [...document.querySelectorAll(".coachpanel .co-agree .co-err")].filter(x => !x.hidden).map(x => x.textContent));
-    if (!eq(said, [BREAK])) throw new Error(`I agree answered 503 break says ${JSON.stringify(said)}`);
+    for (const [status, error, want, zh] of [[503, "break", BREAK, null], [403, "agree", "The coach has been updated. Reload the page to see what's new.", "教練已更新，請重新整理頁面。"]]) {
+      const backend = (q, req) => q.pathname === "/coach/agree" ? { status, body: { error } } : coachBackend({ agreed: false })(q, req);
+      const page = await open({ store: TOKEN, backend }); await page.tap(TAB); await inPanel(page, "the agreement", '[data-k="agree"]');
+      await page.check('.coachpanel [data-k="adult"]'); await page.click('.coachpanel [data-k="agree"]');
+      await page.waitForFunction(() => { const e = [...document.querySelectorAll(".coachpanel .co-agree .co-err")].find(x => !x.hidden); return !!e; }, null, { timeout: 5000 }).catch(() => {});
+      const said = () => page.evaluate(() => [...document.querySelectorAll(".coachpanel .co-agree .co-err")].filter(x => !x.hidden).map(x => x.textContent));
+      if (!eq(await said(), [want])) throw new Error(`I agree answered ${status} ${error} says ${JSON.stringify(await said())}`);
+      if (zh) { await page.evaluate(() => setLang("zh")); await settle(page); if (!eq(await said(), [zh])) throw new Error(`in 中文 I agree answered ${status} ${error} says ${JSON.stringify(await said())}`); }
+    }
   },
   // The page's hooks never throw, whatever they're given, and a spot the page doesn't have leaves the tab as html.tw says.
   async hooksHold(open) {
@@ -917,11 +993,12 @@ const CHECKS = {
   //   world: developer mode (World mode, the PIN in); pub: window.__chatPublic; coachPub: window.__coachPublic; url: window.__chatUrl;
   //   view: the saved view; test: window.__chatTest; store: localStorage entries; clock: the page's fixed time (page.clock); skew: Date.now
   //   moved on by window.__skew(ms); query: the address's ?… before #<spot>. backend(url, request) answers the fake backend's calls. ua: the
-//   browser's user agent; init: more init scripts, each a function (or [function, its argument]). An answer with jpeg (bytes) goes as
-//   image/jpeg.
+//   browser's user agent; init: more init scripts, each a function (or [function, its argument]); tz: the phone's time zone (the
+//   machine's when null). An answer with jpeg (bytes) goes as image/jpeg.
   async function open({ spot = "donghe", world = true, pub = false, coachPub = false, url = CHAT, view = "fc", test = true, store = {}, chatJs = CHAT_JS, coachJs = COACH_JS,
-    clock = null, skew = false, query = "", backend = () => ({ body: { reports: [], online: 0, last_id: 0 } }), ua = null, init = [] }) {
-    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block", ...(ua ? { userAgent: ua } : {}) });
+    clock = null, skew = false, query = "", backend = () => ({ body: { reports: [], online: 0, last_id: 0 } }), ua = null, init = [], tz = null }) {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block",
+      ...(ua ? { userAgent: ua } : {}), ...(tz ? { timezoneId: tz } : {}) });
     ctxs.push(ctx); const asked = [], tried = [];
     await ctx.route("**/*", r => { const u = r.request().url(), bare = u.split(/[?#]/)[0];
       if (bare === PAGE) return r.continue();
@@ -954,7 +1031,7 @@ const CHECKS = {
   }
   // A blank page in a fresh context, for the checks that don't need the site.
   const blank = async () => { const ctx = await browser.newContext(); ctxs.push(ctx); const page = await ctx.newPage(); page.on("pageerror", e => errs.push(String(e))); return page; };
-  try { for (const [name, run] of Object.entries(CHECKS)) await step(name, () => run(open, { blank, tmp })); }
+  try { for (const [name, run] of Object.entries(CHECKS)) if (!ONLY.length || ONLY.includes(name)) await step(name, () => run(open, { blank, tmp })); }
   finally { await browser.close(); try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {} }
   process.exitCode = bad ? 1 : 0;
 })();

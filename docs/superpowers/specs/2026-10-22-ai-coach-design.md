@@ -1,6 +1,7 @@
 # AI surf coach (clip review) for WaveSlave: design
 
-Date: 2026-10-22. Status: for Bryan's review (updated 2026-10-23 after a five-part check against the code, the research and Bryan's choices).
+Date: 2026-10-22. Status: for Bryan's review (updated 2026-10-23 after a five-part check against the code, the research and Bryan's choices,
+and with his two answers of 2026-10-23).
 
 ## Goal
 
@@ -43,6 +44,12 @@ people a reason to come back to the site. At first Bryan approves every draft; l
   until the surfer deletes it.
 - **A surfer who leaves halfway** (to answer LINE, say) keeps their progress.
 
+## Decisions (Bryan, in the project thread, 2026-10-23)
+
+- **Credit day:** Bryan's Max plan renews on the **16th** of each month, so the coach's spending month starts on the 16th.
+- **The example review:** Bryan's trial clip is the example signed-out visitors see (his face shows). It is redone as a
+  one-move review first, and Bryan OKs it before it goes on the site.
+
 ## Defaults I picked (say if you want otherwise)
 
 - **Feedback language:** the site's language when the clip is sent, English or 中文. Drafts in 中文 come with an English copy
@@ -66,15 +73,6 @@ people a reason to come back to the site. At first Bryan approves every draft; l
 - **The Drafts list** only ever shows for Bryan's own LINE account, before and after go-live.
 - **Who says what at the foot of a review:** "checked by a person" only on reviews Bryan approved.
 
-## Bryan to confirm in this review
-
-1. **The day your Max plan renews each month.** Your free credit refreshes that day, so the coach counts its spending from it.
-   It's on claude.ai under Settings > Billing.
-2. **Your clip test as the example** that signed-out visitors see (your face shows). It would be redone in the one-move shape
-   first, and you'd OK it.
-
-Everything else here is what you already said yes to, or a default above.
-
 ## What the surfer sees
 
 ### The Coach tab
@@ -83,7 +81,7 @@ Everything else here is what you already said yes to, or a default above.
   (developer mode now, everyone in Taiwan mode after "go live") and the page is on a Taiwan spot, the same rule as the chat.
 - It opens a full-screen Coach panel over Forecast, like the chat room. ✕ closes it.
 - **Signed out:** "Your coach breaks your clip down frame by frame: what went well, one main fix and a drill." Below it, the
-  example review (only if Bryan agrees, item 2 above) and "Sign in with LINE". After signing in, the page comes back to the
+  example review (Bryan's trial clip, redone as a one-move review he OKs) and "Sign in with LINE". After signing in, the page comes back to the
   Coach panel, not the chat.
 - **Signed in:** "2 of 2 reviews left in November", **How to film**, a **New review** button, and their reviews, newest first,
   each showing the move, the date and its status (Coach is reviewing / Ready / Not reviewed).
@@ -149,7 +147,7 @@ the review and its key frames from WaveSlave.
 | Agreement not ticked | "The coach is for surfers 18 and over, sending clips of themselves." Send stays off. |
 | No reviews left | "You've used your 2 reviews for November. More on December 1." |
 | Coach full today (10 already) | "Coach is full today. Try again tomorrow." Their key frames stay on their phone for tomorrow. |
-| Money limit reached | "Coach is resting until 15 November." (the next credit day) |
+| Money limit reached | "Coach is resting until 16 November." (the next credit day) |
 | Coach paused, its key not working, or the free plan busy | "Coach is taking a break. Try again later." |
 | Banned account | "This account can't use the coach." |
 | Clip won't open on this phone | "This phone can't open that clip. Try another, or open waveslave.tw in your phone's own browser." |
@@ -308,7 +306,7 @@ waveslave.tw (GitHub Pages)                        Cloudflare (free plan), worke
   `[vars]`:
   - `COACH_MODEL = "claude-opus-5-5"`; prices in US$ per million tokens, `COACH_PRICE_IN = "4"`, `COACH_PRICE_OUT = "20"`;
   - `COACH_STOP_USD = "78"`, `COACH_HARD_USD = "80"`, `COACH_EXTRA_USD = "0"`;
-  - `COACH_CREDIT_DAY` (Bryan's renewal day, confirmed in this review);
+  - `COACH_CREDIT_DAY = "16"` (Bryan's Max plan renews on the 16th);
   - `COACH_MONTHLY = "2"`, `COACH_MONTHLY_MAX = "4"`, `COACH_DAILY = "10"`, `COACH_DAILY_AUTO = "40"`;
   - `COACH_ALERT_TO = "waveslave050@gmail.com"`.
 - **Placement:** `/admin/where` answers two lines, `room colo=…` and `coach colo=…` (mod-admin.spec.mjs is updated). Hints are a
@@ -456,7 +454,7 @@ waveslave.tw (GitHub Pages)                        Cloudflare (free plan), worke
 
 ### Money
 
-- **The credit month** starts on `COACH_CREDIT_DAY` at 08:00 Taiwan time (00:00 UTC), shortly after the plan payment, when the
+- **The credit month** starts on `COACH_CREDIT_DAY` (the 16th) at 08:00 Taiwan time (00:00 UTC), shortly after the plan payment, when the
   new credit lands. In a month without that day, it starts on the month's last day.
 - **Spend** is counted per call from the reply's token counts and the prices in `[vars]`. A call that times out or is cut off
   counts at its worst case (all of `max_tokens`).

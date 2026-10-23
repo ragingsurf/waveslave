@@ -88,12 +88,13 @@ async function signIn(page) {
   await until(page, "the session token", () => !!localStorage.getItem("waveslave-chat-token") && !!document.querySelector(".chatroom .cr-in").getClientRects().length);
   await page.keyboard.press("Escape"); await until(page, "the room to shut", () => !document.documentElement.classList.contains("chat-open"));
 }
-// The coach's sign-in (CHAT.signIn("coach"), which the Coach panel's Sign in with LINE calls), to LINE (approved at once) and back on the
-// page's ?chat#c=…. Resolves to where the backend sent the browser back to, once the page there has loaded.
-async function coachTrip(page) {
+// The coach's sign-in (CHAT.signIn("coach"), which the Coach panel's Sign in with LINE calls), to LINE (approved at once, unless
+// line.deny()) and back on the page's ?chat#c=… (or ?chat#e=… when ret says so). Resolves to where the backend sent the browser back to,
+// once the page there has loaded.
+async function coachTrip(page, ret = /\?chat#c=/) {
   let back = null; const seen = r => { if (r.url().startsWith(CHAT() + "/auth/line/callback")) back = r.headers().location || null; };
   page.on("response", seen);
-  try { await Promise.all([page.waitForURL(u => u.href.startsWith(ORIGIN()) && /\?chat#c=/.test(back || ""), { timeout: 20e3, waitUntil: "load" }), page.evaluate(() => { CHAT.signIn("coach"); })]); }
+  try { await Promise.all([page.waitForURL(u => u.href.startsWith(ORIGIN()) && ret.test(back || ""), { timeout: 20e3, waitUntil: "load" }), page.evaluate(() => { CHAT.signIn("coach"); })]); }
   finally { page.off("response", seen); }
   return back;
 }
@@ -162,12 +163,38 @@ const STEPS = {
     if (!eq(Object.keys(kept.v).sort(), ["at", "then", "v"]) || kept.v.then !== "coach" || !(Math.abs(Date.now() - kept.v.at) < 60e3)) throw new Error(`waveslave-chat-v holds ${JSON.stringify(kept.v)}`);
     if (kept.room || kept.chat || !kept.coach) throw new Error(`after CHAT.signIn("coach") the room is ${kept.room ? "built" : "not built"}${kept.chat ? " and open" : ""}, the panel ${kept.coach ? "open" : "shut"}`);
   },
-  // A new person (the fake LINE's account has none yet): back from LINE the room opens, on top, with the sign-up sheet; Join signs them in
-  // and lands on the Coach panel, the room shut, the token kept and v gone.
+  // The room opens for a waiting coach sign-in only from the Coach panel: with the panel shut (or in a second tab), the page coming back
+  // into view leaves the room shut. CHAT.signIn() with anything but "coach" starts nothing.
+  async coachPanelShut(s) {
+    const page = s.coach;
+    await page.tap(".coachpanel .co-x"); await until(page, "the panel to shut", () => !document.documentElement.classList.contains("coach-open"));
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange"))); await wait(300);
+    if (await page.evaluate(() => !!document.querySelector(".chatroom") || document.documentElement.classList.contains("chat-open"))) throw new Error("with the Coach panel shut, coming back to the page opened the room");
+    const before = await page.evaluate(() => localStorage.getItem("waveslave-chat-v"));
+    await page.evaluate(() => { CHAT.signIn(); CHAT.signIn("chat"); }); await wait(500);
+    const st = await page.evaluate(() => ({ v: localStorage.getItem("waveslave-chat-v"), url: location.href }));
+    if (st.v !== before || st.url !== `${ORIGIN()}/#jinshan`) throw new Error(`CHAT.signIn() without "coach" started a sign-in: ${JSON.stringify(st)}`);
+  },
+  // LINE says no (the person tapped Cancel) to a sign-in from the Coach panel: back on the page the Coach panel is open under the room, and
+  // the room is on top with "Couldn't sign in with LINE, try again"; shutting the room lands on the Coach panel.
+  async coachDenied(s) {
+    const page = s.coach; await page.tap(TAB); await panelOpen(page); line.deny();
+    const back = await coachTrip(page, /\?chat#e=/);
+    if (!/#e=access_denied$/.test(back || "")) throw new Error(`the backend sent the browser back to ${back}`);
+    await until(page, "the room and the Coach panel", () => { const c = document.documentElement.classList; return c.contains("chat-open") && c.contains("coach-open"); });
+    await onTop(page, "the room's note", ".chatroom .cr-note");
+    const st = await page.evaluate(() => ({ note: document.querySelector(".chatroom .cr-note").textContent, v: localStorage.getItem("waveslave-chat-v"),
+      token: localStorage.getItem("waveslave-chat-token"), focus: !!document.activeElement && !!document.activeElement.closest(".chatroom") }));
+    if (st.note !== "Couldn't sign in with LINE, try again" || st.v !== null || st.token !== null || !st.focus) throw new Error(`back from a cancelled sign-in: ${JSON.stringify(st)}`);
+    await page.keyboard.press("Escape"); await landed(page);
+  },
+  // A new person (the fake LINE's account has none yet): back from LINE the room opens, on top of the Coach panel, with the sign-up sheet;
+  // Join signs them in and lands on the Coach panel, the room shut, the token kept and v gone.
   async coachSignUp(s) {
     const page = s.coach, back = await coachTrip(page);
     if (!/\?chat#c=[A-Za-z0-9_-]{22}&p=\d{6}$/.test(back || "")) throw new Error(`the backend sent the browser back to ${back}`);
-    await until(page, "the sign-up sheet", () => !!document.querySelector('.chatroom .cr-sheet [data-k="nick"]') && document.documentElement.classList.contains("chat-open"));
+    await until(page, "the sign-up sheet over the Coach panel", () => { const c = document.documentElement.classList;
+      return !!document.querySelector('.chatroom .cr-sheet [data-k="nick"]') && c.contains("chat-open") && c.contains("coach-open"); });
     await onTop(page, "the sign-up sheet's Join", '.chatroom .cr-sheet [data-k="join"]');
     await page.check('.chatroom .cr-sheet [data-k="consent"]'); await page.click('.chatroom .cr-sheet [data-k="join"]');
     await landed(page);

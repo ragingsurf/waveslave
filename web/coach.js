@@ -177,13 +177,14 @@ function draw() {
 }
 // Opens the panel over the Forecast view: from the map, the page goes back to Forecast first, as it does for the chat's room. Asked
 // before start-up (chat.js can finish a sign-in for the coach while the page is still loading), it opens once the shell has started.
+// The chat's room can be open over the panel (a sign-in for the coach that needs the surfer): the focus stays in the room then, and comes
+// to the panel when it's asked again once the room has shut.
 function open() {
   if (!P.started) { P.early = true; return; }
   if (!can()) return;
   if (VIEW !== "fc") setView("fc", true);
-  if (P.open) return;
-  P.open = true; P.opener = document.activeElement; P.el.hidden = false; document.documentElement.classList.add("coach-open");
-  P.el.focus({ preventScroll: true });
+  if (!P.open) { P.open = true; P.opener = document.activeElement; P.el.hidden = false; document.documentElement.classList.add("coach-open"); }
+  if (!document.documentElement.classList.contains("chat-open") && !P.el.contains(document.activeElement)) P.el.focus({ preventScroll: true });
 }
 // ✕ or Escape, or the coach going away: the focus goes back where it was, else to the tab while it shows.
 function close() {

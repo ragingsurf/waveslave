@@ -214,10 +214,14 @@ const CHECKS = {
     if (s.opened !== 1 || !s.room) throw new Error(`with the panel shut the CHAT button didn't open the room (${JSON.stringify(s)}; the check itself is off)`);
   },
   // COACH.open() while the page is still loading, before coach.js has started (as when chat.js finishes a sign-in for the coach during its
-  // own start-up, here from the end of the chat.js served), isn't dropped: the panel opens once coach.js starts.
+  // own start-up, here from the end of the chat.js served), isn't dropped: the panel opens once coach.js starts. With the coach off for
+  // this visitor (developer mode off, the chat public), the same early COACH.open() leaves the panel shut.
   async earlyOpen(open) {
-    const page = await open({ chatJs: CHAT_JS + "\n;window.COACH.open();\n" }); await wait(300); const l = await look(page);
+    const chatJs = CHAT_JS + "\n;window.COACH.open();\n";
+    let page = await open({ chatJs }); await wait(300); let l = await look(page);
     if (!l.panel || !l.open || l.view !== "fc") throw new Error(`COACH.open() before coach.js started left ${JSON.stringify(l)}`);
+    page = await open({ chatJs, world: false, pub: true }); await wait(300); l = await look(page);
+    if (l.tab || l.panel || l.open) throw new Error(`with the coach off, COACH.open() before coach.js started left ${JSON.stringify(l)}`);
   },
   // The page's hooks never throw, whatever they're given, and a spot the page doesn't have leaves the tab as html.tw says.
   async hooksHold(open) {

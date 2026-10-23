@@ -316,7 +316,8 @@ const CHECKS = {
   // Every string is there in English, 中文 and 日本語, with the same codes and the same number of house rules, none empty, and the privacy
   // note names the operator (CONTACT) in each. The delete-account warning and the privacy note's "What is kept" and "How long" name the
   // coach's reviews and their key frames in each (AI coach spec, "chat.js's texts"), and "How long" says the key frames go 30 days after
-  // the review.
+  // the review. "Why" names the coach too, and "Where, and who handles it" says the key frames go to Anthropic (ruling P32); no part of
+  // the note names Bryan.
   async everyLanguage(open) {
     const page = await open({}), bad = await page.evaluate(c => { const T = window.CHAT._strings, out = [], langs = ["en", "zh", "ja"];
       const text = (v, k) => { const s = typeof v === "function" ? v(...(k === "privacy" ? [c] : k === "forecastSaid" ? ["1.1 m", "1.0 m", "07:00"] : [7])) : v;
@@ -335,9 +336,12 @@ const CHECKS = {
       }
       for (const l of langs) for (const k of Object.keys(T[l])) if (!(k in T.en)) out.push(`${l} has ${k}, en doesn't`);
       const coach = { en: ["coach reviews", "key frames"], zh: ["教練講評", "關鍵影格"], ja: ["コーチのレビュー", "キーフレーム"] }, after = { en: "30 days after the review", zh: "講評後 30 天", ja: "レビューの30日後" };
-      for (const l of langs) { const p = T[l].privacy(c); // p[2] is "What is kept", p[4] "How long"
-        for (const [k, t, want] of [["deleteWhat", T[l].deleteWhat, coach[l]], [p[2][0], p[2][1], coach[l]], [p[4][0], p[4][1], [...coach[l], after[l]]]])
-          for (const w of want) if (!t.toLowerCase().includes(w)) out.push(`${l}: ${k} doesn't say ${w}`); }
+      const named = { en: "coach", zh: "教練", ja: "コーチ" }, frames = { en: "key frames", zh: "關鍵影格", ja: "キーフレーム" };
+      for (const l of langs) { const p = T[l].privacy(c); // p[1] is "Why", p[2] "What is kept", p[3] "Where, and who handles it", p[4] "How long"
+        for (const [k, t, want] of [["deleteWhat", T[l].deleteWhat, coach[l]], [p[1][0], p[1][1], [named[l]]], [p[2][0], p[2][1], coach[l]],
+          [p[3][0], p[3][1], ["anthropic", frames[l], "waveslave"]], [p[4][0], p[4][1], [...coach[l], after[l]]]])
+          for (const w of want) if (!t.toLowerCase().includes(w)) out.push(`${l}: ${k} doesn't say ${w}`);
+        if (/bryan/i.test(JSON.stringify(p))) out.push(`${l}: the privacy note names Bryan`); }
       return out; }, CONTACT);
     if (bad.length) throw new Error(bad.join("; "));
     if (!await page.evaluate(() => window.CHAT._strings.en.lineLogin === "Log in with LINE" && window.CHAT._strings.zh.lineLogin === "使用LINE帳號登入" && window.CHAT._strings.ja.lineLogin === "LINEでログイン"))

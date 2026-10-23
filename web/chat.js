@@ -112,9 +112,9 @@ const STR = {
     privacyShort: "To post, the chat keeps your nickname, a one-way code made from your LINE ID and what you post. Cloudflare stores it outside Taiwan, and LINE (LY Corp) handles sign-in. Posts are public. The full privacy note is under More.",
     privacy: c => [
       ["Who runs the chat", `${c.name} runs this chat. Questions and takedown requests: ${c.email}.`],
-      ["Why", "Your data is used only to run the chat."],
+      ["Why", "Your data is used only to run the chat and the coach."],
       ["What is kept", "Your nickname, a one-way code made from your LINE ID (never the ID itself), your messages, reports and session logs, and your coach reviews with the key frames you send for them. Cloudflare also sees your IP address when you connect."],
-      ["Where, and who handles it", "Cloudflare stores the chat on servers outside Taiwan. LINE (LY Corp) handles sign-in. Messages, reports and shared sessions are public, under your nickname."],
+      ["Where, and who handles it", "Cloudflare stores the chat and the coach on servers outside Taiwan. LINE (LY Corp) handles sign-in. Messages, reports and shared sessions are public, under your nickname. The key frames you send the coach go to Anthropic (USA), the company that makes the AI, to write your review: it doesn't train on them, and deletes them within 30 days, or keeps them for up to 2 years if its safety checks flag them. A person at WaveSlave sees them while checking the coach's draft reviews."],
       ["How long", "Room messages and shared sessions: 30 days. Reports: 1 year, with your nickname taken off after 30 days. Private session logs: until you delete them, or after 2 years without signing in. Coach reviews: the written feedback until you delete it, or after 2 years without signing in; the key frames 30 days after the review. Cloudflare keeps recovery copies for up to 30 days. Anything hidden for child safety, and messages kept as evidence of a broken rule, are kept for 180 days."],
       ["Your rights", `"Download my data" and "Delete my account" are in the chat's menu at any time, or write to ${c.email}.`],
       ["If you don't sign in", "You can still read everything. Signing in is only for posting."]],
@@ -176,9 +176,9 @@ const STR = {
     privacyShort: "要發言，聊天室會保存你的暱稱、由 LINE ID 單向產生的代碼，以及你發表的內容。資料由 Cloudflare 存放在台灣以外的伺服器，登入由 LINE（LY Corp）處理。發言內容是公開的。完整的隱私權說明在「更多」裡。",
     privacy: c => [
       ["誰在營運", `WaveSlave 的台灣浪友聊天室由 ${c.name} 營運。有問題或要求下架內容，請寫信到 ${c.email}。`],
-      ["蒐集目的", "你的資料只用於營運聊天室。"],
+      ["蒐集目的", "你的資料只用於營運聊天室與教練。"],
       ["保存哪些資料", "你的暱稱、由 LINE ID 單向產生的代碼（不會保存 ID 本身），以及你的訊息、回報、衝浪日誌與教練講評，連同你為講評送出的關鍵影格。你連線時，Cloudflare 也會看到你的 IP 位址。"],
-      ["存放地點與經手者", "聊天室的資料由 Cloudflare 存放在台灣以外的伺服器；登入由 LINE（LY Corp）處理。訊息、回報與分享的日誌會以你的暱稱公開。"],
+      ["存放地點與經手者", "聊天室與教練的資料由 Cloudflare 存放在台灣以外的伺服器；登入由 LINE（LY Corp）處理。訊息、回報與分享的日誌會以你的暱稱公開。你傳給教練的關鍵影格會送到開發這個 AI 的美國公司 Anthropic，用來寫你的講評；Anthropic 不會用它們來訓練 AI，並在 30 天內刪除，若被它的安全檢查標記，最多保留 2 年。WaveSlave 的工作人員審閱教練的講評草稿時，也會看到這些關鍵影格。"],
       ["保存多久", "聊天室訊息與分享的日誌：30 天。回報：1 年，30 天後移除你的暱稱。私人日誌：保留到你刪除為止，或 2 年未登入後刪除。教練講評：文字講評保留到你刪除為止，或 2 年未登入後刪除；關鍵影格在講評後 30 天刪除。Cloudflare 的復原備份最多保留 30 天；因兒少安全而隱藏的內容，以及因違反版規而保留為證據的訊息，保留 180 天。"],
       ["你的權利", `你隨時可以在聊天室選單中使用「下載我的資料」或「刪除我的帳號」，也可以寫信到 ${c.email}。`],
       ["不登入的話", "你仍然可以閱讀所有內容，只有發言需要登入。"]],
@@ -240,9 +240,9 @@ const STR = {
     privacyShort: "投稿するには、ニックネーム、LINE IDから一方向に作ったコード、投稿内容をチャットに保存します。データはCloudflareが台湾国外に保存し、ログインはLINE（LY Corp）が扱います。投稿は公開されます。プライバシーについての全文は「詳しく」にあります。",
     privacy: c => [
       ["運営者", `WaveSlaveの台湾チャットは${c.name}が運営しています。お問い合わせ・削除のご依頼は ${c.email} まで。`],
-      ["利用目的", "データはチャットの運営のためだけに使います。"],
+      ["利用目的", "データはチャットとコーチの運営のためだけに使います。"],
       ["保存する情報", "ニックネーム、LINE IDから一方向に作ったコード（ID自体は保存しません）、メッセージ、報告、セッション記録、コーチのレビューと、そのために送ったキーフレーム。接続時にはCloudflareがIPアドレスを受け取ります。"],
-      ["保存場所と取り扱う事業者", "チャットのデータはCloudflareが台湾国外のサーバーに保存します。ログインはLINE（LY Corp）が扱います。メッセージ・報告・共有したセッションはニックネームとともに公開されます。"],
+      ["保存場所と取り扱う事業者", "チャットとコーチのデータはCloudflareが台湾国外のサーバーに保存します。ログインはLINE（LY Corp）が扱います。メッセージ・報告・共有したセッションはニックネームとともに公開されます。コーチに送ったキーフレームは、レビューを書くため、AIを開発する米国のAnthropicに送られます。Anthropicはそれを学習に使わず、30日以内に削除します（安全チェックで問題があるとされた場合は最長2年間保存）。WaveSlaveのスタッフも、コーチのレビューの下書きを確認する際にキーフレームを見ます。"],
       ["保存期間", "ルームのメッセージと共有したセッション：30日。報告：1年（30日後にニックネームを外します）。非公開のセッション記録：削除するまで、または2年間ログインがないと削除。コーチのレビュー：文章は削除するまで、または2年間ログインがないと削除。キーフレームはレビューの30日後に削除。Cloudflareの復旧用コピーは最長30日、子どもの安全のため非表示にした内容と、ルール違反の証拠として保存したメッセージは180日保存されます。"],
       ["あなたの権利", `チャットのメニューの「データをダウンロード」と「アカウントを削除」はいつでも使えます。${c.email} への連絡もできます。`],
       ["ログインしない場合", "すべて閲覧できます。ログインが必要なのは投稿だけです。"]],
@@ -973,10 +973,11 @@ document.addEventListener("visibilitychange", guard(() => {
   if (document.visibilityState === "hidden") sock.awayT = setTimeout(guard(() => { if (document.visibilityState === "hidden" && R.open) { stopSocket(); setState("away"); } }), AWAY_MS);
   else { if (!tokenMoved()) check(); markSeen(); drawBar(); }
 }));
-// Back on the page with a sign-in for the coach still waiting and no token (the home-screen app's way: LINE finished it in Safari, which
-// shows the pin), the room opens over the Coach panel for its code box.
+// Back on the page with a sign-in for the coach still waiting, no token, and the Coach panel open (the home-screen app's way: LINE
+// finished it in Safari, which shows the pin), the room opens over the panel for its code box. With the panel shut, or in another tab,
+// nothing opens.
 document.addEventListener("visibilitychange", guard(() => {
-  if (document.visibilityState === "visible" && !R.open && on() && pendingThen() && !signedIn()) enter({}); }));
+  if (document.visibilityState === "visible" && !R.open && on() && document.documentElement.classList.contains("coach-open") && pendingThen() && !signedIn()) enter({}); }));
 addEventListener("storage", guard(e => { if (e.key === KEYS.token || e.key === null) { if (!tokenMoved() && R.built) drawBar(); } }));
 addEventListener("offline", guard(() => { if (R.open && sock.ws) { stopSocket(); lost(1006); } }));
 addEventListener("online", guard(() => { if (R.open && R.state !== "update") { sock.tries = 0; connect(); } }));
@@ -1012,9 +1013,11 @@ function pendingV() {
 // What this page's waiting sign-in is for: "coach" when the Coach panel started it, else null. Read before v is let go.
 function pendingThen() { try { const o = JSON.parse(load(KEYS.v) || "null"); return pendingV() && o.then === "coach" ? "coach" : null; } catch (e) { return null; } }
 // Back from LINE (at start-up, or once developer mode comes on): a sign-in for the coach finishes without the room; any other opens it.
-function arrive(o) { if (o.signin && pendingThen()) finishSignin(o.signin); else enter(o); }
-// A sign-in for the coach that needs the surfer: the room opens first, over the Coach panel.
-function roomFor(then) { if (then && !R.open) enter({}); }
+function arrive(o) { if (o.signin && pendingThen()) { if (HOOK.signin) HOOK.signin(o.signin); } else enter(o); }
+// A sign-in for the coach that needs the surfer: the room opens first, over the Coach panel, which opens under it (at start-up, once
+// coach.js has started), so shutting the room lands on the panel.
+function roomFor(then) { if (!then || R.open) return; coachOpen(); enter({}); }
+const coachOpen = () => { if (window.COACH && typeof window.COACH.open === "function") window.COACH.open(); };
 // then: "coach" from CHAT.signIn("coach"), kept with v; nothing for the room's own LINE button.
 async function login(then) {
   const subtle = window.crypto && crypto.subtle; if (!subtle) { roomFor(then); return note(S("loginFailed"), true); }
@@ -1062,7 +1065,7 @@ function signedInAs(token, then) {
   save(KEYS.token, token); save(KEYS.v, null); R.pinErr = null;
   if (R.sheet && (R.sheet.name === "signup" || R.sheet.name === "pin")) closeSheet();
   drawAll();
-  if (then === "coach") { closeRoom(); if (window.COACH && typeof window.COACH.open === "function") window.COACH.open(); return; }
+  if (then === "coach") { closeRoom(); coachOpen(); return; }
   note(S("signedIn"));
   if (R.open) { sock.tries = 0; connect(); }
 }
@@ -1538,8 +1541,9 @@ window.CHAT = {
   relang: guard(() => { draw(); drawAll(); }),
   dev: guard(() => showChat()),
   // The coach's hooks (web/coach.js), which signs in through the chat: signIn("coach") is the Coach panel's Sign in with LINE, back to the
-  // panel; token() is the session token or null, and token(old), for the token that just got a 401, signs out quietly and answers null.
-  signIn: guard(then => { if (on()) login(then === "coach" ? then : null); }),
+  // panel (anything else starts nothing); token() is the session token or null, and token(old), for the token that just got a 401, signs
+  // out quietly and answers null.
+  signIn: guard(then => { if (then === "coach" && on()) login(then); }),
   token: guard(old => { refused(old); return load(KEYS.token); }),
 };
 if (TEST) Object.assign(window.CHAT, { _opened: TEST, _strings: STR, _snap: snapshot });

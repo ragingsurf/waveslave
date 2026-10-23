@@ -17,7 +17,7 @@
 //   onFlag, flagger()          the report button, and when a flag counts (spec "Moderation", step 4)
 //   onAdmin                    Bryan's claim to the admin role (step 7)
 //   onBan ... onHiddenList     Bryan's tools (step 5), plus his Delete in onDelete
-//   where                      GET /admin/where: which Cloudflare data centre the room lives in
+//   where                      GET /admin/where: which Cloudflare data centres the room and the coach live in
 //   mySessions ... deleteAccount   the /me routes: the surf diary, the user's own data, and deleting the account
 //   shareSession, onShare      a log from the diary as a session card in the room, and out of it again (onUnshare)
 //   rest()                     the free-plan guard: past 90% of a daily limit the chat rests until 00:00 UTC
@@ -30,7 +30,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { hmacB64u, pin6, randomB64u, readToken, sameText, sha256b64u, signToken, subHash } from "./auth.js";
 import { blocked, checkNick, normalise, REASONS, SPOTS, validReport, validSession } from "./mod.js";
-import { coach } from "./stubs.js";
+import { coach, colo } from "./stubs.js";
 import BLOCKLIST from "../blocklist.json";
 
 const SECOND = 1000;
@@ -184,8 +184,6 @@ const CLAIM_TRIES_ALL = 10; // ...and wrong codes in all that stop everyone, unt
 // "/admin <code>" as typed, with either slash, in front of the code in an admin frame; and any slash command.
 const ADMIN_COMMAND = /^[/／]admin\s+/iu;
 const SLASH = /^[/／]/u;
-const TRACE_URL = "https://www.cloudflare.com/cdn-cgi/trace"; // Cloudflare's own page, which says where it was served
-const COLO = /^colo=[A-Z]{3}$/;
 
 // A message's columns as the room reads them to send it out (toPublic()).
 const MSG_COLS = "id, ts, uid, kind, spot, body, reply_to, likes";
@@ -1652,22 +1650,29 @@ export class Room extends DurableObject {
     });
   }
 
-  // GET /admin/where (Bryan only): where the room lives. It asks Cloudflare's trace page, served by the data centre the
-  // room runs in, and answers its colo= line as text ("colo=NRT"), and nothing else from it. 401 {error: "auth"}
-  // without a good token, 403 {error: "admin"} for anyone but Bryan, and 502 {error: "trace"} when the page can't be
-  // read.
+  // GET /admin/where (Bryan only): where the room and the coach live, as two lines of text, "room colo=NRT" and
+  // "coach colo=KIX" (AI coach spec, "Placement"; ruling R4). Each asks Cloudflare's trace page from where it runs
+  // (colo() in stubs.js). When the coach can't say (it is down, or its trace failed), its line is "coach colo=?", and
+  // the room's still shows. 401 {error: "auth"} without a good token, 403 {error: "admin"} for anyone but Bryan, and
+  // 502 {error: "trace"} when the room's own trace can't be read, without asking the coach.
   async where(request) {
     const user = await this.userFromToken(bearer(request));
     if (!user) return refuse(401, "auth");
     if (user.role !== "admin") return refuse(403, "admin");
+    let line = null;
     try {
-      const res = await fetch(TRACE_URL);
-      const line = res.ok ? (await res.text()).split("\n").map((l) => l.trim()).find((l) => COLO.test(l)) : undefined;
-      if (line) return new Response(`${line}\n`, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+      line = await colo();
     } catch (err) {
       console.error("chat: the trace failed:", err?.name ?? "error");
     }
-    return refuse(502, "trace");
+    if (!line) return refuse(502, "trace");
+    let coachLine = "colo=?";
+    try {
+      coachLine = await this.coachStub().where();
+    } catch (err) {
+      console.error("chat: the coach's where failed:", err?.name ?? "error");
+    }
+    return new Response(`room ${line}\ncoach ${coachLine}\n`, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }
 
   // Stores a new message from `user` and sends it to every socket as msg.

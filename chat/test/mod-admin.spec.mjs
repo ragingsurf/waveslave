@@ -9,11 +9,13 @@
 // As in socket.spec.mjs, each test opens its sockets on a room of its own, straight on the room's /r/ws, and writes
 // accounts and messages straight into the room's tables, with session tokens signed by the test secret. The room's
 // clock stands at T. Two tests go through the Worker to the real "taiwan" room: signing in with LINE after a ban, and
-// /admin/where. Their accounts are new ones each time, and they close their sockets again.
+// /admin/where. Their accounts are new ones each time, and they close their sockets again. /admin/where also asks the
+// real "taiwan" coach where it lives (coach.spec.mjs covers the coach's half), with its clock at T.
 import { evictDurableObject, runInDurableObject, SELF } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { b64u, hmacB64u, randomB64u, sha256b64u, signToken, subHash } from "../src/auth.js";
+import { coach } from "../src/stubs.js";
 import {
   DAY, HOUR, MIN, SEC, addMessages, addUser, all, closeClients, connect, hex, insertUser, join, newRoom, nextError, ofType, say,
   settle, synced, take, until,
@@ -872,8 +874,14 @@ function mockTrace(answer = () => new Response(TRACE)) {
 
 const where = (stub, token) => stub.fetch("https://room/r/where", { headers: token ? { Authorization: `Bearer ${token}` } : {} });
 
+// The taiwan coach, which the room's where() asks through coachStub(), with its clock at T.
+const coachAtT = () => runInDurableObject(coach(env), (c) => {
+  c.now = () => T;
+});
+
 describe("GET /admin/where", () => {
-  it("with Bryan's token answers the colo= line of Cloudflare's trace and nothing else; anyone else's gets 403", async () => {
+  it("with Bryan's token answers the room's and the coach's colo= lines of Cloudflare's trace and nothing else; anyone else's gets 403", async () => {
+    await coachAtT();
     const r = await freshRoom(Date.now());
     const bryan = await addUser(r, { role: "admin" });
     const a = await addUser(r);
@@ -881,8 +889,9 @@ describe("GET /admin/where", () => {
     const res = await where(r.stub, bryan.token);
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toMatch(/^text\/plain/);
-    expect(await res.text()).toBe("colo=NRT\n");
-    expect(asked).toEqual([TRACE_URL]);
+    expect(await res.text()).toBe("room colo=NRT\ncoach colo=NRT\n");
+    // One trace for the room, and one the coach asked for itself.
+    expect(asked).toEqual([TRACE_URL, TRACE_URL]);
     const theirs = await where(r.stub, a.token);
     expect(theirs.status).toBe(403);
     expect(await theirs.json()).toEqual({ error: "admin" });
@@ -891,19 +900,53 @@ describe("GET /admin/where", () => {
       expect(res2.status).toBe(401);
       expect(await res2.json()).toEqual({ error: "auth" });
     }
-    expect(asked).toHaveLength(1);
+    expect(asked).toHaveLength(2);
   });
 
-  it("answers 502 when the trace can't be read", async () => {
+  it("answers coach colo=? when the coach can't say where it is, logging only the error's name", async () => {
+    await coachAtT();
     const r = await freshRoom(Date.now());
     const bryan = await addUser(r, { role: "admin" });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    // The coach's where() throws...
+    mockTrace();
+    await r.inRoom((room) => {
+      room.coachStub = () => ({
+        where: async () => {
+          throw new Error("the coach is down, token abc");
+        },
+      });
+    });
+    const res = await where(r.stub, bryan.token);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("room colo=NRT\ncoach colo=?\n");
+    expect(logged.mock.calls).toEqual([["chat: the coach's where failed:", "Error"]]);
+    // ...or the real coach's trace can't be read: the room's is asked first, then the coach's.
+    await r.inRoom((room) => {
+      delete room.coachStub;
+    });
+    vi.mocked(globalThis.fetch).mockRestore();
+    let n = 0;
+    const asked = mockTrace(() => (++n === 1 ? new Response(TRACE) : new Response("oops", { status: 500 })));
+    const res2 = await where(r.stub, bryan.token);
+    expect(await res2.text()).toBe("room colo=NRT\ncoach colo=?\n");
+    expect(asked).toHaveLength(2);
+    expect(logged).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers 502 when the room's trace can't be read, without asking the coach", async () => {
+    const r = await freshRoom(Date.now());
+    const bryan = await addUser(r, { role: "admin" });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     for (const answer of [() => new Response("oops", { status: 500 }), () => new Response("fl=1\nh=x\n"), () => Promise.reject(new TypeError("network"))]) {
-      mockTrace(answer);
+      const asked = mockTrace(answer);
       const res = await where(r.stub, bryan.token);
       expect(res.status).toBe(502);
       expect(await res.json()).toEqual({ error: "trace" });
-      vi.restoreAllMocks();
+      expect(asked).toHaveLength(1);
+      vi.mocked(globalThis.fetch).mockRestore();
     }
+    expect(logged.mock.calls).toEqual([["chat: the trace failed:", "TypeError"]]);
   });
 });
 
@@ -971,13 +1014,15 @@ describe("through the Worker, on the taiwan room", () => {
     await until(() => runInDurableObject(taiwan, (room) => room.online() === 0), "the taiwan room to see the close");
   });
 
-  it("GET /admin/where with Bryan's token returns the colo= line; with anyone else's, 403", async () => {
+  it("GET /admin/where with Bryan's token returns the room's and the coach's colo= lines; with anyone else's, 403", async () => {
+    await coachAtT();
     const bryan = await taiwanUser(`U${hex(16)}`, "admin");
     const other = await taiwanUser(`U${hex(16)}`);
-    mockTrace();
+    const asked = mockTrace();
     const res = await SELF.fetch(`${BASE}/admin/where`, { headers: { Authorization: `Bearer ${bryan.token}` } });
     expect(res.status).toBe(200);
-    expect(await res.text()).toBe("colo=NRT\n");
+    expect(await res.text()).toBe("room colo=NRT\ncoach colo=NRT\n");
+    expect(asked).toEqual([TRACE_URL, TRACE_URL]);
     expect(res.headers.get("Cache-Control")).toBe("no-store");
     const theirs = await SELF.fetch(`${BASE}/admin/where`, { headers: { Authorization: `Bearer ${other.token}` } });
     expect(theirs.status).toBe(403);

@@ -1,6 +1,6 @@
-// The stubs of the chat's two Durable Objects (AI coach spec, "Backend"; ruling R1). Everything that reaches the room
-// or the coach makes its stub here: the Worker for each request, the room through coachStub() and Coach through
-// roomStub(), which tests replace as they replace now().
+// The stubs of the chat's two Durable Objects (AI coach spec, "Backend"; ruling R1), and where each one lives.
+// Everything that reaches the room or the coach makes its stub here: the Worker for each request, the room through
+// coachStub() and Coach through roomStub(), which tests replace as they replace now().
 //
 // Only the first call that creates an object places it, so a stub made without the hint could put it somewhere else.
 // Each object is one of a kind, found by name.
@@ -16,3 +16,15 @@ export const COACH_NAME = "taiwan";
 export const room = (env) => env.ROOM.getByName("taiwan", HINT);
 
 export const coach = (env) => env.COACH.getByName(COACH_NAME, HINT);
+
+// Where the code calling this runs, for GET /admin/where: the colo= line of Cloudflare's trace page, which the data
+// centre the request leaves from serves ("colo=NRT"), and nothing else from it. null when the page answers with an
+// error or holds no such line; a network error is thrown, for the caller to log as its own.
+const TRACE_URL = "https://www.cloudflare.com/cdn-cgi/trace";
+const COLO = /^colo=[A-Z]{3}$/;
+
+export async function colo() {
+  const res = await fetch(TRACE_URL);
+  if (!res.ok) return null;
+  return (await res.text()).split("\n").map((l) => l.trim()).find((l) => COLO.test(l)) ?? null;
+}

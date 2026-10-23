@@ -1,5 +1,5 @@
-# Taiwan chat backend: one Worker in front of one Durable Object. The design is in
-# docs/superpowers/specs/2026-10-21-taiwan-chat-design.md.
+# Taiwan chat backend: one Worker in front of two Durable Objects, the chat's room and the AI coach. The designs are in
+# docs/superpowers/specs/2026-10-21-taiwan-chat-design.md and docs/superpowers/specs/2026-10-22-ai-coach-design.md.
 name = "waveslave-chat"
 main = "src/index.js"
 # Pinned on purpose: a newer date could change how the runtime behaves under us.
@@ -12,16 +12,49 @@ workers_dev = true
 name = "ROOM"
 class_name = "Room"
 
-# SQLite storage is the only kind on the free plan. Later class changes add new [[migrations]] entries.
+# The AI coach: its reviews, key frames and AI calls. Reached through env.COACH.getByName("taiwan",
+# {locationHint: "apac-ne"}) (src/stubs.js).
+[[durable_objects.bindings]]
+name = "COACH"
+class_name = "Coach"
+
+# SQLite storage is the only kind on the free plan. Later class changes add new [[migrations]] entries. Migrations only
+# go forward: once v2 has run, Coach can't be removed without a new migration that deletes it.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room"]
 
-# The five secrets (LINE_CHANNEL_ID, LINE_CHANNEL_SECRET, SESSION_SECRET, SUB_PEPPER, ADMIN_CODE) are
-# never listed here. The deploy workflow sets them; `wrangler dev` reads them from .dev.vars, which is not committed,
-# and the Vitest tests use stand-in values from vitest.config.mjs.
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Coach"]
+
+# The five secrets (LINE_CHANNEL_ID, LINE_CHANNEL_SECRET, SESSION_SECRET, SUB_PEPPER, ADMIN_CODE), and the coach's two
+# (ANTHROPIC_API_KEY, RESEND_API_KEY), are never listed here. The deploy workflow sets them; `wrangler dev` reads them
+# from .dev.vars, which is not committed, and the Vitest tests use stand-in values from vitest.config.mjs.
 [vars]
 APP_URL = "https://waveslave.tw/"
 ALLOWED_ORIGINS = "https://waveslave.tw"
 LINE_AUTH_URL = "https://access.line.me/oauth2/v2.1/authorize"
 LINE_TOKEN_URL = "https://api.line.me/oauth2/v2.1/token"
+
+# The coach (AI coach spec, "Backend"). Prices are US$ per million tokens. The coach stops new reviews and Redo at
+# COACH_STOP_USD + COACH_EXTRA_USD spent in a credit month, and makes no more AI calls at COACH_HARD_USD + COACH_EXTRA_USD.
+# The credit month starts on COACH_CREDIT_DAY at 08:00 Taiwan time: Bryan's Max plan renews on the 16th (Bryan, Oct 23).
+# A surfer gets COACH_MONTHLY reviews a Taiwan month, and sends COACH_MONTHLY_MAX at most, counting the ones given back;
+# the coach takes COACH_DAILY reviews a Taiwan day, COACH_DAILY_AUTO on autopilot. COACH_ALERT_TO gets the emails.
+COACH_MODEL = "claude-opus-5-5"
+COACH_PRICE_IN = "4"
+COACH_PRICE_OUT = "20"
+COACH_STOP_USD = "78"
+COACH_HARD_USD = "80"
+COACH_EXTRA_USD = "0"
+COACH_CREDIT_DAY = "16"
+COACH_MONTHLY = "2"
+COACH_MONTHLY_MAX = "4"
+COACH_DAILY = "10"
+COACH_DAILY_AUTO = "40"
+COACH_ALERT_TO = "waveslave050@gmail.com"
+# Where the coach's AI calls and emails go. They are here, not in the code, so the tests can point them at fakes, as
+# they do LINE_TOKEN_URL (ruling R7).
+COACH_API_URL = "https://api.anthropic.com/v1/messages"
+COACH_MAIL_URL = "https://api.resend.com/emails"

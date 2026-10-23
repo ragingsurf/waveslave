@@ -1,5 +1,5 @@
 // Helpers for the Worker tests that work on a room of their own and open sockets on it: socket.spec.mjs,
-// mod-admin.spec.mjs and me.spec.mjs. Each test gets a room of its own, calls it straight on its /r/ routes the way the
+// mod-admin.spec.mjs and me.spec.mjs; and newCoach(), for the coach's tests. Each test gets a room of its own, calls it straight on its /r/ routes the way the
 // Worker passes the app's requests on (worker.spec.mjs covers the Worker's part), and writes accounts and messages
 // straight into its tables, with session tokens signed by the test secret.
 //
@@ -52,6 +52,22 @@ export async function newRoom(name, at) {
   const inRoom = (fn) => runInDurableObject(stub, fn);
   const rows = (query, ...binds) => inRoom((room) => room.sql.exec(query, ...binds).toArray());
   return { stub, clock, inRoom, rows, now: () => clock.t ?? Date.now() };
+}
+
+// A coach of its own, named "<name>-<random>", for the coach's tests, shaped like newRoom(). Its clock (coach.now)
+// stands at `at` until the test moves clock.t. `at` must be in 2030 or later, so no alarm a test sets goes off by itself
+// mid-test. Returns {stub, clock, inCoach, rows}: inCoach runs fn on the coach object, and rows runs a query on its
+// storage.
+export async function newCoach(name, at) {
+  if (!(at >= Date.UTC(2030, 0, 1))) throw new Error("newCoach: give the coach a clock in 2030 or later");
+  const stub = env.COACH.getByName(`${name}-${crypto.randomUUID()}`, { locationHint: "apac-ne" });
+  const clock = { t: at };
+  await runInDurableObject(stub, (coach) => {
+    coach.now = () => clock.t;
+  });
+  const inCoach = (fn) => runInDurableObject(stub, fn);
+  const rows = (query, ...binds) => inCoach((coach) => coach.sql.exec(query, ...binds).toArray());
+  return { stub, clock, inCoach, rows };
 }
 
 // Writes one account into a room's tables (room is the room object, inside runInDurableObject): user is {id, sub, nick},

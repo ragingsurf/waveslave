@@ -11,7 +11,7 @@
 //   POST /auth/signup         ->  /r/signup
 //   GET, POST /me/sessions; DELETE /me/sessions/<id>; POST /me/signout; GET /me/export; DELETE /me
 //                             ->  the same path under /r (the Authorization header goes through)
-//   GET  /admin/where         ->  /r/where
+//   GET  /admin/where         ->  /r/where (the room asks the coach for its line too)
 //
 // /reports is open to every page. The rest answer only our own pages, and /auth/..., /me/... and /admin/... are never
 // cached.
@@ -28,6 +28,8 @@
 // look like a code, "start" (a bad h), "state" (an unknown, used or stale sign-in), "token" (LINE's answer didn't
 // check out), "banned", or "resting" (the room couldn't answer, or is resting near the free plan's daily limits).
 export { Room } from "./room.js";
+// The AI coach's Durable Object (AI coach spec, "Backend"), bound as COACH in wrangler.toml.
+export { Coach } from "./coach.js";
 import { verifyLineIdToken } from "./auth.js";
 import { SPOTS } from "./mod.js";
 // One room for all of Taiwan (Bryan, Oct 21). Every route reaches it through room(env), with its location hint.

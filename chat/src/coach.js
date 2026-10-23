@@ -24,13 +24,23 @@
 //   where()                    the second line of GET /admin/where: which Cloudflare data centre the coach lives in
 //   roomStub()                 the room's stub (stubs.js), which tests replace
 //   alarmBy(at)                makes sure the coach's one alarm goes off by `at`
+//   alarm()                    the one alarm: one review's AI call a run (spec "Backend", steps 1-7)
+//   nextAlarmAt(now)           when the alarm should next go off
+//   callsHeld(now)             whether Pause, a stop or a money rest holds every AI call
+//   requestFor, callAi         a review's Messages API request, and the call itself
+//   setPaused, startAgain      Bryan's Pause, and Start again after the coach stopped itself (ruling R10)
 //
 // Times are epoch milliseconds. Nothing reaches the coach but RPC calls from the Worker and the room, and its alarm.
 // Every route answers {status, json}, or {status, jpeg: Uint8Array} for a key frame.
 import { DurableObject } from "cloudflare:workers";
-import { randomB64u } from "./auth.js";
-import { AGREE_VER, BOARDS, LANGS, LEVELS, MOVES, STANCES } from "./coach-guide.js";
-import { checkFrame, creditMonth, nextTwMonth, twDay, twMonth } from "./coach-rules.js";
+import { randomB64u, sha256b64u } from "./auth.js";
+import {
+  AGREE_VER, BOARDS, LANGS, LEVELS, MOVES, STANCES, autopilotOk, buildRequest, checkReply, readReply,
+} from "./coach-guide.js";
+import {
+  ATTEMPT_WAITS, CALLING_STALE, MAX_TRIES, MAX_WAITS, checkFrame, cleanupAfter, costUsd, creditMonth, estimateIn,
+  nextTwMonth, sortError, twDay, twMonth, waitFor, worstUsd,
+} from "./coach-rules.js";
 import { colo, room } from "./stubs.js";
 
 // The schema this code expects. A change to the tables bumps it and adds a step to migrate(), which brings the coach up
@@ -279,6 +289,17 @@ const noteFor = (review) => (review.hold ? "not_surf" : review.surfer_note ?? nu
 // The reviews columns that hold JSON (SCHEMA_V1), read back as values for the admin.
 const JSON_COLUMNS = Object.freeze(["answers", "draft", "english", "final", "flags", "warnings", "redo_note"]);
 const fromJson = (text) => (text === null ? null : JSON.parse(text));
+
+// ---- The AI call --------------------------------------------------------------------------------------------------
+
+// The Messages API call (spec "The AI request"): the API version it is written for, room for the model's thinking as
+// well as the reply, and a 10-minute timeout, inside the 15 minutes an alarm run may take.
+const API_VERSION = "2026-10-21";
+const MAX_TOKENS = 16_000;
+const CALL_TIMEOUT = 600_000;
+// The reviews columns that record a call that answered, in the order answered() lists them: the model named in the
+// answer, its tokens in and out, and its cost in US$.
+const CALL_SET = "model = ?, tok_in = ?, tok_out = ?, cost = ?";
 
 // A key frame's base64 text as its JPEG's bytes. checkFrame() let only plain base64 in.
 function fromBase64(text) {
@@ -768,5 +789,275 @@ export class Coach extends DurableObject {
   async alarmBy(at) {
     const set = await this.ctx.storage.getAlarm();
     if (set === null || set > at) await this.ctx.storage.setAlarm(at);
+  }
+
+  // The one alarm (spec "Backend", steps 1-7): one review's AI call a run, never in a surfer's request, as a run may
+  // take 15 minutes. Whatever happened, the run counts itself as a request, the usage counts are saved, and the alarm
+  // is set for the next thing due (nextAlarmAt), as the room's alarm does.
+  async alarm() {
+    try {
+      await this.runOne(this.now());
+    } finally {
+      try {
+        // Counted last, so the save covers the rows the run itself read and wrote. usage() may have saved already.
+        this.usage("req");
+        if (this.unsaved > 0) this.saveUsage();
+      } finally {
+        await this.ctx.storage.setAlarm(this.nextAlarmAt(this.now()));
+      }
+    }
+  }
+
+  // One run: the oldest review due is taken, the room is asked whether its account is banned, then the AI is called
+  // and what came back is saved (settle). A money rest past its end is over first, so the reviews waiting on it go.
+  async runOne(now) {
+    const rest = this.getMeta("rest");
+    if (rest && now >= rest.until) this.setMeta("rest", null);
+    if (this.callsHeld(now)) return;
+    const review = this.takeNext(now);
+    if (!review) return;
+    let banned, userId;
+    try {
+      [banned, userId] = await Promise.all([
+        this.roomStub().isBanned(review.sub_hash),
+        sha256b64u("coach:" + review.sub_hash),
+      ]);
+    } catch (err) {
+      // It stays calling, so the alarm comes back for it at its 16-minute mark.
+      console.error("coach: the room's ban check failed:", err?.name ?? "error");
+      return;
+    }
+    // Everything is looked at again after that await, and there is none from here to the call: the review may have
+    // gone, or Bryan paused, meanwhile.
+    if (!this.stillCalling(review)) return;
+    if (banned) return this.skipBanned(review);
+    if (this.callsHeld(this.now())) return this.putBack(review);
+    const ask = this.requestFor(review, userId);
+    this.settle(review, ask, await this.callAi(ask.body));
+  }
+
+  // Whether every AI call waits now: while stopFor() says "break" (Pause, the coach stopped itself, no API key, the
+  // free-plan or the size guard), or a money rest holds. The money stop at COACH_STOP_USD + COACH_EXTRA_USD refuses only
+  // new reviews and Redo: the reviews already sent are still called. (The money limits add the hard stop, and a credit
+  // rest's probe every 6 hours.)
+  callsHeld(now) {
+    const stop = this.stopFor(now);
+    return stop !== null && (stop.kind === "break" || this.getMeta("rest") !== null);
+  }
+
+  // When the alarm should next go off (spec step 7), never before now: the earliest of the next review's next_try (a
+  // queued one's, or a calling one's 16-minute mark), the next daily clean-up (04:00 Taiwan), the hourly email (ruling
+  // R9), and a money rest's next probe and its end. While callsHeld() no review counts, so Pause and a stop wake
+  // nothing, and lifting them brings the alarm back (setPaused, startAgain). Each time here must be moved on by the run
+  // it wakes, or the alarm would go off again at once.
+  nextAlarmAt(now) {
+    const rest = this.getMeta("rest");
+    const times = [this.getMeta("next_cleanup") ?? cleanupAfter(now), this.getMeta("digest_due"), rest?.until, rest?.probe_at];
+    if (!this.callsHeld(now)) {
+      times.push(this.one("SELECT min(next_try) AS at FROM reviews WHERE status IN ('queued', 'calling')").at);
+    }
+    return Math.max(now, Math.min(...times.filter(Number.isFinite)));
+  }
+
+  // The next review to call, marked calling with next_try at its 16-minute mark (spec step 2): of those queued and due,
+  // or left calling past their mark (a deploy can stop a call midway), the one sent first. null when none is due.
+  takeNext(now) {
+    return this.one(
+      `UPDATE reviews SET status = 'calling', next_try = ? WHERE id = (
+         SELECT id FROM reviews WHERE status IN ('queued', 'calling') AND next_try <= ? ORDER BY sent, id LIMIT 1)
+       RETURNING *`,
+      now + CALLING_STALE, now,
+    );
+  }
+
+  // Whether a review taken by takeNext() is still calling for the redo number it was taken with (spec step 3).
+  stillCalling(review) {
+    return this.one("SELECT 1 FROM reviews WHERE id = ? AND status = 'calling' AND redos = ?", review.id, review.redos) !== null;
+  }
+
+  // Saves what became of a call, only while its review is still calling for the same redo number (spec step 3), so an
+  // alarm that ran twice saves once, and a review deleted, banned or sent back for a Redo meanwhile gets nothing. `set`
+  // is the SET clause, with its values in `binds`. True when it saved.
+  saveCall(review, set, ...binds) {
+    const saved = this.one(
+      `UPDATE reviews SET ${set} WHERE id = ? AND status = 'calling' AND redos = ? RETURNING id`,
+      ...binds, review.id, review.redos,
+    );
+    return saved !== null;
+  }
+
+  // The Messages API request for a review (spec "The AI request"; buildRequest): its key frames; the surfer's answers;
+  // the published text of the account's last 2 reviews of this move, for progress; the 3 newest of Bryan's examples for
+  // the move, leaving out this review's own, as a Redo's note reaches the coach through `redo` only; and on a Redo, the
+  // draft it redoes with Bryan's notes. `userId` is the account's opaque hash for metadata.user_id. Returns {body, nums:
+  // the key frames' numbers, hadHistory, estIn: the tokens it sends, as estimateIn() reckons them}.
+  requestFor(review, userId) {
+    const frames = this.all("SELECT n, ms, b64 FROM frames WHERE review_id = ? AND b64 IS NOT NULL ORDER BY n", review.id);
+    const history = this.all(
+      `SELECT published AS at, final FROM reviews WHERE sub_hash = ? AND move = ? AND status = 'published'
+       ORDER BY published DESC LIMIT 2`,
+      review.sub_hash, review.move,
+    ).map((h) => ({ at: h.at, final: fromJson(h.final) }));
+    const examples = this.all(
+      "SELECT draft, bryan, note FROM examples WHERE move = ? AND review_id IS NOT ? ORDER BY at DESC, id DESC LIMIT 3",
+      review.move, review.id,
+    ).map((e) => ({ draft: fromJson(e.draft), bryan: fromJson(e.bryan), note: e.note }));
+    const redo = review.redos > 0 ? { draft: fromJson(review.draft), notes: fromJson(review.redo_note) } : null;
+    const body = buildRequest({
+      model: this.env.COACH_MODEL, maxTokens: MAX_TOKENS, lang: review.lang, answers: JSON.parse(review.answers), frames,
+      history, examples, userId, redo,
+    });
+    const text = [body.system, ...body.messages[0].content.map((block) => block.text ?? "")].join("");
+    return { body, nums: frames.map((f) => f.n), hadHistory: history.length > 0, estIn: estimateIn(frames.length, text.length) };
+  }
+
+  // One call to the Messages API with a request body, not streaming, with a 10-minute timeout (spec "The AI request"):
+  // {kind: "ok", message}, the answer, or {kind, retryAfter}, what sortError() makes of the error and the answer's
+  // retry-after header. A network error, the timeout or an answer that isn't JSON is "attempt" (sortError() would take a
+  // missing answer for "fail"). The alarm never calls it without an API key (stopFor).
+  async callAi(body) {
+    try {
+      const res = await fetch(this.env.COACH_API_URL, {
+        method: "POST",
+        headers: {
+          "x-api-key": String(this.env.ANTHROPIC_API_KEY).trim(),
+          "anthropic-version": API_VERSION,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(CALL_TIMEOUT),
+      });
+      if (res.ok) return { kind: "ok", message: await res.json() };
+      return { kind: sortError(res.status, await res.text()), retryAfter: res.headers.get("retry-after") };
+    } catch (err) {
+      console.error("coach: the AI call failed:", err?.name ?? "error");
+      return { kind: "attempt", retryAfter: null };
+    }
+  }
+
+  // What became of a call (spec steps 4-6 and "Money"), each saved with saveCall(). An answer is checked (answered());
+  // an error goes by its kind:
+  //   "wait"      a 429 or 529: it waits for retry-after, or 30 minutes, with no attempt used; the 12th wait counts as one
+  //   "attempt"   a 5xx, a timeout or a network error
+  //   "fail"      any other 400, or a 413: the coach gives up on it at once
+  //   "pause", "credit", "limit"   the key, the model or the money, not this review's fault
+  settle(review, ask, result) {
+    const now = this.now();
+    if (result.kind === "ok") return this.answered(review, ask, readReply(result.message), now);
+    if (result.kind === "wait") return this.waited(review, waitFor(result.retryAfter), now);
+    if (result.kind === "attempt") return this.attempted(review, now);
+    if (result.kind === "fail") return this.gaveUp(review, review.attempts + 1);
+    // The review goes back in the queue with no attempt used. The money limits add what each kind starts: "pause"
+    // stops the coach (ruling R10), "credit" and "limit" a money rest.
+    return this.putBack(review, now);
+  }
+
+  // An answer, checked in the spec's order. A refusal or a flag first, as a reply of any shape may carry one (ruling
+  // R16); then a reply cut off or failing a check counts an attempt; then a clip that isn't surfing is held for Bryan
+  // (ruling R16); and the rest is a draft, published at once on autopilot when autopilotOk(). The call's model, tokens
+  // and cost are saved with what it gave.
+  answered(review, ask, { reply, stop, usage, model }, now) {
+    const call = [model, usage?.input_tokens ?? null, usage?.output_tokens ?? null, this.callCost(usage, ask.estIn)];
+    if (stop === "refusal") return this.flagged(review, ["refusal"], [], call);
+    const checked = checkReply(reply, { sentNums: ask.nums, hadHistory: ask.hadHistory, lang: review.lang });
+    if (checked.flags.length > 0) return this.flagged(review, checked.flags, checked.warnings, call);
+    if (checked.errors.length > 0) return this.attempted(review, now);
+    // A 中文 review's English copy, for Bryan, has a column of its own.
+    const { english = null, ...draft } = reply;
+    const saved = [
+      JSON.stringify(draft), english === null ? null : JSON.stringify(english), JSON.stringify(checked.warnings), ...call,
+    ];
+    const set = `next_try = NULL, draft = ?, english = ?, warnings = ?, flags = '[]', ${CALL_SET}`;
+    if (!reply.is_surf_clip) {
+      // Not published, and held for Bryan, who may give it back or ban the account. Its key frames stay for him.
+      this.saveCall(review, `status = 'rejected', hold = 1, ${set}`, ...saved);
+    } else if (this.getMeta("autopilot") && autopilotOk(reply, checked)) {
+      this.saveCall(review, `status = 'published', published = ?, final = ?, checked = 0, ${set}`, now, saved[0], ...saved);
+    } else {
+      this.saveCall(review, `status = 'drafted', ${set}`, ...saved);
+    }
+  }
+
+  // A refusal, or a reply flagged sexual or under 18 (ruling R16), is never retried or published: the review is
+  // rejected and held for Bryan with its flags, its key frames go at once, the account starts no new review until he
+  // clears or bans it, and the count is kept. Its reply isn't kept as a draft: Bryan sees only the warning.
+  flagged(review, flags, warnings, call) {
+    this.ctx.storage.transactionSync(() => {
+      const set = `status = 'rejected', hold = 1, next_try = NULL, flags = ?, warnings = ?, ${CALL_SET}`;
+      if (!this.saveCall(review, set, JSON.stringify(flags), JSON.stringify(warnings), ...call)) return;
+      this.dropFrames(review.id);
+      this.all("UPDATE people SET blocked = 1 WHERE sub_hash = ?", review.sub_hash);
+    });
+  }
+
+  // A call that counts as an attempt (spec step 5): a reply cut off or failing a check, a 5xx, a timeout. Attempt 2
+  // waits a minute and attempt 3 five (ATTEMPT_WAITS), or longer when the AI asked for a longer wait (`wait`, in ms),
+  // and the waits start again. After the third the coach gives up on it.
+  attempted(review, now, wait = 0) {
+    const attempts = review.attempts + 1;
+    if (attempts >= MAX_TRIES) return this.gaveUp(review, attempts);
+    const next = now + Math.max(ATTEMPT_WAITS[attempts - 1], wait);
+    this.saveCall(review, "status = 'queued', attempts = ?, waits = 0, next_try = ?", attempts, next);
+  }
+
+  // A 429 or 529 (spec step 5): the review waits `ms` with no attempt used, until the 12th wait, which counts as one.
+  waited(review, ms, now) {
+    const waits = review.waits + 1;
+    if (waits >= MAX_WAITS) return this.attempted(review, now, ms);
+    this.saveCall(review, "status = 'queued', waits = ?, next_try = ?", waits, now + ms);
+  }
+
+  // The coach gives up on a review after its third attempt, or on an error no retry would fix (spec steps 5 and 6): it
+  // fails and its count goes back. A Redo instead goes back to Bryan as it was, its old draft with a red "Redo failed"
+  // line, and its count stays: the review itself didn't fail.
+  gaveUp(review, attempts) {
+    if (review.redos > 0) {
+      const warnings = fromJson(review.warnings);
+      if (!warnings.includes("redo_failed")) warnings.push("redo_failed");
+      const set = "status = 'drafted', attempts = ?, next_try = NULL, warnings = ?";
+      this.saveCall(review, set, attempts, JSON.stringify(warnings));
+      return;
+    }
+    this.ctx.storage.transactionSync(() => {
+      if (this.saveCall(review, "status = 'failed', attempts = ?, next_try = NULL", attempts)) this.giveBack(review.id);
+    });
+  }
+
+  // Back in the queue, due now, with no attempt used: a hold that began while the room was asked, or an error that is
+  // the key's, the model's or the money's, not this review's.
+  putBack(review, now = this.now()) {
+    this.saveCall(review, "status = 'queued', next_try = ?", now);
+  }
+
+  // A banned account's review (spec step 2): rejected with no call, its key frames gone, its count not given back.
+  skipBanned(review) {
+    this.ctx.storage.transactionSync(() => {
+      if (this.saveCall(review, "status = 'rejected', hold = 0, next_try = NULL")) this.dropFrames(review.id);
+    });
+  }
+
+  // What a call cost in US$ at the [vars] prices: from the answer's token counts, or at its worst case (all of the
+  // request, and every token max_tokens allows) when it gave none.
+  callCost(usage, estIn) {
+    const { priceIn, priceOut } = this.config();
+    const prices = { in: priceIn, out: priceOut };
+    return usage ? costUsd(usage, prices) : worstUsd(estIn, MAX_TOKENS, prices);
+  }
+
+  // ---- Pause and Start again ---------------------------------------------------------------------------------------
+
+  // Bryan's Pause, the kill switch (spec "Money"): no new reviews and no AI calls while it holds. Turning it off brings
+  // the alarm to now, so the reviews waiting go at once.
+  async setPaused(paused) {
+    this.setMeta("paused", paused === true);
+    if (paused !== true) await this.alarmBy(this.now());
+  }
+
+  // Start again, after a key or model error stopped the coach (ruling R10): stopped is cleared, and paused with it, and
+  // the alarm comes to now.
+  async startAgain() {
+    this.setMeta("stopped", false);
+    this.setMeta("paused", false);
+    await this.alarmBy(this.now());
   }
 }

@@ -9,7 +9,18 @@
 //   getMeta, setMeta           the meta table, whose values are JSON (the keys are listed above SCHEMA_V1)
 //   config()                   the coach's [vars] from wrangler.toml as numbers, with the spec's for a bad one
 //   usage(kind, n)             approximate daily counts of coach requests and SQL rows, for the free-plan guard
-//   route({method, path, who, body})   every /coach/... and /admin/coach/... route, from the Worker over RPC (ruling R2)
+//   stopFor(now)               why no new review may start or send now: a break, money, or nothing
+//   dailyLimit(), sentToday(now)   how many reviews a Taiwan day takes, and how many were sent today
+//   counts(sub_hash, month)    a LINE account's reviews used and sent in a Taiwan month
+//   giveBack(id)               a review's count given back, once: the only way any count goes back
+//   dropFrames, dropReview     a review's key frames, or the review and its key frames, deleted, with frame_bytes kept right
+//   route({method, path, who, body})   every /coach/... and /admin/coach/... route, from the Worker over RPC (ruling R2):
+//     getMe                    GET /coach/me
+//     postAgree                POST /coach/agree
+//     postReview               POST /coach/reviews: starts a review
+//     postFrame, getFrame      POST and GET /coach/reviews/{id}/frames/{n}
+//     postSend                 POST /coach/reviews/{id}/send
+//     getReview, deleteReview  GET and DELETE /coach/reviews/{id}
 //   where()                    the second line of GET /admin/where: which Cloudflare data centre the coach lives in
 //   roomStub()                 the room's stub (stubs.js), which tests replace
 //   alarmBy(at)                makes sure the coach's one alarm goes off by `at`
@@ -17,6 +28,9 @@
 // Times are epoch milliseconds. Nothing reaches the coach but RPC calls from the Worker and the room, and its alarm.
 // Every route answers {status, json}, or {status, jpeg: Uint8Array} for a key frame.
 import { DurableObject } from "cloudflare:workers";
+import { randomB64u } from "./auth.js";
+import { AGREE_VER, BOARDS, LANGS, LEVELS, MOVES, STANCES } from "./coach-guide.js";
+import { checkFrame, creditMonth, nextTwMonth, twDay, twMonth } from "./coach-rules.js";
 import { colo, room } from "./stubs.js";
 
 // The schema this code expects. A change to the tables bumps it and adds a step to migrate(), which brings the coach up
@@ -169,6 +183,127 @@ export const readConfig = (env) =>
   );
 
 const refuse = (status, error, more = {}) => ({ status, json: { error, ...more } });
+const OK = Object.freeze({ status: 200, json: { ok: true } });
+const NOT_FOUND = refuse(404, "not_found");
+
+// ---- Limits -------------------------------------------------------------------------------------------------------
+
+// The free-plan guard (spec "Free-plan room"): the account's daily limits on the free plan, which the room and the coach
+// share, and the share of any one of them at which the coach refuses new reviews by its own count (usage()). The room
+// rests the chat at 90% of its own, so the coach stops well before.
+const COACH_GUARD = 0.08;
+const FREE_DAILY = Object.freeze({ req: 100_000, read: 5_000_000, write: 100_000 });
+
+// The size guard (spec "Size guard"): new reviews stop while the key frames stored pass 700 MB, or the whole database
+// passes 950 MB (freed pages aren't always handed back). Counted in millions of bytes, the lower reading of a MB, so the
+// guard errs early.
+const FRAME_BYTES_MAX = 700_000_000;
+const DATABASE_MAX = 950_000_000;
+
+const BREAK = Object.freeze({ kind: "break" });
+// The answer to a start or send that stopFor() stops: 503 break, or 503 money with when the rest ends.
+const stopped = (stop) => (stop.kind === "money" ? refuse(503, "money", { until: stop.until }) : refuse(503, "break"));
+
+// ---- Starting a review --------------------------------------------------------------------------------------------
+
+const FRAMES_MIN = 8; // the surfer must be in at least 8 of the 12 key frames
+const FRAME_N_MAX = 12;
+const NOTE_MAX = 200; // characters in the surfer's "Anything else?" line
+const MOVE_OTHER_MAX = 60; // characters in the line that names an "other" move
+// A box is [x, y, side] in the video's displayed pixels: no phone films wider than 8K.
+const BOX_MAX = 8192;
+// A key frame's time in the clip. Clips are 2 minutes at most, so this is only there to keep nonsense out.
+const FRAME_MS_MAX = 10 * 60_000;
+
+const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+
+// The body's JSON object, or null when it isn't one.
+function parseObject(text) {
+  try {
+    const value = JSON.parse(text);
+    return isObject(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+// The surfer's own line, trimmed: "" when left out, or null when it isn't text or runs over `max` characters (counted
+// as characters, so 中文 has the same room as English).
+function ownLine(value, max) {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") return null;
+  const line = value.trim();
+  return [...line].length <= max ? line : null;
+}
+
+const isBox = (box) =>
+  Array.isArray(box) && box.length === 3 && box.every((v) => Number.isInteger(v) && v >= 0 && v <= BOX_MAX) && box[2] >= 1;
+const isFrameMs = (ms) => Number.isInteger(ms) && ms >= 0 && ms <= FRAME_MS_MAX;
+
+// A start's body, checked: {error: "too_few_frames" | "invalid"}, or {lang, answers, frames}. Too few frames is checked
+// before the rest, in the spec's order of refusals: fewer than 8 listed, or a number outside 1-12 or listed twice. Then
+// "invalid": a body that isn't a JSON object, an answer not on its list, a line too long, or a frame's time or box
+// that isn't whole numbers in range.
+function readStart(body) {
+  if (body === null) return { error: "invalid" };
+  const frames = Array.isArray(body.frames) ? body.frames : [];
+  const ns = frames.map((f) => (isObject(f) ? f.n : undefined));
+  const numbered = ns.every((n) => Number.isInteger(n) && n >= 1 && n <= FRAME_N_MAX);
+  if (frames.length < FRAMES_MIN || !numbered || new Set(ns).size !== ns.length) return { error: "too_few_frames" };
+  const note = ownLine(body.note, NOTE_MAX);
+  const moveOther = ownLine(body.move_other, MOVE_OTHER_MAX);
+  const listed = MOVES.includes(body.move) && LEVELS.includes(body.level) && BOARDS.includes(body.board) &&
+    STANCES.includes(body.stance) && LANGS.includes(body.lang);
+  if (!listed || note === null || moveOther === null || !frames.every((f) => isFrameMs(f.ms) && isBox(f.box))) {
+    return { error: "invalid" };
+  }
+  return {
+    lang: body.lang,
+    answers: { move: body.move, move_other: moveOther, level: body.level, board: body.board, stance: body.stance, note },
+    frames: frames.map((f) => ({ n: f.n, ms: f.ms, box: f.box })),
+  };
+}
+
+// ---- What a surfer and the admin see -----------------------------------------------------------------------------
+
+// The surfer's words for a stored status (spec "The Coach tab": Coach is reviewing / Ready / Not reviewed).
+const SURFER_STATUS = Object.freeze({
+  queued: "reviewing", calling: "reviewing", drafted: "reviewing", published: "ready", rejected: "not_reviewed",
+  failed: "not_reviewed",
+});
+
+// What the surfer is told about a review that wasn't published: "not_surf" while Bryan holds a not-surf or flagged clip
+// (ruling R16: "We couldn't review this clip."), else his note, or null.
+const noteFor = (review) => (review.hold ? "not_surf" : review.surfer_note ?? null);
+
+// The reviews columns that hold JSON (SCHEMA_V1), read back as values for the admin.
+const JSON_COLUMNS = Object.freeze(["answers", "draft", "english", "final", "flags", "warnings", "redo_note"]);
+const fromJson = (text) => (text === null ? null : JSON.parse(text));
+
+// A key frame's base64 text as its JPEG's bytes. checkFrame() let only plain base64 in.
+function fromBase64(text) {
+  const bin = atob(text);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+// ---- Routes -------------------------------------------------------------------------------------------------------
+
+// Every route the coach serves so far: [method, path, the method that answers it]. The path's groups (a review's id, a
+// key frame's number) come after who and the body. The Worker has already matched the same shapes (index.js).
+const ID = "([A-Za-z0-9_-]{22})";
+const N = "([1-9]|1[0-2])";
+const ROUTES = [
+  ["GET", "/coach/me", "getMe"],
+  ["POST", "/coach/agree", "postAgree"],
+  ["POST", "/coach/reviews", "postReview"],
+  ["GET", `/coach/reviews/${ID}`, "getReview"],
+  ["DELETE", `/coach/reviews/${ID}`, "deleteReview"],
+  ["GET", `/coach/reviews/${ID}/frames/${N}`, "getFrame"],
+  ["POST", `/coach/reviews/${ID}/frames/${N}`, "postFrame"],
+  ["POST", `/coach/reviews/${ID}/send`, "postSend"],
+].map(([method, path, run]) => ({ method, path: new RegExp(`^${path}$`), run }));
 
 export class Coach extends DurableObject {
   constructor(ctx, env) {
@@ -280,14 +415,327 @@ export class Coach extends DurableObject {
     this.used.write += cursor.rowsWritten;
   }
 
+  // ---- Limits ------------------------------------------------------------------------------------------------------
+
+  // Why no new review may start or be sent at `now`, or null when nothing stops it (spec "Backend" and "Money"):
+  //   {kind: "break"}   "Coach is taking a break": Bryan's Pause, the coach stopped itself (ruling R10), no API key, the
+  //                     free-plan guard (8% of a daily limit, by the coach's own UTC-day count, ruling R8), or the size
+  //                     guard
+  //   {kind: "money", until}   "Coach is resting until <until>": a money rest, until it ends; or the credit month's spend
+  //                     at COACH_STOP_USD + COACH_EXTRA_USD, until the next credit day, when the spend starts again
+  // A break says more than money, so it comes first.
+  stopFor(now) {
+    if (this.getMeta("paused") || this.getMeta("stopped")) return BREAK;
+    if (String(this.env.ANTHROPIC_API_KEY ?? "").trim() === "") return BREAK;
+    const used = this.usage("req", 0);
+    if (Object.entries(FREE_DAILY).some(([kind, limit]) => used[kind] >= COACH_GUARD * limit)) return BREAK;
+    if ((this.getMeta("frame_bytes") ?? 0) > FRAME_BYTES_MAX || this.sql.databaseSize > DATABASE_MAX) return BREAK;
+    const rest = this.getMeta("rest");
+    if (rest) return { kind: "money", until: rest.until };
+    const spend = this.getMeta("spend");
+    if (spend) {
+      const { stopUsd, extraUsd, creditDay } = this.config();
+      // The spend counts until the credit month it started in ends; after that it is last month's.
+      const { next } = creditMonth(spend.start, creditDay);
+      if (now < next && spend.usd >= stopUsd + extraUsd) return { kind: "money", until: next };
+    }
+    return null;
+  }
+
+  // How many reviews a Taiwan day takes: COACH_DAILY, or COACH_DAILY_AUTO while autopilot is on.
+  dailyLimit() {
+    const { daily, dailyAuto } = this.config();
+    return this.getMeta("autopilot") ? dailyAuto : daily;
+  }
+
+  // The reviews sent on `now`'s Taiwan day (ruling R8), from meta today = {day, n}: 0 once the day has changed.
+  sentToday(now) {
+    const today = this.getMeta("today");
+    return today?.day === twDay(now) ? today.n : 0;
+  }
+
+  fullToday(now) {
+    return this.sentToday(now) >= this.dailyLimit();
+  }
+
+  // A LINE account's {used, sent} in a Taiwan month ("2030-06"), 0 and 0 when it has no row.
+  counts(sub_hash, month) {
+    return this.one("SELECT used, sent FROM quota WHERE sub_hash = ? AND month = ?", sub_hash, month) ?? { used: 0, sent: 0 };
+  }
+
+  // What a month's {used, sent} leaves: `left` of the COACH_MONTHLY, and `sent_left` of the COACH_MONTHLY_MAX an account
+  // may send whatever is given back. `none` when no more may start or send.
+  leftOf({ used, sent }) {
+    const { monthly, monthlyMax } = this.config();
+    return {
+      left: Math.max(0, Math.min(monthly - used, monthlyMax - sent)),
+      sent_left: Math.max(0, monthlyMax - sent),
+      none: used >= monthly || sent >= monthlyMax,
+    };
+  }
+
+  // Gives a review's count back to the Taiwan month it was sent in: used - 1, never below 0, and never sent, so the
+  // 4-a-month cap still holds. given marks it, so a review is given back once at most, whoever asks again; a review
+  // never sent has nothing to give. True when this call gave it back. This is the only way any count goes back: a
+  // reject, Bryan's Give back, a withdraw, a failure, the 14-day close, the hard stop and a money rest all call it; a
+  // not-surf or flagged reply, a delete, a ban and a banned account's skipped review never do.
+  giveBack(id) {
+    return this.ctx.storage.transactionSync(() => {
+      const review = this.one(
+        "UPDATE reviews SET given = 1 WHERE id = ? AND given = 0 AND quota_month IS NOT NULL RETURNING sub_hash, quota_month",
+        id,
+      );
+      if (!review) return false;
+      this.all("UPDATE quota SET used = max(used - 1, 0) WHERE sub_hash = ? AND month = ?", review.sub_hash, review.quota_month);
+      return true;
+    });
+  }
+
+  // ---- Key frames --------------------------------------------------------------------------------------------------
+
+  // meta frame_bytes, the base64 text of every key frame stored, for the size guard: every write and delete of a frame
+  // moves it by the bytes it adds or frees.
+  addFrameBytes(delta) {
+    if (delta !== 0) this.setMeta("frame_bytes", Math.max(0, (this.getMeta("frame_bytes") ?? 0) + delta));
+  }
+
+  // Deletes a review's key frames, their rows included. Returns the bytes freed. Inside the caller's transaction.
+  dropFrames(id) {
+    const { bytes } = this.one("SELECT coalesce(sum(length(b64)), 0) AS bytes FROM frames WHERE review_id = ?", id);
+    this.all("DELETE FROM frames WHERE review_id = ?", id);
+    this.addFrameBytes(-bytes);
+    return bytes;
+  }
+
+  // Deletes a review and its key frames. Inside the caller's transaction.
+  dropReview(id) {
+    this.dropFrames(id);
+    this.all("DELETE FROM reviews WHERE id = ?", id);
+  }
+
   // ---- Routes (ruling R2) ------------------------------------------------------------------------------------------
 
   // Every coach route, from the Worker, as route({method, path, who, body}): who = {uid, sub_hash, role} is the
   // signed-in caller as the room's whoIs() gave it (never anything the surfer sent), and body is the request's text.
-  // No route is open yet, so every path is 404 not_found.
-  async route() {
+  // A path it doesn't serve is 404 not_found (ROUTES).
+  async route({ method, path, who, body } = {}) {
     this.usage("req");
-    return refuse(404, "not_found");
+    if (typeof who?.uid !== "string" || typeof who?.sub_hash !== "string") return refuse(401, "auth");
+    for (const route of ROUTES) {
+      const match = route.method === method ? route.path.exec(path) : null;
+      if (match) return this[route.run](who, body, ...match.slice(1));
+    }
+    return NOT_FOUND;
+  }
+
+  // The people row of a LINE account, or null.
+  person(sub_hash) {
+    return this.one("SELECT * FROM people WHERE sub_hash = ?", sub_hash);
+  }
+
+  // A review of the caller's own account (by uid), or null. With `admin`, Bryan may see anyone's. Another account
+  // asking gets null, the same as for a review that isn't there, so it learns nothing.
+  reviewFor(who, id, { admin = false } = {}) {
+    const review = this.one("SELECT * FROM reviews WHERE id = ?", id);
+    if (!review) return null;
+    return review.uid === who.uid || (admin && who.role === "admin") ? review : null;
+  }
+
+  // GET /coach/me: what the Coach panel shows. left and sent_left as leftOf() says for this Taiwan month; month and
+  // next_month (when the next one starts) are the server's, whatever the phone's clock says (Review Focus 3); stop is
+  // stopFor(); profile is the saved level, board and stance; and the account's reviews, newest first, but the one
+  // still uploading, each with its status in the surfer's words.
+  getMe(who) {
+    const now = this.now();
+    const month = twMonth(now);
+    const { left, sent_left } = this.leftOf(this.counts(who.sub_hash, month));
+    const person = this.person(who.sub_hash);
+    const reviews = this.all(
+      `SELECT id, move, created, status, published, surfer_note, hold FROM reviews
+       WHERE uid = ? AND status != 'uploading' ORDER BY created DESC, id DESC`,
+      who.uid,
+    );
+    return {
+      status: 200,
+      json: {
+        left,
+        sent_left,
+        monthly: this.config().monthly,
+        month,
+        next_month: nextTwMonth(now),
+        full_today: this.fullToday(now),
+        stop: this.stopFor(now),
+        profile: person?.level ? { level: person.level, board: person.board, stance: person.stance } : null,
+        agreed: person?.agreed_ver === AGREE_VER,
+        admin: who.role === "admin",
+        reviews: reviews.map((r) => ({
+          id: r.id, move: r.move, created: r.created, status: SURFER_STATUS[r.status], published: r.published, note: noteFor(r),
+        })),
+      },
+    };
+  }
+
+  // POST /coach/agree {ver, adult}: saves the coach agreement's version and when, for this LINE account. Only this
+  // version, with the 18+ tick, else 403 agree.
+  postAgree(who, body) {
+    const agreement = parseObject(body);
+    if (agreement?.ver !== AGREE_VER || agreement?.adult !== true) return refuse(403, "agree");
+    this.all(
+      `INSERT INTO people (sub_hash, agreed_ver, agreed_at) VALUES (?, ?, ?)
+       ON CONFLICT (sub_hash) DO UPDATE SET agreed_ver = excluded.agreed_ver, agreed_at = excluded.agreed_at`,
+      who.sub_hash, AGREE_VER, this.now(),
+    );
+    return OK;
+  }
+
+  // POST /coach/reviews {lang, move, move_other, level, board, stance, note, frames: [{n, ms, box}]}: starts a review,
+  // {id}. Refused, in this order: agree, banned (the room's isBanned), blocked, stopFor(), in_progress (one queued,
+  // calling or drafted), full_today, no_reviews_left, then too_few_frames and invalid (readStart). Nothing counts yet:
+  // that is send's. Only once every check passes does it write, all in one transaction: the account's own review still
+  // uploading goes (another tab's, ruling R12), the new one goes in with its listed key frames waiting, and the level,
+  // board and stance are saved for next time.
+  async postReview(who, body) {
+    if (this.person(who.sub_hash)?.agreed_ver !== AGREE_VER) return refuse(403, "agree");
+    if (await this.roomStub().isBanned(who.sub_hash)) return refuse(403, "banned");
+    // No await from here on, so nothing else runs between these checks and the write. The row is read again, as the
+    // account may have gone meanwhile.
+    const now = this.now();
+    const person = this.person(who.sub_hash);
+    if (person?.agreed_ver !== AGREE_VER) return refuse(403, "agree");
+    if (person.blocked) return refuse(403, "blocked");
+    const stop = this.stopFor(now);
+    if (stop) return stopped(stop);
+    const open = "SELECT 1 FROM reviews WHERE sub_hash = ? AND status IN ('queued', 'calling', 'drafted') LIMIT 1";
+    if (this.one(open, who.sub_hash)) return refuse(409, "in_progress");
+    if (this.fullToday(now)) return refuse(429, "full_today");
+    if (this.leftOf(this.counts(who.sub_hash, twMonth(now))).none) return refuse(429, "no_reviews_left");
+    const start = readStart(parseObject(body));
+    if (start.error) return refuse(400, start.error);
+    const { lang, answers, frames } = start;
+    const id = randomB64u(16);
+    this.ctx.storage.transactionSync(() => {
+      for (const old of this.all("SELECT id FROM reviews WHERE sub_hash = ? AND status = 'uploading'", who.sub_hash)) {
+        this.dropReview(old.id);
+      }
+      this.all(
+        `INSERT INTO reviews (id, uid, sub_hash, lang, move, answers, status, created)
+         VALUES (?, ?, ?, ?, ?, ?, 'uploading', ?)`,
+        id, who.uid, who.sub_hash, lang, answers.move, JSON.stringify(answers), now,
+      );
+      for (const f of frames) {
+        this.all("INSERT INTO frames (review_id, n, ms, box) VALUES (?, ?, ?, ?)", id, f.n, f.ms, JSON.stringify(f.box));
+      }
+      this.all(
+        "UPDATE people SET level = ?, board = ?, stance = ? WHERE sub_hash = ?",
+        answers.level, answers.board, answers.stance, who.sub_hash,
+      );
+    });
+    return { status: 200, json: { id } };
+  }
+
+  // POST /coach/reviews/{id}/frames/{n}, the body a key frame's JPEG as base64 text: {ok: true}. Refused: not_found
+  // (not the caller's own), not_uploading (sent already), bad_frame (a number not listed at the start, or checkFrame()
+  // says so), too_big (over 140 KB). A frame sent again replaces the one there.
+  postFrame(who, body, id, n) {
+    const review = this.reviewFor(who, id);
+    if (!review) return NOT_FOUND;
+    if (review.status !== "uploading") return refuse(409, "not_uploading");
+    const frame = this.one("SELECT length(b64) AS bytes FROM frames WHERE review_id = ? AND n = ?", id, Number(n));
+    if (!frame) return refuse(400, "bad_frame");
+    const bad = checkFrame(body);
+    if (bad === "too_big") return refuse(413, "too_big");
+    if (bad) return refuse(400, "bad_frame");
+    this.ctx.storage.transactionSync(() => {
+      this.all("UPDATE frames SET b64 = ? WHERE review_id = ? AND n = ?", body, id, Number(n));
+      this.addFrameBytes(body.length - (frame.bytes ?? 0));
+    });
+    return OK;
+  }
+
+  // POST /coach/reviews/{id}/send: {ok: true, left}. Refused: not_found, not_uploading, missing_frames (a listed key
+  // frame hasn't come), then stopFor(), full_today and no_reviews_left again, as they may have changed since the start.
+  // Then it counts, in the Taiwan month of now, not of the start (Review Focus 3), queues the review for the alarm and
+  // sets the alarm for now. The checks and the writes run with no await between them, so two sends can't both take
+  // today's last place or the month's last review.
+  async postSend(who, body, id) {
+    const review = this.reviewFor(who, id);
+    if (!review) return NOT_FOUND;
+    if (review.status !== "uploading") return refuse(409, "not_uploading");
+    if (this.one("SELECT 1 FROM frames WHERE review_id = ? AND b64 IS NULL LIMIT 1", id)) return refuse(409, "missing_frames");
+    const now = this.now();
+    const stop = this.stopFor(now);
+    if (stop) return stopped(stop);
+    if (this.fullToday(now)) return refuse(429, "full_today");
+    const month = twMonth(now);
+    if (this.leftOf(this.counts(review.sub_hash, month)).none) return refuse(429, "no_reviews_left");
+    this.ctx.storage.transactionSync(() => {
+      this.all(
+        "UPDATE reviews SET status = 'queued', sent = ?, next_try = ?, quota_month = ? WHERE id = ?",
+        now, now, month, id,
+      );
+      this.all(
+        `INSERT INTO quota (sub_hash, month, used, sent) VALUES (?, ?, 1, 1)
+         ON CONFLICT (sub_hash, month) DO UPDATE SET used = used + 1, sent = sent + 1`,
+        review.sub_hash, month,
+      );
+      this.setMeta("today", { day: twDay(now), n: this.sentToday(now) + 1 });
+    });
+    const { left } = this.leftOf(this.counts(review.sub_hash, month));
+    await this.alarmBy(now);
+    return { status: 200, json: { ok: true, left } };
+  }
+
+  // GET /coach/reviews/{id}, for its owner or the admin; anyone else gets not_found. The owner gets
+  // {id, status, move, created, have, note}: have is the key frames already here (for a resumed upload), note as in
+  // GET /coach/me; and once it is published, review = {text, times, checked}: the published text, each key frame's time
+  // in ms by its number (the server's record, so the AI can't make a time up), and whether Bryan checked it (ruling
+  // R20). Never the draft, its English copy, flags, warnings, Redo notes, tokens or cost. The admin gets every column
+  // (adminView).
+  getReview(who, body, id) {
+    const review = this.reviewFor(who, id, { admin: true });
+    if (!review) return NOT_FOUND;
+    if (who.role === "admin") return { status: 200, json: this.adminView(review) };
+    const frames = this.all("SELECT n, ms, b64 IS NOT NULL AS have FROM frames WHERE review_id = ? ORDER BY n", id);
+    const view = {
+      id, status: review.status, move: review.move, created: review.created, have: frames.filter((f) => f.have).map((f) => f.n),
+      note: noteFor(review),
+    };
+    if (review.status === "published") {
+      view.review = {
+        text: fromJson(review.final),
+        times: Object.fromEntries(frames.map((f) => [f.n, f.ms])),
+        checked: review.checked === 1,
+      };
+    }
+    return { status: 200, json: view };
+  }
+
+  // A review as the admin sees it: every column, the JSON ones read back, with its key frames' {n, ms, box} and the
+  // numbers of those here (have). Never a frame's text: that comes one at a time from getFrame().
+  adminView(review) {
+    const view = { ...review };
+    for (const column of JSON_COLUMNS) view[column] = fromJson(review[column]);
+    const frames = this.all("SELECT n, ms, box, b64 IS NOT NULL AS have FROM frames WHERE review_id = ? ORDER BY n", review.id);
+    view.frames = frames.map((f) => ({ n: f.n, ms: f.ms, box: JSON.parse(f.box) }));
+    view.have = frames.filter((f) => f.have).map((f) => f.n);
+    return view;
+  }
+
+  // GET /coach/reviews/{id}/frames/{n}, for its owner or the admin: {status: 200, jpeg}, which the Worker answers as
+  // image/jpeg. not_found for anyone else, and for a frame that hasn't come or is gone.
+  getFrame(who, body, id, n) {
+    if (!this.reviewFor(who, id, { admin: true })) return NOT_FOUND;
+    const frame = this.one("SELECT b64 FROM frames WHERE review_id = ? AND n = ? AND b64 IS NOT NULL", id, Number(n));
+    if (!frame) return NOT_FOUND;
+    return { status: 200, jpeg: fromBase64(frame.b64) };
+  }
+
+  // DELETE /coach/reviews/{id}, for its owner: the review and its key frames go, in any status. Its count is never given
+  // back (spec "Counting the 2 reviews").
+  deleteReview(who, body, id) {
+    if (!this.reviewFor(who, id)) return NOT_FOUND;
+    this.ctx.storage.transactionSync(() => this.dropReview(id));
+    return OK;
   }
 
   // ---- Placement ---------------------------------------------------------------------------------------------------

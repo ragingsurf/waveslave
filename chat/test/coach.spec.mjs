@@ -1,7 +1,7 @@
 // Tests for the coach object, chat/src/coach.js (docs/superpowers/specs/2026-10-22-ai-coach-design.md, "Backend"): its
 // tables and their migrate(), its settings from wrangler.toml's [vars], its usage counts for the free-plan guard,
-// alarmBy(), where() for /admin/where, roomStub(), and route() before any route is added. They run inside the Workers
-// runtime (see vitest.config.mjs). Run from chat/:
+// alarmBy(), where() for /admin/where, roomStub(), and route()'s paths it doesn't serve (coach-send.spec.mjs has the
+// surfer's routes). They run inside the Workers runtime (see vitest.config.mjs). Run from chat/:
 // npx vitest run --no-isolate --max-workers=1 test/coach.spec.mjs
 //
 // Each test has a coach of its own (newCoach), with its clock at T, years ahead, so no alarm a test sets goes off by
@@ -294,16 +294,24 @@ describe("settings", () => {
 // ---- Routes, where() and the room ---------------------------------------------------------------------------------
 
 describe("route()", () => {
-  it("answers 404 not_found for every path for now", async () => {
+  it("answers 404 not_found for a path or method it doesn't serve", async () => {
     const c = await freshCoach();
     const asks = [
-      { method: "GET", path: "/coach/me", who: WHO, body: "" },
-      { method: "POST", path: "/coach/reviews", who: WHO, body: "{}" },
-      { method: "DELETE", path: "/coach/reviews/AAAAAAAAAAAAAAAAAAAAAA", who: WHO, body: "" },
+      { method: "POST", path: "/coach/reviews/AAAAAAAAAAAAAAAAAAAAAA/report", who: WHO, body: "{}" },
       { method: "GET", path: "/admin/coach/drafts", who: { ...WHO, role: "admin" }, body: "" },
+      { method: "POST", path: "/admin/coach/settings", who: { ...WHO, role: "admin" }, body: "{}" },
+      { method: "PUT", path: "/coach/me", who: WHO, body: "" },
       { method: "GET", path: "/nowhere", who: WHO, body: "" },
     ];
     for (const ask of asks) expect(await c.stub.route(ask), `${ask.method} ${ask.path}`).toEqual({ status: 404, json: { error: "not_found" } });
+  });
+
+  it("answers 401 auth when who isn't an account, before looking at the path", async () => {
+    const c = await freshCoach();
+    for (const who of [undefined, null, {}, { uid: "u-1" }, { sub_hash: "sub-1" }, { uid: 1, sub_hash: "sub-1" }]) {
+      expect(await c.stub.route({ method: "GET", path: "/coach/me", who, body: "" }), JSON.stringify(who)).toEqual({ status: 401, json: { error: "auth" } });
+    }
+    expect(await c.rows("SELECT count(*) AS n FROM people")).toEqual([{ n: 0 }]);
   });
 });
 

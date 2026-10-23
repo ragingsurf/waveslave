@@ -783,6 +783,22 @@ const CHECKS = {
     if (down.h === "–" || !down.facts || !down.days || !down.chart) throw new Error(`with the backend unreachable the page didn't draw: ${JSON.stringify(down)}`);
   },
   // A pin dropped east of 180° asks Open-Meteo for a longitude in -180..180: 200°E goes out as -160.
+  // A pin dragged with the mouse lands where it's let go (its flag is drawn over a copy of the map on the way, Oct 23).
+  async pinDrag(open) {
+    const page = await open({ ...home("tw"), size: { width: 1440, height: 900 } }); await zoomOut(page);
+    const b = await page.locator("#wsFx").boundingBox(), at = await page.evaluate(() => window.__ws.px(178, 32));
+    await page.route("**/api.open-meteo.com/**", r => r.abort()); await page.mouse.click(b.x + at[0], b.y + at[1]); await settle(page);
+    if (!await page.evaluate(() => window.__ws.pin())) throw new Error("no pin dropped");
+    let got; const asked = new Promise(r => { got = r; }), wait = setTimeout(() => got(null), 3000);
+    await page.unroute("**/api.open-meteo.com/**"); await page.route("**/api.open-meteo.com/**", r => { got(r.request().url()); return r.abort(); });
+    await page.mouse.move(b.x + at[0], b.y + at[1]); await page.mouse.down();
+    for (let i = 1; i <= 10; i++) { await page.mouse.move(b.x + at[0] + 20*i, b.y + at[1]); await page.waitForTimeout(16); }
+    await settle(page);
+    await page.mouse.up(); const url = await asked; clearTimeout(wait);
+    if (!url) throw new Error("letting go of the dragged pin asked for no forecast");
+    const want = await page.evaluate(([x, y]) => window.__ws.ll(x, y)[0], [at[0] + 200, at[1]]), lon = +new URL(url).searchParams.get("longitude");
+    if (Math.abs(((lon - want) % 360 + 540) % 360 - 180) > 0.5) throw new Error(`the pin landed at longitude ${lon}, want about ${want.toFixed(2)}`);
+  },
   async pinRequestWraps(open) {
     const page = await open({ spot: "donghe", saved: MID }); await zoomOut(page);
     let got; const asked = new Promise(r => { got = r; }), wait = setTimeout(() => got(null), 3000);

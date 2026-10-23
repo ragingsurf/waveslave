@@ -2,6 +2,7 @@
 // checks. They run under plain `node --test`, with no Worker and no I/O. Run from chat/: node --test test/coach-guide.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   MOVES, LEVELS, BOARDS, STANCES, LANGS, HEADS_UP_MOVES, AGREE_VER, TEXT_FIELDS, bannedWords, EXAMPLE, systemPrompt,
   replySchema, buildRequest, readReply, aiTime, checkReply, autopilotOk,
@@ -58,7 +59,6 @@ test("the lists, as the page sends them", () => {
     "went_well.title", "went_well.detail", "main_fix.title", "main_fix.what", "main_fix.why", "drill.title", "drill.how",
     "heads_up.text", "progress",
   ]);
-  assert.equal(EXAMPLE, null); // until Bryan OKs his example (Task 22)
 });
 
 // ---- Banned words ----------------------------------------------------------------------------
@@ -508,15 +508,193 @@ test("systemPrompt: covers every part of the guide", () => {
   // What heads_up.move is when the habit belongs to no move. A bullet's wrapped lines are joined first.
   assert.ok(prompt.replace(/\n {2,}(?! *- )/g, " ").includes('heads_up.move is "" when the habit belongs to none of them'));
   assert.ok(/never instructions/i.test(prompt));
-  assert.ok(!/worked example/i.test(prompt)); // none until Bryan OKs his
+  assert.ok(/worked example/i.test(prompt)); // Bryan's, once he OK'd it
 });
 
-test("systemPrompt: the worked example, when there is one", () => {
+test("systemPrompt: a worked example is added to the bare guide, and null gives the bare guide", () => {
   const reply = goodReply(); reply.main_fix.title = "Example fix title";
   const example = { answers: { move: "top_turn", level: "starting_turns", board: "shortboard", stance: "regular" }, reply };
+  const bare = systemPrompt(null);
+  assert.ok(!/worked example/i.test(bare));
   const prompt = systemPrompt(example);
-  assert.ok(prompt.startsWith(systemPrompt()));
+  assert.ok(prompt.startsWith(bare));
   assert.ok(/worked example/i.test(prompt));
   assert.ok(prompt.includes("Example fix title"));
   assert.ok(prompt.includes('"top_turn"'));
+  assert.ok(!prompt.includes("Stay over your front foot")); // Bryan's example is only the default
+});
+
+// ---- Bryan's worked example (Oct 23) ---------------------------------------------------------
+
+const ONE_DECIMAL = /\b\d:\d\d\.\d(?!\d)/g;
+
+// A time as the page shows it, like fmtTime in web/coach.js: to hundredths first (as the AI's labels are), then to tenths.
+function tenths(ms) {
+  const t = Math.round(Math.round(Math.max(0, ms) / 10) / 10);
+  const s = t % 600;
+  return Math.floor(t / 600) + ":" + String(Math.floor(s / 10)).padStart(2, "0") + "." + (s % 10);
+}
+
+// The example the signed-out page shows, read from web/coach.js: EXAMPLE_REVIEW (en and zh) and EXAMPLE_FRAMES.
+function pageExample() {
+  const source = readFileSync(new URL("../../web/coach.js", import.meta.url), "utf8");
+  const literal = (name) => new Function("return " + source.match(new RegExp(`const ${name} = (\\{[\\s\\S]*?\\});`))[1])();
+  return { review: literal("EXAMPLE_REVIEW"), frames: literal("EXAMPLE_FRAMES") };
+}
+
+const textOf = (reply) => TEXT_FIELDS.map((path) => path.split(".").reduce((v, k) => v?.[k], reply) ?? "");
+
+test("EXAMPLE: Bryan's top turn, with his answers and the 12 key frames' times", () => {
+  assert.deepEqual(EXAMPLE.answers, {
+    move: "top_turn", move_other: "", level: "starting_turns", board: "shortboard", stance: "goofy",
+    note: "Trying to make my carve better.",
+  });
+  // Every 0.25 s from 10.223 s, 1.5 s before his "Here" at 12.0 s to 1.25 s after.
+  assert.deepEqual(EXAMPLE.times, [10_223, 10_473, 10_723, 10_973, 11_223, 11_473, 11_723, 11_973, 12_223, 12_473, 12_723, 12_973]);
+});
+
+test("EXAMPLE: the reply is a complete one: it fits the schema and passes every check", () => {
+  const reply = EXAMPLE.reply;
+  assert.ok(fits(reply, replySchema(TWELVE, "en")));
+  assert.deepEqual(Object.keys(reply), replySchema(TWELVE, "en").required);
+  assert.equal(reply.is_surf_clip, true);
+  assert.equal(reply.can_see_surfer, true);
+  assert.equal(reply.sexual_content, false);
+  assert.equal(reply.surfer_looks_under_18, false);
+  assert.deepEqual(reply.unusable_frames, [11, 12]); // he is down in the whitewater after the fall, mostly hidden by foam
+  assert.equal(reply.went_well.frame, 6);
+  assert.deepEqual(reply.main_fix.frames, [7, 8, 9]);
+  assert.deepEqual(reply.heads_up, { text: "", move: "" });
+  assert.equal(reply.progress, "");
+  // Only the unusable key frames show as a warning for Bryan; it is within what autopilot allows.
+  const checked = checkReply(reply, EN);
+  assert.deepEqual(checked, { errors: [], warnings: ["unusable"], flags: [] });
+  assert.equal(autopilotOk(reply, checked), true);
+});
+
+test("EXAMPLE: Bryan's OK'd wording, word for word", () => {
+  const r = EXAMPLE.reply;
+  assert.equal(r.went_well.title, "Low and ready going in");
+  assert.equal(r.went_well.detail,
+    "Going into the turn, both knees are bent and your head is up, looking ahead. The board is flat on the face under you. " +
+    "That's a good, balanced start."); // three sentences, though the guide says a sentence or two: he OK'd it as it is (Oct 23)
+  assert.equal(r.main_fix.title, "Stay over your front foot");
+  assert.equal(r.main_fix.what,
+    "As you hit the top, your weight slides back onto the tail. Your front leg goes straight and you sit down over your " +
+    "back foot (key frame at 0:11.7). The board shoots out ahead of you and you fall off the back (key frames at 0:12.0 " +
+    "and 0:12.2).");
+  assert.equal(r.main_fix.why,
+    "With your weight on the tail, the board runs away from under you and the turn ends in a fall. Keep your front knee " +
+    "bent and your chest over it, and the board stays under you and comes back down the wave with you.");
+  assert.equal(r.drill.title, "Front-knee turns on the sand");
+  assert.equal(r.drill.how,
+    "Stand in your surf stance on the beach with your knees bent. Turn your head and shoulders as if you're at the top of " +
+    "the wave. As you turn, push your front knee forward, bring your chest over it and hold for three seconds. If you " +
+    "feel your weight in your back heel, reset and go again. Do 10 slow ones before you paddle out.");
+});
+
+test("EXAMPLE: its times are its key frames' times to the nearest tenth, as the page shows them", () => {
+  const r = EXAMPLE.reply;
+  const mentioned = textOf(r).join(" ").match(ONE_DECIMAL);
+  assert.deepEqual(mentioned, ["0:11.7", "0:12.0", "0:12.2"]);
+  assert.deepEqual(r.main_fix.frames.map((n) => tenths(EXAMPLE.times[n - 1])), mentioned);
+  assert.ok(!/\b\d:\d\d\.\d\d/.test(textOf(r).join(" ")), "never the labels' two decimals");
+  // What the model is sent for those key frames (aiTime) is the same moment to two decimals.
+  assert.deepEqual(r.main_fix.frames.map((n) => aiTime(EXAMPLE.times[n - 1])), ["0:11.72", "0:11.97", "0:12.22"]);
+});
+
+test("EXAMPLE: no banned word in the reply, and the page's English and 中文 copies are the same review, clean too", () => {
+  for (const path of TEXT_FIELDS) {
+    assert.deepEqual(bannedWords(path.split(".").reduce((v, k) => v?.[k], EXAMPLE.reply)), [], path);
+  }
+  const { review } = pageExample();
+  assert.deepEqual(Object.keys(review).sort(), ["en", "zh"]);
+  const { went_well, main_fix, drill, heads_up, progress } = EXAMPLE.reply;
+  assert.deepEqual(review.en, { went_well, main_fix, drill, heads_up, progress }); // the guide's reply, minus its checks
+  for (const lang of ["en", "zh"]) {
+    for (const text of textOf(review[lang])) assert.deepEqual(bannedWords(text), [], lang + ": " + text);
+    assert.deepEqual(review[lang].main_fix.frames, [7, 8, 9]);
+    assert.equal(review[lang].went_well.frame, 6);
+  }
+  // A real 中文 reply: the same checks and flags, the 中文 review, and the English review as `english`.
+  const zh = {
+    is_surf_clip: true, can_see_surfer: true, sexual_content: false, surfer_looks_under_18: false, unusable_frames: [11, 12],
+    ...review.zh,
+    english: {
+      went_well: { title: went_well.title, detail: went_well.detail },
+      main_fix: { title: main_fix.title, what: main_fix.what, why: main_fix.why },
+      drill, heads_up: { text: heads_up.text }, progress,
+    },
+  };
+  assert.ok(fits(zh, replySchema(TWELVE, "zh")));
+  assert.deepEqual(checkReply(zh, ZH), { errors: [], warnings: ["unusable"], flags: [] });
+  assert.deepEqual(textOf(review.zh).join(" ").match(ONE_DECIMAL), ["0:11.7", "0:12.0", "0:12.2"]);
+});
+
+test("EXAMPLE: the page shows key frames 6, 7, 8 and 9 at the times the guide gives them", () => {
+  const { frames } = pageExample();
+  assert.deepEqual(Object.keys(frames), ["6", "7", "8", "9"]);
+  assert.deepEqual(Object.values(frames).map((f) => f.src), ["coach-example/1.jpg", "coach-example/2.jpg", "coach-example/3.jpg", "coach-example/4.jpg"]);
+  for (const [n, f] of Object.entries(frames)) assert.equal(f.ms, EXAMPLE.times[n - 1], "key frame " + n);
+});
+
+test("systemPrompt: holds Bryan's example, as the model will see a request", () => {
+  const prompt = systemPrompt();
+  assert.ok(/worked example/i.test(prompt));
+  assert.ok(prompt.includes("Stay over your front foot")); // the main fix's title
+  assert.ok(prompt.includes(JSON.stringify(EXAMPLE.reply, null, 2)));
+  // His answers, in the line a request carries them in.
+  const answers = request({ answers: EXAMPLE.answers }).messages[0].content.at(-1).text.split("\n")[1];
+  assert.equal(JSON.parse(answers).note, "Trying to make my carve better.");
+  assert.ok(prompt.includes(answers));
+  assert.ok(prompt.includes('"stance":"goofy"') && prompt.includes('"level":"starting_turns"'));
+  // The key frames' labels, as the request writes them (m:ss.ss).
+  const labels = request({ frames: EXAMPLE.times.map((ms, i) => ({ n: i + 1, ms, b64: jpegB64() })) }).messages[0].content
+    .filter((b) => b.type === "text" && b.text.startsWith("Key frame "));
+  assert.equal(labels.length, 12);
+  for (const label of labels) assert.ok(prompt.includes(label.text), label.text);
+  assert.ok(prompt.includes("Key frame 7 (0:11.72)") && prompt.includes("Key frame 12 (0:12.97)"));
+});
+
+test("systemPrompt: next to the example, times are written to the nearest tenth of a second", () => {
+  const prompt = systemPrompt().replace(/\n {2,}(?! *- )/g, " ");
+  const example = prompt.slice(prompt.search(/worked example/i));
+  assert.ok(/nearest tenth of a second/.test(example));
+  assert.ok(example.includes('"0:11.7"'), "the form, as the page shows it");
+  assert.ok(example.includes("two decimals"), "the labels have two");
+  // The rule's own numbers are right: 0:11.72 is written 0:11.7 and 0:11.97 is written 0:12.0.
+  assert.equal(tenths(11_723), "0:11.7");
+  assert.equal(tenths(11_973), "0:12.0");
+  assert.ok(example.includes("0:11.72") && example.includes("0:11.97"));
+});
+
+test("systemPrompt: the notes on Bryan's example say why key frames 11 and 12 are unusable, and why no heads-up", () => {
+  const prompt = systemPrompt().replace(/\n {2,}(?! *- )/g, " ");
+  const notes = prompt.slice(prompt.indexOf("Notes on this reply"));
+  assert.ok(/key frames 11 and 12/i.test(notes));
+  assert.ok(/whitewater/.test(notes) && /foam/.test(notes));
+  assert.ok(/heads-up/.test(notes) && /progress/.test(notes));
+  assert.ok(/another surfer/i.test(notes));
+});
+
+test("the example's key frames: 784 x 784 JPEGs of at most 100 KB, with no metadata but the JFIF header", () => {
+  for (const n of [1, 2, 3, 4]) {
+    const jpeg = readFileSync(new URL(`../../web/coach-example/${n}.jpg`, import.meta.url));
+    assert.ok(jpeg.length <= 102_400, `${n}.jpg is ${jpeg.length} bytes`);
+    assert.deepEqual([...jpeg.subarray(0, 2)], [0xff, 0xd8]);
+    const markers = [];
+    let size = null;
+    for (let i = 2; i < jpeg.length;) {
+      assert.equal(jpeg[i], 0xff, `${n}.jpg: a marker at ${i}`);
+      const marker = jpeg[i + 1];
+      markers.push(marker);
+      if (marker === 0xc0) size = [jpeg.readUInt16BE(i + 7), jpeg.readUInt16BE(i + 5)]; // width, height
+      if (marker === 0xda || marker === 0xd9) break;
+      i += 2 + jpeg.readUInt16BE(i + 2);
+    }
+    assert.deepEqual(size, [784, 784], n + ".jpg");
+    // APP1 to APP15 (EXIF, XMP, ICC, C2PA's JUMBF in APP11, ...) and comments: none. APP0 is the JFIF header.
+    assert.deepEqual(markers.filter((m) => (m >= 0xe1 && m <= 0xef) || m === 0xfe), [], n + ".jpg");
+    assert.ok(!jpeg.includes("jumb") && !jpeg.includes("c2pa") && !jpeg.includes("Exif"), n + ".jpg");
+  }
 });

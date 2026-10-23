@@ -8,7 +8,7 @@
 //   AGREE_VER                              the version of the coach agreement
 //   TEXT_FIELDS                            the 9 fields of a review the surfer reads (and Bryan can edit)
 //   bannedWords(text)                      words a surfer must never see in a review
-//   EXAMPLE, systemPrompt()                the coaching guide, and the worked example in it once Bryan OKs one
+//   EXAMPLE, systemPrompt()                the coaching guide, and Bryan's worked example in it
 //   replySchema(sentNums, lang)            the JSON schema the reply must fit
 //   aiTime(ms), buildRequest({...})        a key frame's time as the AI sees it; the Messages API request body
 //   readReply(message)                     the reply, why it stopped, its tokens and its model, from the API's answer
@@ -117,9 +117,62 @@ export function bannedWords(text) {
 
 // ---- The coaching guide ----------------------------------------------------------------------
 
-// Bryan's clip test redone as a one-move review, once he OKs it (Bryan, Oct 23; Ruling R14). Until then the guide has no
-// worked example. When set: {answers: {move, level, board, stance}, reply}, the reply in English in the reply's shape.
-export const EXAMPLE = null;
+// Bryan's trial clip redone as a one-move review of his last turn, a top turn: the worked example in the guide. He OK'd it on
+// Oct 23 ("Yes you can use it as a guide") and asked for no changes, so its wording is his, word for word (Bryan, Oct 23): the
+// detail of "what went well" runs to three sentences, though the guide asks for a sentence or two, and it stays as he OK'd it.
+// The page shows the same review, in English and 中文, in EXAMPLE_REVIEW in web/coach.js (the signed-out view).
+//   answers   what he told the page, in the shape a request carries them in
+//   times     the 12 key frames' times in the clip, in ms: key frame n is times[n - 1]. They run every 0.25 s from 1.5 s before
+//             his "Here" (12.0 s) to 1.25 s after, moved left to end 0.05 s before the clip does. The AI sees them as
+//             "Key frame 7 (0:11.72)" (aiTime); the review writes them to the nearest tenth, "0:11.7", as the page shows them
+//   reply     the review in English, in the reply's shape
+//   notes     what the example shows that its words don't say
+export const EXAMPLE = {
+  answers: {
+    move: "top_turn", move_other: "", level: "starting_turns", board: "shortboard", stance: "goofy",
+    note: "Trying to make my carve better.",
+  },
+  times: [10_223, 10_473, 10_723, 10_973, 11_223, 11_473, 11_723, 11_973, 12_223, 12_473, 12_723, 12_973],
+  reply: {
+    is_surf_clip: true,
+    can_see_surfer: true,
+    sexual_content: false,
+    surfer_looks_under_18: false,
+    unusable_frames: [11, 12],
+    went_well: {
+      frame: 6,
+      title: "Low and ready going in",
+      detail: "Going into the turn, both knees are bent and your head is up, looking ahead. The board is flat on the face " +
+        "under you. That's a good, balanced start.",
+    },
+    main_fix: {
+      frames: [7, 8, 9],
+      title: "Stay over your front foot",
+      what: "As you hit the top, your weight slides back onto the tail. Your front leg goes straight and you sit down over " +
+        "your back foot (key frame at 0:11.7). The board shoots out ahead of you and you fall off the back (key frames at " +
+        "0:12.0 and 0:12.2).",
+      why: "With your weight on the tail, the board runs away from under you and the turn ends in a fall. Keep your front " +
+        "knee bent and your chest over it, and the board stays under you and comes back down the wave with you.",
+    },
+    drill: {
+      title: "Front-knee turns on the sand",
+      how: "Stand in your surf stance on the beach with your knees bent. Turn your head and shoulders as if you're at the " +
+        "top of the wave. As you turn, push your front knee forward, bring your chest over it and hold for three seconds. " +
+        "If you feel your weight in your back heel, reset and go again. Do 10 slow ones before you paddle out.",
+    },
+    heads_up: { text: "", move: "" },
+    progress: "",
+  },
+  notes: [
+    "Key frame 6 shows what went well as the turn starts: both knees bent, head up, the board flat on the face. The main " +
+      "fix is that same shape lost at the top, in key frames 7 to 9.",
+    "Key frames 11 and 12 are in unusable_frames: the surfer is down in the whitewater after the fall, mostly hidden by " +
+      "foam, with only their head and the board showing.",
+    "Another surfer shows out the back in key frames 10 and 11. The review doesn't mention them.",
+    'There is no heads-up, because nothing serious shows outside this move in these key frames, and progress is "" ' +
+      "because it is their first review of this move.",
+  ],
+};
 
 // A short surf glossary, so both languages use the same words: [English, 中文 as used in Taiwan].
 const GLOSSARY = [
@@ -233,16 +286,31 @@ Words
 Glossary (English: 中文)
 ${GLOSSARY.map(([en, zh]) => `- ${en}: ${zh}`).join("\n")}`;
 
-// The system prompt: the guide, then the worked example when there is one. `example` is for the tests; the coach always
-// uses EXAMPLE.
+// The system prompt: the guide, then the worked example when there is one: the key frames' labels as a request writes
+// them, the surfer's answers as a request carries them, the reply, how its times are written, and the notes. `example` is
+// for the tests (null leaves the example out); the coach always uses EXAMPLE.
 export function systemPrompt(example = EXAMPLE) {
   if (!example) return GUIDE;
-  return GUIDE + `
-
-A worked example
-The surfer's answers: ${JSON.stringify(example.answers)}
-A good reply, in English:
-${JSON.stringify(example.reply, null, 2)}`;
+  const { answers, times = [], reply, notes = [] } = example;
+  const parts = [
+    GUIDE,
+    "A worked example\n" +
+      "This is the shape and the style to aim for: one surfer, one top turn. Don't copy its words: say what the key " +
+      "frames you are sent show.",
+  ];
+  if (times.length > 0) {
+    parts.push("The key frames, labelled the way you are sent them:\n" + times.map((ms, i) => keyFrameLabel(i + 1, ms)).join("\n"));
+  }
+  parts.push(
+    "The surfer's answers, as JSON:\n" + answersJson(answers),
+    "A good reply, in English:\n" + JSON.stringify(reply, null, 2),
+    // The page shows times to the nearest tenth (fmtTime in web/coach.js), while a request labels key frames to the hundredth.
+    "Times in the text: the labels have two decimals (\"Key frame 7 (0:11.72)\"), but write each time to the nearest tenth of a " +
+      "second, the way the surfer's page shows it: that one is \"0:11.7\", and 0:11.97 is \"0:12.0\", as in the reply above. " +
+      "Never write two decimals.",
+  );
+  if (notes.length > 0) parts.push("Notes on this reply\n" + notes.map((note) => "- " + note).join("\n"));
+  return parts.join("\n\n");
 }
 
 // ---- The reply schema ------------------------------------------------------------------------
@@ -296,6 +364,13 @@ export function aiTime(ms) {
   return minutes + ":" + seconds.toFixed(2).padStart(5, "0");
 }
 
+// The label before each key frame in a request, and the line that carries the surfer's answers: the worked example in the guide
+// is written with these too, so it shows the model what it will be sent.
+const keyFrameLabel = (n, ms) => `Key frame ${n} (${aiTime(ms)})`;
+const answersJson = (a) => JSON.stringify({
+  move: a.move, move_other: a.move_other ?? "", level: a.level, board: a.board, stance: a.stance, note: a.note ?? "",
+});
+
 const HISTORY_MAX = 2;
 const EXAMPLES_MAX = 3;
 const REDO_NOTES_MAX = 2; // at most 2 Redos a review (spec "Defaults")
@@ -307,9 +382,7 @@ function surferText(lang, answers, history, examples, redo) {
   const a = answers ?? {};
   const lines = [
     "The surfer's answers, as JSON. move_other and note are the surfer's own words.",
-    JSON.stringify({
-      move: a.move, move_other: a.move_other ?? "", level: a.level, board: a.board, stance: a.stance, note: a.note ?? "",
-    }),
+    answersJson(a),
     "",
     lang === "zh"
       ? 'Write the review in 中文: Traditional Chinese as used in Taiwan. Also fill "english" with the same review in ' +
@@ -374,7 +447,7 @@ export function buildRequest({ model, maxTokens, lang, answers, frames, history 
   const schema = replySchema(sorted.map((f) => f.n), lang);
   const content = [];
   for (const f of sorted) {
-    content.push({ type: "text", text: `Key frame ${f.n} (${aiTime(f.ms)})` });
+    content.push({ type: "text", text: keyFrameLabel(f.n, f.ms) });
     content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: f.b64 } });
   }
   content.push({ type: "text", text: surferText(lang, answers, history, examples, redo) });

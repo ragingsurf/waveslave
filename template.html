@@ -1516,7 +1516,9 @@ const WS = (() => {
   const tEnd = () => Math.max(...SP.map(s => s.wind.length ? s.wind[s.wind.length-1].t : 0), ...GRIDS.map(g => g.end));
   function pinCols() { const now = Date.now(), start = now - (now + 8*36e5)%(3*36e5), end = tEnd(), out = [];
     for (let t = start; t <= end; t += 3*36e5) out.push(t); return out; }
-  function pinFromGrid(lat, lon) { const cols = pinCols().map(t => { const S = sample(t), w = blend(S, lon, lat, "wind"), wv = waveAt(S, lon, lat), sw = swellAt(S, lon, lat), r = blend(S, lon, lat, "rain");
+  // now: just the map's own time, for the flag while the pin is dragged (Bryan, Oct 23: the whole ten days on every move made it trail the mouse);
+  // the drop works the rest out.
+  function pinFromGrid(lat, lon, now) { const cols = (now ? [times[ti]] : pinCols()).map(t => { const S = sample(t), w = blend(S, lon, lat, "wind"), wv = waveAt(S, lon, lat), sw = swellAt(S, lon, lat), r = blend(S, lon, lat, "rain");
       return { t, kt: w ? Math.hypot(w.u, w.v) : null, from: w ? (Math.atan2(-w.u, -w.v)*180/Math.PI+360)%360 : null, wh: wv ? wv.h : null, wd: wv ? wv.dir : null, wp: wv && wv.p != null ? wv.p : null,
         sh: sw ? sw.h : null, sd: sw ? sw.dir : null, per: sw && sw.p ? sw.p : null, rain: r ? r.h*3 : null, hpa: presAt(lon, lat) }; });
     gridAt(times[ti]); return cols; } // back to the map's own time
@@ -1552,7 +1554,13 @@ const WS = (() => {
   // The flag's orange ▾ opens or closes the forecast table below the map; its ✕ removes the pin.
   let PINBTN = null, PINX = null, PINBOX = null;
   function pinOpen(open) { const el = document.getElementById("wsSheet"); PIN.open = open; if (open) { SHEET = null; showPin(); if (!FS) requestAnimationFrame(() => el.scrollIntoView({behavior: "smooth", block: "start"})); } else el.hidden = true; drawBase(); }
-  function dropPin(lon, lat) { const was = PIN && PIN.open; SHEET = null; const me = PIN = { lat, lon, cols: pinFromGrid(lat, lon), src: "map model", loading: true, open: was };
+  // A dragged pin is drawn over a copy of the map as it was without it, at most once a frame, instead of the whole map drawn again on every move
+  // (Bryan, Oct 23: on a laptop the pin trailed far behind the mouse). The drop draws it all afresh.
+  let UNDER = null, pinRaf = 0;
+  function pinMove() { if (pinRaf) return; pinRaf = requestAnimationFrame(() => { pinRaf = 0; if (!PIN) return;
+    if (!UNDER) { const keep = PIN; PIN = null; drawBase(); PIN = keep; UNDER = document.createElement("canvas"); UNDER.width = base.width; UNDER.height = base.height; UNDER.getContext("2d").drawImage(base, 0, 0); }
+    const g = base.getContext("2d"); g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = "copy"; g.drawImage(UNDER, 0, 0); g.restore(); pinMark(g); }); }
+  function dropPin(lon, lat) { cancelAnimationFrame(pinRaf); pinRaf = 0; UNDER = null; const was = PIN && PIN.open; SHEET = null; const me = PIN = { lat, lon, cols: pinFromGrid(lat, lon), src: "map model", loading: true, open: was };
     const el = document.getElementById("wsSheet"); if (was) showPin(); else el.hidden = true; drawBase();
     const done = () => { if (PIN !== me) return; me.loading = false; if (me.open) showPin(); drawBase(); };
     pinLive(lat, lon).then(cols => { if (PIN !== me) return; me.cols = cols; me.src = "Open-Meteo live"; me.live = true; done(); }).catch(done); }
@@ -1735,7 +1743,7 @@ const WS = (() => {
     fx.onpointermove = e => { if (!P.has(e.pointerId)) return; const prev = P.get(e.pointerId), cur = rel(e); P.set(e.pointerId, cur);
       if (drag && P.size === 1) { if (!drag.moved && Math.hypot(cur[0]-downAt[0], cur[1]-downAt[1]) < 6) return; drag.moved = true;
         // A dragged pin stops at the Pacific box's edge.
-        const B = MAPM.PBOX, [ln, lt] = ll(cur[0]-drag.ox, cur[1]-drag.oy), lon = Math.max(B.l, Math.min(B.r, ln)), lat = Math.max(B.s, Math.min(B.n, lt)); PIN.lon = lon; PIN.lat = lat; PIN.cols = pinFromGrid(lat, lon); PIN.src = "map model"; PIN.live = false; if (raf) dirty = true; else drawBase(); }
+        const B = MAPM.PBOX, [ln, lt] = ll(cur[0]-drag.ox, cur[1]-drag.oy), lon = Math.max(B.l, Math.min(B.r, ln)), lat = Math.max(B.s, Math.min(B.n, lt)); PIN.lon = lon; PIN.lat = lat; PIN.cols = pinFromGrid(lat, lon, true); PIN.src = "map model"; PIN.live = false; pinMove(); }
       else if (P.size === 1) { cx -= (cur[0]-prev[0])/z; cy = iy(my(cy) + (cur[1]-prev[1])/z); liveMoved(); }
       else if (P.size === 2) { const [a, b] = [...P.values()], d = Math.hypot(a[0]-b[0], a[1]-b[1]), m = [(a[0]+b[0])/2, (a[1]+b[1])/2];
         if (pinch) { cx -= (m[0]-pinch.m[0])/z; cy = iy(my(cy) + (m[1]-pinch.m[1])/z); zoomAt(d/pinch.d, m[0], m[1], true); } pinch = {d, m}; } };

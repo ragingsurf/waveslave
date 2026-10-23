@@ -84,7 +84,8 @@ const lineAnswers = (token) => () =>
 // ---- The trip to LINE and back -------------------------------------------------------------------------------
 
 const start = (h) => SELF.fetch(`${BASE}/auth/line/start${h === undefined ? "" : `?h=${encodeURIComponent(h)}`}`, { redirect: "manual" });
-const callback = (query) => SELF.fetch(`${CALLBACK}?${query}`, { redirect: "manual" });
+const callback = (query, ip) =>
+  SELF.fetch(`${CALLBACK}?${query}`, { redirect: "manual", headers: ip ? { "CF-Connecting-IP": ip } : {} });
 const location = (res) => new URL(res.headers.get("Location"));
 
 // The fragment of a redirect back to the app, as an object: {c, p} after a sign-in, {e} after a failure.
@@ -100,24 +101,25 @@ async function startWith(h) {
 
 // The whole trip for `who`: the app starts with h (their own SHA-256(v) unless given), and LINE calls back with an ID
 // token holding claims(nonce) (good claims for `who` unless given). Returns the callback's answer and its fragment.
-async function signIn(who, { h, claims } = {}) {
+// ip is the address LINE's callback comes from (CF-Connecting-IP), when given.
+async function signIn(who, { h, claims, ip } = {}) {
   const { state, nonce } = await startWith(h ?? (await sha256b64u(who.v)));
   const exchanges = mockLine(lineAnswers(await idToken(claims ? claims(nonce) : goodClaims(who, nonce))));
-  const res = await callback(`code=line-code&state=${state}`);
+  const res = await callback(`code=line-code&state=${state}`, ip);
   return { res, state, nonce, exchanges, ...fragment(res) };
 }
 
 // The app's calls to the room, through the Worker as the page makes them.
-async function post(path, body) {
+async function post(path, body, ip) {
   const res = await SELF.fetch(BASE + path, {
     method: "POST",
-    headers: { Origin: ORIGIN, "Content-Type": "application/json" },
+    headers: { Origin: ORIGIN, "Content-Type": "application/json", ...(ip ? { "CF-Connecting-IP": ip } : {}) },
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
   return { status: res.status, body: await res.json() };
 }
-const redeem = (body) => post("/auth/redeem", body);
-const signup = (body) => post("/auth/signup", body);
+const redeem = (body, ip) => post("/auth/redeem", body, ip);
+const signup = (body, ip) => post("/auth/signup", body, ip);
 
 // A person who has signed up, with their session token and user id.
 async function member(nick = freshNick()) {
@@ -254,6 +256,7 @@ describe("GET /auth/line/callback", () => {
       pin: p,
       created: expect.any(Number),
       tries: 0,
+      net: null,
     });
     expect(Date.now() - handoff.created).toBeLessThan(MIN);
     // The code itself is never stored, only its SHA-256; and LINE's raw sub never is, only its sub_hash (ruling R22).
@@ -620,6 +623,63 @@ describe("a sign-in link someone else started (spec Login step 5)", () => {
     const guesses = await Promise.all(Array.from({ length: 12 }, (_, k) => redeem({ v: attacker.v, pin: otherPin(p, k + 1) })));
     const errors = guesses.map((g) => g.body.error).sort();
     expect(errors).toEqual([...Array(9).fill("expired"), ...Array(3).fill("pin")]);
+  });
+});
+
+describe("the app finishing by itself (auto: the sign-in LINE's app handed to Safari)", () => {
+  const HOME = "203.0.113.7";
+  const HOME6 = "2001:db8:1:2:aaaa:bbbb:cccc:dddd";
+
+  it("answers 410 expired while LINE hasn't finished, then opens the handoff from the same network", async () => {
+    const who = person();
+    expect(await redeem({ v: who.v, auto: true }, HOME)).toEqual({ status: 410, body: { error: "expired" } });
+    const { c } = await signIn(who, { ip: HOME });
+    expect(await redeem({ v: who.v, auto: true }, HOME)).toEqual({ status: 200, body: { needs_signup: true, line_name: who.name } });
+    const res = await signup({ v: who.v, auto: true, nick: freshNick(), consent: "v1" }, HOME);
+    expect(res.status).toBe(200);
+    expect((await readToken(res.body.token, env.SESSION_SECRET, Date.now())).uid).toBe((await userBySub(who.sub)).id);
+    expect(await handoffByCode(c)).toBeNull();
+  });
+
+  it("signs a known user straight in", async () => {
+    const someone = await member();
+    await signIn(someone, { ip: HOME });
+    const res = await redeem({ v: someone.v, auto: true }, HOME);
+    expect(res.status).toBe(200);
+    expect((await readToken(res.body.token, env.SESSION_SECRET, Date.now())).uid).toBe(someone.uid);
+  });
+
+  it("takes an IPv6 address from the same /64 network, however it is written", async () => {
+    const someone = await member();
+    await signIn(someone, { ip: HOME6 });
+    const res = await redeem({ v: someone.v, auto: true }, "2001:0DB8:1:2::99");
+    expect(res.status).toBe(200);
+  });
+
+  it("refuses another network (403 net) and counts nothing, so the code and the pin still work", async () => {
+    const who = person();
+    const { c, p } = await signIn(who, { ip: HOME });
+    for (const ip of ["198.51.100.9", "2001:db8:1:3::1", undefined]) {
+      expect(await redeem({ v: who.v, auto: true }, ip), String(ip)).toEqual({ status: 403, body: { error: "net" } });
+    }
+    expect((await handoffByCode(c)).tries).toBe(0);
+    expect((await redeem({ v: who.v, pin: p })).body.needs_signup).toBe(true);
+  });
+
+  it("never opens a stolen link for the attacker on another network, and the victim's own v gets nothing", async () => {
+    const attacker = person();
+    const victim = person();
+    await signIn(victim, { h: await sha256b64u(attacker.v), ip: HOME });
+    expect(await redeem({ v: attacker.v, auto: true }, "198.51.100.9")).toEqual({ status: 403, body: { error: "net" } });
+    expect(await redeem({ v: victim.v, auto: true }, HOME)).toEqual({ status: 410, body: { error: "expired" } });
+    expect(await userBySub(victim.sub)).toBeNull();
+  });
+
+  it("keeps only a keyed hash of the network, never the address", async () => {
+    const who = person();
+    const { c } = await signIn(who, { ip: HOME });
+    expect((await handoffByCode(c)).net).toMatch(B64U_32);
+    expect((await everyValue()).filter((value) => value.includes("203.0.113"))).toEqual([]);
   });
 });
 

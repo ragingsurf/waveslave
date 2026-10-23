@@ -257,6 +257,29 @@ describe("the hourly email", () => {
     expect(mails[2].body.text).toMatch(/Reported by the surfer: 2\b/);
   });
 
+  it("counts a reported review's wait from its report (ruling P46): one sent 20 days ago and reported now waits briefly", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    const b = surfer();
+    // a's review was sent and published 20 days ago; b's draft came 3 hours ago.
+    const old = await insertReview(c, a, {
+      status: "published", sent: T - 20 * DAY, published: T - 20 * DAY + HOUR, handled_at: T - 20 * DAY + HOUR,
+      next_try: null, draft: JSON.stringify(goodReply()), final: JSON.stringify(goodReply()), checked: 1,
+    });
+    const draft = await insertReview(c, b, { status: "drafted", sent: T - 3 * HOUR, waiting_since: T - 3 * HOUR, next_try: null });
+    expect((await report(c, a, old, "That isn't me")).status).toBe(200);
+    c.clock.t = T + 30 * MIN;
+    // In the Drafts list the report waits half an hour, after the draft that has waited three and a half.
+    const { waiting } = (await drafts(c)).json;
+    expect(waiting.map((r) => [r.id, r.waited_ms])).toEqual([[draft, 3 * HOUR + 30 * MIN], [old, 30 * MIN]]);
+    // The email the report brought names the draft's wait as the oldest, not 480 h.
+    resend.push(accepted);
+    await runAlarm(c);
+    expect(subjects()).toEqual(["WaveSlave Coach: 2 drafts waiting (oldest 3 h)"]);
+    expect(mails[0].body.text).toMatch(/the oldest waiting 3 h\./);
+    expect(mails[0].body.text).toMatch(/Reported by the surfer: 1\b/);
+  });
+
   it("a flagged clip and a failed Redo bring it, as Bryan has them to act on", async () => {
     const c = await freshCoach();
     const flagged = await insertReview(c, surfer());

@@ -265,6 +265,22 @@ describe("when it runs", () => {
     expect(await alarmAt(c)).toBe(CLEAN + DAY);
   });
 
+  it("a run that fails still makes the run's AI call, and the review is drafted", async () => {
+    const c = await freshCoach();
+    const queued = await insertReview(c, surfer(), { status: "queued", next_try: CLEAN });
+    await c.inCoach((coach) => {
+      coach.cleanRules = () => {
+        throw new RangeError("a bug");
+      };
+    });
+    ai.push(ok());
+    await runAlarm(c);
+    expect(logged.splice(0)).toEqual([["coach: the daily clean-up failed:", "RangeError"]]);
+    expect(await reviewRow(c, queued)).toMatchObject({ status: "drafted", waiting_since: CLEAN });
+    expect(await getMeta(c, "next_cleanup")).toBe(CLEAN + DAY);
+    expect(await getMeta(c, "last_cleanup")).toBeNull();
+  });
+
   it("a run that fails changes nothing and is logged by the error's name only; the next day's run covers both days", async () => {
     const c = await freshCoach();
     const a = surfer();
@@ -368,6 +384,20 @@ describe("drafts waiting 14 days", () => {
     expect(await quota(c, a)).toEqual([{ month: MONTH, used: 0, sent: 1 }]);
     expect(await quota(c, b)).toEqual([{ month: MONTH, used: 1, sent: 2 }]);
     await expectBytesRight(c);
+  });
+
+  it("close a draft whose count a money rest or the hard stop already gave back, and give nothing back twice", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    // Two reviews counted this month, the late one given back already (as startRest() and holdForCredit() leave it):
+    // used 1 of 2 sent.
+    await insertHandled(c, a, "published", 3 * DAY);
+    const late = await insertReview(c, a, { sent: CLEAN - 15 * DAY, given: 1 });
+    await c.rows("UPDATE quota SET used = used - 1 WHERE sub_hash = ? AND month = ?", a.sub_hash, MONTH);
+    expect(await quota(c, a)).toEqual([{ month: MONTH, used: 1, sent: 2 }]);
+    await runAlarm(c);
+    expect(await reviewRow(c, late)).toMatchObject({ status: "rejected", surfer_note: LATE, given: 1, handled_at: CLEAN });
+    expect(await quota(c, a)).toEqual([{ month: MONTH, used: 1, sent: 2 }]);
   });
 
   it("count from when each began waiting for Bryan: a draft that came days after it was sent, a Redo's, a failed Redo's", async () => {

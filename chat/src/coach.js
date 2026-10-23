@@ -396,8 +396,14 @@ function withEdits(text, edits) {
 // The settings Bryan may change (POST /admin/coach/settings), each true or false.
 const SETTING_KEYS = Object.freeze(["autopilot", "paused", "start_again", "test_email"]);
 
-// The Drafts list's waiting reviews in the order they were sent, the first first.
-const bySent = (a, b) => a.sent - b.sent || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+// When a review Bryan has to act on began waiting for him (ruling P46): a draft from its waiting_since (its draft came,
+// a Redo's came back, or the surfer reported it), else from when it was sent (a held clip, or a draft with none), or
+// started. A report on a review sent weeks ago so waits from the report, as the 14-day close counts it (cleanRules).
+const waitingFrom = (review) =>
+  (review.status === "drafted" ? review.waiting_since : null) ?? review.sent ?? review.created;
+
+// The Drafts list's waiting reviews, the one waiting longest first.
+const byWaiting = (a, b) => waitingFrom(a) - waitingFrom(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 // ---- The AI call --------------------------------------------------------------------------------------------------
 
@@ -1006,11 +1012,11 @@ export class Coach extends DurableObject {
   // Only Bryan's account reaches these: route() answers anyone else 403 admin. The review is his to act on by its id,
   // whoever's it is.
 
-  // GET /admin/coach/drafts: {waiting, handled, settings}. waiting is every review Bryan has to act on, the one sent
-  // first first: the drafts, those reported among them, and the clips held as not surf or flagged (ruling R16). handled
-  // is the last 50 handled (handled_at, ruling P39), published, rejected or failed, the last handled first. Each is as
-  // draftView() shows it. Every query reads about as many rows as it shows, through its index, never every review kept
-  // for 24 months: the free-plan guard counts rows read.
+  // GET /admin/coach/drafts: {waiting, handled, settings}. waiting is every review Bryan has to act on, the one waiting
+  // longest first (waitingFrom): the drafts, those reported among them, and the clips held as not surf or flagged
+  // (ruling R16). handled is the last 50 handled (handled_at, ruling P39), published, rejected or failed, the last
+  // handled first. Each is as draftView() shows it. Every query reads about as many rows as it shows, through its
+  // index, never every review kept for 24 months: the free-plan guard counts rows read.
   getDrafts() {
     const now = this.now();
     const waiting = this.waiting();
@@ -1029,18 +1035,18 @@ export class Coach extends DurableObject {
     };
   }
 
-  // The reviews waiting for Bryan, the one sent first first: the drafts, those reported among them, and the clips held
-  // as not surf or flagged (ruling R16). Each query reads through its index. `columns` are the columns read, which
-  // must hold sent and id (bySent): the hourly email needs only a few.
+  // The reviews waiting for Bryan, the one waiting longest first: the drafts, those reported among them, and the clips
+  // held as not surf or flagged (ruling R16). Each query reads through its index. `columns` are the columns read, which
+  // must hold id, status, waiting_since, sent and created (byWaiting): the hourly email needs only a few.
   waiting(columns = "*") {
     const drafted = this.all(`SELECT ${columns} FROM reviews WHERE status = 'drafted'`);
     const held = this.all(`SELECT ${columns} FROM reviews INDEXED BY reviews_held WHERE hold = 1`);
-    return [...drafted, ...held].sort(bySent);
+    return [...drafted, ...held].sort(byWaiting);
   }
 
   // A review as the Drafts list shows it: adminView() (every column, but never a key frame's text), with the account's
-  // saved profile {level, board, stance, blocked}, its key frames' times in ms by number, how long the surfer has waited
-  // since sending it (waited_ms: "waiting 5 h"), and whether the surfer reported it.
+  // saved profile {level, board, stance, blocked}, its key frames' times in ms by number, how long it has waited for
+  // Bryan (waited_ms: "waiting 5 h", waitingFrom), and whether the surfer reported it.
   draftView(review, now) {
     const view = this.adminView(review);
     const person = this.person(review.sub_hash);
@@ -1048,7 +1054,7 @@ export class Coach extends DurableObject {
       level: person.level, board: person.board, stance: person.stance, blocked: person.blocked === 1,
     };
     view.times = Object.fromEntries(view.frames.map((f) => [f.n, f.ms]));
-    view.waited_ms = now - (review.sent ?? review.created);
+    view.waited_ms = now - waitingFrom(review);
     view.reported = review.report !== null;
     return view;
   }
@@ -1857,11 +1863,11 @@ export class Coach extends DurableObject {
   }
 
   // The hourly email's {subject, text}, or null when there is nothing to tell. Its waiting reviews are the Drafts
-  // list's (waiting), with how long the surfer of the one sent first has waited, in whole hours, as the list counts
+  // list's (waiting), with how long the one waiting longest has waited for Bryan, in whole hours, as the list counts
   // it (draftView); the failed ones are those handled since `since` (the last email, or 7 days ago at most), read
   // through the handled index. Counts and times only.
   digestMail(now, since) {
-    const waiting = this.waiting("id, sent, created, hold, report");
+    const waiting = this.waiting("id, status, waiting_since, sent, created, hold, report");
     const failed = this.one(
       "SELECT count(*) AS n FROM reviews INDEXED BY reviews_handled WHERE handled_at > ? AND status = 'failed'",
       since,
@@ -1870,11 +1876,11 @@ export class Coach extends DurableObject {
     const lines = [];
     let subject;
     if (waiting.length > 0) {
-      const hours = Math.floor((now - (waiting[0].sent ?? waiting[0].created)) / HOUR);
+      const hours = Math.floor((now - waitingFrom(waiting[0])) / HOUR);
       const oldest = hours < 1 ? "under 1 h" : `${hours} h`;
       const n = waiting.length;
       subject = `WaveSlave Coach: ${n} draft${n === 1 ? "" : "s"} waiting (oldest ${oldest})`;
-      lines.push(`Waiting for you in Drafts: ${n}, the oldest sent ${oldest} ago.`);
+      lines.push(`Waiting for you in Drafts: ${n}, the oldest waiting ${oldest}.`);
       const reported = waiting.filter((r) => r.report !== null).length;
       const held = waiting.filter((r) => r.hold === 1).length;
       if (reported > 0) lines.push(`Reported by the surfer: ${reported}`);
@@ -1899,6 +1905,9 @@ export class Coach extends DurableObject {
       if (due !== null && due > now) return;
       this.setMeta("next_cleanup", cleanupAfter(now));
       if (due === null) return;
+      // All or nothing, by choice: a bug that throws every time stops every rule every day, with only this log line,
+      // and frame_bytes climbs until the size guard gives new reviews a break. That is taken over half a run, as a
+      // failed day is never lost: last_cleanup stays, so the first run that finishes redoes the window it missed.
       this.ctx.storage.transactionSync(() => {
         this.cleanRules(now, this.getMeta("last_cleanup") ?? 0);
         this.setMeta("last_cleanup", now);

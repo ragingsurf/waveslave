@@ -531,7 +531,7 @@ describe("POST /auth/signup", () => {
   it("refuses a nickname checkNick refuses, with checkNick's code, and keeps the handoff", async () => {
     const who = person();
     const { c } = await signIn(who);
-    for (const [nick, code] of [["a", "length"], ["x".repeat(21), "length"], [undefined, "length"], ["Admin", "reserved"], ["ｂｒｙａｎ", "reserved"], ["a<b>", "chars"]]) {
+    for (const [nick, code] of [["", "length"], ["x".repeat(21), "length"], [undefined, "length"], ["Admin", "reserved"], ["ｂｒｙａｎ", "reserved"], ["a<b>", "chars"]]) {
       expect(await signup({ v: who.v, code: c, nick, consent: "v1" }), String(nick)).toEqual({ status: 400, body: { error: "nick", code } });
     }
     expect(await userBySub(who.sub)).toBeNull();

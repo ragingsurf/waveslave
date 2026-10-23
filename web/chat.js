@@ -75,7 +75,7 @@ const STR = {
     signOutAll: "Sign out everywhere", deleteAccount: "Delete my account", lockRoom: "Lock the room", unlockRoom: "Unlock the room",
     hiddenMsgs: n => `Hidden messages (${n})`, unban: "Unban", unbanN: n => `Unban (${n})`, adminOn: "Admin tools are on", adminNo: "That command isn't available",
     hiddenWhy: { flags: "Hidden by reports", ban: "Hidden by a ban", admin: "Hidden by you" }, noHidden: "No hidden messages", noBanned: "No one is banned",
-    nickErr: { length: "2–20 characters", chars: "Only letters, digits, spaces and _ - .", reserved: "That name is reserved", taken: "That nickname is taken",
+    nickErr: { length: "1–20 characters", chars: "Only letters, digits, spaces and _ - .", reserved: "That name is reserved", taken: "That nickname is taken",
       blocked: "That nickname isn't allowed" },
     nickWait: d => `Once a week: you can change it again in ${d} ${d === 1 ? "day" : "days"}`,
     // Post a report
@@ -98,7 +98,8 @@ const STR = {
     locked: "The room is locked. You can still read.", failed: "That didn't go through. Try again.", gone: "That's gone already",
     blocked: { link: "Links can't be posted here. Edit it and send again.", line: "LINE IDs and invites can't be posted here. Edit it and send again.",
       phone: "Phone numbers can't be posted here. Edit it and send again.", other: "That can't be posted here. Edit it and send again." },
-    pinTitle: "Almost done", pinShown: "Signed in with LINE. Now go back to the WaveSlave app: it finishes signing in by itself. If it asks for a code, enter this one:", pinBox: "Enter the code from the LINE sign-in",
+    pinTitle: "✓ Signed in with LINE", pinShown: "Now open the WaveSlave app again. It finishes signing in by itself.", pinNeed: "Need a code?",
+    pinNeedSay: "Only if WaveSlave asks for one:", pinWait: "Finishing your LINE sign-in…", pinBox: "Enter the code from the LINE sign-in",
     pinGo: "Sign in", pinWrong: "That code isn't right. Check it and try again.", signedIn: "Signed in with LINE", signInAgain: "Log in with LINE again first",
     posted: "Report posted", stars: n => `${n} of 5 stars`, future: "The start can't be later than now.", tooLong: "A session can be up to 12 hours.",
     saved: "Saved to your diary", savedShared: "Saved, and shared to the chat", notShared: why => `Saved to your diary, but it couldn't be shared: ${why}`,
@@ -143,7 +144,7 @@ const STR = {
     signOutAll: "登出所有裝置", deleteAccount: "刪除我的帳號", lockRoom: "鎖定聊天室", unlockRoom: "解除鎖定",
     hiddenMsgs: n => `被隱藏的訊息（${n}）`, unban: "解除停權", unbanN: n => `解除停權（${n}）`, adminOn: "管理工具已開啟", adminNo: "無法使用這個指令",
     hiddenWhy: { flags: "因檢舉而隱藏", ban: "因停權而隱藏", admin: "由你隱藏" }, noHidden: "沒有被隱藏的訊息", noBanned: "沒有被停權的帳號",
-    nickErr: { length: "暱稱需 2–20 個字", chars: "只能用文字、數字、空格和 _ - .", reserved: "這個暱稱保留給站方", taken: "這個暱稱已經有人用了",
+    nickErr: { length: "暱稱需 1–20 個字", chars: "只能用文字、數字、空格和 _ - .", reserved: "這個暱稱保留給站方", taken: "這個暱稱已經有人用了",
       blocked: "這個暱稱不能使用" },
     nickWait: d => `每週只能改一次，${d} 天後可以再改`,
     postTitle: "回報浪況", postSub: "現在浪況如何？只要 5 秒。", spotHead: "浪點", sizeHead: "浪高", condHead: "海況", crowdHead: "人潮",
@@ -163,7 +164,8 @@ const STR = {
     locked: "聊天室已鎖定，仍可閱讀。", failed: "沒有送出，請再試一次。", gone: "已經不在了",
     blocked: { link: "這裡不能貼連結，修改後再送出。", line: "這裡不能留 LINE ID 或邀請，修改後再送出。", phone: "這裡不能留電話號碼，修改後再送出。",
       other: "這段內容不能在這裡發表，修改後再送出。" },
-    pinTitle: "差一步就完成", pinShown: "已使用 LINE 登入。請回到 WaveSlave App，它會自動完成登入。如果要求輸入代碼，請輸入這組：", pinBox: "輸入 LINE 登入後顯示的代碼",
+    pinTitle: "✓ 已使用 LINE 登入", pinShown: "請重新打開 WaveSlave App，它會自動完成登入。", pinNeed: "需要代碼嗎？",
+    pinNeedSay: "只有在 WaveSlave 要求時才需要輸入：", pinWait: "正在完成 LINE 登入…", pinBox: "輸入 LINE 登入後顯示的代碼",
     pinGo: "登入", pinWrong: "代碼不正確，請確認後再試一次。", signedIn: "已用 LINE 登入", signInAgain: "請先重新用 LINE 登入",
     posted: "已送出回報", stars: n => `${n} 顆星（滿分 5 顆）`, future: "開始時間不能晚於現在。", tooLong: "一次衝浪最長 12 小時。",
     saved: "已存入你的日誌", savedShared: "已儲存，並分享到聊天室", notShared: why => `已存入你的日誌，但無法分享：${why}`,
@@ -207,7 +209,7 @@ const STR = {
     signOutAll: "すべての端末でログアウト", deleteAccount: "アカウントを削除", lockRoom: "ルームをロック", unlockRoom: "ロックを解除",
     hiddenMsgs: n => `非表示のメッセージ（${n}）`, unban: "利用停止を解除", unbanN: n => `利用停止を解除（${n}）`, adminOn: "管理ツールがオンになりました", adminNo: "このコマンドは使えません",
     hiddenWhy: { flags: "通報で非表示", ban: "利用停止で非表示", admin: "あなたが非表示にしました" }, noHidden: "非表示のメッセージはありません", noBanned: "利用停止中のアカウントはありません",
-    nickErr: { length: "2〜20文字で入力してください", chars: "文字・数字・スペース・_ - . のみ使えます", reserved: "このニックネームは予約されています",
+    nickErr: { length: "1〜20文字で入力してください", chars: "文字・数字・スペース・_ - . のみ使えます", reserved: "このニックネームは予約されています",
       taken: "このニックネームは使われています", blocked: "このニックネームは使えません" },
     nickWait: d => `変更は週1回です。あと${d}日で変更できます`,
     postTitle: "波情報を投稿", postSub: "今の波はどう？5秒で完了。", spotHead: "ポイント", sizeHead: "サイズ", condHead: "コンディション", crowdHead: "混雑",
@@ -227,7 +229,8 @@ const STR = {
     locked: "ルームはロック中です。閲覧はできます。", failed: "送信できませんでした。もう一度お試しください。", gone: "すでにありません",
     blocked: { link: "リンクは投稿できません。直してから送ってください。", line: "LINE IDや招待は投稿できません。直してから送ってください。",
       phone: "電話番号は投稿できません。直してから送ってください。", other: "この内容は投稿できません。直してから送ってください。" },
-    pinTitle: "あと少しです", pinShown: "LINEでログインしました。WaveSlaveアプリに戻ると自動でログインします。コードを求められたら、これを入力してください：", pinBox: "LINEログイン後に表示されたコードを入力",
+    pinTitle: "✓ LINEでログインしました", pinShown: "WaveSlaveアプリをもう一度開いてください。自動でログインが完了します。", pinNeed: "コードが必要ですか？",
+    pinNeedSay: "WaveSlaveに求められたときだけ入力してください：", pinWait: "LINEログインを完了しています…", pinBox: "LINEログイン後に表示されたコードを入力",
     pinGo: "ログイン", pinWrong: "コードが違います。確認してもう一度お試しください。", signedIn: "LINEでログインしました", signInAgain: "もう一度LINEでログインしてください",
     posted: "波情報を投稿しました", stars: n => `星${n}つ（5段階）`, future: "開始時刻を今より後にはできません。", tooLong: "1回のセッションは最長12時間です。",
     saved: "日記に保存しました", savedShared: "保存して、チャットに共有しました", notShared: why => `日記に保存しましたが、共有できませんでした：${why}`,
@@ -674,7 +677,8 @@ function build() {
   E.pinGo = btn("cr-pill cr-send", null, "", () => pinEntered());
   E.pinIn.addEventListener("keydown", guard(e => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); pinEntered(); } }));
   E.pinIn.addEventListener("input", guard(() => { if (R.pinErr) { R.pinErr = null; drawBar(); } }));
-  E.pinBox = el("div", { class: "cr-pinbox" }, E.pinLab, el("div", { class: "cr-bar" }, E.pinIn, E.pinGo), E.pinErr);
+  E.pinWait = el("p", { class: "cr-pin-wait", role: "status" });
+  E.pinBox = el("div", { class: "cr-pinbox" }, E.pinWait, E.pinLab, el("div", { class: "cr-bar" }, E.pinIn, E.pinGo), E.pinErr);
   E.foot = el("div", { class: "cr-foot" }, E.heard, E.reply, E.note, E.barIn, E.pinBox, E.barOut);
   E.sheetTitle = el("h2", { id: "chatSheetTitle" }); E.sheetX = btn("cr-ic cr-x", null, "✕", () => closeSheet());
   E.sheetBody = el("div", { class: "cr-sheet-b" });
@@ -727,7 +731,7 @@ function drawStatus() { const s = R.el.status; s.textContent = "";
 // the code box above it while a sign-in started here waits.
 function drawBar() { const E = R.el, on = signedIn();
   E.barIn.hidden = !on; E.barOut.hidden = on; E.menuBtn.hidden = false;
-  E.pinBox.hidden = on || !pendingV(); E.pinLab.textContent = S("pinBox"); E.pinGo.textContent = S("pinGo"); E.pinIn.setAttribute("aria-label", S("pinBox"));
+  E.pinBox.hidden = on || !pendingV(); E.pinWait.textContent = S("pinWait"); E.pinWait.hidden = auto.net; E.pinLab.textContent = S("pinBox"); E.pinGo.textContent = S("pinGo"); E.pinIn.setAttribute("aria-label", S("pinBox"));
   E.pinErr.textContent = R.pinErr || ""; E.pinErr.hidden = !R.pinErr; E.pinGo.disabled = !!R.pinBusy;
   E.rep.textContent = S("report"); E.log.textContent = S("log"); E.send.textContent = S("send");
   E.input.setAttribute("placeholder", S("say")); E.input.setAttribute("aria-label", S("say")); E.lineWord.textContent = S("lineLogin"); drawSend(); }
@@ -1087,7 +1091,9 @@ function pinEntered() { const v = pendingV(), pin = R.el.pinIn.value.replace(/\D
   R.pinErr = null; R.pinBusy = true; drawBar();
   redeem(v, { pin }, null).finally(guard(() => { R.pinBusy = false; drawBar(); })); }
 // The page with no v: the pin, and nothing else.
-function pinSheet(st) { return { title: S("pinTitle"), body: [el("p", null, S("pinShown")), el("p", { class: "cr-pin-code" }, st.pin)] }; }
+// The pin waits behind "Need a code?": the app should finish by itself, so the page says only to go back to it.
+function pinSheet(st) { return { title: S("pinTitle"), body: [el("p", { class: "cr-pin-go" }, S("pinShown")),
+  el("details", { class: "cr-pin-more" }, el("summary", null, S("pinNeed")), el("p", null, S("pinNeedSay")), el("p", { class: "cr-pin-code" }, st.pin))] }; }
 // First sign-in (mockup 3): the short privacy notice (the full one opens in place), the nickname prefilled from the LINE name, and the one
 // tick; Join waits for it. What's public is said under the tick.
 function signupSheet(st) {
@@ -1531,6 +1537,9 @@ html:not([lang="en"]) .cr-sheet-hd h2{font:700 21px/1.25 var(--body);letter-spac
 .cr-log-cap{font-weight:600}
 .cr-sheet-b .cr-pin-code{margin:18px 0 6px;font:400 56px/1 VT323,var(--mono);letter-spacing:.2em;text-align:center;color:var(--led-amb);text-shadow:0 0 calc(10px*var(--led-glow)) rgba(255,170,40,.65)}
 .cr-pinbox{margin:0 0 10px}
+.cr-pin-wait{margin:0 0 8px;font-size:15px;font-weight:600}
+.cr-sheet-b .cr-pin-go{font-size:17px;line-height:1.45}
+.cr-pin-more{margin-top:14px;color:var(--muted);font-size:13px}.cr-pin-more summary{cursor:pointer}
 .cr-pin-in{letter-spacing:.2em}
 .cr-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 `;

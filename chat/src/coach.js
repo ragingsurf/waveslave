@@ -16,6 +16,7 @@
 //   counts(sub_hash, month)    a LINE account's reviews used and sent in a Taiwan month
 //   giveBack(id)               a review's count given back, once: the only way any count goes back
 //   dropFrames, dropReview     a review's key frames, or the review and its key frames, deleted, with frame_bytes kept right
+//   clearFrames                a review's key frames cleared, their rows kept (ruling P16), with frame_bytes kept right
 //   route({method, path, who, body})   every /coach/... and /admin/coach/... route, from the Worker over RPC (ruling R2):
 //     getMe                    GET /coach/me
 //     postAgree                POST /coach/agree
@@ -39,6 +40,7 @@
 //   mail(subject, text)        one email to Bryan through Resend, at most 20 a Taiwan day
 //   alert(kind), tell          tells Bryan at once that the coach stopped itself or is resting, once a Taiwan day each
 //   digestAfter, digest, digestMail   the hourly email: due after a draft, a failure or a report, sent by the alarm
+//   cleanup(now), cleanRules   the daily clean-up at 04:00 Taiwan (spec "Daily clean-up"), run by the alarm
 //   setPaused, startAgain      Bryan's Pause, and Start again after the coach stopped itself (ruling R10)
 //
 // Times are epoch milliseconds. Nothing reaches the coach but RPC calls from the Worker and the room, and its alarm.
@@ -78,7 +80,7 @@ const USAGE_SAVE_MS = 30_000; // ...or time, whichever comes first
 //   ban_fails      the room's ban checks that failed in a row, for how long the next review waits (BAN_RETRY)
 //   today          {day, n}: the reviews sent on this Taiwan day
 //   frame_bytes    the bytes of key frames stored, for the size guard
-//   next_cleanup   when the daily clean-up next runs
+//   next_cleanup   when the daily clean-up next runs (cleanup); last_cleanup, when the last one that finished ran
 //   digest_due     when the hourly email is due (ruling R9), null when none is; and last_digest, when the last one went
 //   mail_day       {day, n, alerts}: this Taiwan day's emails, for the cap of 20 a day, and the alerts sent on it
 //
@@ -95,7 +97,9 @@ const SCHEMA_V1 = [
   // not-surf or flagged clip to act on (ruling R16). model, tok_in, tok_out and cost (US$) are the call's.
   // surfer_note is what the surfer is told when it isn't published; report is the surfer's line when they report it.
   // handled_at is when it was last handled (ruling P39): published, rejected or failed, by Bryan or the alarm; null
-  // while it waits, a report included.
+  // while it waits, a report included. waiting_since is when it last began waiting for Bryan as a draft: its draft came,
+  // a Redo's new draft or a failed Redo's old one came back, or the surfer reported it. The 14-day close counts from it
+  // (cleanRules), as a Redo or a report may come weeks after the review was sent.
   `CREATE TABLE reviews (
     id TEXT PRIMARY KEY,
     uid TEXT NOT NULL,
@@ -112,6 +116,7 @@ const SCHEMA_V1 = [
     sent INTEGER,
     published INTEGER,
     handled_at INTEGER,
+    waiting_since INTEGER,
     quota_month TEXT,
     given INTEGER NOT NULL DEFAULT 0,
     checked INTEGER NOT NULL DEFAULT 0,
@@ -456,6 +461,17 @@ const TEST_MAIL = Object.freeze([
 // A time as Taiwan's clock reads it, "2030-06-16 08:00".
 const twClock = (ms) => new Date(ms + TW_MS).toISOString().slice(0, 16).replace("T", " ");
 
+// ---- The daily clean-up -------------------------------------------------------------------------------------------
+
+// How long the daily clean-up keeps each thing (spec "Daily clean-up"), at 04:00 Taiwan (cleanupAfter):
+const UNSENT_KEEP = 2 * HOUR; // a review never sent, from its start
+const DRAFT_WAIT = 14 * DAY; // a draft waiting for Bryan, from when it began waiting (waiting_since)
+const SHORT_KEEP = 7 * DAY; // the key frames of a failed review, and of a clip held as not surf, from when it was handled
+// The key frames of a published or rejected review, and a rejected review's drafts and notes, from when it was handled.
+const LONG_KEEP = 30 * DAY;
+// What the surfer is told about a draft the clean-up closed.
+const LATE_NOTE = "Sorry, we couldn't review this in time";
+
 // ---- Routes -------------------------------------------------------------------------------------------------------
 
 // Every route the coach serves: [method, path, the method that answers it, and "admin" for Bryan's own]. The path's
@@ -719,6 +735,17 @@ export class Coach extends DurableObject {
     return bytes;
   }
 
+  // Clears a review's key frames but keeps their rows (ruling P16): each frame's number, time and box stay, as a
+  // published review's key frames' times are read from them, and a frame asked for is then not_found (getFrame). The
+  // daily clean-up's way; dropFrames() is for a flagged clip, a not-surf Give back, a ban and a delete. Returns the
+  // bytes freed. Inside the caller's transaction.
+  clearFrames(id) {
+    const { bytes } = this.one("SELECT coalesce(sum(length(b64)), 0) AS bytes FROM frames WHERE review_id = ?", id);
+    this.all("UPDATE frames SET b64 = NULL WHERE review_id = ? AND b64 IS NOT NULL", id);
+    this.addFrameBytes(-bytes);
+    return bytes;
+  }
+
   // Deletes a review and its key frames. Inside the caller's transaction.
   dropReview(id) {
     this.dropFrames(id);
@@ -956,8 +983,8 @@ export class Coach extends DurableObject {
   // POST /coach/reviews/{id}/report {line}, for its owner ("Something wrong?", spec "The review"): {ok: true}. A
   // published review goes back to Bryan's Drafts, drafted again and marked Reported, with the surfer's line of up to
   // 200 characters ("" when they gave none). It keeps its publish time, which tells Bryan's Withdraw it was published,
-  // and waits for him again, so it is no longer handled. Bryan hears of it in the hourly email (digestAfter). Refused:
-  // not_found (not the caller's own), state (not published), invalid.
+  // and waits for him again from now (waiting_since), so it is no longer handled. Bryan hears of it in the hourly email
+  // (digestAfter). Refused: not_found (not the caller's own), state (not published), invalid.
   async postReport(who, body, id) {
     const review = this.reviewFor(who, id);
     if (!review) return NOT_FOUND;
@@ -965,8 +992,12 @@ export class Coach extends DurableObject {
     const ask = parseObject(body);
     const line = ask === null ? null : ownLine(ask.line, ADMIN_NOTE_MAX);
     if (line === null) return INVALID;
-    this.all("UPDATE reviews SET status = 'drafted', report = ?, handled_at = NULL WHERE id = ?", line, id);
-    await this.alarmBy(this.digestAfter(this.now()));
+    const now = this.now();
+    this.all(
+      "UPDATE reviews SET status = 'drafted', report = ?, handled_at = NULL, waiting_since = ? WHERE id = ?",
+      line, now, id,
+    );
+    await this.alarmBy(this.digestAfter(now));
     return OK;
   }
 
@@ -1238,12 +1269,14 @@ export class Coach extends DurableObject {
     if (set === null || set > at) await this.ctx.storage.setAlarm(at);
   }
 
-  // The one alarm (spec "Backend", steps 1-7): one review's AI call a run, never in a surfer's request, as a run may
-  // take 15 minutes. Whatever happened, the hourly email goes when it is due (step 4: digest), the run counts itself as
-  // a request, the usage counts are saved, and the alarm is set for the next thing due (nextAlarmAt), as the room's
-  // alarm does.
+  // The one alarm (spec "Backend", steps 1-7): the daily clean-up when it is due (cleanup), first, so a long or cut-off
+  // call can't hold it back, then one review's AI call a run, never in a surfer's request, as a run may take 15
+  // minutes. Whatever happened, the hourly email goes when it is due (step 4: digest), the run counts itself as a
+  // request, the usage counts are saved, and the alarm is set for the next thing due (nextAlarmAt), as the room's alarm
+  // does. Neither the clean-up nor the email ever throws.
   async alarm() {
     try {
+      this.cleanup(this.now());
       await this.runOne(this.now());
     } finally {
       try {
@@ -1495,7 +1528,7 @@ export class Coach extends DurableObject {
   // R16); then a reply cut off or failing a check counts an attempt; then a clip that isn't surfing is held for Bryan
   // (ruling R16); and the rest is a draft, published at once on autopilot when autopilotOk(), but for a Redo's, which
   // Bryan asked for and sees first (ruling P24). The call's model, tokens and cost are saved with what it gave. A draft
-  // or a held clip waits for Bryan, so it brings the hourly email (digestAfter).
+  // or a held clip waits for Bryan, a draft from now (waiting_since), so it brings the hourly email (digestAfter).
   answered(review, ask, { reply, stop, usage, model }, now) {
     const call = [model, usage?.input_tokens ?? null, usage?.output_tokens ?? null, this.callCost(usage, ask.estIn)];
     if (stop === "refusal") return this.flagged(review, ["refusal"], [], call);
@@ -1516,7 +1549,7 @@ export class Coach extends DurableObject {
     } else if (review.redos === 0 && this.getMeta("autopilot") && autopilotOk(reply, checked)) {
       const published = "status = 'published', published = ?, handled_at = ?, final = ?, checked = 0";
       this.saveCall(review, `${published}, ${set}`, now, now, saved[0], ...saved);
-    } else if (this.saveCall(review, `status = 'drafted', ${set}`, ...saved)) {
+    } else if (this.saveCall(review, `status = 'drafted', waiting_since = ?, ${set}`, now, ...saved)) {
       this.digestAfter(now);
     }
   }
@@ -1558,14 +1591,15 @@ export class Coach extends DurableObject {
 
   // The coach gives up on a review after its third attempt, or on an error no retry would fix (spec steps 5 and 6): it
   // fails and its count goes back. A Redo instead goes back to Bryan as it was, its old draft with a red "Redo failed"
-  // line, and its count stays: the review itself didn't fail. Either way it goes in the hourly email (digestAfter).
+  // line, waiting for him from now (waiting_since), and its count stays: the review itself didn't fail. Either way it
+  // goes in the hourly email (digestAfter).
   gaveUp(review, attempts) {
     const now = this.now();
     if (review.redos > 0) {
       const warnings = fromJson(review.warnings);
       if (!warnings.includes("redo_failed")) warnings.push("redo_failed");
-      const set = "status = 'drafted', attempts = ?, next_try = NULL, warnings = ?";
-      if (this.saveCall(review, set, attempts, JSON.stringify(warnings))) this.digestAfter(now);
+      const set = "status = 'drafted', attempts = ?, next_try = NULL, warnings = ?, waiting_since = ?";
+      if (this.saveCall(review, set, attempts, JSON.stringify(warnings), now)) this.digestAfter(now);
       return;
     }
     this.ctx.storage.transactionSync(() => {
@@ -1850,6 +1884,81 @@ export class Coach extends DurableObject {
     }
     if (failed > 0) lines.push(`Failed since the last email: ${failed} (given back)`);
     return { subject, text: lines.join("\n") };
+  }
+
+  // ---- The daily clean-up (spec "Daily clean-up") ------------------------------------------------------------------
+
+  // The daily clean-up, which the alarm runs first in every run (alarm) and which does its work when meta next_cleanup
+  // has come (04:00 Taiwan: cleanupAfter). The next one's time is set before anything else, whatever comes of this one,
+  // so the alarm never goes off again at once (nextAlarmAt). A coach with none set yet (its first alarm run) only sets
+  // it. Every rule runs in one transaction (cleanRules) with last_cleanup, so a run that fails changes nothing, and the
+  // next day's run covers the day it missed too. It never throws.
+  cleanup(now) {
+    try {
+      const due = this.getMeta("next_cleanup");
+      if (due !== null && due > now) return;
+      this.setMeta("next_cleanup", cleanupAfter(now));
+      if (due === null) return;
+      this.ctx.storage.transactionSync(() => {
+        this.cleanRules(now, this.getMeta("last_cleanup") ?? 0);
+        this.setMeta("last_cleanup", now);
+      });
+    } catch (err) {
+      console.error("coach: the daily clean-up failed:", err?.name ?? "error");
+    }
+  }
+
+  // The clean-up's rules at `now` (spec "Daily clean-up"). `last` is when the last run that finished ran (0 for none).
+  // The rules that go by handled_at read, through the handled index, only the reviews that came of age since that run:
+  // every review older was done then, and a review handled again (Bryan's actions, a report) is handled at a new time.
+  // So a run reads about as many rows as it cleans, never every review kept for 24 months: the free-plan guard counts
+  // rows read. The other rules read through their own indexes the few reviews that can be due: those uploading,
+  // drafted or held. Inside cleanup()'s transaction.
+  cleanRules(now, last) {
+    // Reviews never sent, 2 hours after they were started: they go with their key frames. Nothing was counted for them
+    // (a review counts when it is sent: postSend), so there is nothing to give back.
+    for (const { id } of this.all("SELECT id FROM reviews WHERE status = 'uploading' AND created <= ?", now - UNSENT_KEEP)) {
+      this.dropReview(id);
+    }
+    // Drafts Bryan hasn't handled in 14 days, counted from when each began waiting for him (waiting_since), a reported
+    // review's from its report: closed, the surfer told, handled now, and given back (once: giveBack). No email: Bryan
+    // heard of each when it came. A clip held as not surf or flagged isn't a draft and keeps its count (ruling R16).
+    const late = this.all(
+      `UPDATE reviews SET status = 'rejected', surfer_note = ?, next_try = NULL, handled_at = ?
+       WHERE status = 'drafted' AND hold = 0 AND flags = '[]' AND waiting_since <= ? RETURNING id`,
+      LATE_NOTE, now, now - DRAFT_WAIT,
+    );
+    for (const { id } of late) this.giveBack(id);
+    // A clip held as not surf, 7 days after it was found: the hold ends and its key frames go (ruling R16). Its count
+    // stays, and it keeps the time it was handled, so it shows among the handled where it was. A flagged clip waits for
+    // Bryan's Clear or Ban.
+    const notSurf = this.all(
+      `UPDATE reviews INDEXED BY reviews_held SET hold = 0
+       WHERE hold = 1 AND status = 'rejected' AND flags = '[]' AND handled_at <= ? RETURNING id`,
+      now - SHORT_KEEP,
+    );
+    for (const { id } of notSurf) this.clearFrames(id);
+    // Key frames (ruling P16: their rows stay): a failed review's 7 days after, a published or rejected review's 30.
+    const handled = (age, statuses) =>
+      this.all(
+        `SELECT id FROM reviews INDEXED BY reviews_handled
+         WHERE handled_at > ? AND handled_at <= ? AND status IN (${statuses})`,
+        last - age, now - age,
+      );
+    for (const { id } of handled(SHORT_KEEP, "'failed'")) this.clearFrames(id);
+    for (const { id } of handled(LONG_KEEP, "'published', 'rejected'")) this.clearFrames(id);
+    // A rejected review's texts, 30 days after: the coach's draft, its English copy, the text published before a
+    // Withdraw, which no one is shown now, and Bryan's Redo notes. What the surfer is shown stays (his note to them, and
+    // the not-surf warning and the flags, noteFor), and so does the row. A published review's text is kept until the
+    // surfer deletes it, and Bryan's examples until forget.
+    this.all(
+      `UPDATE reviews INDEXED BY reviews_handled SET draft = NULL, english = NULL, final = NULL, redo_note = '[]'
+       WHERE handled_at > ? AND handled_at <= ? AND status = 'rejected' AND hold = 0`,
+      last - LONG_KEEP, now - LONG_KEEP,
+    );
+    // Quota rows of past Taiwan months: only this month's counts are read (counts). The table holds about one row an
+    // account that used the coach this month, so reading it all is cheap.
+    this.all("DELETE FROM quota WHERE month < ?", twMonth(now));
   }
 
   // ---- Pause and Start again ---------------------------------------------------------------------------------------

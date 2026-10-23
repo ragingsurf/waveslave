@@ -65,8 +65,8 @@ const rows = (coach, query, ...binds) => coach.sql.exec(query, ...binds).toArray
 const TABLES = {
   reviews: [
     "id", "uid", "sub_hash", "lang", "move", "answers", "status", "attempts", "waits", "redos", "next_try", "created", "sent",
-    "published", "handled_at", "quota_month", "given", "checked", "hold", "model", "tok_in", "tok_out", "cost", "draft",
-    "english", "final", "flags", "warnings", "redo_note", "surfer_note", "report",
+    "published", "handled_at", "waiting_since", "quota_month", "given", "checked", "hold", "model", "tok_in", "tok_out", "cost",
+    "draft", "english", "final", "flags", "warnings", "redo_note", "surfer_note", "report",
   ],
   frames: ["review_id", "n", "ms", "box", "b64"],
   people: ["sub_hash", "level", "board", "stance", "agreed_ver", "agreed_at", "blocked"],
@@ -132,7 +132,7 @@ describe("tables", () => {
       const review = rows(coach, "SELECT * FROM reviews WHERE id = 'r1'")[0];
       expect(review).toMatchObject({ attempts: 0, waits: 0, redos: 0, given: 0, checked: 0, hold: 0 });
       for (const list of ["flags", "warnings", "redo_note"]) expect(JSON.parse(review[list]), list).toEqual([]);
-      for (const unset of ["next_try", "sent", "published", "handled_at", "quota_month", "model", "cost", "draft", "english", "final", "surfer_note", "report"]) {
+      for (const unset of ["next_try", "sent", "published", "handled_at", "waiting_since", "quota_month", "model", "cost", "draft", "english", "final", "surfer_note", "report"]) {
         expect(review[unset], unset).toBeNull();
       }
       coach.sql.exec("INSERT INTO people (sub_hash) VALUES ('sub-1')");

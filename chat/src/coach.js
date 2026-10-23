@@ -32,7 +32,7 @@
 //   requestFor, callAi         a review's Messages API request, and the call itself
 //   addSpend, startRest, holdForCredit   the money: a call's cost, a money rest, and the hard stop at US$80
 //   markOut, callBack, lostCalls   the calls on their way, and paying for one whose run was cut off
-//   alert(kind)                tells Bryan at once that the coach stopped itself or is resting
+//   alert(kind), tell          tells Bryan at once that the coach stopped itself or is resting
 //   setPaused, startAgain      Bryan's Pause, and Start again after the coach stopped itself (ruling R10)
 //
 // Times are epoch milliseconds. Nothing reaches the coach but RPC calls from the Worker and the room, and its alarm.
@@ -64,11 +64,12 @@ const USAGE_SAVE_MS = 30_000; // ...or time, whichever comes first
 //   paused         true while Bryan's Pause holds: no new reviews and no AI calls
 //   stopped        true after a key or model error, until Bryan taps Start again (ruling R10)
 //   spend          {start, usd, reviews}: the credit month's spending: when that month started, the US$ spent and the
-//                  AI calls paid for (spendAt, addSpend)
+//                  answers the AI wrote (spendAt, addSpend)
 //   rest           {kind, until, probe_at}: a money rest, "credit" or "limit", until `until`; probe_at is a credit
 //                  rest's next probe, null for a limit rest (startRest)
 //   calls_out      {review id: {redos, est_in, at}}: each AI call on its way, from just before its fetch until it comes
 //                  back, with the tokens its request sends and when it went (markOut)
+//   ban_fails      the room's ban checks that failed in a row, for how long the next review waits (BAN_RETRY)
 //   today          {day, n}: the reviews sent on this Taiwan day
 //   frame_bytes    the bytes of key frames stored, for the size guard
 //   next_cleanup   when the daily clean-up next runs
@@ -306,9 +307,10 @@ const fromJson = (text) => (text === null ? null : JSON.parse(text));
 const API_VERSION = "2026-10-21";
 const MAX_TOKENS = 16_000;
 const CALL_TIMEOUT = 600_000;
-// A review whose call couldn't be made (the room's ban check failed, or its request couldn't be built) goes back in the
-// queue for a minute, with no attempt used: no call went out.
-const NOT_CALLED_WAIT = 60_000;
+// A review whose ban check failed (the room didn't answer) goes back in the queue with no attempt used, as no call went
+// out: for a minute after the first failure in a row, twice as long after each one more, and 30 minutes at most.
+const BAN_RETRY = 60_000;
+const BAN_RETRY_MAX = 30 * 60_000;
 // The reviews columns that record a call that answered, in the order answered() lists them: the model named in the
 // answer, its tokens in and out, and its cost in US$.
 const CALL_SET = "model = ?, tok_in = ?, tok_out = ?, cost = ?";
@@ -882,23 +884,35 @@ export class Coach extends DurableObject {
         sha256b64u("coach:" + review.sub_hash),
       ]);
     } catch (err) {
+      // The room may be down for a while, so each failure in a row waits twice as long (BAN_RETRY).
       console.error("coach: the room's ban check failed:", err?.name ?? "error");
-      return this.putBack(review, this.now() + NOT_CALLED_WAIT);
+      const fails = this.getMeta("ban_fails") ?? 0;
+      this.setMeta("ban_fails", fails + 1);
+      return this.putBack(review, this.now() + Math.min(BAN_RETRY_MAX, BAN_RETRY * 2 ** fails));
     }
+    if (this.getMeta("ban_fails")) this.setMeta("ban_fails", 0);
     // Everything is looked at again after that await, and there is none from here to the call: the review may have
     // gone, or Bryan paused, meanwhile.
     if (!this.stillCalling(review)) return;
     if (banned) return this.skipBanned(review);
-    if (this.held(this.now(), probe)) return this.putBack(review);
     let ask;
     try {
       ask = this.requestFor(review, userId);
     } catch (err) {
+      // The same row fails the same way every time, so this counts an attempt, and the last one ends it.
       console.error("coach: the request couldn't be built:", err?.name ?? "error");
-      return this.putBack(review, this.now() + NOT_CALLED_WAIT);
+      return this.attempted(review, this.now());
     }
-    this.markOut(review, ask.estIn);
-    await this.settle(review, ask, await this.callAi(ask.body));
+    // Marking the call may first pay for one this review's earlier run left, which may reach the hard stop, so the
+    // hold is looked at after it. If anything holds the call now (Bryan may also have paused during the ban check), it
+    // doesn't go out.
+    const left = this.markOut(review, ask.estIn);
+    if (this.held(this.now(), probe)) {
+      this.callBack(review);
+      this.putBack(review);
+      return this.tell(this.reached(left));
+    }
+    await this.settle(review, ask, await this.callAi(ask.body), left);
   }
 
   // What holds every AI call at `now`, or null (spec "Backend" and "Money"):
@@ -953,8 +967,9 @@ export class Coach extends DurableObject {
   // The next review to call, marked calling with next_try at its 16-minute mark (spec step 2): of those queued and due,
   // or left calling past their mark, the one sent first. null when none is due. A review left calling is `stale`: its
   // run was cut off midway (a deploy can stop one), which counts as an attempt (step 5, like a timeout), so a call that
-  // fails that way every time can't go on paying every 16 minutes. (A run that couldn't make its call puts its review
-  // back in the queue itself, so it isn't left calling.) The read and the write have no await between them.
+  // fails that way every time can't go on paying every 16 minutes. (A run that couldn't make its call never leaves its
+  // review calling: a failed ban check puts it back in the queue, and a request that can't be built counts an
+  // attempt.) The read and the write have no await between them.
   takeNext(now) {
     const next = this.one(
       "SELECT id, status FROM reviews WHERE status IN ('queued', 'calling') AND next_try <= ? ORDER BY sent, id LIMIT 1",
@@ -1017,8 +1032,9 @@ export class Coach extends DurableObject {
   // One call to the Messages API with a request body, not streaming, with a 10-minute timeout (spec "The AI request"):
   // {kind: "ok", message}, the answer, or {kind, retryAfter, cutOff}, what sortError() makes of the error and the
   // answer's retry-after header. A network error, the timeout or an answer that isn't JSON is "attempt" (sortError()
-  // would take a missing answer for "fail"); cutOff is true only for the timeout or an abort, a call that may have run
-  // to its worst case (spec "Money"). The alarm never calls it without an API key (stopFor).
+  // would take a missing answer for "fail"). Any of those is cutOff: the request may have gone out and run, even to its
+  // worst case, with nothing come back to say what it cost (spec "Money"), so it is paid at that. An error answer is
+  // never cutOff: Anthropic answered it. The alarm never calls it without an API key (stopFor).
   async callAi(body) {
     try {
       const res = await fetch(this.env.COACH_API_URL, {
@@ -1035,28 +1051,28 @@ export class Coach extends DurableObject {
       return { kind: sortError(res.status, await res.text()), retryAfter: res.headers.get("retry-after"), cutOff: false };
     } catch (err) {
       console.error("coach: the AI call failed:", err?.name ?? "error");
-      return { kind: "attempt", retryAfter: null, cutOff: err?.name === "TimeoutError" || err?.name === "AbortError" };
+      return { kind: "attempt", retryAfter: null, cutOff: true };
     }
   }
 
   // What became of a call (spec steps 3-6 and "Money"). The call is back first: its mark goes (callBack) and its cost
   // counts at once (addSpend), before anything is saved, so a reply for a review deleted or redone meanwhile still
-  // costs the month, and the call is paid once. Then its outcome is saved with saveCall(). An answer is checked
-  // (answered()); an error goes by its kind:
+  // costs the month. It is paid only when its mark was still there: if lostCalls() took it, it was paid at its worst
+  // case already. Then its outcome is saved with saveCall(). An answer is checked (answered()); an error goes by its
+  // kind:
   //   "wait"      a 429 or 529: it waits for retry-after, or 30 minutes, with no attempt used, 12 times in a row at most
   //   "attempt"   a 5xx, a timeout or a network error
   //   "fail"      any other 400, or a 413: the coach gives up on it at once
   //   "pause"     the key or the model doesn't work: the coach stops itself (meta stopped, ruling R10)
   //   "credit", "limit"   the money: a money rest starts (startRest)
   // After those last three, which are no fault of this review's, it goes back in the queue with no attempt used. A
-  // money line the call's cost reached is acted on last (reached), once the review's own outcome is saved. Bryan is
-  // told after every write (alert).
-  async settle(review, ask, result) {
+  // money line reached by the call's cost, or by paying the call this review's earlier run left (`left`, markOut), is
+  // acted on last (reached), once the review's own outcome is saved. Bryan is told after every write (tell).
+  async settle(review, ask, result, left = null) {
     const now = this.now();
     const answer = result.kind === "ok" ? readReply(result.message) : null;
-    this.callBack(review);
-    const usd = this.callUsd(result, answer, ask.estIn);
-    const crossed = usd > 0 ? this.addSpend(usd, now) : null;
+    const usd = this.callBack(review) ? this.callUsd(result, answer, ask.estIn) : 0;
+    const crossed = usd > 0 || answer !== null ? this.addSpend(usd, now, answer !== null) : null;
     let told = null;
     if (result.kind === "ok") {
       // An answer means the credit is back, so it ends a credit rest: only a probe calls during one.
@@ -1076,8 +1092,7 @@ export class Coach extends DurableObject {
       this.putBack(review, now);
       if (this.startRest(result.kind, now)) told = "resting";
     }
-    const reached = this.reached(crossed, now);
-    for (const kind of [told, reached]) if (kind) await this.alert(kind);
+    await this.tell(told, this.reached(crossed ?? left));
   }
 
   // An answer, checked in the spec's order. A refusal or a flag first, as a reply of any shape may carry one (ruling
@@ -1153,8 +1168,8 @@ export class Coach extends DurableObject {
   }
 
   // Back in the queue, due `at` (now by default), with no attempt used: a hold that began while the room was asked; a
-  // call that couldn't be made, a minute later; or an error that is the key's, the model's or the money's, not this
-  // review's.
+  // ban check that failed, a while later (BAN_RETRY); or an error that is the key's, the model's or the money's, not
+  // this review's.
   putBack(review, at = this.now()) {
     this.saveCall(review, "status = 'queued', next_try = ?", at);
   }
@@ -1181,8 +1196,8 @@ export class Coach extends DurableObject {
   }
 
   // What a call cost the month (spec "Money"): an answer at its token counts, but at its worst case when it was cut
-  // off at max_tokens or gave none; a timeout or an abort (cutOff) at its worst case, as it may have run to the end;
-  // any other error nothing.
+  // off at max_tokens or gave none; a call that threw (cutOff: a timeout, a lost connection, an answer that isn't JSON)
+  // at its worst case, as it may have run to the end; an error answer nothing.
   callUsd(result, answer, estIn) {
     if (result.kind !== "ok") return result.cutOff ? this.worstCost(estIn) : 0;
     return answer.stop === "max_tokens" ? this.worstCost(estIn) : this.callCost(answer.usage, estIn);
@@ -1191,41 +1206,42 @@ export class Coach extends DurableObject {
   // ---- Money -------------------------------------------------------------------------------------------------------
 
   // Adds a call's cost to the credit month's spend (meta spend), which starts again with each credit month (spendAt):
-  // every call that cost something counts, whatever was saved of it. Returns the money line (moneyLines) this call took
-  // the spend to: "hard", "stop", or null when it reached neither for the first time this month.
-  addSpend(usd, now = this.now()) {
+  // every call that cost something counts, whatever was saved of it. `answer` is true for a call the AI answered, which
+  // counts one more in `reviews` (ruling P36): a Redo's answer counts, a timeout or a lost call doesn't. Returns the
+  // money line (moneyLines) this took the spend to: "hard", "stop", or null when it reached neither for the first time
+  // this month.
+  addSpend(usd, now = this.now(), answer = false) {
     const { start, usd: before, reviews } = this.spendAt(now);
     const after = before + usd;
-    this.setMeta("spend", { start, usd: after, reviews: reviews + 1 });
+    this.setMeta("spend", { start, usd: after, reviews: reviews + (answer ? 1 : 0) });
     const { stop, hard } = this.moneyLines();
     if (before < hard && after >= hard) return "hard";
     return before < stop && after >= stop ? "stop" : null;
   }
 
-  // What a money line reached by a call's cost (addSpend) starts: at the hard stop every review waiting waits for the
-  // next credit month (holdForCredit), and either line is a "resting" alert for Bryan, which it returns (else null).
-  reached(crossed, now) {
-    if (crossed === "hard") this.holdForCredit(now);
+  // What a money line reached by a call's cost (addSpend) starts: at the hard stop every review waiting is held
+  // (holdForCredit), and either line is a "resting" alert for Bryan, which it returns (else null).
+  reached(crossed) {
+    if (crossed === "hard") this.holdForCredit();
     return crossed === null ? null : "resting";
   }
 
-  // The hard stop (spec "Money"): no more AI calls this credit month, so every review waiting goes back to queued with
-  // no attempt used, waits for the next credit month, and is given back to the month it was sent in (once: giveBack).
-  holdForCredit(now) {
-    const { next } = this.spendAt(now);
+  // The hard stop (spec "Money"): no more AI calls, so every review waiting goes back to queued with no attempt used, and
+  // waits while the hard stop holds (callHold): until the next credit month, or until COACH_EXTRA_USD is raised, when
+  // it goes at once. A first review is given back to the month it was sent in (once: giveBack); a Redo keeps its
+  // count, as the surfer still gets the review (ruling P38).
+  holdForCredit() {
     this.ctx.storage.transactionSync(() => {
-      const held = this.all(
-        "UPDATE reviews SET status = 'queued', next_try = ? WHERE status IN ('queued', 'calling') RETURNING id", next,
-      );
-      for (const { id } of held) this.giveBack(id);
+      const held = this.all("UPDATE reviews SET status = 'queued' WHERE status IN ('queued', 'calling') RETURNING id, redos");
+      for (const { id, redos } of held) if (redos === 0) this.giveBack(id);
     });
   }
 
   // Starts a money rest of `kind` (spec "Money"), during which every AI call waits: "credit" (the credit ran out) until
   // the next credit day, with one review tried every PROBE_EVERY to end it early (probeDue); "limit" (the Console's
-  // monthly limit, which counts UTC months) until 08:00 Taiwan on the 1st, with no probe. The reviews waiting are given
-  // back to the month they were sent in (once: giveBack). A rest of the same kind already on goes on as it is: that is
-  // a probe that found no credit again. True when a rest started.
+  // monthly limit, which counts UTC months) until 08:00 Taiwan on the 1st, with no probe. The first reviews waiting are
+  // given back to the month they were sent in (once: giveBack); a Redo keeps its count (ruling P38). A rest of the same
+  // kind already on goes on as it is: that is a probe that found no credit again. True when a rest started.
   startRest(kind, now) {
     if (this.restAt(now)?.kind === kind) return false;
     const rest = kind === "credit"
@@ -1233,7 +1249,8 @@ export class Coach extends DurableObject {
       : { kind, until: nextUtcMonth(now), probe_at: null };
     this.ctx.storage.transactionSync(() => {
       this.setMeta("rest", rest);
-      for (const { id } of this.all("SELECT id FROM reviews WHERE status IN ('queued', 'calling')")) this.giveBack(id);
+      const waiting = this.all("SELECT id FROM reviews WHERE status IN ('queued', 'calling') AND redos = 0");
+      for (const { id } of waiting) this.giveBack(id);
     });
     return true;
   }
@@ -1241,16 +1258,28 @@ export class Coach extends DurableObject {
   // The calls on their way (meta calls_out): a review's call is marked just before its fetch (markOut), with the tokens
   // its request sends, and unmarked as soon as it comes back (callBack), so a mark that stays is a call whose run was
   // cut off (lostCalls). A run that stops before its fetch marks nothing.
+  //
+  // A mark this review's earlier call left, unpaid (lostCalls() couldn't yet tell it was lost, as when the hard stop
+  // put its review back in the queue), is paid at its worst case before the new one replaces it, so no call goes
+  // unpaid (ruling P37). Returns the money line that reached, or null.
   markOut(review, estIn) {
+    const now = this.now();
     const out = this.getMeta("calls_out") ?? {};
-    out[review.id] = { redos: review.redos, est_in: estIn, at: this.now() };
+    const left = out[review.id];
+    const crossed = left ? this.addSpend(this.worstCost(left.est_in), now) : null;
+    out[review.id] = { redos: review.redos, est_in: estIn, at: now };
     this.setMeta("calls_out", out);
+    return crossed;
   }
 
+  // Unmarks a review's call that came back. True when its mark was there to take; false when lostCalls() took it and
+  // paid it already.
   callBack(review) {
     const out = this.getMeta("calls_out") ?? {};
+    if (!Object.hasOwn(out, review.id)) return false;
     delete out[review.id];
     this.setMeta("calls_out", out);
+    return true;
   }
 
   // Pays for each call that went out and never came back, at its worst case, as it may have run to the end (spec
@@ -1272,8 +1301,7 @@ export class Coach extends DurableObject {
       delete out[id];
     }
     this.setMeta("calls_out", out);
-    const reached = this.reached(crossed, now);
-    if (reached) await this.alert(reached);
+    await this.tell(this.reached(crossed));
   }
 
   // ---- Alerts ------------------------------------------------------------------------------------------------------
@@ -1282,6 +1310,11 @@ export class Coach extends DurableObject {
   // working), "resting" when a money rest starts or the credit month's spend reaches US$78 or US$80 (+ extra). Its
   // callers await it once their writes are done. It must never throw. Nothing is sent yet: the alert emails fill it in.
   async alert(kind) {}
+
+  // Sends each alert named (alert), in turn, leaving out the nulls.
+  async tell(...kinds) {
+    for (const kind of kinds) if (kind) await this.alert(kind);
+  }
 
   // ---- Pause and Start again ---------------------------------------------------------------------------------------
 

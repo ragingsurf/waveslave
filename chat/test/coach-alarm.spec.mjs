@@ -319,7 +319,7 @@ describe("attempts and waits", () => {
     expect(await reviewRow(c, id)).toMatchObject({ status: "failed", attempts: 3 });
   });
 
-  it("callAi marks a timeout or an abort as cut off, and no other attempt", async () => {
+  it("callAi marks every call that threw as cut off (it may have run, ruling P37), and no error answer", async () => {
     const c = await freshCoach();
     const thrown = (err) => () => {
       throw err;
@@ -337,7 +337,7 @@ describe("attempts and waits", () => {
       return out;
     });
     const attempt = (cutOff) => ({ kind: "attempt", retryAfter: null, cutOff });
-    expect(results).toEqual([attempt(true), attempt(true), attempt(false), attempt(false), attempt(false)]);
+    expect(results).toEqual([attempt(true), attempt(true), attempt(true), attempt(true), attempt(false)]);
     expect(logged.splice(0).map((args) => args[1])).toEqual(["TimeoutError", "AbortError", "TypeError", "SyntaxError"]);
   });
 

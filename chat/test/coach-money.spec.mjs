@@ -245,7 +245,7 @@ describe("the hard stop at US$80 + extra", () => {
     await expectSpend(c, { start: NEXT_CREDIT, usd: GOOD_USD, reviews: 1 });
   });
 
-  it("the call that reaches it is saved; every other review waiting goes back to queued for the next credit month, given back once", async () => {
+  it("the call that reaches it is saved; every other review waiting goes back to queued and waits, given back once", async () => {
     const c = await freshCoach();
     const [a, b, d] = [surfer(), surfer(), surfer()];
     await setMeta(c, "spend", { start: CREDIT_START, usd: 79.95, reviews: 529 });
@@ -259,9 +259,9 @@ describe("the hard stop at US$80 + extra", () => {
     await expectSpend(c, { start: CREDIT_START, usd: 79.95 + GOOD_USD, reviews: 530 });
     expect(await reviewRow(c, first)).toMatchObject({ status: "drafted", given: 0 });
     expect(await quota(c, a)).toEqual({ used: 1, sent: 1 });
-    expect(await reviewRow(c, second)).toMatchObject({ status: "queued", attempts: 1, next_try: NEXT_CREDIT, given: 1 });
+    expect(await reviewRow(c, second)).toMatchObject({ status: "queued", attempts: 1, next_try: T - MIN, given: 1 });
     expect(await quota(c, b)).toEqual({ used: 0, sent: 1 });
-    expect(await reviewRow(c, third)).toMatchObject({ status: "queued", attempts: 0, next_try: NEXT_CREDIT, given: 1 });
+    expect(await reviewRow(c, third)).toMatchObject({ status: "queued", attempts: 0, next_try: T + 10 * MIN, given: 1 });
     expect(await quota(c, d)).toEqual({ used: 0, sent: 1 });
     expect(c.alerts).toEqual(["resting"]);
     expect(await alarmAt(c)).toBe(NEXT_CREDIT);
@@ -286,7 +286,7 @@ describe("the hard stop at US$80 + extra", () => {
     expect(await quota(c, b, "2030-06")).toEqual({ used: 0, sent: 1 });
   });
 
-  it("a timeout that reaches it counts its attempt first, then waits for the next credit month like the rest", async () => {
+  it("a timeout that reaches it counts its attempt first, then waits like the rest", async () => {
     const c = await freshCoach();
     const a = surfer();
     await setMeta(c, "spend", { start: CREDIT_START, usd: 79.7, reviews: 529 });
@@ -294,8 +294,8 @@ describe("the hard stop at US$80 + extra", () => {
     ai.push(timedOut);
     await runAlarm(c);
     expect(logged.splice(0)).toEqual([["coach: the AI call failed:", "TimeoutError"]]);
-    await expectSpend(c, { start: CREDIT_START, usd: 79.7 + worstFor(calls[0]), reviews: 530 });
-    expect(await reviewRow(c, id)).toMatchObject({ status: "queued", attempts: 1, next_try: NEXT_CREDIT, given: 1 });
+    await expectSpend(c, { start: CREDIT_START, usd: 79.7 + worstFor(calls[0]), reviews: 529 });
+    expect(await reviewRow(c, id)).toMatchObject({ status: "queued", attempts: 1, next_try: T + MIN, given: 1 });
     expect(await quota(c, a)).toEqual({ used: 0, sent: 1 });
     expect(c.alerts).toEqual(["resting"]);
   });
@@ -308,11 +308,46 @@ describe("the hard stop at US$80 + extra", () => {
     await setMeta(c, "calls_out", { [id]: { redos: 0, est_in: 15_000, at: T - 17 * MIN } });
     await runAlarm(c);
     expect(calls).toEqual([]);
-    await expectSpend(c, { start: CREDIT_START, usd: 79.7 + worstUsd(15_000, 16_000, PRICES), reviews: 530 });
-    expect(await reviewRow(c, id)).toMatchObject({ status: "queued", attempts: 1, next_try: NEXT_CREDIT, given: 1 });
+    await expectSpend(c, { start: CREDIT_START, usd: 79.7 + worstUsd(15_000, 16_000, PRICES), reviews: 529 });
+    expect(await reviewRow(c, id)).toMatchObject({ status: "queued", attempts: 1, next_try: T - SEC, given: 1 });
     expect(await quota(c, a)).toEqual({ used: 0, sent: 1 });
     expect(c.alerts).toEqual(["resting"]);
     expect(await alarmAt(c)).toBe(NEXT_CREDIT);
+  });
+
+  it("raising COACH_EXTRA_USD after it lets the reviews it held go at the next alarm run, not at the next credit month", async () => {
+    const c = await freshCoach();
+    await setMeta(c, "spend", { start: CREDIT_START, usd: 79.95, reviews: 529 });
+    await insertReview(c, surfer(), { sent: T - 2 * MIN });
+    const held = await insertReview(c, surfer(), { sent: T - MIN });
+    ai.push(ok());
+    await runAlarm(c);
+    expect(await reviewRow(c, held)).toMatchObject({ status: "queued", attempts: 0, next_try: T, given: 1 });
+    c.clock.t = T + HOUR;
+    await runAlarm(c);
+    expect(calls).toHaveLength(1);
+    // Bryan adds credit and raises the extra budget, which the coach reads afresh on its next run.
+    await setEnv(c, { COACH_EXTRA_USD: "20" });
+    c.clock.t = T + 2 * HOUR;
+    ai.push(ok());
+    await runAlarm(c);
+    expect((await reviewRow(c, held)).status).toBe("drafted");
+    await expectSpend(c, { start: CREDIT_START, usd: 79.95 + 2 * GOOD_USD, reviews: 531 });
+  });
+
+  it("holds a waiting Redo without giving it back: the surfer still gets the review (ruling P38)", async () => {
+    const c = await freshCoach();
+    const [a, b] = [surfer(), surfer()];
+    await setMeta(c, "spend", { start: CREDIT_START, usd: 79.95, reviews: 529 });
+    await insertReview(c, a, { sent: T - 3 * MIN });
+    const first = await insertReview(c, a, { sent: T - 2 * MIN });
+    const redo = await insertReview(c, b, { sent: T - MIN, redos: 1 });
+    ai.push(ok());
+    await runAlarm(c);
+    expect(await reviewRow(c, first)).toMatchObject({ status: "queued", given: 1 });
+    expect(await reviewRow(c, redo)).toMatchObject({ status: "queued", redos: 1, given: 0 });
+    expect(await quota(c, a)).toEqual({ used: 1, sent: 2 });
+    expect(await quota(c, b)).toEqual({ used: 1, sent: 1 });
   });
 
   it("COACH_EXTRA_USD = \"10\" raises both lines by 10", async () => {
@@ -389,7 +424,7 @@ describe("what a call costs the month", () => {
     expect(logged.splice(0)).toEqual([["coach: the AI call failed:", "TimeoutError"]]);
     const worst = worstFor(calls[0]);
     expect(worst).toBeCloseTo(0.38, 1);
-    expect(await getMeta(c, "spend")).toEqual({ start: CREDIT_START, usd: worst, reviews: 1 });
+    expect(await getMeta(c, "spend")).toEqual({ start: CREDIT_START, usd: worst, reviews: 0 });
     expect(await reviewRow(c, id)).toMatchObject({ status: "queued", attempts: 1, cost: null });
   });
 
@@ -440,6 +475,31 @@ describe("what a call costs the month", () => {
     await expectSpend(c, { start: CREDIT_START, usd: 2 * GOOD_USD, reviews: 2 });
   });
 
+  it("spend.reviews counts each answer the AI wrote, a Redo's included, and no call that gave none (ruling P36)", async () => {
+    const c = await freshCoach();
+    const redo = await insertReview(c, surfer(), {
+      redos: 1, draft: JSON.stringify(goodReply()), redo_note: JSON.stringify(["Focus on the back foot"]),
+    });
+    ai.push(ok());
+    await runAlarm(c);
+    expect((await reviewRow(c, redo)).status).toBe("drafted");
+    await expectSpend(c, { start: CREDIT_START, usd: GOOD_USD, reviews: 1 });
+    // A 500 and a timeout write no answer: the timeout costs its worst case, and neither counts.
+    await insertReview(c, surfer());
+    ai.push(fail500);
+    await runAlarm(c);
+    c.clock.t = T + MIN;
+    ai.push(timedOut);
+    await runAlarm(c);
+    expect(logged.splice(0)).toEqual([["coach: the AI call failed:", "TimeoutError"]]);
+    await expectSpend(c, { start: CREDIT_START, usd: GOOD_USD + worstFor(calls[2]), reviews: 1 });
+    // The third try is answered: one more.
+    c.clock.t = T + 6 * MIN;
+    ai.push(ok());
+    await runAlarm(c);
+    await expectSpend(c, { start: CREDIT_START, usd: 2 * GOOD_USD + worstFor(calls[2]), reviews: 2 });
+  });
+
   it("errors start no spending at all, and the money rests' errors none either", async () => {
     const c = await freshCoach();
     await insertReview(c, surfer());
@@ -452,9 +512,9 @@ describe("what a call costs the month", () => {
   });
 });
 
-// ---- Calls a cut-off run left, and calls that never went out (ruling P31) -------------------------------------------
+// ---- Calls a cut-off run left, and calls that never went out (rulings P31, P35 and P37) -----------------------------
 
-describe("a call cut off midway, and one that never went out (ruling P31)", () => {
+describe("a call cut off midway, and one that never went out (rulings P31, P35 and P37)", () => {
   it("a call is marked as on its way from just before its fetch until it comes back", async () => {
     const c = await freshCoach();
     const id = await insertReview(c, surfer());
@@ -481,13 +541,13 @@ describe("a call cut off midway, and one that never went out (ruling P31)", () =
     ai.push(ok());
     await runAlarm(c);
     expect(await reviewRow(c, cut)).toMatchObject({ status: "drafted", attempts: 1 });
-    await expectSpend(c, { start: CREDIT_START, usd: lost + GOOD_USD, reviews: 2 });
+    await expectSpend(c, { start: CREDIT_START, usd: lost + GOOD_USD, reviews: 1 });
     expect(await getMeta(c, "calls_out")).toEqual({});
     // The next run takes the other again (an attempt, like any review left calling) and pays only its own call.
     ai.push(ok());
     await runAlarm(c);
     expect(await reviewRow(c, early)).toMatchObject({ status: "drafted", attempts: 1 });
-    await expectSpend(c, { start: CREDIT_START, usd: lost + 2 * GOOD_USD, reviews: 3 });
+    await expectSpend(c, { start: CREDIT_START, usd: lost + 2 * GOOD_USD, reviews: 2 });
   });
 
   it("at its last attempt it is given up on with no call, and its lost call is still paid", async () => {
@@ -499,7 +559,7 @@ describe("a call cut off midway, and one that never went out (ruling P31)", () =
     expect(calls).toEqual([]);
     expect(await reviewRow(c, id)).toMatchObject({ status: "failed", attempts: 3, given: 1 });
     expect(await quota(c, a)).toEqual({ used: 0, sent: 1 });
-    await expectSpend(c, { start: CREDIT_START, usd: worstUsd(15_000, 16_000, PRICES), reviews: 1 });
+    await expectSpend(c, { start: CREDIT_START, usd: worstUsd(15_000, 16_000, PRICES), reviews: 0 });
   });
 
   it("a mark whose review is gone is paid once it is 16 minutes old (before that it may still be on its way), and never twice", async () => {
@@ -510,42 +570,145 @@ describe("a call cut off midway, and one that never went out (ruling P31)", () =
     c.clock.t = T + MIN;
     await runAlarm(c);
     const lost = worstUsd(15_000, 16_000, PRICES);
-    await expectSpend(c, { start: CREDIT_START, usd: lost, reviews: 1 });
+    await expectSpend(c, { start: CREDIT_START, usd: lost, reviews: 0 });
     expect(await getMeta(c, "calls_out")).toEqual({});
     c.clock.t = T + 20 * MIN;
     await runAlarm(c);
-    await expectSpend(c, { start: CREDIT_START, usd: lost, reviews: 1 });
+    await expectSpend(c, { start: CREDIT_START, usd: lost, reviews: 0 });
   });
 
-  it("a failed ban check puts the review back in the queue a minute later, with no attempt used and nothing paid", async () => {
+  it("a lost connection or an answer that isn't JSON may have run, so each counts at its worst case (ruling P37)", async () => {
+    const c = await freshCoach();
+    const id = await insertReview(c, surfer());
+    ai.push(() => {
+      throw new TypeError("Network connection lost.");
+    });
+    await runAlarm(c);
+    const worst = worstFor(calls[0]);
+    await expectSpend(c, { start: CREDIT_START, usd: worst, reviews: 0 });
+    c.clock.t = T + MIN;
+    ai.push(() => new Response("<html>bad gateway</html>", { status: 200 }));
+    await runAlarm(c);
+    expect(logged.splice(0)).toEqual([["coach: the AI call failed:", "TypeError"], ["coach: the AI call failed:", "SyntaxError"]]);
+    await expectSpend(c, { start: CREDIT_START, usd: 2 * worst, reviews: 0 });
+    expect(await reviewRow(c, id)).toMatchObject({ status: "queued", attempts: 2 });
+  });
+
+  it("a mark its review's earlier call left is paid at its worst case before the next call replaces it (ruling P37)", async () => {
+    const c = await freshCoach();
+    // The hard stop put this review back in the queue while its cut-off call, 5 minutes ago, was still marked.
+    const id = await insertReview(c, surfer());
+    await setMeta(c, "calls_out", { [id]: { redos: 0, est_in: 15_000, at: T - 5 * MIN } });
+    let during;
+    await c.inCoach(async (coach) => {
+      ai.push(() => {
+        during = coach.getMeta("calls_out");
+        return Response.json(apiMessage(goodReply()));
+      });
+      await coach.alarm();
+    });
+    expect(during).toEqual({ [id]: { redos: 0, est_in: estFor(calls[0]), at: T } });
+    await expectSpend(c, { start: CREDIT_START, usd: worstUsd(15_000, 16_000, PRICES) + GOOD_USD, reviews: 1 });
+    expect(await getMeta(c, "calls_out")).toEqual({});
+    expect((await reviewRow(c, id)).status).toBe("drafted");
+  });
+
+  it("when paying that mark reaches the hard stop, the call doesn't go out: the review is held and given back", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    await setMeta(c, "spend", { start: CREDIT_START, usd: 79.7, reviews: 529 });
+    const id = await insertReview(c, a);
+    await setMeta(c, "calls_out", { [id]: { redos: 0, est_in: 15_000, at: T - 5 * MIN } });
+    await runAlarm(c);
+    expect(calls).toEqual([]);
+    await expectSpend(c, { start: CREDIT_START, usd: 79.7 + worstUsd(15_000, 16_000, PRICES), reviews: 529 });
+    expect(await getMeta(c, "calls_out")).toEqual({});
+    expect(await reviewRow(c, id)).toMatchObject({ status: "queued", attempts: 0, given: 1 });
+    expect(await quota(c, a)).toEqual({ used: 0, sent: 1 });
+    expect(c.alerts).toEqual(["resting"]);
+    expect(await alarmAt(c)).toBe(NEXT_CREDIT);
+  });
+
+  it("a call whose mark lostCalls() took, and paid at its worst case, isn't paid again when it comes back (ruling P37)", async () => {
+    const c = await freshCoach();
+    const id = await insertReview(c, surfer());
+    await c.inCoach(async (coach) => {
+      ai.push(async () => {
+        // It takes so long that a run meanwhile counts it lost.
+        c.clock.t = T + 17 * MIN;
+        await coach.lostCalls(c.clock.t);
+        return Response.json(apiMessage(goodReply()));
+      });
+      await coach.alarm();
+    });
+    await expectSpend(c, { start: CREDIT_START, usd: worstFor(calls[0]), reviews: 1 });
+    expect((await reviewRow(c, id)).status).toBe("drafted");
+    expect(await getMeta(c, "calls_out")).toEqual({});
+  });
+
+  it("a failed ban check puts the review back with no attempt used and nothing paid, waiting twice as long after each failure in a row (ruling P35)", async () => {
     const c = await freshCoach();
     const id = await insertReview(c, surfer());
     c.onAsk = () => {
       throw new Error("the room is down");
     };
+    // A minute, then 2, then 4...
+    let at = T;
+    for (const wait of [MIN, 2 * MIN, 4 * MIN]) {
+      c.clock.t = at;
+      await runAlarm(c);
+      at += wait;
+      expect(await reviewRow(c, id)).toMatchObject({ status: "queued", attempts: 0, next_try: at });
+      expect(await alarmAt(c)).toBe(at);
+    }
+    expect(logged.splice(0)).toEqual(Array(3).fill(["coach: the room's ban check failed:", "Error"]));
+    expect(await getMeta(c, "ban_fails")).toBe(3);
+    // ...and 30 minutes at most.
+    await setMeta(c, "ban_fails", 9);
+    c.clock.t = at;
     await runAlarm(c);
     expect(logged.splice(0)).toEqual([["coach: the room's ban check failed:", "Error"]]);
+    expect(await reviewRow(c, id)).toMatchObject({ status: "queued", attempts: 0, next_try: at + 30 * MIN });
     expect(calls).toEqual([]);
-    expect(await reviewRow(c, id)).toMatchObject({ status: "queued", attempts: 0, next_try: T + MIN });
     expect(await getMeta(c, "spend")).toBeNull();
     expect(await getMeta(c, "calls_out")).toBeNull();
-    expect(await alarmAt(c)).toBe(T + MIN);
-    // A minute later it goes, still on its first attempt.
+    // A run that gets past the ban check starts the count again, and the review goes, still on its first attempt.
     c.onAsk = null;
-    c.clock.t = T + MIN;
+    c.clock.t = at + 30 * MIN;
     ai.push(ok());
     await runAlarm(c);
     expect(await reviewRow(c, id)).toMatchObject({ status: "drafted", attempts: 0 });
+    expect(await getMeta(c, "ban_fails")).toBe(0);
   });
 
-  it("a request that can't be built goes back the same way, logged by its error's name", async () => {
+  it("a request that can't be built counts an attempt, so the third fails it and gives it back once (ruling P35)", async () => {
     const c = await freshCoach();
-    const id = await insertReview(c, surfer(), { answers: "{" });
+    const a = surfer();
+    const id = await insertReview(c, a, { answers: "{" });
+    await runAlarm(c);
+    expect(await reviewRow(c, id)).toMatchObject({ status: "queued", attempts: 1, next_try: T + MIN });
+    for (const at of [T + MIN, T + 6 * MIN]) {
+      c.clock.t = at;
+      await runAlarm(c);
+    }
+    expect(logged.splice(0)).toEqual(Array(3).fill(["coach: the request couldn't be built:", "SyntaxError"]));
+    expect(calls).toEqual([]);
+    expect(await reviewRow(c, id)).toMatchObject({ status: "failed", attempts: 3, next_try: null, given: 1 });
+    expect(await quota(c, a)).toEqual({ used: 0, sent: 1 });
+    expect(await giveBackAgain(c, id)).toBe(false);
+    expect(await getMeta(c, "spend")).toBeNull();
+  });
+
+  it("a Redo whose request can't be built goes back to drafted with redo_failed at its last attempt, its count kept", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    const id = await insertReview(c, a, { answers: "{", redos: 1, attempts: 2, draft: JSON.stringify(goodReply()) });
     await runAlarm(c);
     expect(logged.splice(0)).toEqual([["coach: the request couldn't be built:", "SyntaxError"]]);
-    expect(calls).toEqual([]);
-    expect(await reviewRow(c, id)).toMatchObject({ status: "queued", attempts: 0, next_try: T + MIN });
-    expect(await getMeta(c, "spend")).toBeNull();
+    const row = await reviewRow(c, id);
+    expect(row).toMatchObject({ status: "drafted", redos: 1, attempts: 3, next_try: null, given: 0 });
+    expect(JSON.parse(row.warnings)).toEqual(["redo_failed"]);
+    expect(await quota(c, a)).toEqual({ used: 1, sent: 1 });
   });
 });
 
@@ -656,6 +819,23 @@ describe("each of Anthropic's money and key errors goes its own way", () => {
     expect(await getMeta(c, "rest")).toBeNull();
     expect((await reviewRow(c, first)).status).toBe("drafted");
     expect((await reviewRow(c, second)).status).toBe("queued");
+  });
+
+  it.each([
+    ["credit", creditLow],
+    ["limit", apiError(400, "invalid_request_error", "You have reached your specified workspace API usage limits.")],
+  ])("a %s rest gives back only the first reviews waiting: a Redo keeps its count (ruling P38)", async (kind, answer) => {
+    const c = await freshCoach();
+    const [a, b] = [surfer(), surfer()];
+    const first = await insertReview(c, a, { sent: T - 2 * MIN });
+    const redo = await insertReview(c, b, { sent: T - MIN, redos: 1 });
+    ai.push(answer);
+    await runAlarm(c);
+    expect((await getMeta(c, "rest")).kind).toBe(kind);
+    expect(await reviewRow(c, first)).toMatchObject({ status: "queued", given: 1 });
+    expect(await reviewRow(c, redo)).toMatchObject({ status: "queued", redos: 1, given: 0 });
+    expect(await quota(c, a)).toEqual({ used: 0, sent: 1 });
+    expect(await quota(c, b)).toEqual({ used: 1, sent: 1 });
   });
 
   it("during a credit rest a start gets money with the rest's end, and a start just after the end goes through", async () => {

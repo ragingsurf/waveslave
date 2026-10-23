@@ -466,7 +466,7 @@ note says so.
    - A message hidden for child safety is copied to `holds` automatically and kept 180 days, whatever else is deleted. This is
      what Taiwan's 2024 child-protection amendment asks for; a lawyer should confirm.
 6. **Nicknames:**
-   - normalised as in step 1, from letters, digits, single inner spaces and `_ - .`, 2–20 characters;
+   - normalised as in step 1, from letters, digits, single inner spaces and `_ - .`, 1–20 characters (one is fine: Bryan, Oct 23);
    - unique by `nick_key`, the normalised look-alike-folded form;
    - refused if that form contains any reserved word: bryan, admin, waveslave, coach, mod, staff, 官方, 管理, 管理员, 管理員, 教練,
      教练 or 站長.

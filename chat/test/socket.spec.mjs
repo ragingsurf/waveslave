@@ -1021,7 +1021,7 @@ describe("nick", () => {
     const a = await addUser(r);
     const c = await join(r, a);
     const cases = [
-      ["L", "nick:length"],
+      ["   ", "nick:length"],
       [undefined, "nick:length"],
       ["Admin_Kai", "nick:reserved"],
       ["a<b>", "nick:chars"],

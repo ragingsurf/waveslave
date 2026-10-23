@@ -225,11 +225,11 @@ const STEPS = {
     await b.waitForSelector(".chatroom .cr-pinbox input", { state: "visible" });
     const a = await s.open({ go: false });
     await a.goto(start, { waitUntil: "load" }); await a.waitForURL(u => u.href.startsWith(ORIGIN()), { waitUntil: "load" });
-    await a.waitForSelector(".chatroom .cr-pin-code");
+    await a.waitForSelector(".chatroom .cr-pin-code", { state: "attached" });
     const shown = await a.evaluate(() => ({ title: document.getElementById("chatSheetTitle").textContent, text: document.querySelector(".chatroom .cr-sheet-b").textContent,
       pin: document.querySelector(".chatroom .cr-pin-code").textContent, inputs: document.querySelectorAll(".chatroom .cr-sheet input").length,
       token: localStorage.getItem("waveslave-chat-token"), href: location.href }));
-    if (!/^\d{6}$/.test(shown.pin) || !shown.text.startsWith("Signed in with LINE. Now go back to the WaveSlave app: it finishes signing in by itself. If it asks for a code, enter this one:") || shown.inputs || shown.token || /#[cp]=/.test(shown.href))
+    if (!/^\d{6}$/.test(shown.pin) || shown.title !== "✓ Signed in with LINE" || !shown.text.startsWith("Now open the WaveSlave app again. It finishes signing in by itself.Need a code?") || shown.inputs || shown.token || /#[cp]=/.test(shown.href))
       throw new Error(`the browser without v shows ${JSON.stringify(shown)}`);
     // A wrong code tapped in twice uses one of the three tries, not two: Sign in is off while the first is checked (each redeem held
     // here for 300 ms, so the second tap comes while it's on its way).
@@ -260,10 +260,12 @@ const STEPS = {
     await b.click(".chatroom .cr-line");
     for (let i = 0; i < 50 && !start; i++) await wait(100);
     if (!start) throw new Error("the LINE button didn't start a sign-in");
+    await b.waitForFunction(() => { const w = document.querySelector(".chatroom .cr-pin-wait"); return w && !w.hidden && w.getClientRects().length && w.textContent === "Finishing your LINE sign-in…"; }, null, { timeout: 5e3 })
+      .catch(() => { throw new Error("B doesn't say it's finishing the sign-in"); });
     const a = await s.open({ go: false });
     await a.setExtraHTTPHeaders(IP); // on every request, the callback LINE redirects to included
     await a.goto(start, { waitUntil: "load" }); await a.waitForURL(u => u.href.startsWith(ORIGIN()), { waitUntil: "load" });
-    await a.waitForSelector(".chatroom .cr-pin-code");
+    await a.waitForSelector(".chatroom .cr-pin-code", { state: "attached" });
     await signedInBar(b);
     if (!(await b.evaluate(() => !!localStorage.getItem("waveslave-chat-token") && !localStorage.getItem("waveslave-chat-v")))) throw new Error("B isn't signed in, or still holds v");
     if (await b.isVisible(".chatroom .cr-pinbox")) throw new Error("the code box still shows");

@@ -50,7 +50,7 @@ class Skip extends Error {}
 // with another status, the backend's refusal: 401 auth, else 503 break) besides /reports. The token the checks give the page is a
 // stand-in: only the fake backend sees it.
 const me = o => ({ left: 2, sent_left: 4, monthly: 2, month: "2030-11", next_month: Date.UTC(2030, 10, 30, 16), full_today: false, stop: null, profile: null,
-  agreed: true, admin: false, reviews: [], ...o });
+  agreed: true, admin: false, reviews: [], account: "u-test", ...o });
 const coachBackend = (o = {}, status = 200) => q => q.pathname === "/coach/me" ? { status, body: status === 200 ? me(o) : { error: status === 401 ? "auth" : "break" } }
   : { body: { reports: [], online: 0, last_id: 0 } };
 const TOKEN = { "waveslave-chat-token": "test-token" };
@@ -102,12 +102,15 @@ async function slideTo(page, at) {
   await page.evaluate(t => { const r = document.querySelector('.coachpanel [data-k="slider"]'); r.value = String(t); r.dispatchEvent(new Event("input", { bubbles: true })); }, at);
   await page.waitForFunction(t => { const v = document.querySelector(".coachpanel video"); return !!v && !v.seeking && Math.abs(v.currentTime - t) < 0.02; }, at);
 }
-// The draft in IndexedDB (waveslave-coach, draft, "current"), with each key frame's blob as its size: null when there's none, or the error.
+// The draft in IndexedDB (waveslave-coach, draft: "current", with the id and sent of "progress" when it's the same flow's), with each key
+// frame's blob as its size: null when there's none, or the error.
 const draft = page => page.evaluate(() => new Promise(ok => { const q = indexedDB.open("waveslave-coach");
   q.onerror = () => ok({ error: String(q.error) });
-  q.onsuccess = () => { const d = q.result; if (!d.objectStoreNames.contains("draft")) return ok(null);
-    const g = d.transaction("draft").objectStore("draft").get("current");
-    g.onsuccess = () => { const r = g.result; ok(r ? { ...r, frames: r.frames.map(f => ({ ...f, blob: f.blob instanceof Blob ? f.blob.size : null })) } : null); }; g.onerror = () => ok({ error: String(g.error) }); }; }));
+  q.onsuccess = () => { const d = q.result; if (!d.objectStoreNames.contains("draft")) { d.close(); return ok(null); }
+    const tx = d.transaction("draft"), g = tx.objectStore("draft").get("current"), p = tx.objectStore("draft").get("progress");
+    tx.oncomplete = () => { const r = g.result, pr = p.result && r && p.result.flow === r.flow ? p.result : null; d.close();
+      ok(r ? { ...r, frames: r.frames.map(f => ({ ...f, blob: f.blob instanceof Blob ? f.blob.size : null })), id: pr ? pr.id : null, sent: pr ? pr.sent : [] } : null); };
+    tx.onerror = () => ok({ error: String(tx.error) }); }; }));
 // Each key frame sent (base64 text), decoded in the page: its size, its bytes, and where its white pixels are (their count and centre).
 const decode = (page, bodies) => page.evaluate(async bodies => Promise.all(bodies.map(async b => {
   const bytes = Uint8Array.from(atob(b), c => c.charCodeAt(0)), bm = await createImageBitmap(new Blob([bytes], { type: "image/jpeg" }));
@@ -118,12 +121,18 @@ const decode = (page, bodies) => page.evaluate(async bodies => Promise.all(bodie
 // An init script noting every size given to a canvas (window.__canvases) and every drawImage of a video: the canvas's size and the
 // numbers it was given (window.__draws).
 function watchCanvas() {
-  window.__canvases = []; window.__draws = [];
+  window.__canvases = []; window.__draws = []; const ids = new WeakMap(); let next = 0;
+  const id = c => { if (!ids.has(c)) ids.set(c, next++); return ids.get(c); };
   for (const k of ["width", "height"]) { const d = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, k);
-    Object.defineProperty(HTMLCanvasElement.prototype, k, { configurable: true, get: d.get, set(v) { d.set.call(this, v); window.__canvases.push([this.width, this.height]); } }); }
+    Object.defineProperty(HTMLCanvasElement.prototype, k, { configurable: true, get: d.get, set(v) { d.set.call(this, v); window.__canvases.push({ id: id(this), w: this.width, h: this.height }); } }); }
   const draw = CanvasRenderingContext2D.prototype.drawImage;
-  CanvasRenderingContext2D.prototype.drawImage = function (src, ...a) { if (src instanceof HTMLVideoElement) window.__draws.push({ cw: this.canvas.width, ch: this.canvas.height, a }); return draw.call(this, src, ...a); };
+  CanvasRenderingContext2D.prototype.drawImage = function (src, ...a) { if (src instanceof HTMLVideoElement) window.__draws.push({ id: id(this.canvas), cw: this.canvas.width, ch: this.canvas.height, a }); return draw.call(this, src, ...a); };
 }
+// An init script noting each value given to a progress bar, with its max (window.__bar).
+function watchBar() { window.__bar = []; const d = Object.getOwnPropertyDescriptor(HTMLProgressElement.prototype, "value");
+  Object.defineProperty(HTMLProgressElement.prototype, "value", { configurable: true, get: d.get, set(v) { d.set.call(this, v); window.__bar.push([this.value, this.max]); } }); }
+// Waits up to 10 s for check() to come true, and says what it waited for when it doesn't.
+async function soon(what, check) { for (let i = 0; i < 100; i++) { if (await check()) return; await wait(100); } throw new Error(`waited 10 s for ${what}`); }
 // An init script noting each play() and pause() of a video (window.__media).
 function watchMedia() { window.__media = []; for (const k of ["play", "pause"]) { const f = HTMLMediaElement.prototype[k];
   HTMLMediaElement.prototype[k] = function () { window.__media.push(k); return f.apply(this, arguments); }; } }
@@ -425,8 +434,15 @@ const CHECKS = {
       const bad = crops.filter(c => c.w !== 784 || c.h !== 784 || c.bytes > 102400 || c.white < 500 || !(c.cx > 157 && c.cx < 627 && c.cy > 157 && c.cy < 627));
       if (crops.length !== 12 || bad.length) throw new Error(`${what}: ${crops.length} close-ups sent, these not 784x784 within 100 KB with the box in the middle: ${JSON.stringify(bad)}`);
       const q = { w: Math.round(size.w / 4), h: Math.round(size.h / 4) }, seen = await page.evaluate(() => ({ sizes: window.__canvases, draws: window.__draws }));
-      const big = seen.sizes.filter(([w, h]) => !((w <= 784 && h <= 784) || (w <= q.w && h <= q.h)));
+      const big = seen.sizes.filter(({ w, h }) => !((w <= 784 && h <= 784) || (w <= q.w && h <= q.h)));
       if (!seen.sizes.length || big.length) throw new Error(`${what}: canvases sized ${JSON.stringify(big)} (of ${seen.sizes.length})`);
+      // The video is drawn into exactly two canvases, each kept for it: one only ever given a quarter of the frame's size, one only ever
+      // 784 x 784 (a canvas starts at 300 x 150, so as its width is set first it's briefly that width by 150).
+      const used = [...new Set(seen.draws.map(d => d.id))], sized = used.map(id => seen.sizes.filter(c => c.id === id));
+      const finals = sized.map(all => all.length ? [all[all.length - 1].w, all[all.length - 1].h] : null), want = [[q.w, q.h], [784, 784]];
+      const stray = sized.flatMap((all, i) => finals[i] ? all.filter(c => ![300, finals[i][0]].includes(c.w) || ![150, finals[i][1]].includes(c.h)) : []);
+      if (used.length !== 2 || !eq(finals.map(String).sort(), want.map(String).sort()) || stray.length)
+        throw new Error(`${what}: the video went into ${used.length} canvases, sized ${JSON.stringify(sized.map(a => a.map(c => [c.w, c.h])))}, want one of ${q.w}x${q.h} and one of 784x784`);
       const odd = seen.draws.filter(({ cw, ch, a }) => !(a.length === 4 && cw === q.w && ch === q.h && eq(a, [0, 0, q.w, q.h])
         || a.length === 8 && cw === 784 && ch === 784 && eq(a.slice(4), [0, 0, 784, 784]) && a[2] === a[3] && a[0] >= 0 && a[1] >= 0 && a[0] + a[2] <= size.w && a[1] + a[3] <= size.h));
       if (seen.draws.length < 24 || odd.length) throw new Error(`${what}: ${seen.draws.length} drawImage calls of the video, these not as they should be: ${JSON.stringify(odd.slice(0, 3))}`);
@@ -508,13 +524,71 @@ const CHECKS = {
     await page.click('.coachpanel [data-k="send"]'); await inPanel(page, `"${SENT}"`, ".co-ok");
     if (await text(page, ".co-ok") !== SENT || st.starts.length !== 1 || st.frames.length !== 12 || st.sends !== 1) throw new Error(`without IndexedDB: ${st.starts.length} starts, ${st.frames.length} key frames, ${st.sends} sends`);
   },
-  // A key frame's upload failing twice at the network and working the third time: the review sends, with each key frame once.
+  // A key frame's upload failing twice at the network and working the third time: the review sends, with each key frame once, and the
+  // send's progress bar (the start, 12 key frames and send: 14 steps) gets to its end.
   async uploadRetries(open, { tmp }) {
-    const st = flowBackend({}, { failFrame: { n: 3, times: 2 } }), page = await open({ store: TOKEN, backend: st.backend }), b = boxAt(640, 360, 6, 3);
+    const st = flowBackend({}, { failFrame: { n: 3, times: 2 } }), page = await open({ store: TOKEN, backend: st.backend, init: [watchBar] }), b = boxAt(640, 360, 6, 3);
     await toCheck(page, makeClip(tmp, {}), { at: 3, x: b.x, y: b.y });
     await page.click('.coachpanel [data-k="send"]'); await inPanel(page, `"${SENT}"`, ".co-ok", 30e3);
     const ok = st.frames.filter(f => !f.failed).map(f => f.n), failed = st.frames.filter(f => f.failed).map(f => f.n);
     if (!eq(ok, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) || !eq(failed, [3, 3]) || st.starts.length !== 1 || st.sends !== 1) throw new Error(`sent ${JSON.stringify(ok)}, failed ${JSON.stringify(failed)}, ${st.starts.length} starts, ${st.sends} sends`);
+    const bar = (await page.evaluate(() => window.__bar)).filter(([, max]) => max === 14);
+    if (!bar.length || !eq(bar[bar.length - 1], [14, 14])) throw new Error(`the send's progress bar ended at ${JSON.stringify(bar[bar.length - 1])}, want [14, 14]`);
+  },
+  // IndexedDB failing to open once, and then closing under the coach (as Safari can in the background), doesn't end the saving: the next
+  // save opens it again (each time the coach opens it is counted).
+  async idbReopens(open, { tmp }) {
+    const flaky = () => { window.__opens = 0; window.__breakTx = false; const o = IDBFactory.prototype.open, t = IDBDatabase.prototype.transaction;
+      IDBFactory.prototype.open = function (name, ...a) { if (name === "waveslave-coach" && window.__opens++ === 0) throw new DOMException("failed", "UnknownError"); return o.call(this, name, ...a); };
+      IDBDatabase.prototype.transaction = function (...a) { if (window.__breakTx) { window.__breakTx = false; throw new DOMException("The database connection is closing.", "InvalidStateError"); } return t.apply(this, a); }; };
+    const st = flowBackend(), page = await open({ store: TOKEN, backend: st.backend, init: [flaky] }), opens = () => page.evaluate(() => window.__opens);
+    await page.tap(TAB); await inPanel(page, "New review", '[data-k="new"]'); await page.click('.coachpanel [data-k="new"]');
+    await page.setInputFiles('.coachpanel input[type="file"]', makeClip(tmp, {}));
+    await inPanel(page, "the questions", '[data-k="move-top_turn"]'); await page.click('.coachpanel [data-k="move-top_turn"]');
+    await soon("IndexedDB opened again after it failed", async () => await opens() >= 2);
+    const first = await opens(); let d = null;
+    await soon("the move saved", async () => (d = await draft(page)) && d.answers && d.answers.move === "top_turn");
+    if (first !== 2) throw new Error(`the coach opened IndexedDB ${first} times by the first save, want 2 (the first failed)`);
+    await page.evaluate(() => { window.__breakTx = true; }); await page.click('.coachpanel [data-k="move-cutback"]');
+    await soon("the closed connection to be met", () => page.evaluate(() => !window.__breakTx));
+    const before = await opens(); await page.click('.coachpanel [data-k="next"]');
+    await soon("IndexedDB opened again after the connection closed", async () => await opens() === before + 1);
+    await soon("the next save", async () => (d = await draft(page)) && d.step === "find" && d.answers.move === "cutback");
+  },
+  // Picked up after a reload at the check screen, the key frame the tracker lost opens first, as before the reload (spec step 5):
+  // without the clip, its close-up and "Not in this one", which leaves it out.
+  async lostAfterReload(open, { tmp }) {
+    const st = flowBackend(), page = await open({ store: TOKEN, backend: st.backend }), b = boxAt(640, 360, 6, 2.5);
+    await toCheck(page, makeClip(tmp, { gap: [2.9, 3.1] }), { at: 2.5, x: b.x, y: b.y });
+    await soon("the key frames saved", async () => { const d = await draft(page); return !!d && d.step === "check" && d.frames.length === 12; });
+    await page.reload({ waitUntil: "load" }); await settle(page);
+    await page.tap(TAB); await inPanel(page, "Pick up", '[data-k="pickup"]'); await page.click('.coachpanel [data-k="pickup"]');
+    await inPanel(page, "the lost key frame", '[data-k="notin"]');
+    const got = { head: await text(page, '[data-k="fh"]'), big: !!await page.$(".coachpanel img.co-big"), frame: !!await page.$(".coachpanel .co-frame"), grid: !!await page.$(".coachpanel .co-grid") };
+    if (!eq(got, { head: "Key frame at 0:03.0", big: true, frame: false, grid: false })) throw new Error(`picked up, the check screen opened at ${JSON.stringify(got)}`);
+    await page.click('.coachpanel [data-k="notin"]'); await inPanel(page, "the 12 close-ups", ".co-grid");
+    const grid = await page.evaluate(() => ({ lost: document.querySelectorAll(".coachpanel .co-tile.co-lost").length, out: [...document.querySelectorAll(".coachpanel .co-tile.co-out")].map(e => e.dataset.k) }));
+    if (!eq(grid, { lost: 0, out: ["kf-9"] })) throw new Error(`after leaving it out: ${JSON.stringify(grid)}`);
+  },
+  // Shutting the panel while the key frames are being cut stops the cutting (nothing more is drawn) and keeps the clip; opening the panel
+  // again cuts them again from it, to the check screen (ruling P52).
+  async closeDuringCut(open, { tmp }) {
+    const st = flowBackend(), page = await open({ store: TOKEN, backend: st.backend, init: [watchCanvas] }), b = boxAt(640, 360, 6, 3);
+    await page.tap(TAB); await inPanel(page, "New review", '[data-k="new"]'); await page.click('.coachpanel [data-k="new"]');
+    await page.setInputFiles('.coachpanel input[type="file"]', makeClip(tmp, {}));
+    await inPanel(page, "the questions", '[data-k="move-top_turn"]'); await page.click('.coachpanel [data-k="move-top_turn"]'); await page.click('.coachpanel [data-k="next"]');
+    await slideTo(page, 3); await page.click('.coachpanel [data-k="here"]');
+    await tapAt(page, b.x, b.y); await page.waitForFunction(() => window.__draws.length >= 1);
+    await page.keyboard.press("Escape");
+    const at = await page.evaluate(() => ({ draws: window.__draws.length, open: document.documentElement.classList.contains("coach-open") })); await wait(1500);
+    const later = await page.evaluate(async () => { const v = document.querySelector(".coachpanel video");
+      return { draws: window.__draws.length, clip: !!v && await fetch(v.src).then(() => true, () => false) }; });
+    const d = await draft(page);
+    if (at.open || at.draws >= 24 || later.draws !== at.draws || !later.clip || !d || d.step !== "tap" || d.frames.length) throw new Error(`shut while cutting: ${JSON.stringify({ at, later, step: d && d.step, frames: d && d.frames.length })}`);
+    await page.tap(TAB); await inPanel(page, "the 12 close-ups", ".co-grid", 30e3);
+    const after = await page.evaluate(() => ({ tiles: document.querySelectorAll(".coachpanel .co-tile").length, draws: window.__draws.length }));
+    if (after.tiles !== 12 || after.draws < at.draws + 24) throw new Error(`opened again: ${JSON.stringify(after)}, from ${at.draws} draws`);
+    await soon("the key frames saved", async () => { const d = await draft(page); return !!d && d.step === "check" && d.frames.length === 12; });
   },
   // Three failures of one upload: "Couldn't send. Tap to try again.", and the draft in IndexedDB still has all 12 key frames, the review's
   // id and the two the server has. Tapping it asks the server which it has and sends only the rest.

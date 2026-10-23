@@ -385,7 +385,7 @@ function open() {
 // waiting for GET /coach/me is dropped, so drawing the page again (a new language, a spot) doesn't open the panel again.
 function close() {
   if (!P.open) return;
-  P.open = false; P.el.hidden = true; document.documentElement.classList.remove("coach-open"); V.drafts = false; V.sent = false;
+  P.open = false; P.el.hidden = true; document.documentElement.classList.remove("coach-open"); V.drafts = false; V.sent = false; stopWork();
   const back = P.opener; P.opener = null;
   const to = [back, P.tab].find(e => e && e !== document.body && e.isConnected && e.getClientRects().length);
   if (to) to.focus({ preventScroll: true });
@@ -509,7 +509,7 @@ function render() {
   P.body.textContent = "";
   if (!t) { V.drafts = false; P.body.append(...signedOut()); }
   else if (mine && ME.me) {
-    if (!F.loaded) { F.loaded = true; guard(loadDraft)(); }
+    forAccount(account());
     P.body.append(...(F.show && ME.me.agreed === true ? flow(ME.me) : signedIn(ME.me)).filter(Boolean));
   }
   else if (mine && ME.failed) P.body.append(...failed());
@@ -644,19 +644,30 @@ const KEPT_MIN = 8; // the surfer must be in at least 8 of the 12 key frames
 const CLIP_MIN = 3, CLIP_MAX = 120; // a clip's length, in seconds
 const SIDE = 784; // every close-up is 784 x 784: a multiple of the 28 px tile the AI counts its cost in
 
-// The review being made. What a reload must not lose is kept in IndexedDB as it goes (saveDraft): the answers, how far it got, Here (s),
-// the tap and the box side (displayed pixels), the 12 key frames {n, ms, box, lost, blob} once cut, the review's id once started and the
-// key frames the server has (sent). The rest lives only in this page: whether the draft was read (loaded) and whether there is one, whether
-// the flow shows (else the panel's main view, which offers to pick it up), the screen, whether the clip has to be chosen again (resumed),
-// the clip (the file input, its <video> and object URL, whether its length and size are known, its first tap, its length and size, the
-// slider's place), and the screen's state: a clip that wouldn't do (err), unanswered questions, the profile opened for changing, the key
-// frame opened on the check screen and its zoom, a seek on its way, work on its way and its progress bar, and a send that failed. run
-// goes up whenever the work on its way is to stop (a new clip, Start over, a new cut or send).
+// The review being made, which belongs to one account (GET /coach/me's account, its uid: owner) and has an id of its own (flow), so a
+// stored draft is offered, sent and deleted only by its own account, and a tab never deletes another tab's (ruling P51). What a reload
+// must not lose is kept in IndexedDB as it goes (saveDraft): the answers, how far it got, Here (s), the tap and the box side (displayed
+// pixels), the 12 key frames {n, ms, box, lost, blob} once cut, and apart from those (saveProgress), the review's id once started and the
+// key frames the server has (sent). The rest lives only in this page: the account the draft was last read for (loadedFor; undefined
+// before the first) and whether there is a draft, whether the flow shows (else the panel's main view, which offers to pick it up), the
+// screen, whether the clip has to be chosen again (resumed), the clip (the file input, its <video> and object URL, whether its length
+// and size are known, its first tap, its length and size, the slider's place), and the screen's state: a clip that wouldn't do (err),
+// unanswered questions, the profile opened for changing, the key frame opened on the check screen and its zoom, a seek on its way, work
+// on its way (cutting: "all" for the cut, or + / −'s direction) and its progress bar, work the panel shutting stopped (redo), and a send
+// that failed. run goes up whenever the work on its way is to stop (a new clip, Start over, a new cut or send, the panel shutting).
 const noAnswers = p => ({ move: null, move_other: "", note: "", level: p && LEVELS.includes(p.level) ? p.level : null,
   board: p && BOARDS.includes(p.board) ? p.board : null, stance: p && STANCES.includes(p.stance) ? p.stance : null });
-const F = { loaded: false, draft: false, show: false, screen: null, resumed: false, answers: noAnswers(null), profiled: false, here: null, tap: null, side: null,
-  frames: [], id: null, sent: [], input: null, video: null, url: null, ready: false, unlocked: false, dur: 0, vw: 0, vh: 0, pos: 0,
-  err: null, missing: false, editProfile: false, open: null, zoom: null, seeking: false, seekN: 0, busy: false, progress: [0, 1], bar: null, fail: false, run: 0 };
+const F = { loadedFor: undefined, owner: null, flow: null, draft: false, show: false, screen: null, resumed: false, answers: noAnswers(null), profiled: false,
+  here: null, tap: null, side: null, frames: [], id: null, sent: [], input: null, video: null, url: null, ready: false, unlocked: false, dur: 0, vw: 0, vh: 0, pos: 0,
+  err: null, missing: false, editProfile: false, open: null, zoom: null, seeking: false, seekN: 0, busy: false, cutting: null, redo: null, progress: [0, 1], bar: null,
+  fail: false, run: 0 };
+// The signed-in account, as GET /coach/me said for the token kept now (null before it has answered for it, or when it gave none).
+const account = () => { const t = tokenNow(), a = t && ME.token === t && ME.me ? ME.me.account : null; return typeof a === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(a) ? a : null; };
+// A new flow's id: random, only ever compared with the stored draft's.
+function newFlow() {
+  try { return [...crypto.getRandomValues(new Uint8Array(12))].map(b => b.toString(16).padStart(2, "0")).join(""); }
+  catch (e) { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
+}
 // The first max characters of s, counted as the backend counts them (code points, so an emoji is one, and 中文 has the room English has).
 const upTo = (s, max) => [...String(s)].slice(0, max).join("");
 const answered = a => MOVES.includes(a.move) && (a.move !== "other" || a.move_other.trim() !== "") && LEVELS.includes(a.level) && BOARDS.includes(a.board) && STANCES.includes(a.stance);
@@ -669,37 +680,66 @@ function newFrame(n, ms, box, lost, blob) { const f = { n, ms, box, lost, blob: 
 function setBlob(f, blob) { revoke(f); f.blob = blob; try { f.src = URL.createObjectURL(blob); } catch (e) { f.src = null; } }
 function revoke(f) { if (f.src) try { URL.revokeObjectURL(f.src); } catch (e) {} f.src = null; }
 
-// ---- Storage: the draft in IndexedDB (database waveslave-coach, store draft, key "current"), kept until it's sent or Start over clears
-// it: saved as each answer is given and when the key frames are cut (and when they change, or the server has one more). Every step is in
-// try/catch: where IndexedDB is missing or throws (a private window), the review can still be sent, only not picked up after a reload.
-// Writes go one after another, in order.
+// ---- Storage: the draft in IndexedDB (database waveslave-coach, store draft), kept until it's sent or Start over clears it: under
+// "current" {account, flow, answers, step, here, tap, side, frames}, saved as each answer is given and when the key frames are cut (and
+// when they change); and under "progress" {account, flow, id, sent}, saved as the review starts and each key frame lands, so that never
+// writes the 12 key frames again. Every step is in try/catch: where IndexedDB is missing or throws (a private window), the review can
+// still be sent, only not picked up after a reload. Writes go one after another, in order.
 let dbOpen = null, dbQueue = Promise.resolve();
-function idb(mode, op, ...args) {
-  if (!dbOpen) dbOpen = new Promise((ok, no) => { const q = indexedDB.open("waveslave-coach", 1);
+// The connection, opened when first needed. One that failed to open, or that the browser closed (Safari can, in the background) or asked
+// to close for a newer version, is forgotten, so the next save opens it again.
+function db() {
+  if (dbOpen) return dbOpen;
+  const p = dbOpen = new Promise((ok, no) => { const q = indexedDB.open("waveslave-coach", 1);
     q.onupgradeneeded = () => { try { q.result.createObjectStore("draft"); } catch (e) { no(e); } };
-    q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error); q.onblocked = () => no(new Error("blocked")); });
-  return dbOpen.then(d => new Promise((ok, no) => { let out;
-    const tx = d.transaction("draft", mode), q = tx.objectStore("draft")[op](...args);
-    q.onsuccess = () => { out = q.result; }; tx.oncomplete = () => ok(out); tx.onerror = tx.onabort = () => no(tx.error || new Error("idb")); }));
+    q.onsuccess = () => { const d = q.result, forget = () => { if (dbOpen === p) dbOpen = null; };
+      d.onclose = forget; d.onversionchange = () => { forget(); try { d.close(); } catch (e) {} }; ok(d); };
+    q.onerror = () => no(q.error); q.onblocked = () => no(new Error("blocked")); });
+  p.catch(() => { if (dbOpen === p) dbOpen = null; });
+  return p;
+}
+// One transaction on the draft store: run(store, give) makes its requests, and it resolves to what give() was given once it's done.
+function idb(mode, run) {
+  const p = db();
+  return p.then(d => new Promise((ok, no) => {
+    let tx, out;
+    try { tx = d.transaction("draft", mode); } catch (e) { if (dbOpen === p) dbOpen = null; return no(e); }
+    tx.oncomplete = () => ok(out); tx.onerror = tx.onabort = () => no(tx.error || new Error("idb"));
+    run(tx.objectStore("draft"), v => { out = v; });
+  }));
 }
 const queued = f => (dbQueue = dbQueue.then(f).catch(() => {}));
+const progressRec = () => ({ account: F.owner, flow: F.flow, id: F.id, sent: [...F.sent] });
+// The whole draft. Nothing is kept for a review with no account (a backend that doesn't say whose it is).
 function saveDraft() {
+  if (!F.owner) return;
   F.draft = true;
   const step = F.frames.length === 12 ? "check" : F.screen === "find" || F.screen === "tap" ? F.screen : F.screen === "cut" ? "tap" : "questions";
-  const rec = { answers: { ...F.answers }, step, here: F.here, tap: F.tap && { x: F.tap.x, y: F.tap.y }, side: F.side,
-    frames: F.frames.map(f => ({ n: f.n, ms: f.ms, box: f.box && [f.box.x, f.box.y, f.box.side], lost: f.lost, blob: f.blob })), id: F.id, sent: [...F.sent] };
-  queued(() => idb("readwrite", "put", rec, "current"));
+  const rec = { account: F.owner, flow: F.flow, answers: { ...F.answers }, step, here: F.here, tap: F.tap && { x: F.tap.x, y: F.tap.y }, side: F.side,
+    frames: F.frames.map(f => ({ n: f.n, ms: f.ms, box: f.box && [f.box.x, f.box.y, f.box.side], lost: f.lost, blob: f.blob })) }, prog = progressRec();
+  queued(() => idb("readwrite", st => { st.put(rec, "current"); st.put(prog, "progress"); }));
 }
-function dropDraft() { F.draft = false; queued(() => idb("readwrite", "delete", "current")); }
-// The draft a reload left, read once a page load when the panel first shows signed in. Anything that doesn't look right is left out; with
-// the key frames all there it picks up at the check screen, else the clip is chosen again. Nothing changes if a review has started
-// meanwhile.
-async function loadDraft() {
-  let r = null; await queued(() => idb("readonly", "get", "current").then(v => { r = v; }));
+// The review's id and the key frames the server has, alone.
+function saveProgress() { if (!F.owner) return; const prog = progressRec(); queued(() => idb("readwrite", st => { st.put(prog, "progress"); })); }
+// This flow's own draft goes; one another account or another tab saved since stays.
+function dropDraft() {
+  F.draft = false; const acc = F.owner, flow = F.flow;
+  if (acc) queued(() => idb("readwrite", st => { for (const k of ["current", "progress"]) st.get(k).onsuccess = e => { const v = e.target.result;
+    if (v && v.account === acc && v.flow === flow) st.delete(k); }; }));
+}
+// The draft a reload (or another sign-in) left, read once GET /coach/me has said which account is signed in, and offered only to that
+// account: another account's is left as it is, for its own account to pick up. Anything that doesn't look right is left out; with the
+// key frames all there it picks up at the check screen (at a frame the tracker lost, if there is one), else the clip is chosen again.
+// Nothing changes if a review has started meanwhile, or the account has changed again.
+async function loadDraft(acc) {
+  let got = null; await queued(() => idb("readonly", (st, give) => { const o = {}; give(o);
+    st.get("current").onsuccess = e => { o.r = e.target.result; }; st.get("progress").onsuccess = e => { o.p = e.target.result; }; }).then(v => { got = v; }));
+  const r = got && got.r, p = got && got.p;
   const a = r && typeof r === "object" && r.answers && typeof r.answers === "object" ? r.answers : null;
-  if (!a || F.draft || F.show) return;
+  if (!a || r.account !== acc || typeof r.flow !== "string" || F.loadedFor !== acc || F.draft || F.show) return;
   const pick = (v, list) => list.includes(v) ? v : null, str = (v, max) => typeof v === "string" ? upTo(v, max) : "";
   const isBox = b => Array.isArray(b) && b.length === 3 && b.every(Number.isInteger) && b[0] >= 0 && b[1] >= 0 && b[2] >= 1;
+  F.owner = acc; F.flow = r.flow;
   F.answers = { move: pick(a.move, MOVES), move_other: str(a.move_other, OTHER_MAX), note: str(a.note, NOTE_MAX), level: pick(a.level, LEVELS), board: pick(a.board, BOARDS), stance: pick(a.stance, STANCES) };
   F.here = Number.isFinite(r.here) && r.here >= 0 ? r.here : null; F.pos = F.here || 0;
   F.tap = r.tap && Number.isFinite(r.tap.x) && Number.isFinite(r.tap.y) ? { x: r.tap.x, y: r.tap.y } : null;
@@ -707,16 +747,27 @@ async function loadDraft() {
   const fs = Array.isArray(r.frames) ? r.frames : [];
   const good = (f, i) => !!f && f.n === i + 1 && Number.isInteger(f.ms) && f.ms >= 0 && f.blob instanceof Blob && (f.box === null || isBox(f.box));
   if (r.step === "check" && fs.length === 12 && fs.every(good) && F.side) F.frames = fs.map(f => newFrame(f.n, f.ms, f.box && { x: f.box[0], y: f.box[1], side: f.box[2] }, f.lost === true, f.blob));
-  F.id = F.frames.length && typeof r.id === "string" && /^[A-Za-z0-9_-]{22}$/.test(r.id) ? r.id : null;
-  F.sent = F.id && Array.isArray(r.sent) ? r.sent.filter(n => Number.isInteger(n) && n >= 1 && n <= 12) : [];
+  const mine = !!p && typeof p === "object" && p.account === acc && p.flow === r.flow;
+  F.id = mine && F.frames.length && typeof p.id === "string" && /^[A-Za-z0-9_-]{22}$/.test(p.id) ? p.id : null;
+  F.sent = F.id && Array.isArray(p.sent) ? p.sent.filter(n => Number.isInteger(n) && n >= 1 && n <= 12) : [];
   F.draft = true; F.resumed = true; F.screen = F.frames.length ? "check" : "pick";
+  if (F.frames.length) nextLost();
   render();
+}
+// Once GET /coach/me has answered for the token kept now: when the account isn't the one the draft was last read for (another sign-in in
+// this page), the review on its way here is let go (its stored draft stays, for its own account), and the draft is read for this one.
+function forAccount(acc) {
+  if (F.loadedFor === acc) return;
+  if (F.loadedFor !== undefined) resetFlow();
+  F.loadedFor = acc;
+  if (acc) guard(loadDraft)(acc);
 }
 
 // ---- Starting, leaving and picking up.
-// New review: a fresh review, the level, board and stance from last time (GET /coach/me's profile) when there are some.
+// New review: a fresh review of the signed-in account, the level, board and stance from last time (GET /coach/me's profile) when there are
+// some.
 function startNew() {
-  resetFlow(); const p = ME.me && ME.me.profile;
+  resetFlow(); const p = ME.me && ME.me.profile; F.owner = account(); F.flow = newFlow();
   F.answers = noAnswers(p); F.profiled = !!F.answers.level && !!F.answers.board && !!F.answers.stance;
   F.show = true; F.screen = "pick"; V.sent = false; go();
 }
@@ -724,7 +775,8 @@ function startNew() {
 function resetFlow() {
   F.run++; dropClip(); for (const f of F.frames) revoke(f);
   Object.assign(F, { draft: false, show: false, screen: null, resumed: false, answers: noAnswers(null), profiled: false, here: null, tap: null, side: null, frames: [],
-    id: null, sent: [], err: null, missing: false, editProfile: false, open: null, zoom: null, seeking: false, busy: false, fail: false });
+    id: null, sent: [], err: null, missing: false, editProfile: false, open: null, zoom: null, seeking: false, busy: false, cutting: null, redo: null, fail: false,
+    owner: null, flow: null });
 }
 // A new screen: drawn from the top, with the focus on its heading.
 function go() { F.zoom = null; V.top = true; V.focus = F.show ? "fh" : F.draft ? "pickup" : "new"; render(); }
@@ -759,6 +811,7 @@ function flow(me) {
   const s = F.screen, screens = { pick: pickScreen, questions: questionsScreen, find: findScreen, tap: tapScreen, cut: workScreen, send: workScreen, check: checkScreen };
   const sec = el("section", { class: "co-flow" }, s === "cut" || s === "send" ? null : button("back", S("back"), back, "co-back"), (screens[s] || pickScreen)(me));
   if (s === "questions" || s === "find") sec.addEventListener("click", guard(unlock), true);
+  if (s === "cut" && !F.busy && F.redo !== null) setTimeout(guard(redoWork), 0);
   if (F.video && !sec.contains(F.video)) sec.append(el("div", { class: "co-hold", "aria-hidden": "true" }, F.video));
   return [sec];
 }
@@ -959,7 +1012,7 @@ async function cropOf(v, b) {
 async function cutAll() {
   const v = F.video, run = ++F.run, vw = F.vw, vh = F.vh, times = COACHM.keyTimes(F.here, F.dur);
   let from = 0; times.forEach((t, i) => { if (Math.abs(t - F.here) < Math.abs(times[from] - F.here)) from = i; });
-  F.screen = "cut"; F.busy = true; F.progress = [0, 24]; F.open = null; go();
+  F.screen = "cut"; F.busy = true; F.cutting = "all"; F.progress = [0, 24]; F.open = null; go();
   const frames = [];
   try {
     const greys = [];
@@ -973,23 +1026,33 @@ async function cutAll() {
     }
   } catch (e) { if (run === F.run) clipFailed("cantOpen"); return; } finally { if (run !== F.run) frames.forEach(revoke); }
   for (const f of F.frames) revoke(f);
-  F.frames = frames; F.id = null; F.sent = []; F.busy = false; F.fail = false; F.screen = "check"; saveDraft(); nextLost(); go();
+  F.frames = frames; F.id = null; F.sent = []; F.busy = false; F.cutting = null; F.fail = false; F.screen = "check"; saveDraft(); nextLost(); go();
 }
 // + / −: every box 1.2 x bigger or smaller about its centre (COACHM.resize), and the close-ups cut again.
 async function resizeAll(dir) {
   const vw = F.vw, vh = F.vh, side = COACHM.resize({ x: 0, y: 0, side: F.side }, dir, vw, vh).side, v = F.video;
   if (F.busy || !hasClip() || side === F.side) return;
   const run = ++F.run, boxes = F.frames.map(f => f.box && COACHM.resize(f.box, dir, vw, vh)), blobs = [];
-  F.screen = "cut"; F.busy = true; F.progress = [0, boxes.filter(Boolean).length]; F.open = null; go();
+  F.screen = "cut"; F.busy = true; F.cutting = dir; F.progress = [0, boxes.filter(Boolean).length]; F.open = null; go();
   try { for (let i = 0; i < 12; i++) { if (!boxes[i]) continue; await seekTo(v, F.frames[i].ms / 1000); if (run !== F.run) return; blobs[i] = await cropOf(v, boxes[i]); if (run !== F.run) return; stepOn(); } }
   catch (e) { if (run === F.run) clipFailed("cantOpen"); return; }
   F.frames.forEach((f, i) => { if (boxes[i]) { f.box = boxes[i]; setBlob(f, blobs[i]); } });
-  F.side = side; changed(); F.busy = false; F.screen = "check"; go();
+  F.side = side; changed(); F.busy = false; F.cutting = null; F.screen = "check"; go();
 }
 // The key frames changed: a review started with the old boxes is started again at the next send.
 function changed() { F.id = null; F.sent = []; F.fail = false; saveDraft(); }
 // The progress of cutting or sending.
 const workScreen = () => [heading(S(F.screen === "cut" ? "cutting" : "sending")), progress(), F.screen === "cut" && F.video ? el("div", { class: "co-player" }, F.video) : null];
+// Shutting the panel stops cutting, and + / −, where it is (ruling P52): the clip stays, for Pick up, and when the flow shows again on that
+// step it cuts again from the clip. A send goes on, as it only needs the key frames kept.
+function stopWork() { if (F.busy && F.screen === "cut") { F.run++; F.busy = false; F.seeking = false; F.redo = F.cutting; F.cutting = null; } }
+function redoWork() {
+  const r = F.redo; F.redo = null;
+  if (r === null || F.busy || F.screen !== "cut" || !F.show || !P.open) return;
+  if (!hasClip()) { F.screen = r === "all" ? "tap" : "check"; return go(); }
+  if (r === "all") return cutAll();
+  F.screen = "check"; const run = F.run; resizeAll(r); if (run === F.run) go(); // + / − that can't go on leaves the key frames as they were
+}
 
 // ---- Step 5, the check screen: all 12 close-ups, "Is this you in each key frame?". Tapping one opens its frame, where tapping yourself
 // moves its box there (a box of the side the others have), or "Not in this one" leaves it out; a frame the tracker lost is opened first,
@@ -1047,14 +1110,15 @@ function leaveOut(i) { const f = F.frames[i], wasLost = f.lost; f.box = null; f.
 const AGAIN = new Set(["bad_frame", "too_big", "not_uploading", "missing_frames"]);
 async function send() {
   const t = tokenNow(), kept = keptFrames();
-  if (F.busy || !t || kept.length < KEPT_MIN || !answered(F.answers)) return;
+  if (F.busy || !t || F.owner !== account() || kept.length < KEPT_MIN || !answered(F.answers)) return;
   const run = ++F.run; F.busy = true; F.fail = false; F.screen = "send"; F.open = null; F.progress = [0, kept.length + 2]; go();
   let r = { status: 0, code: null };
   for (let restarts = 0, again = 0; ;) {
     try { r = await sendRound(t, kept, run); } catch (e) { r = { status: 0, code: null }; }
     if (run !== F.run) return;
     if (r.ok) break;
-    if (r.code === "not_found" && restarts < 1) { restarts++; F.id = null; F.sent = []; saveDraft(); continue; }
+    // The silent restart is only for the signed-in account's own review, with the token it started with.
+    if (r.code === "not_found" && restarts < 1 && F.owner === account() && tokenNow() === t) { restarts++; F.id = null; F.sent = []; saveProgress(); continue; }
     if (AGAIN.has(r.code) && again < 1) { again++; continue; }
     break;
   }
@@ -1071,14 +1135,14 @@ async function sendRound(t, kept, run) {
     if (run !== F.run || g.status !== 200 || !g.json) return g;
     if (g.json.status !== "uploading") return { ok: true, left: null };
     const have = Array.isArray(g.json.have) ? g.json.have : [];
-    F.sent = kept.map(f => f.n).filter(n => have.includes(n));
+    F.sent = kept.map(f => f.n).filter(n => have.includes(n)); saveProgress();
   } else {
     const a = F.answers, body = { lang: lang(), move: a.move, move_other: a.move === "other" ? a.move_other.trim() : "", level: a.level, board: a.board, stance: a.stance,
       note: upTo(a.note.trim(), NOTE_MAX), frames: kept.map(f => ({ n: f.n, ms: f.ms, box: [f.box.x, f.box.y, f.box.side] })) };
     const s = await coachReq("POST", "/coach/reviews", t, JSON.stringify(body), "application/json");
     if (run !== F.run || s.status !== 200) return s;
     if (!s.json || typeof s.json.id !== "string" || !/^[A-Za-z0-9_-]{22}$/.test(s.json.id)) return { status: s.status, code: null };
-    F.id = s.json.id; F.sent = []; saveDraft();
+    F.id = s.json.id; F.sent = []; saveProgress();
   }
   stepOn();
   for (const f of kept) {
@@ -1086,12 +1150,13 @@ async function sendRound(t, kept, run) {
       const b64 = await base64(f.blob); if (run !== F.run) return {};
       const r = await coachReq("POST", `/coach/reviews/${F.id}/frames/${f.n}`, t, b64, "text/plain");
       if (run !== F.run || r.status !== 200) return r;
-      F.sent.push(f.n); saveDraft();
+      F.sent.push(f.n); saveProgress();
     }
     stepOn();
   }
   const d = await coachReq("POST", `/coach/reviews/${F.id}/send`, t, "{}", "application/json");
   if (run !== F.run || d.status !== 200) return d;
+  stepOn();
   return { ok: true, left: d.json && d.json.left };
 }
 const base64 = blob => new Promise((ok, no) => { const r = new FileReader();

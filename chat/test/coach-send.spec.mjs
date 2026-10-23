@@ -170,9 +170,11 @@ describe("starting, uploading and sending", () => {
       status: 200,
       json: {
         left: 2, sent_left: 4, monthly: 2, month: MONTH, next_month: Date.UTC(2030, 5, 30, 16), full_today: false, stop: null,
-        profile: null, agreed: false, admin: false, reviews: [],
+        profile: null, agreed: false, admin: false, reviews: [], account: a.uid,
       },
     });
+    // account is the chat account's uid (ruling P51): never the LINE sub's hash.
+    expect(JSON.stringify((await me(c, a)).json)).not.toContain(a.sub_hash);
     expect(await agree(c, a)).toEqual(OK);
     expect(await c.rows("SELECT * FROM people")).toEqual([
       { sub_hash: a.sub_hash, level: null, board: null, stance: null, agreed_ver: AGREE_VER, agreed_at: T, blocked: 0 },

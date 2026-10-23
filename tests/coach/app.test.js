@@ -14,8 +14,9 @@
 //   everyone will see them once Bryan opens them (window.__chatPublic and window.__coachPublic). Anything but the page, the backend, the
 //   fake LINE and the fake AI is cut off.
 // - Helpers for the steps: signIn(page) signs a page in with LINE; makeAdmin() makes the seeded account u-bryan the admin, whose session
-//   token is token("u-bryan"), and seeds the surfers u-ana, u-ben, u-cho and u-dan (token(uid) each), so the New review checks each have
-//   an account of their own, with its 2 reviews a month; pick(page, clip) gives the coach's clip picker a clip from tests/coach/clips.js
+//   token is token("u-bryan"), and seeds the surfers u-ana to u-gus (SURFERS, token(uid) each), so the New review checks each have
+//   an account of their own, with its 2 reviews a month; coachPage(s, token) opens a page signed in with the Coach panel open, and
+//   coachTab(s, page) another tab of its browser; pick(page, clip) gives the coach's clip picker a clip from tests/coach/clips.js
 //   (makeClip), and toCheck(page, …) runs New review to the check screen; coachTrip(page)
 //   runs the coach's sign-in (CHAT.signIn("coach"), or the panel's Sign in with LINE) to LINE and back, and landed(page) waits for the
 //   Coach panel with the room shut; coachApi(token, path, …) calls the backend as the page does, and sendReview(token) sends a review
@@ -55,7 +56,7 @@ async function tearDown() { if (srv) await srv.tearDown(); if (line) await line.
 // role admin and the room's meta admin_uid, and wrangler dev starts again on it (tests/chat/room.test.js seeds its room the same way).
 // Its session token is token("u-bryan"). The New review checks' surfers (SURFERS) go in the same way, with role user. Doing it again
 // changes nothing.
-const SURFERS = ["u-ana", "u-ben", "u-cho", "u-dan"];
+const SURFERS = ["u-ana", "u-ben", "u-cho", "u-dan", "u-eve", "u-fay", "u-gus"];
 const ADMIN = String.raw`
 import json, sqlite3, sys
 d = json.load(sys.stdin); c = sqlite3.connect(d["db"])
@@ -198,12 +199,18 @@ async function tapYourself(page) {
   const lost = await page.$$eval(".coachpanel .co-tile.co-lost", e => e.length);
   if (lost) throw new Error(`the tracker lost the white box in ${lost} key frames`);
 }
-// The draft in IndexedDB (waveslave-coach, draft, "current"), each key frame's blob as its size; null when there's none.
+// The draft in IndexedDB (waveslave-coach, draft: "current", with the id and sent of "progress" when it's the same flow's), each key
+// frame's blob as its size; null when there's none.
 const draft = page => page.evaluate(() => new Promise(ok => { const q = indexedDB.open("waveslave-coach");
   q.onerror = () => ok({ error: String(q.error) });
-  q.onsuccess = () => { const d = q.result; if (!d.objectStoreNames.contains("draft")) return ok(null);
-    const g = d.transaction("draft").objectStore("draft").get("current");
-    g.onsuccess = () => { const r = g.result; ok(r ? { ...r, frames: r.frames.map(f => ({ ...f, blob: f.blob instanceof Blob ? f.blob.size : null })) } : null); }; g.onerror = () => ok({ error: String(g.error) }); }; }));
+  q.onsuccess = () => { const d = q.result; if (!d.objectStoreNames.contains("draft")) { d.close(); return ok(null); }
+    const tx = d.transaction("draft"), g = tx.objectStore("draft").get("current"), p = tx.objectStore("draft").get("progress");
+    tx.oncomplete = () => { const r = g.result, pr = p.result && r && p.result.flow === r.flow ? p.result : null; d.close();
+      ok(r ? { ...r, frames: r.frames.map(f => ({ ...f, blob: f.blob instanceof Blob ? f.blob.size : null })), id: pr ? pr.id : null, sent: pr ? pr.sent : [] } : null); };
+    tx.onerror = () => ok({ error: String(tx.error) }); }; }));
+// An init script counting the coach's IndexedDB writes by key (window.__puts): "current" holds the key frames, "progress" the id and sent.
+function countPuts() { if (window.__puts) return; window.__puts = {}; const put = IDBObjectStore.prototype.put;
+  IDBObjectStore.prototype.put = function (v, k) { window.__puts[k] = (window.__puts[k] || 0) + 1; return put.call(this, v, k); }; }
 // Notes the coach's calls a page makes (method, path, the body as text, and the answer's status), in s.calls.
 function watchCalls(page) {
   const calls = [];
@@ -242,9 +249,13 @@ async function soon(what, check) { for (let i = 0; i < 100; i++) { if (await che
 // The picker: "Choose a clip", the privacy line just under it, and the phone's picker for videos.
 const picker = page => page.evaluate(() => { const c = document.querySelector(".coachpanel .co-choose"), p = document.querySelector(".coachpanel .co-privacy"), i = c && c.querySelector('input[type="file"]');
   return { choose: c && c.textContent, privacy: p && p.textContent, under: !!c && !!p && c.nextElementSibling === p && p.getBoundingClientRect().top >= c.getBoundingClientRect().bottom - 1, accept: i && i.accept }; });
-// Signed in on a page of its own: the token in localStorage (and more of store), the Coach panel open, its count shown.
+// Signed in on a page of its own: the token in localStorage (and more of store), the Coach panel open, its count shown. coachTab(s, page)
+// is another tab of page's browser, the same.
 async function coachPage(s, tok, { store = {}, init = [] } = {}) {
-  const page = await s.open({ store: { "waveslave-chat-token": tok, ...store }, init });
+  return panelUp(await s.open({ store: { "waveslave-chat-token": tok, ...store }, init }));
+}
+const coachTab = async (s, page) => panelUp(await s.tab(page));
+async function panelUp(page) {
   await page.tap(TAB); await panelOpen(page);
   await until(page, "the signed-in panel", () => !!document.querySelector(".coachpanel .co-left"));
   return page;
@@ -745,9 +756,13 @@ const STEPS = {
     const page = s.ben, tok = token("u-ben"), calls = watchCalls(page);
     await pick(page, clip()); await answer(page, { move: "cutback" }); await tapYourself(page);
     const v = await valve(page, (m, p) => isFrame(m, p) && +p.split("/").pop() > 5);
+    await page.context().addInitScript(countPuts); await page.evaluate(countPuts);
     await page.click('.coachpanel [data-k="send"]'); await v.wait(1, "the 6th key frame's upload");
     let d = null; await soon("the draft with 5 key frames sent", async () => (d = await draft(page)) && eq(d.sent, [1, 2, 3, 4, 5]));
     if (d.step !== "check" || d.frames.length !== 12 || d.frames.some(f => !f.blob) || !/^[A-Za-z0-9_-]{22}$/.test(d.id || "")) throw new Error(`the draft partway: ${JSON.stringify({ ...d, frames: d.frames.length })}`);
+    // Each step of the send writes only the id and what has landed, never the 12 key frames again.
+    const puts = await page.evaluate(() => window.__puts);
+    if (puts.current || !(puts.progress >= 6)) throw new Error(`sending wrote IndexedDB ${JSON.stringify(puts)}, want only "progress" (the start and 5 key frames)`);
     await page.reload({ waitUntil: "load" }); v.drop(); await page.unroute(CHAT() + "/coach/reviews/**");
     const mark = calls.length;
     await page.tap(TAB); await panelOpen(page); await inPanel(page, "Pick up where you left off?", ".co-resume");
@@ -762,6 +777,8 @@ const STEPS = {
     const after = calls.slice(mark).map(c => [c.method, c.path.replace(d.id, "{id}"), c.status]);
     const want = [["GET", "/coach/reviews/{id}", 200], ...[6, 7, 8, 9, 10, 11, 12].map(n => ["POST", `/coach/reviews/{id}/frames/${n}`, 200]), ["POST", "/coach/reviews/{id}/send", 200]];
     if (!eq(after, want)) throw new Error(`after the reload the page asked ${JSON.stringify(after)}`);
+    const again = await page.evaluate(() => window.__puts);
+    if (again.current) throw new Error(`the send after the reload wrote the key frames again: ${JSON.stringify(again)}`);
     const r = await coachApi(tok, `/coach/reviews/${d.id}`);
     if (r.status !== 200 || r.json.status === "uploading" || !eq(r.json.have, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])) throw new Error(`the server's review: ${r.status} ${JSON.stringify(r.json)}`);
   },
@@ -785,7 +802,8 @@ const STEPS = {
     const me = await coachApi(tok, "/coach/me");
     if (me.status !== 200 || me.json.left !== 2) throw new Error(`after full_today u-dan has ${me.json && me.json.left} reviews left, want 2`);
   },
-  // Review Focus 2: the same account in two tabs (u-cho's). Both get to Send; A starts, then B starts, which drops A's review still
+  // Review Focus 2: the same account in two tabs (u-cho's), here in two browsers (two contexts, so each has its own IndexedDB: two
+  // devices; twoTabsOneBrowser is the one-browser case). Both get to Send; A starts, then B starts, which drops A's review still
   // uploading (R12). A's first key frame then meets not_found and A starts again once, silently, dropping B's; B's first key frame meets
   // not_found too and B starts again and goes through; A's next key frame meets not_found again and A ends on "Couldn't send. Tap to try
   // again.", its draft kept. One review on the server, one fewer left, and B's draft gone.
@@ -808,6 +826,68 @@ const STEPS = {
     if (me.status !== 200 || me.json.reviews.length !== 1 || me.json.left !== 1) throw new Error(`the server has ${me.json && me.json.reviews.length} reviews for u-cho, ${me.json && me.json.left} left`);
     const da = await draft(a), db = await draft(b);
     if (db !== null || !da || da.frames.length !== 12) throw new Error(`the drafts: A's ${da ? "kept" : "gone"}, B's ${db ? "kept" : "gone"}`);
+  },
+  // The same in two tabs of one browser (u-eve's), which share IndexedDB's one draft: B gets to the check screen first and A after, so
+  // the draft kept is A's. R12 goes as above; B's send, done, deletes only its own draft, so A's is still there, and still after A's
+  // "Couldn't send", and a reload of A's tab offers it.
+  async twoTabsOneBrowser(s) {
+    const tok = token("u-eve"); await agreeFor(tok);
+    const b = await coachPage(s, tok), a = await coachTab(s, b), ca = watchCalls(a), cb = watchCalls(b);
+    let d = null;
+    await toCheck(b); await soon("B's draft", async () => (d = await draft(b)) && d.frames.length === 12);
+    const flowB = d.flow;
+    await toCheck(a); await soon("A's draft in B's place", async () => (d = await draft(a)) && d.frames.length === 12 && d.flow !== flowB);
+    const flowA = d.flow;
+    const va = await valve(a, isFrame), vb = await valve(b, isFrame);
+    await a.click('.coachpanel [data-k="send"]'); await va.wait(1, "A's first key frame");
+    await b.click('.coachpanel [data-k="send"]'); await vb.wait(1, "B's first key frame");
+    va.release(); await va.wait(1, "A's first key frame after starting again");
+    vb.open();
+    await until(b, "B's Sent", t => { const e = document.querySelector('.coachpanel [data-k="sent"]'); return !!e && e.textContent === t; }, SENT, 60e3);
+    await wait(500); d = await draft(a);
+    if (!d || d.flow !== flowA || d.frames.length !== 12) throw new Error(`once B sent, the draft is ${d ? (d.flow === flowB ? "B's" : "another") : "gone"}, want A's`);
+    va.open();
+    await until(a, "A's Couldn't send", t => { const e = document.querySelector('.coachpanel [data-k="retry"]'); return !!e && e.textContent === t; }, FAILED, 30e3);
+    await soon("A's calls", () => framesOf(ca).length >= 2);
+    const got = { aStarts: startsOf(ca).map(c => c.status), aFrames: framesOf(ca).map(f => f.status), bStarts: startsOf(cb).map(c => c.status), bFrames: framesOf(cb).map(f => f.status) };
+    if (!eq(got, { aStarts: [200, 200], aFrames: [404, 404], bStarts: [200, 200], bFrames: [404, ...Array(12).fill(200)] })) throw new Error(`the two tabs: ${JSON.stringify(got)}`);
+    const me = await coachApi(tok, "/coach/me");
+    if (me.status !== 200 || me.json.reviews.length !== 1 || me.json.left !== 1) throw new Error(`the server has ${me.json && me.json.reviews.length} reviews for u-eve, ${me.json && me.json.left} left`);
+    d = await draft(a);
+    if (!d || d.flow !== flowA || d.frames.length !== 12) throw new Error(`after A's Couldn't send the draft is ${d ? "another" : "gone"}, want A's`);
+    await a.reload({ waitUntil: "load" }); await a.tap(TAB); await panelOpen(a); await inPanel(a, "Pick up where you left off?", ".co-resume");
+  },
+  // A draft belongs to its account (ruling P51), on one browser. u-fay gets to the check screen; then u-gus signs in in the same page (as
+  // a code-box sign-in does): the review on its way there is let go (its clip's address revoked), u-gus gets New review and no Pick up,
+  // and nothing is sent; after a reload u-gus still isn't offered it, and u-fay's draft is still stored. u-fay signing in again gets it
+  // back: Pick up where you left off?, the key frames ready, the check screen with all 12.
+  async accountSwitch(s) {
+    const fay = token("u-fay"), gus = token("u-gus"); await agreeFor(fay); await agreeFor(gus);
+    // The token goes in by hand (not by s.open's store, which would put it back on every load).
+    const page = await s.open({}), calls = watchCalls(page);
+    await page.evaluate(t => localStorage.setItem("waveslave-chat-token", t), fay); await page.reload({ waitUntil: "load" }); await panelUp(page);
+    await toCheck(page); let d = null;
+    await soon("u-fay's draft", async () => (d = await draft(page)) && d.frames.length === 12);
+    if (d.account !== "u-fay") throw new Error(`the draft is kept for ${JSON.stringify(d.account)}, want "u-fay"`);
+    const src = await page.evaluate(() => document.querySelector(".coachpanel video").src), mark = calls.length;
+    // Another sign-in in this page: a new token kept, and the panel opened again (chat.js calls COACH.open() once a sign-in is done).
+    const signIn = async tok => { await page.tap(".coachpanel .co-x"); await until(page, "the panel to shut", () => !document.documentElement.classList.contains("coach-open"));
+      await page.evaluate(t => localStorage.setItem("waveslave-chat-token", t), tok); await page.tap(TAB); await panelOpen(page); };
+    const offered = async who => { await until(page, `${who}'s panel`, () => !!document.querySelector(".coachpanel .co-left") && !!document.querySelector(".coachpanel .co-new, .coachpanel .co-resume"));
+      await wait(500); return page.evaluate(() => ({ resume: !!document.querySelector(".coachpanel .co-resume"), video: !!document.querySelector(".coachpanel video") })); };
+    await signIn(gus);
+    let st = await offered("u-gus"); const clip = await page.evaluate(u => fetch(u).then(() => "alive", () => "revoked"), src);
+    if (!eq({ ...st, clip }, { resume: false, video: false, clip: "revoked" })) throw new Error(`u-gus signed in after u-fay: ${JSON.stringify({ ...st, clip })}`);
+    await page.reload({ waitUntil: "load" }); await page.tap(TAB); await panelOpen(page); st = await offered("u-gus");
+    if (st.resume) throw new Error("after a reload u-gus is offered u-fay's draft");
+    d = await draft(page);
+    if (!d || d.account !== "u-fay" || d.frames.length !== 12) throw new Error(`with u-gus signed in the draft became ${JSON.stringify(d && { account: d.account, frames: d.frames.length })}`);
+    await signIn(fay); await inPanel(page, "Pick up where you left off?", ".co-resume");
+    const offer = await page.$$eval(".coachpanel .co-resume > *", e => e.map(x => x.textContent));
+    if (!eq(offer, ["Pick up where you left off?", "Top turn", "Your key frames are ready.", "Pick up", "Start over"])) throw new Error(`u-fay again is offered ${JSON.stringify(offer)}`);
+    await page.click('.coachpanel [data-k="pickup"]'); await inPanel(page, "the check screen", ".co-grid");
+    const tiles = await page.$$eval(".coachpanel .co-tile", t => t.length), posts = calls.slice(mark).filter(c => c.method === "POST");
+    if (tiles !== 12 || posts.length) throw new Error(`u-fay's draft back: ${tiles} close-ups; sent meanwhile ${JSON.stringify(posts.map(c => c.path))}`);
   },
 };
 
@@ -835,6 +915,11 @@ const STEPS = {
       page.at = at || `/#${spot}`; page.pub = pub;
       if (go) await s.go(page);
       return page;
+    },
+    // Another tab of page's browser (its context, so the same storage), at the same address.
+    async tab(page) {
+      const p = await page.context().newPage(); p.on("pageerror", e => errs.push(String(e)));
+      p.at = page.at; p.pub = page.pub; await s.go(p); return p;
     },
     // Opens the page's address (page.at), and waits for the CHAT button when the chat is on for everyone.
     async go(page) {

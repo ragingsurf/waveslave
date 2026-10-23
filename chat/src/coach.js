@@ -804,8 +804,9 @@ export class Coach extends DurableObject {
 
   // GET /coach/me: what the Coach panel shows. left and sent_left as leftOf() says for this Taiwan month; month and
   // next_month (when the next one starts) are the server's, whatever the phone's clock says (Review Focus 3); stop is
-  // stopFor(); profile is the saved level, board and stance; and the account's reviews, newest first, but the one
-  // still uploading, each with its status in the surfer's words.
+  // stopFor(); profile is the saved level, board and stance; the account's reviews, newest first, but the one
+  // still uploading, each with its status in the surfer's words; and account, the chat account's uid (ruling P51),
+  // which the page keeps with an unsent review so only this account picks it up. Never the LINE sub or its hash.
   getMe(who) {
     const now = this.now();
     const month = twMonth(now);
@@ -832,6 +833,7 @@ export class Coach extends DurableObject {
         reviews: reviews.map((r) => ({
           id: r.id, move: r.move, created: r.created, status: SURFER_STATUS[r.status], published: r.published, note: noteFor(r),
         })),
+        account: who.uid,
       },
     };
   }

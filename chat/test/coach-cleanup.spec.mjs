@@ -23,7 +23,9 @@ import { DAY, HOUR, MIN, hex, newCoach } from "./helpers.mjs";
 // 04:00 Taiwan (20:00 UTC the day before) on 4 June, years ahead: a clean-up's time. The next one is a day later.
 const CLEAN = Date.UTC(2030, 5, 3, 20);
 const MONTH = "2030-06"; // CLEAN's Taiwan month
-const LATE = "Sorry, we couldn't review this in time";
+// A draft closed after 14 days: the surfer is told with a code, "late", that the page puts in their language, never
+// with words stored for them, so surfer_note stays empty.
+const LATE = Object.freeze({ surfer_note: null, warnings: JSON.stringify(["late"]) });
 
 const NOT_FOUND = Object.freeze({ status: 404, json: { error: "not_found" } });
 
@@ -359,7 +361,7 @@ describe("drafts waiting 14 days", () => {
     await runAlarm(c);
     expect(await reviewRow(c, fresh)).toMatchObject({ status: "drafted", given: 0, handled_at: null, surfer_note: null });
     expect(await reviewRow(c, late)).toMatchObject({
-      status: "rejected", surfer_note: LATE, given: 1, handled_at: CLEAN, next_try: null, hold: 0,
+      status: "rejected", ...LATE, given: 1, handled_at: CLEAN, next_try: null, hold: 0,
       draft: JSON.stringify(goodReply()),
     });
     expect(await quota(c, a)).toEqual([{ month: MONTH, used: 1, sent: 1 }]);
@@ -367,7 +369,7 @@ describe("drafts waiting 14 days", () => {
     // The surfer sees it wasn't reviewed, and why, and has a review back to send.
     const mine = await me(c, b);
     expect(mine.left).toBe(1);
-    expect(mine.reviews.find((r) => r.id === late)).toMatchObject({ status: "not_reviewed", note: LATE });
+    expect(mine.reviews.find((r) => r.id === late)).toMatchObject({ status: "not_reviewed", note: "late" });
     // Bryan sees it among the handled, the last handled first, and no longer waiting.
     const list = await drafts(c);
     expect(list.waiting.map((r) => r.id)).toEqual([fresh]);
@@ -380,7 +382,7 @@ describe("drafts waiting 14 days", () => {
     // The next day: the one 13 days waiting has waited 14 and is closed too, and nothing goes back twice.
     c.clock.t = CLEAN + DAY;
     await runAlarm(c);
-    expect(await reviewRow(c, fresh)).toMatchObject({ status: "rejected", surfer_note: LATE, given: 1, handled_at: CLEAN + DAY });
+    expect(await reviewRow(c, fresh)).toMatchObject({ status: "rejected", ...LATE, given: 1, handled_at: CLEAN + DAY });
     expect(await quota(c, a)).toEqual([{ month: MONTH, used: 0, sent: 1 }]);
     expect(await quota(c, b)).toEqual([{ month: MONTH, used: 1, sent: 2 }]);
     await expectBytesRight(c);
@@ -396,7 +398,7 @@ describe("drafts waiting 14 days", () => {
     await c.rows("UPDATE quota SET used = used - 1 WHERE sub_hash = ? AND month = ?", a.sub_hash, MONTH);
     expect(await quota(c, a)).toEqual([{ month: MONTH, used: 1, sent: 2 }]);
     await runAlarm(c);
-    expect(await reviewRow(c, late)).toMatchObject({ status: "rejected", surfer_note: LATE, given: 1, handled_at: CLEAN });
+    expect(await reviewRow(c, late)).toMatchObject({ status: "rejected", ...LATE, given: 1, handled_at: CLEAN });
     expect(await quota(c, a)).toEqual([{ month: MONTH, used: 1, sent: 2 }]);
   });
 
@@ -435,12 +437,12 @@ describe("drafts waiting 14 days", () => {
     // only the first two are closed.
     c.clock.t = T1 + 14 * DAY + HOUR + 30 * MIN;
     await runAlarm(c);
-    expect(await reviewRow(c, first)).toMatchObject({ status: "rejected", surfer_note: LATE, given: 1 });
-    expect(await reviewRow(c, redone)).toMatchObject({ status: "rejected", surfer_note: LATE, given: 1 });
+    expect(await reviewRow(c, first)).toMatchObject({ status: "rejected", ...LATE, given: 1 });
+    expect(await reviewRow(c, redone)).toMatchObject({ status: "rejected", ...LATE, given: 1 });
     expect(await reviewRow(c, failed)).toMatchObject({ status: "drafted", given: 0 });
   });
 
-  it("count from the report for a published review the surfer reported, however long ago it was sent", async () => {
+  it("count from the report for a published review the surfer reported, which goes back to published, report kept", async () => {
     const c = await freshCoach();
     const a = surfer();
     const b = surfer();
@@ -457,12 +459,27 @@ describe("drafts waiting 14 days", () => {
     expect(await reviewRow(c, yesterday)).toMatchObject({
       status: "drafted", report: "", published: CLEAN - 19 * DAY, handled_at: null, given: 0,
     });
-    // Closed like any draft: the surfer is told, and the count goes back, as a Withdraw would give it.
+    // Not closed as late: it was published, so it is published again as it was, handled now with its report kept, so
+    // Bryan still finds it among the handled. Nothing goes back, and the surfer sees it as before.
     expect(await reviewRow(c, longAgo)).toMatchObject({
-      status: "rejected", surfer_note: LATE, report: "That isn't me", published: CLEAN - 19 * DAY, handled_at: CLEAN, given: 1,
+      status: "published", surfer_note: null, warnings: "[]", report: "That isn't me", published: CLEAN - 19 * DAY,
+      final: JSON.stringify(goodReply()), handled_at: CLEAN, next_try: null, given: 0,
     });
     expect(await quota(c, a)).toEqual([{ month: MONTH, used: 1, sent: 1 }]);
-    expect(await quota(c, b)).toEqual([{ month: MONTH, used: 0, sent: 1 }]);
+    expect(await quota(c, b)).toEqual([{ month: MONTH, used: 1, sent: 1 }]);
+    expect((await me(c, b)).reviews.find((r) => r.id === longAgo)).toMatchObject({ status: "ready", note: null });
+    expect((await drafts(c)).handled.find((r) => r.id === longAgo)).toMatchObject({ status: "published", handled_at: CLEAN });
+  });
+
+  it("close a reported review as late when a Redo took its published text, as there is nothing to publish again", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    const id = await insertHandled(c, a, "published", 19 * DAY, {
+      status: "drafted", final: null, report: "", handled_at: null, waiting_since: CLEAN - 15 * DAY,
+    });
+    await runAlarm(c);
+    expect(await reviewRow(c, id)).toMatchObject({ status: "rejected", ...LATE, report: "", handled_at: CLEAN, given: 1 });
+    expect(await quota(c, a)).toEqual([{ month: MONTH, used: 0, sent: 1 }]);
   });
 
   it("15 days old, a clip held as not surf or flagged isn't given back: the not-surf hold ends, the flagged one waits", async () => {
@@ -540,7 +557,8 @@ describe("key frames", () => {
 
     // The owner's published review still has its text and its key frames' times; none of its frames is here now.
     expect((await call(c, a, "GET", `/coach/reviews/${published31}`)).json).toEqual({
-      id: published31, status: "published", move: "top_turn", created: CLEAN - 31 * DAY - HOUR - 10 * MIN, have: [], note: null,
+      id: published31, status: "published", move: "top_turn", move_other: "", created: CLEAN - 31 * DAY - HOUR - 10 * MIN,
+      have: [], note: null,
       review: { text: goodReply(), times: TIMES, checked: true },
     });
     const admin = (await call(c, BRYAN, "GET", `/coach/reviews/${rejected31}`)).json;
@@ -713,7 +731,7 @@ describe("what a run reads", () => {
     for (const { query, read } of reads) expect(read, query).toBeLessThan(100);
 
     expect(await reviewRow(c, unsent)).toBeUndefined();
-    expect(await reviewRow(c, late)).toMatchObject({ status: "rejected", surfer_note: LATE });
+    expect(await reviewRow(c, late)).toMatchObject({ status: "rejected", ...LATE });
     expect(await reviewRow(c, notSurf)).toMatchObject({ hold: 0 });
     expect(await reviewRow(c, rejected)).toMatchObject({ draft: null, surfer_note: "Not a top turn" });
     for (const id of [notSurf, failed, published, rejected]) expect(await framesOf(c, id)).toEqual(ALL_CLEARED);

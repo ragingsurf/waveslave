@@ -29,6 +29,7 @@ const INVALID = Object.freeze({ status: 400, json: { error: "invalid" } });
 const STATE = Object.freeze({ status: 409, json: { error: "state" } });
 const ADMIN = Object.freeze({ status: 403, json: { error: "admin" } });
 const BREAK = Object.freeze({ status: 503, json: { error: "break" } });
+const NO_FRAMES = Object.freeze({ status: 409, json: { error: "no_frames" } });
 
 // Every fetch throws; each test checks that none was tried. console.error is recorded, and a test that expects a line
 // takes it from `logged`.
@@ -326,7 +327,8 @@ describe("Bryan's edits (Review Focus 4)", () => {
     const id = await insertReview(c, surfer());
     const before = await snapshot(c);
     const bad = [
-      { "went_well.title": "" }, { progress: "   \n " }, { "main_fix.why": "a".repeat(1_001) },
+      { "went_well.title": "" }, { "main_fix.why": "   \n " }, { "drill.title": "" }, { "heads_up.move": "" },
+      { progress: "p".repeat(1_001) }, { "heads_up.text": "h".repeat(1_001) }, { "main_fix.why": "a".repeat(1_001) },
       { "main_fix.why": "浪".repeat(1_001) }, { "drill.how": "🌊".repeat(1_001) }, { "went_well.frame": "1" },
       { went_well: { title: "Nested" } }, { "is_surf_clip": "true" }, { english: "x" }, { "drill.title": 5 },
       { "drill.title": null }, ["went_well.title"], "Lower", 7,
@@ -335,6 +337,28 @@ describe("Bryan's edits (Review Focus 4)", () => {
       expect(await act(c, id, { action: "approve", edits }), JSON.stringify(edits)).toEqual(INVALID);
     }
     expect(await snapshot(c)).toEqual(before);
+  });
+
+  it("an empty or blank heads_up.text or progress removes that part (ruling P64), and the owner never sees it", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    const reply = goodReply();
+    reply.heads_up = { text: "Watch the rocks on the inside.", move: "bottom_turn" };
+    reply.progress = "Lower than last time.";
+    const id = await insertReview(c, a, { draft: JSON.stringify(reply) });
+    expect(await act(c, id, { action: "approve", edits: { "heads_up.text": "", progress: "  \n " } })).toEqual(OK);
+    const want = { ...reply, heads_up: { text: "", move: "" }, progress: "" };
+    expect(JSON.parse((await reviewRow(c, id)).final)).toEqual(want);
+    expect((await ownerView(c, a, id)).review.text).toEqual(want);
+    // An edit that removes a part is an edit, and so an example.
+    expect((await examples(c)).map((e) => e.bryan)).toEqual([JSON.stringify(want)]);
+
+    // Removing a part that has nothing in it changes nothing: no example.
+    const none = await insertReview(c, a);
+    expect(await act(c, none, { action: "approve", edits: { "heads_up.text": "", progress: "" } })).toEqual(OK);
+    const row = await reviewRow(c, none);
+    expect(row.final).toBe(row.draft);
+    expect(await examples(c)).toHaveLength(1);
   });
 
   it("nine 1,000-character 中文 fields pass, length counted in characters after trimming", async () => {
@@ -430,13 +454,13 @@ describe("Redo", () => {
     expect(await act(c, id, { action: "redo", note: "Back foot" })).toEqual(OK);
   });
 
-  it("is refused (409 state) unless at least 8 of the review's key frames are still kept", async () => {
+  it("is refused (409 no_frames) unless at least 8 of the review's key frames are still kept", async () => {
     const c = await freshCoach();
     const a = surfer();
     const id = await insertReview(c, a);
     await c.rows("UPDATE frames SET b64 = NULL WHERE review_id = ? AND n > 7", id);
     const before = await snapshot(c);
-    expect(await act(c, id, { action: "redo", note: "Back foot" })).toEqual(STATE);
+    expect(await act(c, id, { action: "redo", note: "Back foot" })).toEqual(NO_FRAMES);
     expect(await snapshot(c)).toEqual(before);
     await c.rows("UPDATE frames SET b64 = ? WHERE review_id = ? AND n = 8", FRAME, id);
     expect(await act(c, id, { action: "redo", note: "Back foot" })).toEqual(OK);
@@ -446,7 +470,7 @@ describe("Redo", () => {
       status: "published", published: T - 40 * DAY, final: JSON.stringify(goodReply()), frames: false,
     });
     expect(await report(c, a, old, { line: "Wrong" })).toEqual(OK);
-    expect(await act(c, old, { action: "redo", note: "Look again" })).toEqual(STATE);
+    expect(await act(c, old, { action: "redo", note: "Look again" })).toEqual(NO_FRAMES);
     expect(await reviewRow(c, old)).toMatchObject({ status: "drafted", redos: 0 });
     expect(await act(c, old, { action: "withdraw", note: "Sorry" })).toEqual(OK);
   });
@@ -556,6 +580,23 @@ describe("Clear", () => {
     expect(await used(c, a)).toBe(3);
     expect(await act(c, first, { action: "clear" })).toEqual(STATE);
     expect(await act(c, notSurf, { action: "clear" })).toEqual(STATE);
+  });
+
+  it("lifts a block kept for the LINE account too (one kept when the surfer deleted another flagged clip)", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    const b = surfer();
+    const held = await insertFlagged(c, a);
+    const deleted = await insertFlagged(c, a, ["under_18"]);
+    expect(await call(c, a, "DELETE", `/coach/reviews/${deleted}`)).toEqual(OK);
+    await c.rows("INSERT INTO kept_blocks (sub_hash, kept_at) VALUES (?, ?)", b.sub_hash, T - DAY);
+    expect(await c.rows("SELECT sub_hash FROM kept_blocks ORDER BY sub_hash = ?", b.sub_hash)).toEqual([
+      { sub_hash: a.sub_hash }, { sub_hash: b.sub_hash },
+    ]);
+    expect((await call(c, a, "GET", "/coach/me")).json.blocked).toBe(true);
+    expect(await act(c, held, { action: "clear" })).toEqual(OK);
+    expect(await c.rows("SELECT sub_hash FROM kept_blocks")).toEqual([{ sub_hash: b.sub_hash }]);
+    expect((await call(c, a, "GET", "/coach/me")).json.blocked).toBe(false);
   });
 });
 
@@ -745,6 +786,18 @@ describe("GET /admin/coach/drafts", () => {
     expect(waiting[1]).toMatchObject({ status: "rejected", hold: 1, flags: [], warnings: ["not_surf"], have: TWELVE });
     expect(waiting[2]).toMatchObject({ status: "rejected", hold: 1, flags: ["sexual"], have: [], frames: [], draft: null });
     expect(waiting[2].profile.blocked).toBe(true);
+    // No banned word, none named.
+    expect(first.words).toEqual([]);
+  });
+
+  it("names the banned words of a draft warned for them, each once, as the coach found them (words)", async () => {
+    const c = await freshCoach();
+    const reply = goodReply();
+    reply.main_fix.what = "In the video your weight slides back (key frame at 0:11.7).";
+    reply.drill.how = "Watch the whole video again, then do 10. 照片 too.";
+    const id = await insertReview(c, surfer(), { draft: JSON.stringify(reply), warnings: JSON.stringify(["words"]) });
+    const view = (await drafts(c)).json.waiting.find((r) => r.id === id);
+    expect(view.words).toEqual(["video", "watch the whole video", "照片"]);
   });
 
   it("then the last 50 handled, the last handled first (handled_at): published, rejected and failed reviews", async () => {
@@ -909,9 +962,10 @@ describe("the alarm's outcomes", () => {
     for (const [name, [status, handledAt]] of Object.entries(want)) {
       expect(await reviewRow(c, ids[name]), name).toMatchObject({ status, handled_at: handledAt });
     }
-    // What each surfer is told: "We couldn't review this clip." for the clips that weren't, nothing for the failed one.
+    // What each surfer is told: "We couldn't review this clip." for the clips that weren't, and that the one that failed
+    // went wrong on our side and doesn't count.
     const notes = {
-      failed: null, banned: null, flagged: "not_surf", notSurf: "not_surf", published: null, drafted: null,
+      failed: "failed", banned: null, flagged: "not_surf", notSurf: "not_surf", published: null, drafted: null,
     };
     for (const [name, note] of Object.entries(notes)) {
       expect(await ownerView(c, owners[name], ids[name]), name).toMatchObject({ note });

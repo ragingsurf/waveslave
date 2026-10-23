@@ -170,7 +170,7 @@ describe("starting, uploading and sending", () => {
       status: 200,
       json: {
         left: 2, sent_left: 4, monthly: 2, month: MONTH, next_month: Date.UTC(2030, 5, 30, 16), full_today: false, stop: null,
-        profile: null, agreed: false, admin: false, reviews: [], account: a.uid,
+        profile: null, agreed: false, admin: false, blocked: false, reviews: [], account: a.uid,
       },
     });
     // account is the chat account's uid (ruling P51): never the LINE sub's hash.
@@ -199,7 +199,9 @@ describe("starting, uploading and sending", () => {
     expect((await me(c, a)).json).toMatchObject({
       left: 2, reviews: [], agreed: true, profile: { level: "starting_turns", board: "shortboard", stance: "regular" },
     });
-    expect(await getReview(c, a, id)).toEqual({ status: 200, json: { id, status: "uploading", move: "top_turn", created: T, have: [], note: null } });
+    expect(await getReview(c, a, id)).toEqual({
+      status: 200, json: { id, status: "uploading", move: "top_turn", move_other: "", created: T, have: [], note: null },
+    });
 
     await uploadAll(c, a, id);
     expect((await getReview(c, a, id)).json.have).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
@@ -873,7 +875,10 @@ describe("access", () => {
     const owner = await getReview(c, a, id);
     expect(owner).toEqual({
       status: 200,
-      json: { id, status: "drafted", move: "cutback", created: T - 2 * HOUR, have: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], note: null },
+      json: {
+        id, status: "drafted", move: "cutback", move_other: "", created: T - 2 * HOUR, have: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        note: null,
+      },
     });
     const admin = await getReview(c, BRYAN, id);
     expect(admin.status).toBe(200);
@@ -894,7 +899,8 @@ describe("access", () => {
     await c.rows("UPDATE reviews SET status = 'published', published = ?, final = ?, checked = 1 WHERE id = ?", T - HOUR, JSON.stringify(final), id);
     const published = (await getReview(c, a, id)).json;
     expect(published).toEqual({
-      id, status: "published", move: "cutback", created: T - 2 * HOUR, have: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], note: null,
+      id, status: "published", move: "cutback", move_other: "", created: T - 2 * HOUR, have: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+      note: null,
       review: { text: final, times: Object.fromEntries(listed().map((f) => [f.n, f.ms])), checked: true },
     });
     for (const word of ["Low over the board", "english", "flags", "redo", "cost", "the-model", "back foot", "words"]) {
@@ -923,16 +929,32 @@ describe("access", () => {
     }
     await insertReview(c, surfer(), { status: "published", created: at(0.5), frames: false, published: at(0.2) });
     expect((await me(c, a)).json.reviews).toEqual([
-      { id: ids.queued, move: "cutback", created: at(1), status: "reviewing", published: null, note: null },
-      { id: ids.calling, move: "cutback", created: at(2), status: "reviewing", published: null, note: null },
-      { id: ids.drafted, move: "cutback", created: at(3), status: "reviewing", published: null, note: null },
-      { id: ids.published, move: "cutback", created: at(4), status: "ready", published: at(3.5), note: null },
-      { id: ids.rejected, move: "cutback", created: at(5), status: "not_reviewed", published: null, note: "We couldn't see you. Try filming closer." },
-      { id: ids.not_surf, move: "cutback", created: at(6), status: "not_reviewed", published: null, note: "not_surf" },
-      { id: ids.failed, move: "cutback", created: at(7), status: "not_reviewed", published: null, note: null },
+      { id: ids.queued, move: "cutback", move_other: "", created: at(1), status: "reviewing", published: null, note: null },
+      { id: ids.calling, move: "cutback", move_other: "", created: at(2), status: "reviewing", published: null, note: null },
+      { id: ids.drafted, move: "cutback", move_other: "", created: at(3), status: "reviewing", published: null, note: null },
+      { id: ids.published, move: "cutback", move_other: "", created: at(4), status: "ready", published: at(3.5), note: null },
+      {
+        id: ids.rejected, move: "cutback", move_other: "", created: at(5), status: "not_reviewed", published: null,
+        note: "We couldn't see you. Try filming closer.",
+      },
+      { id: ids.not_surf, move: "cutback", move_other: "", created: at(6), status: "not_reviewed", published: null, note: "not_surf" },
+      // Failed on our side, and given back: the page says so, and that it doesn't count.
+      { id: ids.failed, move: "cutback", move_other: "", created: at(7), status: "not_reviewed", published: null, note: "failed" },
     ]);
     expect((await getReview(c, a, ids.not_surf)).json).toMatchObject({ status: "rejected", note: "not_surf" });
     expect((await getReview(c, a, ids.rejected)).json.note).toBe("We couldn't see you. Try filming closer.");
+    expect((await getReview(c, a, ids.failed)).json.note).toBe("failed");
+  });
+
+  it("gives an \"other\" move's own name as the surfer wrote it (move_other), in /coach/me and the review's GET", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    const answers = JSON.stringify({ ...ANSWERS, move: "other", move_other: "Air reverse" });
+    const id = await insertReview(c, a, { move: "other", answers, status: "published", published: T, frames: false });
+    expect((await me(c, a)).json.reviews).toEqual([
+      { id, move: "other", move_other: "Air reverse", created: T, status: "ready", published: T, note: null },
+    ]);
+    expect((await getReview(c, a, id)).json).toMatchObject({ move: "other", move_other: "Air reverse" });
   });
 });
 

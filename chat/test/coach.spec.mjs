@@ -322,6 +322,57 @@ describe("route()", () => {
   });
 });
 
+describe("route()'s cap a LINE account a UTC day (ruling P68)", () => {
+  const TOO_MANY = Object.freeze({ status: 429, json: { error: "too_many" } });
+  const meOf = (coach, who) => coach.route({ method: "GET", path: "/coach/me", who, body: "" });
+
+  it("answers 429 too_many to an account's 601st request of the day, before any SQL, and doesn't count it toward the guard", async () => {
+    const c = await freshCoach();
+    const other = Object.freeze({ uid: "u-2", sub_hash: "sub-2", role: "user" });
+    const sameLine = Object.freeze({ ...WHO, uid: "u-3" }); // another chat account of the same LINE account
+    const admin = Object.freeze({ uid: "u-9", sub_hash: "sub-9", role: "admin" });
+    await c.inCoach(async (coach) => {
+      for (let i = 0; i < 599; i++) expect((await meOf(coach, WHO)).status).toBe(200);
+      expect((await meOf(coach, sameLine)).status).toBe(200);
+      const req = coach.usage("req", 0).req;
+      const real = coach.sql;
+      let asked = 0;
+      coach.sql = { exec: (...args) => (asked++, real.exec(...args)) };
+      try {
+        expect(await meOf(coach, WHO)).toEqual(TOO_MANY);
+        expect(await meOf(coach, sameLine)).toEqual(TOO_MANY);
+        expect(await coach.route({ method: "POST", path: "/coach/reviews", who: WHO, body: "{}" })).toEqual(TOO_MANY);
+      } finally {
+        coach.sql = real;
+      }
+      expect(asked).toBe(0);
+      expect(coach.usage("req", 0).req).toBe(req);
+      // Another account, and the admin however many it has sent, go on.
+      expect((await meOf(coach, other)).status).toBe(200);
+      coach.used.by[admin.sub_hash] = 5_000;
+      expect((await meOf(coach, admin)).status).toBe(200);
+      coach.saveUsage();
+      expect(savedUsage(coach).by).toEqual({ [WHO.sub_hash]: 603, [other.sub_hash]: 1, [admin.sub_hash]: 5_001 });
+    });
+  });
+
+  it("is saved with the usage counts, so a new copy of the coach goes on from them, and starts afresh the next UTC day", async () => {
+    const c = await freshCoach();
+    await c.inCoach(async (coach) => {
+      for (let i = 0; i < 600; i++) await meOf(coach, WHO);
+      coach.saveUsage();
+    });
+    await evictDurableObject(c.stub);
+    await c.inCoach(async (coach) => {
+      coach.now = () => T + HOUR;
+      expect(await meOf(coach, WHO)).toEqual(TOO_MANY);
+      coach.now = () => Date.UTC(2030, 5, 4, 0, 0);
+      expect((await meOf(coach, WHO)).status).toBe(200);
+      expect(coach.usage("req", 0).by).toEqual({ [WHO.sub_hash]: 1 });
+    });
+  });
+});
+
 describe("where()", () => {
   it("answers the colo= line of Cloudflare's trace, as the coach's own data centre serves it", async () => {
     const c = await freshCoach();

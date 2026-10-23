@@ -275,6 +275,34 @@ describe("Coach.forget(uid, sub_hash)", () => {
 
 // ---- A block kept for a LINE account (rulings P47 and P48) ----------------------------------------------------------
 
+describe("DELETE /coach/reviews/{id} (ruling P67)", () => {
+  it("deletes the examples made from the review with it, so forget() afterwards finds nothing of it left", async () => {
+    const c = await freshCoach();
+    const a = surfer();
+    const b = surfer();
+    const published = { status: "published", published: T - HOUR, final: JSON.stringify(goodReply()) };
+    const id = await insertReview(c, a, published);
+    const other = await insertReview(c, a, { ...published, frames: false });
+    await insertExample(c, id, "Approved with an edit");
+    await insertExample(c, id, "Look at the back foot");
+    await insertExample(c, other, "Another of theirs");
+    const theirs = await insertReview(c, b, { status: "drafted", draft: JSON.stringify(goodReply()) });
+    await insertExample(c, theirs, "Someone else's example");
+
+    expect(await route(c, a, "DELETE", `/coach/reviews/${id}`)).toEqual({ status: 200, json: { ok: true } });
+
+    expect(await c.rows("SELECT * FROM examples WHERE review_id = ?", id)).toEqual([]);
+    expect(await c.rows("SELECT note FROM examples ORDER BY id")).toEqual([
+      { note: "Another of theirs" }, { note: "Someone else's example" },
+    ]);
+    expect(await c.rows("SELECT count(*) AS n FROM frames WHERE review_id = ?", id)).toEqual([{ n: 0 }]);
+    await expectBytesRight(c);
+    expect(await c.stub.forget(a.uid, a.sub_hash)).toEqual({ ok: true });
+    expect(await c.rows("SELECT note FROM examples")).toEqual([{ note: "Someone else's example" }]);
+    expect(await c.rows("SELECT id FROM reviews")).toEqual([{ id: theirs }]);
+  });
+});
+
 describe("a block kept for a LINE account (rulings P47 and P48)", () => {
   // A clip flagged an hour ago and held for Bryan, as the alarm leaves it: rejected, hold 1, its flags, no key frames,
   // its count kept, and the account blocked.
@@ -287,6 +315,44 @@ describe("a block kept for a LINE account (rulings P47 and P48)", () => {
     await c.rows("UPDATE people SET blocked = 1 WHERE sub_hash = ?", a.sub_hash);
     return a;
   }
+
+  it("a held flagged review the surfer deletes: the block is kept as forget() keeps it, and lapses after 90 days", async () => {
+    const c = await freshCoach();
+    const a = await flaggedAccount(c);
+    const blocked = async () => (await route(c, a, "GET", "/coach/me")).json.blocked;
+    const [{ id }] = await c.rows("SELECT id FROM reviews WHERE sub_hash = ?", a.sub_hash);
+    expect(await route(c, a, "DELETE", `/coach/reviews/${id}`)).toEqual({ status: 200, json: { ok: true } });
+    expect(await c.rows("SELECT id FROM reviews")).toEqual([]);
+    expect(await c.rows("SELECT blocked FROM people WHERE sub_hash = ?", a.sub_hash)).toEqual([{ blocked: 0 }]);
+    expect(await c.rows("SELECT * FROM kept_blocks")).toEqual([{ sub_hash: a.sub_hash, kept_at: T }]);
+    expect(await start(c, a)).toEqual(BLOCKED);
+    expect(await blocked()).toBe(true);
+    // Deleting a review of an account that isn't blocked keeps no block.
+    const b = surfer();
+    const published = await insertReview(c, b, { status: "published", final: JSON.stringify(goodReply()), frames: false });
+    expect(await route(c, b, "DELETE", `/coach/reviews/${published}`)).toEqual({ status: 200, json: { ok: true } });
+    expect(await c.rows("SELECT sub_hash FROM kept_blocks")).toEqual([{ sub_hash: a.sub_hash }]);
+    // 90 days on, the block has lapsed.
+    c.clock.t = T + 90 * DAY;
+    expect(await blocked()).toBe(false);
+    expect(await start(c, a)).toMatchObject({ status: 200 });
+  });
+
+  it("GET /coach/me says blocked while the account is blocked, or a block kept for its LINE account holds", async () => {
+    const c = await freshCoach();
+    const blockedOf = async (who) => (await route(c, who, "GET", "/coach/me")).json.blocked;
+    const fresh = surfer();
+    await agree(c, fresh);
+    expect(await blockedOf(fresh)).toBe(false);
+    expect(await blockedOf(surfer())).toBe(false);
+    expect(await blockedOf(await flaggedAccount(c))).toBe(true);
+    const [d89, d90] = [surfer(), surfer()];
+    for (const [who, days] of [[d89, 89], [d90, 90]]) {
+      await c.rows("INSERT INTO kept_blocks (sub_hash, kept_at) VALUES (?, ?)", who.sub_hash, T - days * DAY);
+    }
+    expect(await blockedOf(d89)).toBe(true);
+    expect(await blockedOf(d90)).toBe(false);
+  });
 
   it("a flagged account forgotten: only the block and when it was kept stay, and its remade account is still refused", async () => {
     const c = await freshCoach();

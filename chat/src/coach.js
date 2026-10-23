@@ -49,7 +49,8 @@
 import { DurableObject } from "cloudflare:workers";
 import { randomB64u, sha256b64u } from "./auth.js";
 import {
-  AGREE_VER, BOARDS, LANGS, LEVELS, MOVES, STANCES, TEXT_FIELDS, autopilotOk, buildRequest, checkReply, readReply,
+  AGREE_VER, BOARDS, LANGS, LEVELS, MOVES, STANCES, TEXT_FIELDS, autopilotOk, bannedWords, buildRequest, checkReply,
+  readReply,
 } from "./coach-guide.js";
 import {
   ATTEMPT_WAITS, CALLING_STALE, DAY, HOUR, MAX_TRIES, MAX_WAITS, PROBE_EVERY, TW_MS, checkFrame, cleanupAfter, costUsd,
@@ -68,7 +69,8 @@ const USAGE_SAVE_MS = 30_000; // ...or time, whichever comes first
 
 // The meta keys, each value JSON (setMeta):
 //   schema_ver     the schema migrate() has made
-//   usage          {day, req, read, write, at}: today's counts (usage()), with when they were saved
+//   usage          {day, req, read, write, by, at}: today's counts (usage()), each LINE account's requests (by, for
+//                  route()'s cap), and when they were saved
 //   autopilot      true while a draft that passes every check is published without Bryan
 //   paused         true while Bryan's Pause holds: no new reviews and no AI calls
 //   stopped        true after a key or model error, until Bryan taps Start again (ruling R10)
@@ -96,7 +98,8 @@ const SCHEMA_V1 = [
   // quota_month is the Taiwan month the review counted in ("2030-06"); given is 1 once its count was given back, so it
   // never goes back twice. checked is 1 once Bryan approved or edited it (ruling R20); hold is 1 while Bryan has a
   // not-surf or flagged clip to act on (ruling R16). model, tok_in, tok_out and cost (US$) are the call's.
-  // surfer_note is what the surfer is told when it isn't published; report is the surfer's line when they report it.
+  // surfer_note is Bryan's note to the surfer when it isn't published (what else they are told is a code: noteFor);
+  // report is the surfer's line when they report it.
   // handled_at is when it was last handled (ruling P39): published, rejected or failed, by Bryan or the alarm; null
   // while it waits, a report included. waiting_since is when it last began waiting for Bryan as a draft: its draft came,
   // a Redo's new draft or a failed Redo's old one came back, or the surfer reported it. The 14-day close counts from it
@@ -243,6 +246,11 @@ const STATE = refuse(409, "state"); // an action the review's status doesn't all
 // rests the chat at 90% of its own, so the coach stops well before.
 const COACH_GUARD = 0.08;
 const FREE_DAILY = Object.freeze({ req: 100_000, read: 5_000_000, write: 100_000 });
+// The cap on one LINE account's coach requests a UTC day (ruling P68), so no one account can use up the guard's share
+// for everyone. Past it, route() answers 429 too_many ("Too many tries today"); the admin has none, so Pause always
+// works.
+const TRIES_MAX = 600;
+const TOO_MANY = refuse(429, "too_many");
 
 // The size guard (spec "Size guard"): new reviews stop while the key frames stored pass 700 MB, or the whole database
 // passes 950 MB (freed pages aren't always handed back). Counted in millions of bytes, the lower reading of a MB, so the
@@ -331,13 +339,19 @@ const isFlagged = (review) => fromJson(review.flags).length > 0;
 
 // What the surfer is told about a review that wasn't published (spec "When something goes wrong"): "not_surf" ("We
 // couldn't review this clip.", ruling R16) while Bryan holds a not-surf or flagged clip; else his note, when he wrote
-// one; else "not_surf" still for a clip rejected as not surf (its "not_surf" warning) or flagged, after Give back,
-// Clear or Ban ended the hold; else null.
+// one; else "late" ("Sorry, we couldn't review this in time.") for a draft the 14-day close took (its "late" warning);
+// else "not_surf" still for a clip rejected as not surf (its "not_surf" warning) or flagged, after Give back, Clear or
+// Ban ended the hold; else "failed" ("Something went wrong on our side. This one doesn't count.") for one that failed,
+// which is always given back (gaveUp); else null. Every one but Bryan's note is a code the page puts in the surfer's
+// language.
 function noteFor(review) {
   if (review.hold) return "not_surf";
   if (review.surfer_note !== null) return review.surfer_note;
-  const unreviewable = fromJson(review.warnings).includes("not_surf") || isFlagged(review);
-  return review.status === "rejected" && unreviewable ? "not_surf" : null;
+  const warnings = fromJson(review.warnings);
+  if (review.status === "rejected" && warnings.includes("late")) return "late";
+  const unreviewable = warnings.includes("not_surf") || isFlagged(review);
+  if (review.status === "rejected" && unreviewable) return "not_surf";
+  return review.status === "failed" ? "failed" : null;
 }
 
 // ---- Bryan's Drafts -----------------------------------------------------------------------------------------------
@@ -384,8 +398,10 @@ const versionOf = (review) => [review.status, review.redos, review.waiting_since
 
 // Bryan's edits to a draft, checked (Review Focus 4): an object of the surfer's text fields he changed, each by its
 // path ("went_well.title", "progress": TEXT_FIELDS), to text of 1 to 1,000 characters after trimming, counted as
-// characters, so nine full 中文 fields fit. Returns them trimmed, or null when any isn't so. They are only ever stored
-// as text: markup in them stays the characters it is.
+// characters, so nine full 中文 fields fit. The heads-up's text and the progress line may also be empty, which
+// removes that part (ruling P64). Returns them trimmed, or null when any isn't so. They are only ever stored as text:
+// markup in them stays the characters it is.
+const REMOVABLE = Object.freeze(["heads_up.text", "progress"]);
 function readEdits(edits) {
   if (!isObject(edits)) return null;
   const out = {};
@@ -393,13 +409,14 @@ function readEdits(edits) {
     if (!TEXT_FIELDS.includes(path) || typeof value !== "string") return null;
     const text = value.trim();
     const length = [...text].length;
-    if (length < 1 || length > EDIT_MAX) return null;
+    if (length < (REMOVABLE.includes(path) ? 0 : 1) || length > EDIT_MAX) return null;
     out[path] = text;
   }
   return out;
 }
 
-// A review's text (a reply's shape, as JSON) with Bryan's edits put in at their paths, as JSON. The same text when they
+// A review's text (a reply's shape, as JSON) with Bryan's edits put in at their paths, as JSON. A heads-up whose text
+// is removed loses its move too, so no button is left for a move with nothing said about it. The same text when they
 // change nothing, so an approval is "without changes" exactly when its final text is its draft's.
 function withEdits(text, edits) {
   const review = JSON.parse(text);
@@ -408,6 +425,7 @@ function withEdits(text, edits) {
     if (field === undefined) review[part] = value;
     else review[part] = { ...(isObject(review[part]) ? review[part] : {}), [field]: value };
   }
+  if (edits["heads_up.text"] === "" && isObject(review.heads_up)) review.heads_up.move = "";
   const edited = JSON.stringify(review);
   return edited === JSON.stringify(JSON.parse(text)) ? text : edited;
 }
@@ -494,8 +512,6 @@ const DRAFT_WAIT = 14 * DAY; // a draft waiting for Bryan, from when it began wa
 const SHORT_KEEP = 7 * DAY; // the key frames of a failed review, and of a clip held as not surf, from when it was handled
 // The key frames of a published or rejected review, and a rejected review's drafts and notes, from when it was handled.
 const LONG_KEEP = 30 * DAY;
-// What the surfer is told about a draft the clean-up closed.
-const LATE_NOTE = "Sorry, we couldn't review this in time";
 // A block forget() kept for a LINE account (ruling P47), from when it was kept. It holds no more after this, even before
 // the clean-up deletes it.
 const KEPT_BLOCK = 90 * DAY;
@@ -612,13 +628,14 @@ export class Coach extends DurableObject {
   }
 
   // These two use sql.exec directly, not all(): all() counts its rows through usage(), which they are part of.
-  // The row is JSON {day, req, read, write, at}, where at is when it was saved.
+  // The row is JSON {day, req, read, write, by, at}, where by is each LINE account's requests today (route()'s cap,
+  // tries) and at is when it was saved.
   savedUsage(day) {
     const row = this.sql.exec("SELECT value FROM meta WHERE key = 'usage'").toArray()[0];
     const saved = row ? JSON.parse(row.value) : null;
     this.savedAt = saved?.at ?? -Infinity; // never saved: the next request saves
-    if (saved?.day === day) return { day, req: saved.req, read: saved.read, write: saved.write };
-    return { day, req: 0, read: 0, write: 0 };
+    if (saved?.day === day) return { day, req: saved.req, read: saved.read, write: saved.write, by: saved.by ?? {} };
+    return { day, req: 0, read: 0, write: 0, by: {} };
   }
 
   saveUsage() {
@@ -774,9 +791,10 @@ export class Coach extends DurableObject {
     return bytes;
   }
 
-  // Deletes a review and its key frames. Inside the caller's transaction.
+  // Deletes a review, its key frames and the examples made from it (ruling P67). Inside the caller's transaction.
   dropReview(id) {
     this.dropFrames(id);
+    this.all("DELETE FROM examples WHERE review_id = ?", id);
     this.all("DELETE FROM reviews WHERE id = ?", id);
   }
 
@@ -785,8 +803,10 @@ export class Coach extends DurableObject {
   // Every coach route, from the Worker, as route({method, path, who, body}): who = {uid, sub_hash, role} is the
   // signed-in caller as the room's whoIs() gave it (never anything the surfer sent), and body is the request's text.
   // A path it doesn't serve is 404 not_found (ROUTES). Bryan's own paths are 403 admin to anyone else: the Worker
-  // checks that too, and the coach checks again.
+  // checks that too, and the coach checks again. A LINE account past TRIES_MAX requests today gets 429 too_many before
+  // anything else, with no SQL, and that request isn't counted toward the free-plan guard (tries).
   async route({ method, path, who, body } = {}) {
+    if (typeof who?.uid === "string" && typeof who?.sub_hash === "string" && !this.tries(who)) return TOO_MANY;
     this.usage("req");
     if (typeof who?.uid !== "string" || typeof who?.sub_hash !== "string") return refuse(401, "auth");
     for (const route of ROUTES) {
@@ -796,6 +816,22 @@ export class Coach extends DurableObject {
       return this[route.run](who, body, ...match.slice(1));
     }
     return NOT_FOUND;
+  }
+
+  // Counts a request of who's LINE account today (UTC, as usage() counts), in usage's counts, so it is saved with them:
+  // false once it is past TRIES_MAX (ruling P68). The admin is never capped.
+  tries(who) {
+    this.usage("req", 0); // today's counts, read from meta only by a new copy or on a new day
+    const { by } = this.used;
+    by[who.sub_hash] = (by[who.sub_hash] ?? 0) + 1;
+    return who.role === "admin" || by[who.sub_hash] <= TRIES_MAX;
+  }
+
+  // Whether the LINE account `sub_hash` may start no review at `now`: it is blocked after a flagged clip (its people row
+  // `person`, or null), or a block kept for it (kept_blocks, rulings P47, P48) still holds.
+  blocked(sub_hash, person, now) {
+    const kept = "SELECT 1 FROM kept_blocks WHERE sub_hash = ? AND kept_at > ?";
+    return Boolean(person?.blocked) || this.one(kept, sub_hash, now - KEPT_BLOCK) !== null;
   }
 
   // The people row of a LINE account, or null.
@@ -813,16 +849,19 @@ export class Coach extends DurableObject {
 
   // GET /coach/me: what the Coach panel shows. left and sent_left as leftOf() says for this Taiwan month; month and
   // next_month (when the next one starts) are the server's, whatever the phone's clock says (Review Focus 3); stop is
-  // stopFor(); profile is the saved level, board and stance; the account's reviews, newest first, but the one
-  // still uploading, each with its status in the surfer's words; and account, the chat account's uid (ruling P51),
-  // which the page keeps with an unsent review so only this account picks it up. Never the LINE sub or its hash.
+  // stopFor(); profile is the saved level, board and stance; blocked, whether the account may start no review (blocked);
+  // the account's reviews, newest first, but the one still uploading, each with its status in the surfer's words and
+  // an "other" move's own name as the surfer wrote it (move_other, "" for the others); and account, the chat account's
+  // uid (ruling P51), which the page keeps with an unsent review so only this account picks it up. Never the LINE sub
+  // or its hash.
   getMe(who) {
     const now = this.now();
     const month = twMonth(now);
     const { left, sent_left } = this.leftOf(this.counts(who.sub_hash, month));
     const person = this.person(who.sub_hash);
     const reviews = this.all(
-      `SELECT id, move, created, status, published, surfer_note, hold, warnings, flags FROM reviews
+      `SELECT id, move, coalesce(json_extract(answers, '$.move_other'), '') AS move_other, created, status, published,
+       surfer_note, hold, warnings, flags FROM reviews
        WHERE uid = ? AND status != 'uploading' ORDER BY created DESC, id DESC`,
       who.uid,
     );
@@ -839,8 +878,10 @@ export class Coach extends DurableObject {
         profile: person?.level ? { level: person.level, board: person.board, stance: person.stance } : null,
         agreed: person?.agreed_ver === AGREE_VER,
         admin: who.role === "admin",
+        blocked: this.blocked(who.sub_hash, person, now),
         reviews: reviews.map((r) => ({
-          id: r.id, move: r.move, created: r.created, status: SURFER_STATUS[r.status], published: r.published, note: noteFor(r),
+          id: r.id, move: r.move, move_other: r.move_other, created: r.created, status: SURFER_STATUS[r.status],
+          published: r.published, note: noteFor(r),
         })),
         account: who.uid,
       },
@@ -875,8 +916,7 @@ export class Coach extends DurableObject {
     const now = this.now();
     const person = this.person(who.sub_hash);
     if (person?.agreed_ver !== AGREE_VER) return refuse(403, "agree");
-    const kept = "SELECT 1 FROM kept_blocks WHERE sub_hash = ? AND kept_at > ?";
-    if (person.blocked || this.one(kept, who.sub_hash, now - KEPT_BLOCK)) return refuse(403, "blocked");
+    if (this.blocked(who.sub_hash, person, now)) return refuse(403, "blocked");
     const stop = this.stopFor(now);
     if (stop) return stopped(stop);
     const open = "SELECT 1 FROM reviews WHERE sub_hash = ? AND status IN ('queued', 'calling', 'drafted') LIMIT 1";
@@ -960,19 +1000,19 @@ export class Coach extends DurableObject {
   }
 
   // GET /coach/reviews/{id}, for its owner or the admin; anyone else gets not_found. The owner gets
-  // {id, status, move, created, have, note}: have is the key frames already here (for a resumed upload), note as in
-  // GET /coach/me; and once it is published, review = {text, times, checked}: the published text, each key frame's time
-  // in ms by its number (the server's record, so the AI can't make a time up), and whether Bryan checked it (ruling
-  // R20). Never the draft, its English copy, flags, warnings, Redo notes, tokens or cost. The admin gets every column
-  // (adminView).
+  // {id, status, move, move_other, created, have, note}: move_other and note as in GET /coach/me, have is the key
+  // frames already here (for a resumed upload); and once it is published, review = {text, times, checked}: the
+  // published text, each key frame's time in ms by its number (the server's record, so the AI can't make a time up),
+  // and whether Bryan checked it (ruling R20). Never the draft, its English copy, flags, warnings, Redo notes, tokens
+  // or cost. The admin gets every column (adminView).
   getReview(who, body, id) {
     const review = this.reviewFor(who, id, { admin: true });
     if (!review) return NOT_FOUND;
     if (who.role === "admin") return { status: 200, json: this.adminView(review) };
     const frames = this.all("SELECT n, ms, b64 IS NOT NULL AS have FROM frames WHERE review_id = ? ORDER BY n", id);
     const view = {
-      id, status: review.status, move: review.move, created: review.created, have: frames.filter((f) => f.have).map((f) => f.n),
-      note: noteFor(review),
+      id, status: review.status, move: review.move, move_other: JSON.parse(review.answers).move_other ?? "",
+      created: review.created, have: frames.filter((f) => f.have).map((f) => f.n), note: noteFor(review),
     };
     if (review.status === "published") {
       view.review = {
@@ -1004,11 +1044,21 @@ export class Coach extends DurableObject {
     return { status: 200, jpeg: fromBase64(frame.b64) };
   }
 
-  // DELETE /coach/reviews/{id}, for its owner: the review and its key frames go, in any status. Its count is never given
-  // back (spec "Counting the 2 reviews").
+  // DELETE /coach/reviews/{id}, for its owner: the review, its key frames and the examples made from it go, in any
+  // status. Its count is never given back (spec "Counting the 2 reviews"). A flagged clip held for Bryan takes his
+  // Clear with it, so its account's block is kept for the LINE account as forget() keeps it (rulings P47, P48), and it
+  // lapses after 90 days.
   deleteReview(who, body, id) {
-    if (!this.reviewFor(who, id)) return NOT_FOUND;
-    this.ctx.storage.transactionSync(() => this.dropReview(id));
+    const review = this.reviewFor(who, id);
+    if (!review) return NOT_FOUND;
+    const now = this.now();
+    this.ctx.storage.transactionSync(() => {
+      this.dropReview(id);
+      if (review.hold === 1 && isFlagged(review) && this.person(review.sub_hash)?.blocked) {
+        this.keepBlock(review.sub_hash, now);
+        this.all("UPDATE people SET blocked = 0 WHERE sub_hash = ?", review.sub_hash);
+      }
+    });
     return OK;
   }
 
@@ -1072,7 +1122,8 @@ export class Coach extends DurableObject {
 
   // A review as the Drafts list shows it: adminView() (every column, but never a key frame's text), with the account's
   // saved profile {level, board, stance, blocked}, its key frames' times in ms by number, how long it has waited for
-  // Bryan (waited_ms: "waiting 5 h", waitingFrom), and whether the surfer reported it.
+  // Bryan (waited_ms: "waiting 5 h", waitingFrom), whether the surfer reported it, and, when it has the "words" warning,
+  // the banned words its draft uses (words: each once, as bannedWords finds them), so Bryan needn't hunt for them.
   draftView(review, now) {
     const view = this.adminView(review);
     const person = this.person(review.sub_hash);
@@ -1082,6 +1133,9 @@ export class Coach extends DurableObject {
     view.times = Object.fromEntries(view.frames.map((f) => [f.n, f.ms]));
     view.waited_ms = now - waitingFrom(review);
     view.reported = review.report !== null;
+    const draft = view.warnings.includes("words") && isObject(view.draft) ? view.draft : null;
+    const textAt = (path) => path.split(".").reduce((value, key) => (isObject(value) ? value[key] : undefined), draft);
+    view.words = draft ? [...new Set(TEXT_FIELDS.flatMap((path) => bannedWords(textAt(path))))] : [];
     return view;
   }
 
@@ -1143,13 +1197,13 @@ export class Coach extends DurableObject {
   // Redo, a draft, with Bryan's note for the coach (spec "Backend", step 6): back in the queue, due now, with one more
   // redo and no attempts used. The old draft stays: the alarm sends it with his notes, and a Redo that fails goes back
   // to it. The note joins redo_note and is kept as an example. Text published before a report goes, so the next
-  // approval starts from the new draft. Refused (state) unless at least 8 of its key frames are still kept, as the
+  // approval starts from the new draft. Refused (no_frames) unless at least 8 of its key frames are still kept, as the
   // coach is never called with fewer (an old reported review's may be gone); at most 2 a review (redo_limit); and
   // refused while stopFor() stops new reviews: money at the stop line, or a break.
   async redo(review, { note }, now) {
     if (review.status !== "drafted") return STATE;
     const kept = this.one("SELECT count(*) AS n FROM frames WHERE review_id = ? AND b64 IS NOT NULL", review.id).n;
-    if (kept < FRAMES_MIN) return STATE;
+    if (kept < FRAMES_MIN) return refuse(409, "no_frames");
     if (review.redos >= REDOS_MAX) return refuse(409, "redo_limit");
     const stop = this.stopFor(now);
     if (stop) return stopped(stop);
@@ -1213,12 +1267,14 @@ export class Coach extends DurableObject {
     return OK;
   }
 
-  // Clear, a flagged clip (ruling R16): the account may start reviews again, and every flagged clip of it held for
-  // Bryan is let go. The count stays used; the key frames went when it was flagged.
+  // Clear, a flagged clip (ruling R16): the account may start reviews again, a block kept for its LINE account goes
+  // too, and every flagged clip of it held for Bryan is let go. The count stays used; the key frames went when it was
+  // flagged.
   clearBlock(review, ask, now) {
     if (review.status !== "rejected" || review.hold !== 1 || !isFlagged(review)) return STATE;
     this.ctx.storage.transactionSync(() => {
       this.all("UPDATE people SET blocked = 0 WHERE sub_hash = ?", review.sub_hash);
+      this.all("DELETE FROM kept_blocks WHERE sub_hash = ?", review.sub_hash);
       this.all(
         `UPDATE reviews SET hold = 0, handled_at = ?
          WHERE sub_hash = ? AND status = 'rejected' AND hold = 1 AND flags != '[]'`,
@@ -2044,12 +2100,21 @@ export class Coach extends DurableObject {
       this.dropReview(id);
     }
     // Drafts Bryan hasn't handled in 14 days, counted from when each began waiting for him (waiting_since), a reported
-    // review's from its report: closed, the surfer told, handled now, and given back (once: giveBack). No email: Bryan
-    // heard of each when it came. A clip held as not surf or flagged isn't a draft and keeps its count (ruling R16).
+    // review's from its report. No email: Bryan heard of each when it came. A clip held as not surf or flagged isn't a
+    // draft and keeps its count (ruling R16). A reported review that still has the text published before goes back to
+    // published as it was, handled now with its report kept, and nothing goes back. Any other is closed: rejected with
+    // the "late" warning, which tells the surfer in their language (noteFor), handled now, and given back (once:
+    // giveBack).
+    const waited = "status = 'drafted' AND hold = 0 AND flags = '[]' AND waiting_since <= ?";
+    this.all(
+      `UPDATE reviews SET status = 'published', next_try = NULL, handled_at = ?
+       WHERE ${waited} AND published IS NOT NULL AND final IS NOT NULL`,
+      now, now - DRAFT_WAIT,
+    );
     const late = this.all(
-      `UPDATE reviews SET status = 'rejected', surfer_note = ?, next_try = NULL, handled_at = ?
-       WHERE status = 'drafted' AND hold = 0 AND flags = '[]' AND waiting_since <= ? RETURNING id`,
-      LATE_NOTE, now, now - DRAFT_WAIT,
+      `UPDATE reviews SET status = 'rejected', warnings = json_insert(warnings, '$[#]', 'late'), next_try = NULL,
+       handled_at = ? WHERE ${waited} RETURNING id`,
+      now, now - DRAFT_WAIT,
     );
     for (const { id } of late) this.giveBack(id);
     // A clip held as not surf, 7 days after it was found: the hold ends and its key frames go (ruling R16). Its count

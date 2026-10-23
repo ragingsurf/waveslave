@@ -34,6 +34,11 @@
 // #c=<code>&p=<pin> or #e=<what went wrong>: LINE's own error code (access_denied, say), "line" for one that doesn't
 // look like a code, "start" (a bad h), "state" (an unknown, used or stale sign-in), "token" (LINE's answer didn't
 // check out), "banned", or "resting" (the room couldn't answer, or is resting near the free plan's daily limits).
+//
+// The callback also hands the room the address the browser finished from (CF-Connecting-IP), and /auth/redeem and
+// /auth/signup pass on the caller's. That is what lets the iPhone home-screen app finish by itself when LINE's app
+// hands the sign-in to Safari: the app asks with {v, auto: true}, and the room lets it in only from the same network
+// (room.js, "auto").
 export { Room } from "./room.js";
 // The AI coach's Durable Object (AI coach spec, "Backend"), bound as COACH in wrangler.toml.
 export { Coach } from "./coach.js";
@@ -125,12 +130,12 @@ async function askRoom(env, build) {
 }
 
 // The app's request as the room gets it, at `target`. A WebSocket upgrade keeps all its headers: the handshake needs
-// them, and the room reads the visitor's address from CF-Connecting-IP. Everything else passes on only the two headers
-// the room reads.
+// them, and the room reads the visitor's address from CF-Connecting-IP. Everything else passes on only the three headers
+// the room reads (the address, for a sign-in finished by itself).
 function forward(request, target, wholeRequest) {
   if (wholeRequest) return new Request(target, request);
   const headers = new Headers();
-  for (const name of ["Authorization", "Content-Type"]) {
+  for (const name of ["Authorization", "Content-Type", "CF-Connecting-IP"]) {
     const value = request.headers.get(name);
     if (value !== null) headers.set(name, value);
   }
@@ -167,7 +172,7 @@ async function handle(route, request, env, url, from) {
   if (route.kind === "socket" && request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
     return Response.json({ error: "upgrade" }, { status: 426 });
   }
-  if (route.kind === "login") return route.run(env, url);
+  if (route.kind === "login") return route.run(env, url, request);
   if (route.coach) return coachRoute(request, env, url);
 
   let search = url.search;
@@ -309,7 +314,7 @@ async function lineStart(env, url) {
 
 // Step 3. LINE sends the browser back with ?code=&state= on success, or ?error= when the person cancelled or LINE
 // failed.
-async function lineCallback(env, url) {
+async function lineCallback(env, url, request) {
   const q = url.searchParams;
   if (q.has("error")) return backToApp(env, `e=${lineError(q.get("error"))}`);
   const state = q.get("state");
@@ -333,7 +338,12 @@ async function lineCallback(env, url) {
   // 3.4 and 3.5: the room makes the account code, stops a banned account, and stores the handoff. LINE's sub goes to the
   // room only to be made into the account code (sub_hash), and is never stored. The LINE name goes only into the
   // handoff, to prefill the nickname box.
-  const handoff = await roomJson(env, "/r/handoffs", { h: login.data.h, sub: claims.sub, line_name: claims.name ?? null });
+  const handoff = await roomJson(env, "/r/handoffs", {
+    h: login.data.h,
+    sub: claims.sub,
+    line_name: claims.name ?? null,
+    ip: request.headers.get("CF-Connecting-IP"),
+  });
   if (!handoff) return backToApp(env, "e=resting");
   if (handoff.data.error === "banned") return backToApp(env, "e=banned");
   if (handoff.status !== 200) return backToApp(env, "e=token");

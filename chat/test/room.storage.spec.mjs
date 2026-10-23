@@ -111,7 +111,7 @@ const TABLES = {
   flags: ["msg_id", "sub_hash", "reason", "ts", "rejected"],
   sessions: ["id", "uid", "spot", "start", "end", "stars", "board", "note", "cond", "shared_msg"],
   logins: ["state", "nonce", "pkce_verifier", "h", "created"],
-  handoffs: ["code_hash", "h", "sub_hash", "line_name", "pin", "created", "tries"],
+  handoffs: ["code_hash", "h", "sub_hash", "line_name", "pin", "created", "tries", "net"],
   limits: ["key", "n", "window_end"],
   holds: ["msg_id", "body", "uid", "sub_hash", "reason", "ts"],
   meta: ["key", "value"],
@@ -132,7 +132,7 @@ describe("schema", () => {
       for (const [table, columns] of Object.entries(TABLES)) {
         expect(rows(room, "SELECT name FROM pragma_table_info(?)", table).map((r) => r.name), table).toEqual(columns);
       }
-      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(2);
+      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(3);
     });
   });
 
@@ -174,7 +174,7 @@ describe("schema", () => {
       const atFailure = failSchemaVer(room);
       expect(() => room.migrate()).toThrow("schema_ver write failed");
       delete room.setMeta;
-      // Versions 1 and 2 had both run when schema_ver failed...
+      // Versions 1 to 3 had all run when schema_ver failed...
       expect(atFailure.tables).toEqual(Object.keys(TABLES).sort());
       expect(atFailure.handoffs).toEqual(TABLES.handoffs);
       // ...and the transaction undid them. meta is made before it, so it stays, with no schema_ver.
@@ -183,7 +183,7 @@ describe("schema", () => {
       // So the next migrate() makes them all again.
       room.migrate();
       expect(ownTables(room)).toEqual(Object.keys(TABLES).sort());
-      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(2);
+      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(3);
     });
   });
 
@@ -379,16 +379,16 @@ describe("a room made by schema version 1, as merged in PR #97", () => {
     });
   });
 
-  it("migrate() makes it version 2: handoffs loses sub, its live row stays with its sub_hash, and the raw sub is gone", async () => {
+  it("migrate() makes it version 3: handoffs loses sub and gains net, its live row stays with its sub_hash, and the raw sub is gone", async () => {
     const { stub, who, h, codeHash } = await mergedV1Room();
     const fresh = await runInDurableObject(freshRoom(), (room) => shape(room));
     await runInDurableObject(stub, (room) => {
       const before = { users: rows(room, "SELECT * FROM users"), messages: rows(room, "SELECT * FROM messages") };
       room.migrate();
-      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(2);
+      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(3);
       expect(rows(room, "SELECT name FROM pragma_table_info('handoffs')").map((r) => r.name)).toEqual(TABLES.handoffs);
       expect(rows(room, "SELECT * FROM handoffs")).toEqual([
-        { code_hash: codeHash, h, sub_hash: who.subHash, line_name: who.name, pin: who.pin, created: expect.any(Number), tries: 0 },
+        { code_hash: codeHash, h, sub_hash: who.subHash, line_name: who.name, pin: who.pin, created: expect.any(Number), tries: 0, net: null },
       ]);
       expect(everyValue(room).filter((v) => v.includes(who.sub))).toEqual([]);
       // Every table now has the same columns and indexes as in a room made new by this code.
@@ -428,7 +428,7 @@ describe("a room made by schema version 1, as merged in PR #97", () => {
       expect(value(room, "SELECT sub FROM handoffs")).toBe(who.sub);
       // So the next migrate() runs the step again, and this time it holds.
       room.migrate();
-      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(2);
+      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(3);
       expect(rows(room, "SELECT name FROM pragma_table_info('handoffs')").map((r) => r.name)).toEqual(TABLES.handoffs);
     });
   });
@@ -454,7 +454,7 @@ describe("a room made by schema version 1, as merged in PR #97", () => {
     const old = await roomPost(stub, "signup", { v: who.v, pin: who.pin, nick: "Kai_01", consent: "v1" });
     expect(old.status).toBe(200);
     await runInDurableObject(stub, async (room) => {
-      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(2);
+      expect(value(room, "SELECT value FROM meta WHERE key = 'schema_ver'")).toBe(3);
       expect(rows(room, "SELECT nick, sub_hash FROM users WHERE nick IN ('Nami_01', 'Kai_01') ORDER BY nick")).toEqual([
         { nick: "Kai_01", sub_hash: who.subHash },
         { nick: "Nami_01", sub_hash: await subHash(next.sub, env.SUB_PEPPER) },

@@ -41,13 +41,13 @@ const DAY = 24 * HOUR;
 // The schema this code expects. A change to the tables bumps it and adds a step to migrate(), which brings a room up
 // from whatever version it has. Version 1 is the tables as merged in PR #97 (SCHEMA_V1), and it had a sub column in
 // handoffs: LINE's raw ID. Version 2 drops that column (SCHEMA_V2), so LINE's raw ID is gone from every table after
-// migrate().
+// migrate(). Version 3 gives handoffs a net column (SCHEMA_V3), for the sign-in the home-screen app finishes by itself.
 //
 // The steps only go forward, so never roll the chat back past a version that bumped this (a rollback in Cloudflare's
 // dashboard, or the Deploy chat workflow run on an older branch or tag). The older code takes the higher schema_ver as
 // done and uses tables it doesn't know: version-1 code still writes handoffs.sub, so every sign-in would fail. To undo
 // a change, deploy a fix on top instead.
-const SCHEMA_VER = 2;
+const SCHEMA_VER = 3;
 
 const PAGE_MAX = 100; // the room opens with the last 100 messages
 const REPORT_WINDOW = 4 * HOUR; // a report shows on its spot's card for 4 hours
@@ -301,6 +301,11 @@ const SCHEMA_V1 = [
 // so a sign-in still waiting to be redeemed when this version arrives goes on working.
 const SCHEMA_V2 = ["ALTER TABLE handoffs DROP COLUMN sub"];
 
+// Version 3 (Oct 23): handoffs.net, the keyed hash of the network the LINE sign-in finished from (netHash()), so the app
+// that started it can finish by itself from the same network ({v, auto: true}). A handoff from before has none, and
+// takes the code or the pin as before.
+const SCHEMA_V3 = ["ALTER TABLE handoffs ADD COLUMN net TEXT"];
+
 // The first 19:00 UTC after t (19:00 itself counts as past).
 function retentionTimeAfter(t) {
   const today = Math.floor(t / DAY) * DAY + RETENTION_HOUR_UTC * HOUR;
@@ -357,6 +362,23 @@ function sameCode(a, b) {
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
+}
+
+// The network an address belongs to, as text, or null: an IPv4 address as it is, and an IPv6 address as its first 64
+// bits (the part a phone keeps while the rest changes for privacy), written out in full so one network has one form.
+export function networkOf(ip) {
+  if (typeof ip !== "string" || ip.length > 64) return null;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return ip;
+  if (!/^[0-9a-fA-F:]+$/.test(ip) || !ip.includes(":")) return null;
+  const halves = ip.toLowerCase().split("::");
+  if (halves.length > 2) return null;
+  const left = halves[0] ? halves[0].split(":") : [];
+  const right = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const fill = 8 - left.length - right.length;
+  if (halves.length === 2 ? fill < 1 : fill !== 0) return null;
+  const groups = [...left, ...Array(halves.length === 2 ? fill : 0).fill("0"), ...right];
+  if (groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null;
+  return groups.slice(0, 4).map((g) => g.padStart(4, "0")).join(":") + "::/64";
 }
 
 // The token in an "Authorization: Bearer <token>" header, or null.
@@ -478,6 +500,7 @@ export class Room extends DurableObject {
     this.ctx.storage.transactionSync(() => {
       if (ver < 1) for (const statement of SCHEMA_V1) this.all(statement);
       if (ver < 2) for (const statement of SCHEMA_V2) this.all(statement);
+      if (ver < 3) for (const statement of SCHEMA_V3) this.all(statement);
       this.setMeta("schema_ver", SCHEMA_VER);
     });
   }
@@ -663,9 +686,9 @@ export class Room extends DurableObject {
       case "POST /r/handoffs":
         return this.createHandoff(await readJson(request));
       case "POST /r/redeem":
-        return this.redeem(await readJson(request));
+        return this.redeem(await readJson(request), request);
       case "POST /r/signup":
-        return this.signup(await readJson(request));
+        return this.signup(await readJson(request), request);
       case "GET /r/ws":
         return this.openSocket(request);
       case "POST /r/me/signout":
@@ -742,6 +765,7 @@ export class Room extends DurableObject {
   //   expired  410  no live handoff for that code or v: never made, over 10 minutes old, used, or voided by 3 wrong pins
   //   v        403  the code's handoff was made for another verifier (SHA-256(v) isn't its h)
   //   pin      403  a wrong pin; the third voids the handoff
+  //   net      403  auto: the sign-in finished from another network, so it takes the code or the pin instead
   //   banned   403  this LINE account can't sign in here
   //   consent  400  signup without the tick (consent "v1")
   //   nick     400  with code: checkNick's "length", "chars" or "reserved", "blocked:<rule>" for a name the filters
@@ -785,21 +809,23 @@ export class Room extends DurableObject {
     const code = randomB64u(16);
     const codeHash = await sha256b64u(code);
     const pin = pin6();
+    const net = await this.netHash(body.ip);
     if (this.bannedSub(account)) return refuse(403, "banned");
     const created = this.now();
     this.all(
-      `INSERT INTO handoffs (code_hash, h, sub_hash, line_name, pin, created, tries) VALUES (?, ?, ?, ?, ?, ?, 0)`,
-      codeHash, body.h, account, lineName, pin, created,
+      `INSERT INTO handoffs (code_hash, h, sub_hash, line_name, pin, created, tries, net) VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
+      codeHash, body.h, account, lineName, pin, created, net,
     );
     // The LINE name must not outlive its 10 minutes, even in a room nobody visits, so the alarm comes back for it.
     await this.alarmBy(created + LOGIN_TTL + LOGIN_GRACE);
     return Response.json({ code, pin });
   }
 
-  // Step 4 (and step 5, by pin): the app comes back with {v, code} or {v, pin}. A known user gets a session token and
-  // the handoff goes. A new person gets {needs_signup, line_name}, and the handoff stays for the signup.
-  async redeem(body) {
-    const proof = await this.proof(body);
+  // Step 4 (and step 5, by pin or by itself): the app comes back with {v, code}, {v, pin} or {v, auto: true}. A known
+  // user gets a session token and the handoff goes. A new person gets {needs_signup, line_name}, and the handoff stays
+  // for the signup.
+  async redeem(body, request) {
+    const proof = await this.proof(body, request);
     if (!proof) return refuse(400, "invalid");
     const found = this.handoffFor(proof);
     if (found.error) return refuse(found.status, found.error);
@@ -811,8 +837,8 @@ export class Room extends DurableObject {
   // Step 6: a new person signs up with the same proof, a nickname and the tick (consent "v1"). The account is made only
   // then, with when and to which version they agreed. The LINE name only prefilled the nickname box and is not kept:
   // the handoff goes, with it. A LINE account that already has an account is just signed in.
-  async signup(body) {
-    const proof = await this.proof(body);
+  async signup(body, request) {
+    const proof = await this.proof(body, request);
     if (!proof) return refuse(400, "invalid");
     const found = this.handoffFor(proof);
     if (found.error) return refuse(found.status, found.error);
@@ -837,15 +863,23 @@ export class Room extends DurableObject {
     return Response.json({ token: await this.tokenFor(user, now) });
   }
 
-  // What a redeem or signup body proves: h = SHA-256(v), plus the code's SHA-256 or the pin (the code wins if both
-  // come). The hashing happens here, before any handoff is read. null for a body with neither, or a field of the
-  // wrong shape.
-  async proof(body) {
+  // What a redeem or signup body proves: h = SHA-256(v), plus the code's SHA-256, the pin, or (auto: true) the network
+  // the request comes from (the code wins, then the pin). The hashing happens here, before any handoff is read. null
+  // for a body with none of them, or a field of the wrong shape.
+  async proof(body, request) {
     if (!isText(body?.v, VERIFIER)) return null;
     const h = await sha256b64u(body.v);
     if (body.code !== undefined) return isText(body.code, CODE) ? { h, codeHash: await sha256b64u(body.code) } : null;
     if (body.pin !== undefined) return isText(body.pin, PIN) ? { h, pin: body.pin } : null;
+    if (body.auto === true) return { h, auto: true, net: await this.netHash(request?.headers.get("CF-Connecting-IP")) };
     return null;
+  }
+
+  // The keyed hash (SUB_PEPPER) of the network an address belongs to (networkOf()), or null for no address. The
+  // address itself is never stored.
+  async netHash(ip) {
+    const net = networkOf(ip);
+    return net ? hmacB64u(this.env.SUB_PEPPER, `net:${net}`) : null;
   }
 
   // The live handoff a proof opens ({row}), or what to refuse with ({status, error}). Live means under 10 minutes old
@@ -855,8 +889,19 @@ export class Room extends DurableObject {
   //   By pin: the live handoffs made for this v are checked against it. A wrong pin counts against each of them, and
   //     the third voids (deletes) them. Nothing here awaits, so no other request runs between reading the count and
   //     writing it: guesses sent at the same moment still get three tries in all.
+  //   By itself (auto): the iPhone home-screen app, whose sign-in LINE's app finished in Safari, asks while it waits.
+  //     A live handoff made for this v opens only to a request from the network the sign-in finished from: Safari and
+  //     the app on one phone share it, while someone who got a stranger to finish their sign-in link is elsewhere (the
+  //     stolen link the pin guards against). Not yet finished is 410 expired, so the app asks again; another network
+  //     is 403 net, and the app falls back to the code box. Nothing is counted: there is nothing to guess.
   handoffFor(proof) {
     const since = this.now() - LOGIN_TTL;
+    if (proof.auto) {
+      const live = this.all("SELECT * FROM handoffs WHERE h = ? AND created > ? AND tries < ?", proof.h, since, PIN_TRIES);
+      if (live.length === 0) return { status: 410, error: "expired" };
+      const row = proof.net ? live.find((r) => sameCode(r.net, proof.net)) : null;
+      return row ? { row } : { status: 403, error: "net" };
+    }
     if (proof.codeHash) {
       const row = this.one(
         "SELECT * FROM handoffs WHERE code_hash = ? AND created > ? AND tries < ?",

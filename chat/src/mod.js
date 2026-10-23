@@ -303,7 +303,7 @@ const NICK_CHARS = /^[\p{L}\p{N}_.-]+(?: [\p{L}\p{N}_.-]+)*$/u;
 // "B-r-y-a-n" read as Bryan, and "Le.o" as Leo, so they must count as those names.
 const KEY_DROPS = /[ _.-]/g;
 
-// A nickname is 2 to 20 characters after normalising. Returns {ok: true, nick, key} where nick is what to
+// A nickname is 1 to 20 characters (one is fine: Bryan, Oct 23) after normalising. Returns {ok: true, nick, key} where nick is what to
 // show and key is the folded form with the spaces, "_", "." and "-" taken out, which must be unique across
 // users. Or {ok: false, code} with code "length", "chars" (including a name with no letter or digit, whose
 // key would be empty) or "reserved". Leading and trailing spaces are dropped.
@@ -314,7 +314,7 @@ export function checkNick(nick) {
   const n = normalise(typeof nick === "string" ? nick : "");
   const shown = n.stored.trim();
   const length = [...shown].length;
-  if (length < 2 || length > 20) return { ok: false, code: "length" };
+  if (length < 1 || length > 20) return { ok: false, code: "length" };
   // A tab or line break inside the name (one at either end is trimmed away, like a space) is not a letter.
   if (!NICK_CHARS.test(shown) || n.check.trim().includes("\n")) return { ok: false, code: "chars" };
   const key = normalise(shown).check.replace(KEY_DROPS, "");

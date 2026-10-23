@@ -511,8 +511,9 @@ test("checkNick: reserved words are refused, however they are dressed up", () =>
   }
 });
 
-test("checkNick: length is 2 to 20 characters", () => {
-  assert.deepEqual(checkNick("a"), { ok: false, code: "length" });
+test("checkNick: length is 1 to 20 characters", () => {
+  assert.equal(checkNick("a").ok, true);
+  assert.equal(checkNick("浪").ok, true);
   assert.deepEqual(checkNick(""), { ok: false, code: "length" });
   assert.deepEqual(checkNick("   "), { ok: false, code: "length" });
   assert.deepEqual(checkNick(undefined), { ok: false, code: "length" });

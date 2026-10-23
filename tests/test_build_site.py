@@ -59,6 +59,16 @@ class BuildSite(unittest.TestCase):
                 if m != n: self.assertEqual(self.address(page, m), last[m])
             last = {m: self.address(page, m) for m in SCRIPTS}
 
+    def test_link_preview_card_is_near_the_top(self):
+        # iMessage, LINE and the rest read only the start of a page this big to build the link card, so its tags sit in the first 4 KB,
+        # and the image they point at goes out with the site at 1200x630
+        page = self.build('site'); top = page.encode('utf-8')[:4096].decode('utf-8', 'ignore')
+        for tag in ('og:title', 'og:description', 'og:url', 'og:image', 'og:image:width', 'twitter:card'):
+            self.assertIn('property="%s"' % tag if tag.startswith('og') else 'name="%s"' % tag, top)
+        img = re.search(r'property="og:image" content="https://waveslave\.tw/([^"?]+)', top).group(1)
+        with open(os.path.join(self.tmp, 'site', img), 'rb') as f: head = f.read(24)
+        self.assertEqual(head[:8], b'\x89PNG\r\n\x1a\n'); self.assertEqual((int.from_bytes(head[16:20], 'big'), int.from_bytes(head[20:24], 'big')), (1200, 630))
+
 
 if __name__ == '__main__':
     unittest.main()

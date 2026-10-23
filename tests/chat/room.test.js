@@ -359,8 +359,8 @@ const CHECKS = {
     await page.press(".chatroom .cr-sheet .cr-field", "Enter");
     await page.waitForFunction(() => document.querySelector(".chatroom .cr-shade").hidden, null, { timeout: 5e3 }).catch(() => { throw new Error("saving the name as it is left the sheet up"); });
     await start();
-    await page.fill(".chatroom .cr-sheet .cr-field", "x"); await page.press(".chatroom .cr-sheet .cr-field", "Enter");
-    await errSays("2–20 characters").catch(async () => { throw new Error(`a 1-letter name: ${JSON.stringify(await sheet())}`); });
+    await page.fill(".chatroom .cr-sheet .cr-field", "Admin"); await page.press(".chatroom .cr-sheet .cr-field", "Enter");
+    await errSays("That name is reserved").catch(async () => { throw new Error(`a reserved name: ${JSON.stringify(await sheet())}`); });
     await page.fill(".chatroom .cr-sheet .cr-field", "Wave Rider"); await page.press(".chatroom .cr-sheet .cr-field", "Enter");
     await page.waitForFunction(() => document.querySelector(".chatroom .cr-shade").hidden && /Done/.test(document.querySelector(".chatroom .cr-note").textContent), null, { timeout: 10e3 });
     await say(page, "Hello as Wave Rider");
@@ -370,7 +370,7 @@ const CHECKS = {
     if ((await sheet()).value !== "Wave Rider") throw new Error("the sheet doesn't start from the new name");
     await page.fill(".chatroom .cr-sheet .cr-field", "Wave Rider Two"); await page.press(".chatroom .cr-sheet .cr-field", "Enter");
     await errSays("Once a week: you can change it again in 7 days").catch(async () => { throw new Error(`a second change: ${JSON.stringify(await sheet())}`); });
-    if (!eq(sent, ["x", "Wave Rider", "Wave Rider Two"])) throw new Error(`the room was sent the names ${JSON.stringify(sent)}`);
+    if (!eq(sent, ["Admin", "Wave Rider", "Wave Rider Two"])) throw new Error(`the room was sent the names ${JSON.stringify(sent)}`);
   },
   // The ⋯ button opens Reply, 👍 and Report on someone else's message, by keyboard too: Enter opens it on the first item, the arrows move,
   // Escape shuts it and goes back to ⋯ with the room still open, and ⋯ keeps the focus when the 👍 that went from there redraws the

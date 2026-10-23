@@ -313,6 +313,39 @@ const CHECKS = {
     if (shut !== 0) throw new Error(`a pull with the chat open shows the refresh sign (opacity ${shut})`);
     if (!(shown > 0)) throw new Error("a pull with the chat shut doesn't show the refresh sign (the check itself is off)");
   },
+  // The page holds still under the room (Bryan's iPhone, Oct 23: with the keyboard up, a drag moved the page, the room's top went off the
+  // screen and the Forecast showed under the box). Opened from halfway down the page: the page is pinned where it was, the room covers just
+  // the part of the screen that shows (the visual viewport) and follows it when that changes (zoomed in here, the keyboard on an iPhone), a drag
+  // on the room's header moves nothing, and closing puts the page back where it was.
+  async roomHoldsPage(open) {
+    const page = await open({}); await wait(300);
+    await page.evaluate(() => scrollTo({ top: 1500, behavior: "instant" })); await settle(page);
+    const at = await page.evaluate(() => Math.round(document.body.getBoundingClientRect().top));
+    await page.evaluate(() => document.querySelector(".chatfab").click()); await wait(200);
+    const where = () => page.evaluate(() => { const r = document.querySelector(".chatroom").getBoundingClientRect(), v = visualViewport;
+      return { top: Math.round(r.top), h: Math.round(r.height), vTop: Math.round(v.offsetTop), vH: Math.round(v.height), body: Math.round(document.body.getBoundingClientRect().top), y: Math.round(scrollY) }; });
+    let w = await where();
+    if (w.top !== w.vTop || w.h !== w.vH) throw new Error(`the room is at ${w.top}, ${w.h} tall, the screen shows ${w.vTop}, ${w.vH} tall`);
+    if (w.body !== at) throw new Error(`the page under the room is at ${w.body}, want ${at} (pinned where it was)`);
+    const s = await dragDown(page, [200, 40], -200); await settle(page); const d = await where();
+    if (d.y !== w.y || d.body !== w.body || d.top !== d.vTop) throw new Error(`a drag on the room's header moved the page (${JSON.stringify(w)} → ${JSON.stringify(d)})`);
+    await s.send("Emulation.setPageScaleFactor", { pageScaleFactor: 2 }); await wait(100); await settle(page);
+    w = await where();
+    if (!(w.vH < 844)) throw new Error(`zooming in didn't change the visual viewport (the check itself is off): ${JSON.stringify(w)}`);
+    if (w.top !== w.vTop || w.h !== w.vH) throw new Error(`after the screen moved the room is at ${w.top}, ${w.h} tall, the screen shows ${w.vTop}, ${w.vH} tall`);
+    // The room doesn't zoom (Bryan, Oct 23): no pinch or double-tap zoom in it, a two-finger drag and Safari's gesture events stopped,
+    // and the page's viewport capped at scale 1 while it's open (put back on close, so the Forecast zooms as before).
+    const z = await page.evaluate(() => { const r = document.querySelector(".chatroom"), stop = ev => !r.dispatchEvent(ev);
+      const two = new TouchEvent("touchmove", { cancelable: true, bubbles: true, touches: [0, 1].map(i => new Touch({ identifier: i, target: r, clientX: 100 + 50*i, clientY: 600 })) });
+      return { meta: document.querySelector('meta[name="viewport"]').content, ta: getComputedStyle(r).touchAction, two: stop(two),
+        gesture: stop(Object.assign(new Event("gesturestart", { cancelable: true, bubbles: true }))) }; });
+    if (z.meta !== "width=device-width, initial-scale=1, maximum-scale=1" || z.ta !== "pan-x pan-y" || !z.two || !z.gesture) throw new Error(`the room can zoom: ${JSON.stringify(z)}`);
+    await page.evaluate(() => document.querySelector(".chatroom .cr-hd .cr-x").click()); await settle(page);
+    const meta = await page.evaluate(() => document.querySelector('meta[name="viewport"]').content);
+    if (meta !== "width=device-width, initial-scale=1") throw new Error(`closed, the page's viewport is "${meta}", want it back as it was`);
+    w = await where();
+    if (w.y !== 1500 || w.body !== at) throw new Error(`closed, the page is at ${w.y} (body ${w.body}), want 1500 (body ${at}) where it was`);
+  },
   // Every string is there in English, 中文 and 日本語, with the same codes and the same number of house rules, none empty, and the privacy
   // note names the operator (CONTACT) in each. The delete-account warning and the privacy note's "What is kept" and "How long" name the
   // coach's reviews and their key frames in each (AI coach spec, "chat.js's texts"), and "How long" says the key frames go 30 days after

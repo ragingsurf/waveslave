@@ -20,18 +20,24 @@ export default defineConfig({
         compatibilityDate: "2026-08-15",
         // Stand-ins for the Worker secrets, for the tests only. The real ones are never in the repo: the deploy
         // workflow sets them, and `wrangler dev` reads its own from .dev.vars, which is not committed. ADMIN_CODE is
-        // exactly 32 characters, the shortest the room takes (mod-admin.spec.mjs).
+        // exactly 32 characters, the shortest the room takes (mod-admin.spec.mjs). The coach's two keys only stand in:
+        // a test that gets as far as a call mocks the fetch to COACH_API_URL or COACH_MAIL_URL, so nothing reaches
+        // Anthropic or Resend.
         bindings: {
           LINE_CHANNEL_ID: "1234567890",
           LINE_CHANNEL_SECRET: "test-only-line-channel-secret",
           SESSION_SECRET: "test-only-session-secret",
           SUB_PEPPER: "test-only-sub-pepper",
           ADMIN_CODE: "test-only-admin-code-0123456789x",
+          ANTHROPIC_API_KEY: "test-only-anthropic-key",
+          RESEND_API_KEY: "test-only-resend-key",
         },
       },
     }),
   ],
   test: {
     include: ["test/**/*.spec.mjs"],
+    // 20 s, not Vitest's 5 s: a money test with many coach calls once ran past 5 s on a loaded machine.
+    testTimeout: 20000,
   },
 });

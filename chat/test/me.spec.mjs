@@ -14,8 +14,8 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vitest";
 import { randomB64u, sha256b64u, signToken, subHash } from "../src/auth.js";
 import {
-  DAY, HOUR, MIN, SEC, addMessages, addUser, all, closeClients, connect, hex, join, newRoom, nextError, ofType, settle, synced,
-  take, until,
+  DAY, HOUR, MIN, SEC, addMessages, addUser, all, closeClients, connect, hex, join, newCoach, newRoom, nextError, ofType, settle,
+  synced, take, until,
 } from "./helpers.mjs";
 
 // 12:00 UTC (20:00 in Taiwan) on a day years ahead, so no alarm a test sets goes off by itself.
@@ -40,8 +40,18 @@ const LISTED = { spot: "jinshan", start: SESSION.start, end: SESSION.end, stars:
 
 // ---- Rooms, accounts and calls -------------------------------------------------------------------------------------
 
-// A room of its own, with its clock at T until the test moves clock.t.
-const freshRoom = (at = T) => newRoom("me", at);
+// A room of its own, with its clock at T until the test moves clock.t, and a coach of its own with its clock at T too,
+// which the room reaches through coachStub() (ruling R1) for DELETE /me and GET /me/export (coach-accounts.spec.mjs
+// tests what the coach does there). Its stub is made inside the room, as stubs.js makes the real one.
+async function freshRoom(at = T) {
+  const r = await newRoom("me", at);
+  const coach = await newCoach("me", at);
+  const id = coach.stub.id.toString();
+  await r.inRoom((room) => {
+    room.coachStub = () => room.env.COACH.get(room.env.COACH.idFromString(id));
+  });
+  return r;
+}
 
 const tokenFor = (r, user, { tv = 0, exp = r.now() + 30 * DAY } = {}) => signToken({ uid: user.id, tv, exp }, env.SESSION_SECRET);
 
@@ -468,7 +478,7 @@ describe("share and unshare", () => {
 // ---- GET /me/export ------------------------------------------------------------------------------------------------
 
 describe("GET /me/export", () => {
-  it("holds the user's own nickname, account date, messages, reports and logs, and nothing of anyone else's", async () => {
+  it("holds the user's own nickname, account date, messages, reports, logs and coach reviews, and nothing of anyone else's", async () => {
     const r = await freshRoom();
     const u = await addUser(r, { age: 3 * DAY });
     const v = await addUser(r);
@@ -497,6 +507,8 @@ describe("GET /me/export", () => {
           { id: shared.id, ...LISTED, shared: true },
           { id: quiet.id, ...LISTED, start: T - 30 * HOUR, end: T - 28 * HOUR, cond: null, note: "", shared: false },
         ],
+        // They have sent the coach no clip (coach-accounts.spec.mjs has one that did).
+        coach: [],
       },
     });
     const json = JSON.stringify(res.data);

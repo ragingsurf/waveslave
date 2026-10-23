@@ -3,8 +3,9 @@
 // each other (Bryan, Oct 21).
 // One classic script, loaded with defer after the page's own scripts. It declares no global names: it reads the page's ALL, LANG, CUR,
 // VIEW, SPT, T, countrySpots, switchSpot and setView by bare name (and WORLD, setWorld, worldLocked and wsPin for developer mode), and gives
-// the page only window.CHAT = {spot, relang, dev}, which template.html calls from boot() (a spot is shown), setLang() (the language
-// changed) and keepWorld() (developer mode came on or went off). It brings its own <style>, so its look ships with it.
+// the page only window.CHAT = {spot, relang, dev, signIn, token}: template.html calls the first three from boot() (a spot is shown),
+// setLang() (the language changed) and keepWorld() (developer mode came on or went off), and the AI coach (web/coach.js), which signs in
+// through the chat, calls signIn() and token(). It brings its own <style>, so its look ships with it.
 // - It never throws into the page: each way in is wrapped, and while CHAT_URL or CONTACT is empty it does nothing at all, so the page
 //   works exactly as it does without it.
 // - Everything from the network goes in through textContent, setAttribute or a lookup in this file's own tables, never as HTML. No chat
@@ -33,8 +34,9 @@ const on = () => PUBLIC || (typeof WORLD === "boolean" && WORLD);
 // and the conditions snapshot (CHAT._snap(id, ms)).
 const TEST = window.__chatTest ? [] : null;
 
-// What chat.js keeps on this device: the session token and the sign-in's verifier, the newest message seen (for the button's dot) and the
-// room's filter; and, for the length of a sign-in, the spot to come back to (sessionStorage).
+// What chat.js keeps on this device: the session token and the sign-in's verifier ({v, at}, and then: "coach" for a sign-in the Coach panel
+// started), the newest message seen (for the button's dot) and the room's filter; and, for the length of a sign-in, the spot to come back
+// to (sessionStorage).
 const KEYS = { token: "waveslave-chat-token", v: "waveslave-chat-v", seen: "waveslave-chat-seen", filter: "waveslave-chat-filter", ret: "waveslave-chat-return" };
 // The report and board codes, as the backend checks them (chat/src/mod.js), in the order the forms offer them.
 const CODES = { size: ["flat", "knee", "waist", "chest", "head", "overhead"], cond: ["clean", "ok", "choppy", "blown"], crowd: ["empty", "few", "busy", "packed"],
@@ -104,17 +106,17 @@ const STR = {
     posted: "Report posted", stars: n => `${n} of 5 stars`, future: "The start can't be later than now.", tooLong: "A session can be up to 12 hours.",
     saved: "Saved to your diary", savedShared: "Saved, and shared to the chat", notShared: why => `Saved to your diary, but it couldn't be shared: ${why}`,
     full: "Your diary is full (1,000 sessions). Delete one in My sessions first.", loading: "Loading…", sharedTag: "Shared",
-    deleteWhat: "Your messages, shared sessions, session logs and nickname are deleted now, on every device. Your reports stay, as “a surfer”. Copies kept as evidence of a broken rule stay for up to 180 days. This can't be undone.",
+    deleteWhat: "Your messages, shared sessions, session logs, coach reviews (with their key frames) and nickname are deleted now, on every device. Your reports stay, as “a surfer”. Copies kept as evidence of a broken rule stay for up to 180 days. This can't be undone.",
     deleted: "Your account is deleted", signedOut: "Signed out on every device",
     // The privacy note (Taiwan's Personal Data Protection Act, Article 8): short at first sign-in, in full behind More.
     privacyHead: "Privacy note", contactHead: "Contact",
     privacyShort: "To post, the chat keeps your nickname, a one-way code made from your LINE ID and what you post. Cloudflare stores it outside Taiwan, and LINE (LY Corp) handles sign-in. Posts are public. The full privacy note is under More.",
     privacy: c => [
       ["Who runs the chat", `${c.name} runs this chat. Questions and takedown requests: ${c.email}.`],
-      ["Why", "Your data is used only to run the chat."],
-      ["What is kept", "Your nickname, a one-way code made from your LINE ID (never the ID itself), your messages, reports and session logs. Cloudflare also sees your IP address when you connect."],
-      ["Where, and who handles it", "Cloudflare stores the chat on servers outside Taiwan. LINE (LY Corp) handles sign-in. Messages, reports and shared sessions are public, under your nickname."],
-      ["How long", "Room messages and shared sessions: 30 days. Reports: 1 year, with your nickname taken off after 30 days. Private session logs: until you delete them, or after 2 years without signing in. Cloudflare keeps recovery copies for up to 30 days. Anything hidden for child safety, and messages kept as evidence of a broken rule, are kept for 180 days."],
+      ["Why", "Your data is used only to run the chat and the coach."],
+      ["What is kept", "Your nickname, a one-way code made from your LINE ID (never the ID itself), your messages, reports and session logs, and your coach reviews with the key frames you send for them. Cloudflare also sees your IP address when you connect."],
+      ["Where, and who handles it", "Cloudflare stores the chat and the coach on servers outside Taiwan. LINE (LY Corp) handles sign-in. Messages, reports and shared sessions are public, under your nickname. The key frames you send the coach go to Anthropic (USA), the company that makes the AI, to write your review; with them go your answers and note, your earlier reviews of that move, and, without names, edited reviews of other surfers as examples. Anthropic doesn't train on them, and deletes them within 30 days, or keeps them for up to 2 years if its safety checks flag them. A person at WaveSlave sees them while checking the coach's draft reviews."],
+      ["How long", "Room messages and shared sessions: 30 days. Reports: 1 year, with your nickname taken off after 30 days. Private session logs: until you delete them, or after 2 years without signing in. Coach reviews: the written feedback until you delete it, or after 2 years without signing in; the key frames 30 days after the review. Cloudflare keeps recovery copies for up to 30 days. Cloudflare keeps request logs (time, page asked for) for 3 days. Anything hidden for child safety, and messages kept as evidence of a broken rule, are kept for 180 days."],
       ["Your rights", `"Download my data" and "Delete my account" are in the chat's menu at any time, or write to ${c.email}.`],
       ["If you don't sign in", "You can still read everything. Signing in is only for posting."]],
   },
@@ -170,16 +172,16 @@ const STR = {
     posted: "已送出回報", stars: n => `${n} 顆星（滿分 5 顆）`, future: "開始時間不能晚於現在。", tooLong: "一次衝浪最長 12 小時。",
     saved: "已存入你的日誌", savedShared: "已儲存，並分享到聊天室", notShared: why => `已存入你的日誌，但無法分享：${why}`,
     full: "日誌已滿（1,000 筆），請先在「我的日誌」刪除一筆。", loading: "載入中…", sharedTag: "已分享",
-    deleteWhat: "你的訊息、分享的日誌、私人日誌和暱稱會立即從所有裝置上刪除。你的浪況回報會保留，顯示為「一位浪友」。因違反版規而保留為證據的副本最多保存 180 天。刪除後無法復原。",
+    deleteWhat: "你的訊息、分享的日誌、私人日誌、教練講評（連同關鍵影格）和暱稱會立即從所有裝置上刪除。你的浪況回報會保留，顯示為「一位浪友」。因違反版規而保留為證據的副本最多保存 180 天。刪除後無法復原。",
     deleted: "你的帳號已刪除", signedOut: "已登出所有裝置",
     privacyHead: "隱私權說明", contactHead: "聯絡我們",
     privacyShort: "要發言，聊天室會保存你的暱稱、由 LINE ID 單向產生的代碼，以及你發表的內容。資料由 Cloudflare 存放在台灣以外的伺服器，登入由 LINE（LY Corp）處理。發言內容是公開的。完整的隱私權說明在「更多」裡。",
     privacy: c => [
       ["誰在營運", `WaveSlave 的台灣浪友聊天室由 ${c.name} 營運。有問題或要求下架內容，請寫信到 ${c.email}。`],
-      ["蒐集目的", "你的資料只用於營運聊天室。"],
-      ["保存哪些資料", "你的暱稱、由 LINE ID 單向產生的代碼（不會保存 ID 本身），以及你的訊息、回報與衝浪日誌。你連線時，Cloudflare 也會看到你的 IP 位址。"],
-      ["存放地點與經手者", "聊天室的資料由 Cloudflare 存放在台灣以外的伺服器；登入由 LINE（LY Corp）處理。訊息、回報與分享的日誌會以你的暱稱公開。"],
-      ["保存多久", "聊天室訊息與分享的日誌：30 天。回報：1 年，30 天後移除你的暱稱。私人日誌：保留到你刪除為止，或 2 年未登入後刪除。Cloudflare 的復原備份最多保留 30 天；因兒少安全而隱藏的內容，以及因違反版規而保留為證據的訊息，保留 180 天。"],
+      ["蒐集目的", "你的資料只用於營運聊天室與教練。"],
+      ["保存哪些資料", "你的暱稱、由 LINE ID 單向產生的代碼（不會保存 ID 本身），以及你的訊息、回報、衝浪日誌與教練講評，連同你為講評送出的關鍵影格。你連線時，Cloudflare 也會看到你的 IP 位址。"],
+      ["存放地點與經手者", "聊天室與教練的資料由 Cloudflare 存放在台灣以外的伺服器；登入由 LINE（LY Corp）處理。訊息、回報與分享的日誌會以你的暱稱公開。你傳給教練的關鍵影格會送到開發這個 AI 的美國公司 Anthropic，用來寫你的講評，一起送去的還有你的回答和補充說明、你之前這個動作的講評，以及不具名、經過修改的其他衝浪者講評，作為範例；Anthropic 不會用它們來訓練 AI，並在 30 天內刪除，若被它的安全檢查標記，最多保留 2 年。WaveSlave 的工作人員審閱教練的講評草稿時，也會看到這些關鍵影格。"],
+      ["保存多久", "聊天室訊息與分享的日誌：30 天。回報：1 年，30 天後移除你的暱稱。私人日誌：保留到你刪除為止，或 2 年未登入後刪除。教練講評：文字講評保留到你刪除為止，或 2 年未登入後刪除；關鍵影格在講評後 30 天刪除。Cloudflare 的請求紀錄（時間、要求的頁面）保留 3 天。Cloudflare 的復原備份最多保留 30 天；因兒少安全而隱藏的內容，以及因違反版規而保留為證據的訊息，保留 180 天。"],
       ["你的權利", `你隨時可以在聊天室選單中使用「下載我的資料」或「刪除我的帳號」，也可以寫信到 ${c.email}。`],
       ["不登入的話", "你仍然可以閱讀所有內容，只有發言需要登入。"]],
   },
@@ -235,16 +237,16 @@ const STR = {
     posted: "波情報を投稿しました", stars: n => `星${n}つ（5段階）`, future: "開始時刻を今より後にはできません。", tooLong: "1回のセッションは最長12時間です。",
     saved: "日記に保存しました", savedShared: "保存して、チャットに共有しました", notShared: why => `日記に保存しましたが、共有できませんでした：${why}`,
     full: "日記がいっぱいです（1,000件）。先に「マイセッション」で1件削除してください。", loading: "読み込み中…", sharedTag: "共有中",
-    deleteWhat: "メッセージ、共有したセッション、セッション記録、ニックネームが、すべての端末から今すぐ削除されます。波情報は「サーファー」として残ります。ルール違反の証拠として保存されたコピーは最長180日間残ります。元に戻すことはできません。",
+    deleteWhat: "メッセージ、共有したセッション、セッション記録、コーチのレビュー（キーフレームを含む）、ニックネームが、すべての端末から今すぐ削除されます。波情報は「サーファー」として残ります。ルール違反の証拠として保存されたコピーは最長180日間残ります。元に戻すことはできません。",
     deleted: "アカウントを削除しました", signedOut: "すべての端末でログアウトしました",
     privacyHead: "プライバシーについて", contactHead: "お問い合わせ",
     privacyShort: "投稿するには、ニックネーム、LINE IDから一方向に作ったコード、投稿内容をチャットに保存します。データはCloudflareが台湾国外に保存し、ログインはLINE（LY Corp）が扱います。投稿は公開されます。プライバシーについての全文は「詳しく」にあります。",
     privacy: c => [
       ["運営者", `WaveSlaveの台湾チャットは${c.name}が運営しています。お問い合わせ・削除のご依頼は ${c.email} まで。`],
-      ["利用目的", "データはチャットの運営のためだけに使います。"],
-      ["保存する情報", "ニックネーム、LINE IDから一方向に作ったコード（ID自体は保存しません）、メッセージ、報告、セッション記録。接続時にはCloudflareがIPアドレスを受け取ります。"],
-      ["保存場所と取り扱う事業者", "チャットのデータはCloudflareが台湾国外のサーバーに保存します。ログインはLINE（LY Corp）が扱います。メッセージ・報告・共有したセッションはニックネームとともに公開されます。"],
-      ["保存期間", "ルームのメッセージと共有したセッション：30日。報告：1年（30日後にニックネームを外します）。非公開のセッション記録：削除するまで、または2年間ログインがないと削除。Cloudflareの復旧用コピーは最長30日、子どもの安全のため非表示にした内容と、ルール違反の証拠として保存したメッセージは180日保存されます。"],
+      ["利用目的", "データはチャットとコーチの運営のためだけに使います。"],
+      ["保存する情報", "ニックネーム、LINE IDから一方向に作ったコード（ID自体は保存しません）、メッセージ、報告、セッション記録、コーチのレビューと、そのために送ったキーフレーム。接続時にはCloudflareがIPアドレスを受け取ります。"],
+      ["保存場所と取り扱う事業者", "チャットとコーチのデータはCloudflareが台湾国外のサーバーに保存します。ログインはLINE（LY Corp）が扱います。メッセージ・報告・共有したセッションはニックネームとともに公開されます。コーチに送ったキーフレームは、レビューを書くため、AIを開発する米国のAnthropicに送られます。あわせて、あなたの回答とメモ、その技の過去のレビュー、そして名前を除いて編集した他のサーファーのレビューが例として送られます。Anthropicはこれらを学習に使わず、30日以内に削除します（安全チェックで問題があるとされた場合は最長2年間保存）。WaveSlaveのスタッフも、コーチのレビューの下書きを確認する際にキーフレームを見ます。"],
+      ["保存期間", "ルームのメッセージと共有したセッション：30日。報告：1年（30日後にニックネームを外します）。非公開のセッション記録：削除するまで、または2年間ログインがないと削除。コーチのレビュー：文章は削除するまで、または2年間ログインがないと削除。キーフレームはレビューの30日後に削除。Cloudflareはリクエストのログ（時刻、要求されたページ）を3日間保存します。Cloudflareの復旧用コピーは最長30日、子どもの安全のため非表示にした内容と、ルール違反の証拠として保存したメッセージは180日保存されます。"],
       ["あなたの権利", `チャットのメニューの「データをダウンロード」と「アカウントを削除」はいつでも使えます。${c.email} への連絡もできます。`],
       ["ログインしない場合", "すべて閲覧できます。ログインが必要なのは投稿だけです。"]],
   },
@@ -728,8 +730,8 @@ function drawStatus() { const s = R.el.status; s.textContent = "";
   else if (R.state === "update") { const b = el("button", { type: "button", class: "cr-link" }, S("reloadNew")); b.addEventListener("click", guard(() => location.reload())); s.append(b); }
   s.hidden = !s.firstChild; }
 // Signed in: + Report, 📓 Log and the message box. Signed out: one LINE button in LINE's own style (its green, its icon, its words), with
-// the code box above it while a sign-in started here waits.
-function drawBar() { const E = R.el, on = signedIn();
+// the code box above it while a sign-in started here waits. Nothing to draw before the room is built (a sign-in for the coach).
+function drawBar() { if (!R.built) return; const E = R.el, on = signedIn();
   E.barIn.hidden = !on; E.barOut.hidden = on; E.menuBtn.hidden = false;
   E.pinBox.hidden = on || !pendingV(); E.pinWait.textContent = S("pinWait"); E.pinWait.hidden = auto.net; E.pinLab.textContent = S("pinBox"); E.pinGo.textContent = S("pinGo"); E.pinIn.setAttribute("aria-label", S("pinBox"));
   E.pinErr.textContent = R.pinErr || ""; E.pinErr.hidden = !R.pinErr; E.pinGo.disabled = !!R.pinBusy;
@@ -998,6 +1000,12 @@ document.addEventListener("visibilitychange", guard(() => {
   if (document.visibilityState === "hidden") sock.awayT = setTimeout(guard(() => { if (document.visibilityState === "hidden" && R.open) { stopSocket(); setState("away"); } }), AWAY_MS);
   else { if (!tokenMoved()) check(); markSeen(); drawBar(); }
 }));
+// Back on the page with a sign-in for the coach still waiting, no token, and the Coach panel open (the home-screen app's way: LINE
+// finished it in Safari, which shows the pin), the room opens over the panel for its code box, which says "Finishing your LINE sign-in…"
+// while the app asks to finish by itself (autoTry(), below); once that does, the room shuts again on the Coach panel. With the panel shut,
+// or in another tab, nothing opens.
+document.addEventListener("visibilitychange", guard(() => {
+  if (document.visibilityState === "visible" && !R.open && on() && document.documentElement.classList.contains("coach-open") && pendingThen() && !signedIn()) enter({}); }));
 addEventListener("storage", guard(e => { if (e.key === KEYS.token || e.key === null) { if (!tokenMoved() && R.built) drawBar(); } }));
 addEventListener("offline", guard(() => { if (R.open && sock.ws) { stopSocket(); lost(1006); } }));
 addEventListener("online", guard(() => { if (R.open && R.state !== "update") { sock.tries = 0; connect(); } }));
@@ -1025,6 +1033,11 @@ function enter(o) {
 // LINE has finished, and only to the network the sign-in finished from (the same phone's Safari), so coming back to the app is enough.
 // From another network it answers "net", and the code box is the way in. iOS gives a page no way to switch from Safari back to a
 // home-screen app, so the person still switches back themselves.
+// The Coach panel signs in the same way (AI coach spec, "Sign-in"): CHAT.signIn("coach") keeps then: "coach" beside v. Back from LINE that
+// sign-in finishes without the room, which opens only when it needs the surfer (the sign-up sheet, the pin, an error, or the code box when
+// the page comes back with the sign-in still waiting); once the token is kept, the room shuts and the Coach panel opens. Finished by itself
+// ({v, auto: true}), it goes the same way: a token lands on the Coach panel with the room never opened, and "net" opens the room over the
+// panel for the code box.
 const V_MS = 10 * 60e3, CONSENT = "v1"; // how long a sign-in waits; the version of the house rules and privacy note the tick agrees to
 const b64u = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 // This page's v while its sign-in can still finish, else null.
@@ -1032,11 +1045,24 @@ function pendingV() {
   try { const o = JSON.parse(load(KEYS.v) || "null"), age = o ? Date.now() - o.at : NaN;
     return o && typeof o.v === "string" && /^[A-Za-z0-9_-]{43}$/.test(o.v) && age > -60e3 && age < V_MS ? o.v : null; } catch (e) { return null; }
 }
-async function login() {
-  const subtle = window.crypto && crypto.subtle; if (!subtle) return note(S("loginFailed"), true);
+// What this page's waiting sign-in is for: "coach" when the Coach panel started it, else null. Read before v is let go.
+function pendingThen() { try { const o = JSON.parse(load(KEYS.v) || "null"); return pendingV() && o.then === "coach" ? "coach" : null; } catch (e) { return null; } }
+// What a sign-in to finish is for: an answer to the app's own ask carries the then autoTry() read before asking (by the time it comes back,
+// the code from LINE may have finished the same sign-in and let v go); one back from LINE has none, so it's pendingThen().
+const thenOf = s => s && typeof s === "object" && "then" in s ? s.then : pendingThen();
+// Back from LINE (at start-up, or once developer mode comes on), or finished by itself (landing()): a sign-in for the coach finishes without
+// the room; any other opens it.
+function arrive(o) { if (o.signin && thenOf(o.signin)) { if (HOOK.signin) HOOK.signin(o.signin); } else enter(o); }
+// A sign-in for the coach that needs the surfer: the room opens first, over the Coach panel, which opens under it (at start-up, once
+// coach.js has started), so shutting the room lands on the panel.
+function roomFor(then) { if (!then || R.open) return; coachOpen(); enter({}); }
+const coachOpen = () => { if (window.COACH && typeof window.COACH.open === "function") window.COACH.open(); };
+// then: "coach" from CHAT.signIn("coach"), kept with v; nothing for the room's own LINE button.
+async function login(then) {
+  const subtle = window.crypto && crypto.subtle; if (!subtle) { roomFor(then); return note(S("loginFailed"), true); }
   const v = b64u(crypto.getRandomValues(new Uint8Array(32))), h = b64u(new Uint8Array(await subtle.digest("SHA-256", new TextEncoder().encode(v))));
-  save(KEYS.v, JSON.stringify({ v, at: Date.now() })); save(KEYS.ret, CUR, true);
-  if (!pendingV()) return note(S("loginFailed"), true); // storage is refused here, so the sign-in could never finish
+  save(KEYS.v, JSON.stringify({ v, at: Date.now(), then: then === "coach" ? then : undefined })); save(KEYS.ret, CUR, true);
+  if (!pendingV()) { roomFor(then); return note(S("loginFailed"), true); } // storage is refused here, so the sign-in could never finish
   R.pinErr = null; auto.net = false; drawBar(); autoWatch();
   location.assign(`${BASE}/auth/line/start?h=${h}`);
 }
@@ -1045,7 +1071,7 @@ async function login() {
 const AUTO_MS = 3e3, auto = { t: 0, busy: false, net: false };
 function autoWatch() { clearInterval(auto.t); auto.t = 0; if (!pendingV() || auto.net) return; auto.t = setInterval(guard(autoTry), AUTO_MS); autoTry(); }
 async function autoTry() {
-  const v = pendingV();
+  const v = pendingV(), then = pendingThen();
   if (!v || auto.net || signedIn()) { clearInterval(auto.t); auto.t = 0; return; }
   if (auto.busy || R.pinBusy || document.visibilityState === "hidden") return;
   auto.busy = true;
@@ -1053,11 +1079,13 @@ async function autoTry() {
     const j = await api("/auth/redeem", { method: "POST", body: { v, auto: true } });
     clearInterval(auto.t); auto.t = 0;
     if (j && typeof j.token === "string") save(KEYS.token, j.token); // kept at once, even if the room can't open yet
-    landing({ got: j, v });
+    landing({ got: j, v, then });
   } catch (e) {
     const code = e && e.body && e.body.error;
-    if (code === "net") { auto.net = true; clearInterval(auto.t); auto.t = 0; landing({ net: true }); }
-    else if (code === "banned") { clearInterval(auto.t); auto.t = 0; landing({ error: "banned" }); }
+    // A "net" that comes back after this sign-in has finished another way (the code from LINE, or the code box: v gone or new) has nothing
+    // left to open: the room would only open again over the Coach panel the coach's sign-in has just landed on.
+    if (code === "net") { auto.net = true; clearInterval(auto.t); auto.t = 0; if (pendingV() === v) landing({ net: true, then }); }
+    else if (code === "banned") { clearInterval(auto.t); auto.t = 0; landing({ error: "banned", then }); }
     // "expired" (LINE hasn't finished yet), offline or resting: ask again on the next tick.
   } finally { auto.busy = false; }
 }
@@ -1066,11 +1094,13 @@ addEventListener("pageshow", guard(() => autoTry()));
 addEventListener("focus", guard(() => autoTry()));
 function finishSignin(s) {
   if (!s || typeof s !== "object") return;
-  if (s.got) { try { return landed(s.got, s.v, { auto: true }); } catch (e) { return note(S("loginFailed"), true); } }
-  if (s.net) { drawBar(); if (R.el.pinIn && !R.el.pinBox.hidden) R.el.pinIn.focus({ preventScroll: true }); return; }
-  if (typeof s.error === "string") { save(KEYS.v, null); drawBar(); return note(s.error === "banned" ? S("banned") : s.error === "resting" ? S("resting") : S("loginFailed"), true); }
+  const then = thenOf(s);
+  if (s.got) { try { return landed(s.got, s.v, { auto: true }, then); } catch (e) { roomFor(then); return note(S("loginFailed"), true); } }
+  if (s.net) { roomFor(then); drawBar(); if (R.el.pinIn && !R.el.pinBox.hidden) R.el.pinIn.focus({ preventScroll: true }); return; }
+  if (typeof s.error === "string") { save(KEYS.v, null); roomFor(then); drawBar(); return note(s.error === "banned" ? S("banned") : s.error === "resting" ? S("resting") : S("loginFailed"), true); }
   const v = pendingV(), code = typeof s.code === "string" && /^[A-Za-z0-9_-]{22}$/.test(s.code) ? s.code : null, pin = typeof s.pin === "string" && /^\d{6}$/.test(s.pin) ? s.pin : null;
-  if (v && code) return redeem(v, { code }, pin);
+  if (v && code) return redeem(v, { code }, pin, then);
+  roomFor(then);
   if (pin) return openSheet("pin", pinSheet, { pin });
   note(S("loginFailed"), true);
 }
@@ -1078,41 +1108,49 @@ function finishSignin(s) {
 function loginWhy(e) { const b = (e && e.body) || {};
   return b.resting ? S("resting") : b.error === "banned" ? S("banned") : !(e && e.status) ? S("offline") : S("loginFailed"); }
 // Redeems a sign-in with this page's v and LINE's code, or the pin typed in the code box. Once it's answered, v is no longer kept: a new
-// person's sign-up carries it in the sheet, and a sheet shut without joining means starting again.
-async function redeem(v, proof, pin) {
+// person's sign-up carries it in the sheet, and a sheet shut without joining means starting again. then is what the sign-in was for
+// (pendingThen(), read before v went).
+async function redeem(v, proof, pin, then) {
   try {
-    landed(await api("/auth/redeem", { method: "POST", body: { v, ...proof } }), v, proof);
+    landed(await api("/auth/redeem", { method: "POST", body: { v, ...proof } }), v, proof, then);
   } catch (e) {
     const code = e && e.body && e.body.error;
-    if (code === "v" && pin) return openSheet("pin", pinSheet, { pin }); // the code was made for another v: finished away from where it began
+    // A sign-in for the coach that the app's own ask ({v, auto: true}, sent on pageshow) finished first: it reached the room before this
+    // code, so the code finds the sign-in used up, and the page has already landed on the Coach panel, signed in. Nothing to say.
+    if (then && code === "expired" && signedIn()) return;
+    if (code === "v" && pin) { roomFor(then); return openSheet("pin", pinSheet, { pin }); } // the code was made for another v: finished away from where it began
     if (proof.pin && code === "pin") { R.pinErr = S("pinWrong"); return drawBar(); }
     if (code === "expired" || code === "banned") save(KEYS.v, null);
     if (proof.pin) { R.pinErr = loginWhy(e); return drawBar(); }
-    drawBar(); note(loginWhy(e), true);
+    roomFor(then); drawBar(); note(loginWhy(e), true);
   }
 }
-// A redeem's answer: a known account is signed in, and a new person gets the sign-up sheet, which carries v and the proof.
-function landed(j, v, proof) {
-  if (j && typeof j.token === "string") return signedInAs(j.token);
+// A redeem's answer: a known account is signed in, and a new person gets the sign-up sheet, which carries v and the proof (and then, what
+// the sign-in was for). A sign-in for the coach opens the room for the sheet, over the Coach panel.
+function landed(j, v, proof, then) {
+  if (j && typeof j.token === "string") return signedInAs(j.token, then);
   if (!j || j.needs_signup !== true) throw new Error("chat: the redeem answer has no token");
-  save(KEYS.v, null); R.pinErr = null; drawBar();
-  openSheet("signup", signupSheet, { v, proof, nick: typeof j.line_name === "string" ? [...j.line_name.trim()].slice(0, 20).join("") : "" });
+  save(KEYS.v, null); R.pinErr = null; roomFor(then); drawBar();
+  openSheet("signup", signupSheet, { v, proof, then, nick: typeof j.line_name === "string" ? [...j.line_name.trim()].slice(0, 20).join("") : "" });
 }
-// Signed in: the token is kept, and the socket starts again with it.
-function signedInAs(token) {
+// Signed in: the token is kept, and the socket starts again with it. A sign-in for the coach goes back to the Coach panel instead: the
+// room shuts (it opened only if the sign-in needed the surfer) and the panel opens.
+function signedInAs(token, then) {
   save(KEYS.token, token); save(KEYS.v, null); R.pinErr = null;
   if (R.sheet && (R.sheet.name === "signup" || R.sheet.name === "pin")) closeSheet();
-  drawAll(); note(S("signedIn"));
+  drawAll();
+  if (then === "coach") { closeRoom(); coachOpen(); return; }
+  note(S("signedIn"));
   if (R.open) { sock.tries = 0; connect(); }
 }
 // The code box: the pin, for this page's waiting sign-in. One at a time: while a pin is being checked, Sign in is off and Enter does
 // nothing, so a double tap can't use up two of the three tries, or open the sign-up sheet twice.
-function pinEntered() { const v = pendingV(), pin = R.el.pinIn.value.replace(/\D/g, "");
+function pinEntered() { const v = pendingV(), then = pendingThen(), pin = R.el.pinIn.value.replace(/\D/g, "");
   if (R.pinBusy) return;
   if (!v) return drawBar();
   if (!/^\d{6}$/.test(pin)) { R.pinErr = S("pinWrong"); return drawBar(); }
   R.pinErr = null; R.pinBusy = true; drawBar();
-  redeem(v, { pin }, null).finally(guard(() => { R.pinBusy = false; drawBar(); })); }
+  redeem(v, { pin }, null, then).finally(guard(() => { R.pinBusy = false; drawBar(); })); }
 // The page with no v: the pin, and nothing else.
 // The pin waits behind "Need a code?": the app should finish by itself, so the page says only to go back to it.
 function pinSheet(st) { return { title: S("pinTitle"), body: [el("p", { class: "cr-pin-go" }, S("pinShown")),
@@ -1140,7 +1178,7 @@ async function signup(st) {
   try {
     const j = await api("/auth/signup", { method: "POST", body: { v: st.v, ...st.proof, nick, consent: CONSENT } });
     if (!j || typeof j.token !== "string") throw new Error("chat: the signup answer has no token");
-    signedInAs(j.token);
+    signedInAs(j.token, st.then);
   } catch (e) {
     st.sending = false; const b = (e && e.body) || {};
     if (b.error === "expired" || b.error === "banned" || b.error === "v") { if (R.sheet && R.sheet.state === st) closeSheet(); return note(loginWhy(e), true); }
@@ -1155,8 +1193,11 @@ async function me(path, opts = {}) {
   const token = load(KEYS.token);
   if (!token) throw Object.assign(new Error("chat: signed out"), { status: 401, body: { error: "auth" } });
   try { return await api(path, { ...opts, token }); }
-  catch (e) { if (e && e.status === 401 && load(KEYS.token) === token) { signOutQuietly(); if (R.open) { sock.tries = 0; connect(); } } throw e; }
+  catch (e) { if (e && e.status === 401) refused(token); throw e; }
 }
+// A token the backend answered 401 goes, but only while it is still the one kept: another tab may have signed in since. From me() and
+// from the coach (CHAT.token(old)).
+function refused(token) { if (!token || load(KEYS.token) !== token) return; signOutQuietly(); if (R.open) { sock.tries = 0; connect(); } }
 function meWhy(e) { const b = (e && e.body) || {};
   return b.resting ? S("resting") : !(e && e.status) ? S("offline") : b.error === "auth" ? S("signInAgain") : typeof b.error === "string" ? why(b.error) : S("failed"); }
 // Signed out on purpose (everywhere, or the account deleted): the room says so, and its socket starts again without the token.
@@ -1418,11 +1459,14 @@ function snapshot(id, ms) {
 // day chart's readout and the picked spot, one look in both themes.
 // - The button sits at the screen's bottom right above the safe area, under the full-screen map (z-index 100) and the view switch's
 //   stamp (99), and only on the Forecast view (with the map up, #viewFc is hidden). It's pinned to the screen, not to the header, so a
-//   header change never moves it. In 中文 and 日本語 its word takes the body font, as "Pick your day" does (VT323 has no CJK).
+//   header change never moves it. In 中文 and 日本語 its word takes the body font, as "Pick your day" does (VT323 has no CJK). It hides
+//   under the room and the Coach panel (html.chat-open, html.coach-open): the rule that shows it is html:where(.tw.chat-on), so that
+//   those two, after it, outrank it.
 // - .thru lets touches through it while a finger drags the day picker or the day chart (see below).
 // - html.tw.chat-on .wrap: in Taiwan, with the chat on, the page ends 84 px lower, so the button never covers the end of the credits.
 // - .chatroom: the room covers everything, the full-screen map included, and the page behind it doesn't scroll. Its title, its ✕ and
-//   the picked filter are in the page's LED amber (--led-amb, darker in the light theme); + Report is the strip's amber pill.
+//   the picked filter are in the page's LED amber (--led-amb, darker in the light theme); + Report is the strip's amber pill. When a sign-in
+//   for the coach needs it, it opens over the Coach panel (z-index 110 too, and maybe later in the page), so with html.coach-open it's 111.
 // - Nicknames and message text are isolated from the line around them, and break anywhere when they have to, so no message can push the
 //   room sideways or turn the name and age around.
 const CSS = `
@@ -1440,8 +1484,9 @@ const CSS = `
 #nowReports .rp-dot[data-cond="choppy"],#nowReports .rp-dot[data-cond="blown"]{background:var(--bad)}
 #nowReports .rp-none{margin:0;font-size:13px;color:var(--muted)}
 .chatfab{position:fixed;right:calc(14px + env(safe-area-inset-right));bottom:calc(18px + env(safe-area-inset-bottom));z-index:90;display:none;align-items:center;gap:9px;height:46px;padding:0 18px 0 19px;border-radius:99px;border:1.5px solid #ffb347;background:#140e05;color:#ffb347;cursor:pointer;-webkit-tap-highlight-color:transparent;box-shadow:0 0 16px rgba(255,140,0,.4),0 6px 18px rgba(0,0,0,.45)}
-html.tw.chat-on .chatfab{display:flex}
+html:where(.tw.chat-on) .chatfab{display:flex}
 html.chat-open .chatfab{display:none}
+html.coach-open .chatfab{display:none}
 html:has(#viewFc[hidden]) .chatfab{display:none}
 .chatfab.thru{pointer-events:none}
 .chatfab b{font:400 26px/1 VT323,var(--mono);letter-spacing:.06em;text-shadow:0 0 8px rgba(255,140,0,.7)}
@@ -1452,6 +1497,7 @@ html.tw.chat-on .wrap{padding-bottom:calc(84px + env(safe-area-inset-bottom))}
 html.chat-open,html.chat-open body{overflow:hidden}
 .chatroom{position:fixed;inset:0;z-index:110;touch-action:pan-x pan-y;display:flex;flex-direction:column;background:var(--bg);color:var(--ink);font:15px/1.45 var(--body);overscroll-behavior:contain;outline:none;-webkit-text-size-adjust:100%}
 .chatroom[hidden],.chatroom [hidden]{display:none!important}
+html.coach-open .chatroom{z-index:111}
 .chatroom button{font-family:var(--body);-webkit-tap-highlight-color:transparent}
 .chatroom>.cr-hd,.chatroom>.cr-filters,.chatroom>.cr-status,.chatroom>.cr-list,.chatroom>.cr-foot{width:100%;max-width:760px;margin-inline:auto}
 .cr-hd{flex:none;display:flex;align-items:center;gap:10px;padding:calc(12px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 12px calc(16px + env(safe-area-inset-left));border-bottom:1px solid var(--line)}
@@ -1573,6 +1619,11 @@ window.CHAT = {
   spot: guard(id => { if (id === shown) return; shown = id; data = null; if (inTaiwan(id) && on()) ask(id); else asked++; draw(); }),
   relang: guard(() => { draw(); drawAll(); }),
   dev: guard(() => showChat()),
+  // The coach's hooks (web/coach.js), which signs in through the chat: signIn("coach") is the Coach panel's Sign in with LINE, back to the
+  // panel (anything else starts nothing); token() is the session token or null, and token(old), for the token that just got a 401, signs
+  // out quietly and answers null.
+  signIn: guard(then => { if (then === "coach" && on()) login(then); }),
+  token: guard(old => { refused(old); return load(KEYS.token); }),
 };
 if (TEST) Object.assign(window.CHAT, { _opened: TEST, _strings: STR, _snap: snapshot });
 
@@ -1605,7 +1656,7 @@ let wasOn = on();    // whether the chat was on for this visitor when last looke
 function showChat() {
   const now = on(), turned = now !== wasOn; wasOn = now;
   document.documentElement.classList.toggle("chat-on", now); if (credits) credits.hidden = !now;
-  if (now) { if (turned && shown && inTaiwan(shown)) ask(shown); if (waiting) { const o = waiting; waiting = null; enter(o); } }
+  if (now) { if (turned && shown && inTaiwan(shown)) ask(shown); if (waiting) { const o = waiting; waiting = null; arrive(o); } }
   else if (turned) { closeRoom(); asked++; data = null; online = null; lastId = 0; }
   draw();
 }
@@ -1616,15 +1667,16 @@ document.addEventListener("click", guard(e => { const a = e.target instanceof El
 if (signin) { const back = load(KEYS.ret, true); save(KEYS.ret, null, true); if (back && own(ALL.spots, back) && inTaiwan(back) && back !== CUR) switchSpot(back); }
 window.CHAT.spot(CUR);
 showChat();
-// The room with a sign-in to finish: at once while the chat is on, else once developer mode is (the PIN box first, when it's locked).
+// The room with a sign-in to finish: at once while the chat is on, else once developer mode is (the PIN box first, when it's locked). A
+// sign-in for the coach goes through arrive(), so it opens the room only when it needs the surfer.
 function landing(signin) {
-  if (on()) return enter({ signin });
+  if (on()) return arrive({ signin });
   if (typeof setWorld !== "function") return;
   waiting = { signin };
   if (typeof worldLocked === "function" && worldLocked() && typeof wsPin === "function") wsPin(guard(() => setWorld(true)), guard(() => { waiting = null; }));
   else setWorld(true);
 }
-if (opening && on()) enter(signin ? { signin } : q.get("chat") === "privacy" ? { privacy: true } : {});
+if (opening && on()) arrive(signin ? { signin } : q.get("chat") === "privacy" ? { privacy: true } : {});
 else if (signin) landing(signin);
 // A sign-in this page started and LINE finished elsewhere (the home-screen app, opened again after iOS closed it): it goes on asking.
 if (!signin && pendingV()) autoWatch();

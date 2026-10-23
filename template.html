@@ -579,7 +579,7 @@ html.android .wsmap.fs .sh-scroll th{-webkit-backdrop-filter:none;backdrop-filte
     <span class="fresh" id="fresh">Data snapshot</span></div>
   </header>
   <div class="ctl">
-    <nav class="tabs" role="tablist" aria-label="View"><button role="tab" data-v="fc" aria-selected="true" data-zh="預報" data-ja="予報">Forecast</button><button role="tab" data-v="ws" aria-selected="false" data-zh="地圖" data-ja="地図">Map</button></nav>
+    <nav class="tabs" role="tablist" aria-label="View"><button role="tab" data-v="fc" aria-selected="true" data-zh="預報" data-ja="予報">Forecast</button><button role="tab" data-v="ws" aria-selected="false" data-zh="地圖" data-ja="地図">Map</button><button role="tab" data-v="coach" aria-selected="false" hidden>Coach</button></nav>
     <div class="ctryslot" id="ctrySlot"><div class="ctry" id="ctry" role="group" aria-label="Country"><button data-c="tw" data-zh="台灣" data-ja="台湾">Taiwan</button><button data-c="jp" data-zh="日本" data-ja="日本">Japan</button><button data-c="kr" data-zh="韓國" data-ja="韓国">Korea</button><button data-c="hk" data-zh="香港" data-ja="香港">Hong Kong</button><button data-c="hn" data-zh="海南" data-ja="海南島">Hainan</button><button data-c="vn" data-zh="越南" data-ja="ベトナム">Vietnam</button><button data-c="ph" data-zh="菲律賓" data-ja="フィリピン">Philippines</button><button data-c="id" data-zh="印尼" data-ja="インドネシア">Indonesia</button><button data-c="pg" data-zh="巴布亞紐幾內亞" data-ja="パプアニューギニア">Papua New Guinea</button><button data-c="ca" data-zh="加州" data-ja="カリフォルニア">California</button><button data-c="bj" data-zh="下加州" data-ja="バハ・カリフォルニア">Baja</button><button data-c="hi" data-zh="夏威夷" data-ja="ハワイ">Hawaii</button><button data-c="au" data-zh="澳洲" data-ja="オーストラリア">Australia</button><button data-c="nz" data-zh="紐西蘭" data-ja="ニュージーランド">New Zealand</button><button data-c="vu" data-zh="萬那杜" data-ja="バヌアツ">Vanuatu</button><button data-c="pi" data-zh="南太平洋" data-ja="南太平洋">South Pacific</button><button data-c="mi" data-zh="密克羅尼西亞" data-ja="ミクロネシア">Micronesia</button><button data-c="nw" data-zh="太平洋西北" data-ja="太平洋岸北西部">Pacific NW</button><button data-c="ak" data-zh="阿拉斯加" data-ja="アラスカ">Alaska</button></div></div>
     <nav class="picker" id="picker" aria-label="Choose a spot" data-zh-aria-label="選擇浪點" data-ja-aria-label="ポイントを選ぶ"></nav>
   </div>
@@ -738,7 +738,7 @@ function applyLang(){ const L = isZh() || isJa() ? LANG : "en"; document.documen
     e.setAttribute(a, L!=="en" && e.getAttribute(`data-${L}-${a}`) || e.getAttribute("data-"+k)); });
   document.querySelectorAll("#lang button").forEach(b => b.setAttribute("aria-pressed", b.dataset.l===LANG));
   document.getElementById("langName").textContent = {en: "EN", zh: "中文", ja: "日本語"}[LANG]; }
-function setLang(l){ if(l===LANG) return; LANG=l; try{ localStorage.setItem("waveslave-lang", l); }catch(e){} applyLang(); boot(CUR); WS.relang(); window.CHAT&&CHAT.relang(); }
+function setLang(l){ if(l===LANG) return; LANG=l; try{ localStorage.setItem("waveslave-lang", l); }catch(e){} applyLang(); boot(CUR); WS.relang(); window.CHAT&&CHAT.relang(); window.COACH&&COACH.relang(); }
 // The language menu under the button in the corner: open or shut.
 function langOpen(on){ document.getElementById("langWrap").classList.toggle("open", on); document.getElementById("langBtn").setAttribute("aria-expanded", on); }
 // World mode shows every country; Taiwan mode, the default, only Taiwan's spots, in the forecast and on the map. The W in the logo switches
@@ -747,7 +747,8 @@ let WORLD = document.documentElement.classList.contains("world");
 // The World passcode (web/head.html): until the code is in for this visit, World mode opens the PIN box first (wsPin) and comes on once it's right.
 const worldLocked = () => !!window.__worldLock && !(window.wsUnlocked && wsUnlocked());
 // The chat (web/chat.js) hears of each change through CHAT.dev, if it has one: a chat.js from before it (Oct 22's) has none, and the W must still work with that.
-function keepWorld(on){ WORLD = on; if(!on && window.wsRelock) wsRelock(); document.documentElement.classList.toggle("world", on); try{ localStorage.setItem("waveslave-world", on ? "1" : "0"); }catch(e){} window.CHAT&&typeof CHAT.dev==="function"&&CHAT.dev(); }
+// The coach (web/coach.js) hears through COACH.dev.
+function keepWorld(on){ WORLD = on; if(!on && window.wsRelock) wsRelock(); document.documentElement.classList.toggle("world", on); try{ localStorage.setItem("waveslave-world", on ? "1" : "0"); }catch(e){} window.CHAT&&typeof CHAT.dev==="function"&&CHAT.dev(); window.COACH&&COACH.dev(); }
 // Spot comes from the link (#nanwan) or the last one picked on this device; Donghe otherwise. In Taiwan mode the last one is the last Taiwan
 // spot; a link to another country's spot turns World mode on, so it still opens.
 let SPOT_PEND = null;   // a link to another country's spot while World mode waits for the passcode: opened once it's in
@@ -1307,8 +1308,8 @@ const WS = (() => {
   let seen = "", rsz = 0;
   if (window.ResizeObserver) new ResizeObserver(() => { const box = document.getElementById("wsBox"), k = box.clientWidth + "x" + box.clientHeight;
     if (!FS || !built || document.getElementById("viewWs").hidden || k === seen || rsz) return; rsz = requestAnimationFrame(() => { rsz = 0; seen = box.clientWidth + "x" + box.clientHeight; size(); drawBase(); }); }).observe(document.getElementById("wsBox"));
-  // Escape is the chat room's own while it's open (html.chat-open), so it doesn't close the map behind it.
-  document.addEventListener("keydown", e => { if (e.key !== "Escape" || document.documentElement.classList.contains("chat-open")) return; const w = document.getElementById("wsCtry"); if (w.classList.contains("open") && !w.classList.contains("shutting")) wsCtryOpen(false); else if (FS) setView("fc"); });
+  // Escape is the chat room's own while it's open (html.chat-open), and the Coach panel's (html.coach-open), so it doesn't close the map behind them.
+  document.addEventListener("keydown", e => { if (e.key !== "Escape" || document.documentElement.classList.contains("chat-open") || document.documentElement.classList.contains("coach-open")) return; const w = document.getElementById("wsCtry"); if (w.classList.contains("open") && !w.classList.contains("shutting")) wsCtryOpen(false); else if (FS) setView("fc"); });
   function screenH() { const so = screen.orientation && screen.orientation.type, land = so ? so.startsWith("landscape") : Math.abs(window.orientation || 0) === 90 || innerWidth > innerHeight;
     const sw = screen.width || innerWidth, sh = screen.height || innerHeight, dev = land ? Math.min(sw, sh) : Math.max(sw, sh), vv = window.visualViewport ? visualViewport.height : innerHeight;
     return { land, h: Math.min(vv, innerHeight, dev) }; }
@@ -1861,7 +1862,8 @@ function setView(v, instant){ VIEW=v; try{ localStorage.setItem("waveslave-view"
   const go = () => { clearTimeout(wait); document.removeEventListener("fullscreenchange", go); if(SHOWN==="fc" && ending===hold) ending = FX.run("slam", false, ws, done); };
   const hold = () => { go(); if(ending) ending(); }; let wait = 0; ending = hold;
   if(document.fullscreenElement){ document.addEventListener("fullscreenchange", go); wait = setTimeout(go, 700); try{ document.exitFullscreen().catch(go); }catch(e){ go(); } } else go(); }
-{ const later = afterGlide(), bs = document.querySelectorAll(".tabs button"); bs.forEach(b=>b.onclick=()=>{ pressOnly(bs, b, "aria-selected"); later(()=>setView(b.dataset.v)); }); }
+// The Coach tab (web/coach.js shows it) opens the Coach panel over the forecast and is never picked: the Forecast/Map pill and the saved view stay as they are.
+{ const later = afterGlide(), bs = document.querySelectorAll(".tabs button"); bs.forEach(b=>b.onclick=()=>{ if (b.dataset.v === "coach") { window.COACH && COACH.open(); return; } pressOnly(bs, b, "aria-selected"); later(()=>setView(b.dataset.v)); }); }
 addEventListener("hashchange", () => switchSpot(location.hash.slice(1)));
 function boot(SPOT){
 const DATA = Object.assign({updated:ALL.updated}, ALL.spots[SPOT]);
@@ -2357,8 +2359,9 @@ addEventListener("orientationchange", () => setTimeout(() => WS.resize(), 300));
   // Live cams list only the viewed country's spots, and the panel hides in a country with no cam yet rather than show a column of "No cam found yet".
   document.querySelector("section.spots").hidden = !ids.some(id => (ALL.spots[id].cams||[]).length);
   // The Taiwan chat (web/chat.js) shows for a Taiwan spot, only in World (developer) mode until Bryan opens it to everyone (keepWorld()
-  // tells it when the mode changes): its button keys off the class "tw", and the spot's surfer reports go under "Right now".
-  document.documentElement.classList.toggle("tw", spotCountry(SPOT)==="tw"); window.CHAT&&CHAT.spot(SPOT);
+  // tells it when the mode changes): its button keys off the class "tw", and the spot's surfer reports go under "Right now". The AI coach
+  // (web/coach.js) shows its tab by the same rule.
+  document.documentElement.classList.toggle("tw", spotCountry(SPOT)==="tw"); window.CHAT&&CHAT.spot(SPOT); window.COACH&&COACH.spot(SPOT);
   document.getElementById("spotList").innerHTML = ids.map(id => { const s=ALL.spots[id];
     return `<li${id===SPOT?' aria-current="true"':""}><b>${SPT(s,"name")}</b><span class="links">${(s.cams||[]).length ? s.cams.map((c,i)=>`<a href="${c[1]}" target="_blank" rel="noopener">${camName(s,i)}</a>`).join("") : `<span class="where">${zh?"還沒找到攝影機":ja?"カメラはまだ見つかっていません":"No cam found yet"}</span>`}</span></li>`; }).join("");
   document.querySelectorAll("a[data-spot]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); if(a.dataset.spot===SPOT) return;
@@ -2446,7 +2449,7 @@ if(VIEW!=="fc") setView(VIEW, true);
   (document.fonts?document.fonts.ready:Promise.resolve()).then(place); })();
 
 // ---- pull to refresh (touch): drag down from the top of the Forecast page, release past the line to reload.
-// Not on the map, where a drag down is a pan (it used to reload the page and flash the Forecast page on the way), nor under the chat room (html.chat-open).
+// Not on the map, where a drag down is a pan (it used to reload the page and flash the Forecast page on the way), nor under the chat room (html.chat-open) or the Coach panel (html.coach-open).
 // The sign follows the finger once per frame with a springy pull that slows as it nears the bottom, and the text only changes when it crosses the line.
 (() => {
   const el=document.createElement("div"); el.className="ptr"; el.setAttribute("aria-hidden","true"); el.textContent=T("PULL ▼"); document.body.append(el);
@@ -2455,7 +2458,7 @@ if(VIEW!=="fc") setView(VIEW, true);
   const draw=()=>{ raf=0; d=want; el.style.transform=pos(d); el.style.opacity=Math.min(1,d/GO).toFixed(3);
     const g=d>=GO; if(g!==go){ go=g; el.textContent = T(g ? "LET GO ▲" : "PULL ▼"); } };
   const set=v=>{ want=v; if(!raf) raf=requestAnimationFrame(draw); };
-  addEventListener("touchstart",e=>{ y0 = (VIEW==="fc" && scrollY<=0 && e.touches.length===1 && !document.documentElement.classList.contains("chat-open")) ? e.touches[0].clientY : null; el.style.transition=""; },{passive:true});
+  addEventListener("touchstart",e=>{ const c=document.documentElement.classList; y0 = (VIEW==="fc" && scrollY<=0 && e.touches.length===1 && !c.contains("chat-open") && !c.contains("coach-open")) ? e.touches[0].clientY : null; el.style.transition=""; },{passive:true});
   addEventListener("touchmove",e=>{ if(y0===null) return; const dy=e.touches[0].clientY-y0;
     if(dy<=0||scrollY>0){ set(0); return; } set(MAX*(1-Math.exp(-dy/(MAX*1.2)))); },{passive:true});
   const end=()=>{ if(y0===null) return; y0=null; cancelAnimationFrame(raf); raf=0;
@@ -2547,6 +2550,8 @@ if(VIEW!=="fc") setView(VIEW, true);
   Promise.race([font, new Promise(r => setTimeout(r, 700))]).then(start);
 })();
 </script>
-<!-- The Taiwan chat: its report strip, button and room (web/chat.js, next to this page; build-site.sh puts its version in the address, so a
-     reload never pairs this page with an older chat.js from the browser's cache). The page runs the same without it. -->
+<!-- The AI coach: its tab and panel (web/coach.js), and the Taiwan chat: its report strip, button and room (web/chat.js), both next to this
+     page. build-site.sh puts each one's version in its address, so a reload never pairs this page with an older copy from the browser's
+     cache. coach.js comes first, so COACH is there when chat.js finishes a sign-in for it. The page runs the same without either. -->
+<script src="coach.js" defer></script>
 <script src="chat.js" defer></script>

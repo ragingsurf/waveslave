@@ -14,7 +14,8 @@
 //   everyone will see them once Bryan opens them (window.__chatPublic and window.__coachPublic). Anything but the page, the backend, the
 //   fake LINE and the fake AI is cut off.
 // - Helpers for the steps: signIn(page) signs a page in with LINE; makeAdmin() makes the seeded account u-bryan the admin, whose session
-//   token is token("u-bryan"); pick(page, clip) gives the coach's clip picker a clip from tests/coach/clips.js (makeClip).
+//   token is token("u-bryan"); pick(page, clip) gives the coach's clip picker a clip from tests/coach/clips.js (makeClip); coachTrip(page)
+//   runs the coach's sign-in (CHAT.signIn("coach")) to LINE and back, and landed(page) waits for the Coach panel with the room shut.
 // Playwright wherever node finds it (npm install playwright), else the copy this container keeps.
 const { chromium } = (() => { try { return require("playwright"); } catch (e) { return require("/opt/node22/lib/node_modules/playwright"); } })();
 const fs = require("fs"), path = require("path"), crypto = require("crypto"), { spawnSync } = require("child_process");
@@ -87,6 +88,25 @@ async function signIn(page) {
   await until(page, "the session token", () => !!localStorage.getItem("waveslave-chat-token") && !!document.querySelector(".chatroom .cr-in").getClientRects().length);
   await page.keyboard.press("Escape"); await until(page, "the room to shut", () => !document.documentElement.classList.contains("chat-open"));
 }
+// The coach's sign-in (CHAT.signIn("coach"), which the Coach panel's Sign in with LINE calls), to LINE (approved at once) and back on the
+// page's ?chat#c=…. Resolves to where the backend sent the browser back to, once the page there has loaded.
+async function coachTrip(page) {
+  let back = null; const seen = r => { if (r.url().startsWith(CHAT() + "/auth/line/callback")) back = r.headers().location || null; };
+  page.on("response", seen);
+  try { await Promise.all([page.waitForURL(u => u.href.startsWith(ORIGIN()) && /\?chat#c=/.test(back || ""), { timeout: 20e3, waitUntil: "load" }), page.evaluate(() => { CHAT.signIn("coach"); })]); }
+  finally { page.off("response", seen); }
+  return back;
+}
+// Landed on the Coach panel (ruling P2): html.coach-open set, the panel shown, and the room shut.
+const landed = page => until(page, "the Coach panel with the room shut", () => { const p = document.querySelector(".coachpanel"), c = document.documentElement.classList;
+  return c.contains("coach-open") && !c.contains("chat-open") && !!p && !p.hidden && !!p.getClientRects().length; });
+// The room shows on top when it opens for a coach sign-in: what's at the centre of sel (in the room) is sel itself, not the Coach panel.
+const onTop = (page, what, sel) => until(page, `${what} on top`, sel => { const e = document.querySelector(sel), r = e && e.getBoundingClientRect();
+  if (!r || !r.width || !r.height) return false; const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!at && (at === e || e.contains(at)); }, sel, 5e3);
+// After a coach sign-in: whether the token is kept, what waveslave-chat-v holds, whether the room was ever built, the spot, and the CHAT
+// button's display (none under the Coach panel).
+const signedInState = page => page.evaluate(() => ({ token: !!localStorage.getItem("waveslave-chat-token"), v: localStorage.getItem("waveslave-chat-v"), room: !!document.querySelector(".chatroom"), cur: CUR,
+  fab: getComputedStyle(document.querySelector(".chatfab")).display }));
 // Gives the coach's clip picker a clip (a path from makeClip), as the phone's own picker would. (The picker comes with New review.)
 const pick = (page, clip) => page.setInputFiles('.coachpanel input[type="file"]', clip);
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -124,7 +144,86 @@ const STEPS = {
     if (v.view !== "fc" || v.saved !== "fc" || !v.fc) throw new Error(`the Coach panel opened over ${JSON.stringify(v)}`);
     await page.tap(".coachpanel .co-x"); await until(page, "the panel to shut", () => !document.documentElement.classList.contains("coach-open"));
   },
-  // signIn() signs a page in through the chat with the fake LINE (a new account, so through the sign-up sheet), and the Coach panel
+  // ---- Signing in from the Coach panel, through the chat's LINE sign-in, comes back to the Coach panel, not the room (AI coach spec,
+  // "Sign-in"). The checks call CHAT.signIn("coach") with the empty Coach panel open (ruling P2); Task 18's button calls the same.
+  // From the panel, with the room never opened, the sign-in goes to /auth/line/start?h=<SHA-256(v)> with no page error, and keeps
+  // {v, at, then: "coach"} in waveslave-chat-v. (LINE is held back here, so the page stays.)
+  async coachSignInStarts(s) {
+    s.coach = await s.open({}); const page = s.coach; let start = null;
+    await page.tap(TAB); await panelOpen(page);
+    await page.route(`${CHAT()}/auth/line/start**`, r => { start = r.request().url(); return r.fulfill({ status: 204 }); });
+    await page.evaluate(() => { CHAT.signIn("coach"); });
+    for (let i = 0; i < 50 && !start; i++) await wait(100);
+    await page.unroute(`${CHAT()}/auth/line/start**`);
+    const kept = await page.evaluate(() => ({ v: JSON.parse(localStorage.getItem("waveslave-chat-v") || "null"), room: !!document.querySelector(".chatroom"),
+      chat: document.documentElement.classList.contains("chat-open"), coach: document.documentElement.classList.contains("coach-open") }));
+    const h = start && start.startsWith(CHAT() + "/auth/line/start?h=") ? start.slice((CHAT() + "/auth/line/start?h=").length) : null;
+    if (!h || !kept.v || h !== crypto.createHash("sha256").update(String(kept.v.v)).digest("base64url")) throw new Error(`the sign-in went to ${start} with ${JSON.stringify(kept.v)} kept`);
+    if (!eq(Object.keys(kept.v).sort(), ["at", "then", "v"]) || kept.v.then !== "coach" || !(Math.abs(Date.now() - kept.v.at) < 60e3)) throw new Error(`waveslave-chat-v holds ${JSON.stringify(kept.v)}`);
+    if (kept.room || kept.chat || !kept.coach) throw new Error(`after CHAT.signIn("coach") the room is ${kept.room ? "built" : "not built"}${kept.chat ? " and open" : ""}, the panel ${kept.coach ? "open" : "shut"}`);
+  },
+  // A new person (the fake LINE's account has none yet): back from LINE the room opens, on top, with the sign-up sheet; Join signs them in
+  // and lands on the Coach panel, the room shut, the token kept and v gone.
+  async coachSignUp(s) {
+    const page = s.coach, back = await coachTrip(page);
+    if (!/\?chat#c=[A-Za-z0-9_-]{22}&p=\d{6}$/.test(back || "")) throw new Error(`the backend sent the browser back to ${back}`);
+    await until(page, "the sign-up sheet", () => !!document.querySelector('.chatroom .cr-sheet [data-k="nick"]') && document.documentElement.classList.contains("chat-open"));
+    await onTop(page, "the sign-up sheet's Join", '.chatroom .cr-sheet [data-k="join"]');
+    await page.check('.chatroom .cr-sheet [data-k="consent"]'); await page.click('.chatroom .cr-sheet [data-k="join"]');
+    await landed(page);
+    const st = await signedInState(page);
+    if (!st.token || st.v !== null || st.cur !== "jinshan" || st.fab !== "none") throw new Error(`after Join: ${JSON.stringify(st)}`);
+  },
+  // A known account, from a fresh page: back from LINE the code is redeemed without the room ever being built, and the page lands on the
+  // Coach panel signed in.
+  async coachDirect(s) {
+    const page = await s.open({}); await page.tap(TAB); await panelOpen(page);
+    const back = await coachTrip(page);
+    if (!/\?chat#c=/.test(back || "")) throw new Error(`the backend sent the browser back to ${back}`);
+    await landed(page);
+    const st = await signedInState(page);
+    if (!st.token || st.v !== null || st.room || st.fab !== "none") throw new Error(`back from LINE: ${JSON.stringify(st)}`);
+  },
+  // The home-screen app's way (tests/chat/flow.test.js's pinPath): B, whose room was built before its Coach panel (it came in on a ?chat
+  // link and shut the room), starts the coach's sign-in from the panel, and LINE finishes it in A, a browser with no v, which shows the pin.
+  // Back on B (the page visible again), the room opens on top with the code box; the pin signs B in and lands on the Coach panel.
+  async coachCodeBox(s) {
+    const b = await s.open({ go: false }); let start = null;
+    await b.goto(`${ORIGIN()}/?chat#jinshan`, { waitUntil: "load" });
+    await until(b, "the room from the ?chat link", () => document.documentElement.classList.contains("chat-open"));
+    await b.keyboard.press("Escape"); await until(b, "the room to shut", () => !document.documentElement.classList.contains("chat-open"));
+    await b.tap(TAB); await panelOpen(b);
+    await b.route(`${CHAT()}/auth/line/start**`, r => { start = r.request().url(); return r.fulfill({ status: 204 }); });
+    await b.evaluate(() => { CHAT.signIn("coach"); });
+    for (let i = 0; i < 50 && !start; i++) await wait(100);
+    if (!start) throw new Error("CHAT.signIn(\"coach\") didn't start a sign-in");
+    const a = await s.open({ go: false });
+    await a.goto(start, { waitUntil: "load" }); await a.waitForURL(u => u.href.startsWith(ORIGIN()), { waitUntil: "load" });
+    await a.waitForSelector(".chatroom .cr-pin-code");
+    const pin = await a.textContent(".chatroom .cr-pin-code");
+    if (await b.evaluate(() => document.documentElement.classList.contains("chat-open"))) throw new Error("B opened the room before it came back to the page");
+    await b.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await until(b, "the code box", () => { const i = document.querySelector(".chatroom .cr-pinbox input"); return document.documentElement.classList.contains("chat-open") && !!i && !!i.getClientRects().length; });
+    await onTop(b, "the code box", ".chatroom .cr-pinbox input");
+    await b.fill(".chatroom .cr-pinbox input", pin); await b.click(".chatroom .cr-pinbox button");
+    await landed(b);
+    const st = await signedInState(b);
+    if (!st.token || st.v !== null || st.fab !== "none") throw new Error(`after the code: ${JSON.stringify(st)}`);
+    if (await a.evaluate(() => localStorage.getItem("waveslave-chat-token"))) throw new Error("A got signed in too");
+  },
+  // CHAT.token() gives the coach the token; after the backend refuses it (401: signed out everywhere), CHAT.token(old) signs out quietly:
+  // waveslave-chat-token is cleared and it answers null. A token that isn't the one kept clears nothing.
+  async coachTokenRefused(s) {
+    const got = await s.coach.evaluate(async chat => {
+      const old = CHAT.token(), stored = localStorage.getItem("waveslave-chat-token"), ask = () => fetch(chat + "/coach/me", { headers: { Authorization: "Bearer " + old } });
+      const before = (await ask()).status, out = (await fetch(chat + "/me/signout", { method: "POST", headers: { Authorization: "Bearer " + old } })).status, after = (await ask()).status;
+      const other = CHAT.token("not the token kept") === old, refused = CHAT.token(old);
+      return { same: !!old && old === stored, before, out, after, other, refused, now: CHAT.token(), kept: localStorage.getItem("waveslave-chat-token") };
+    }, CHAT());
+    if (!got.same || got.before === 401 || got.out !== 200 || got.after !== 401) throw new Error(`the token and the backend: ${JSON.stringify(got)}`);
+    if (!got.other || got.refused !== null || got.now !== null || got.kept !== null) throw new Error(`after the 401: ${JSON.stringify(got)}`);
+  },
+  // signIn() signs a page in through the chat with the fake LINE (the account coachSignUp made, so straight in), and the Coach panel
   // still opens afterwards.
   async signedIn(s) {
     const page = s.main; await signIn(page);

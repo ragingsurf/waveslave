@@ -213,6 +213,12 @@ const CHECKS = {
     s = await page.evaluate(() => ({ opened: window.CHAT._opened.length, room: document.documentElement.classList.contains("chat-open") }));
     if (s.opened !== 1 || !s.room) throw new Error(`with the panel shut the CHAT button didn't open the room (${JSON.stringify(s)}; the check itself is off)`);
   },
+  // COACH.open() while the page is still loading, before coach.js has started (as when chat.js finishes a sign-in for the coach during its
+  // own start-up, here from the end of the chat.js served), isn't dropped: the panel opens once coach.js starts.
+  async earlyOpen(open) {
+    const page = await open({ chatJs: CHAT_JS + "\n;window.COACH.open();\n" }); await wait(300); const l = await look(page);
+    if (!l.panel || !l.open || l.view !== "fc") throw new Error(`COACH.open() before coach.js started left ${JSON.stringify(l)}`);
+  },
   // The page's hooks never throw, whatever they're given, and a spot the page doesn't have leaves the tab as html.tw says.
   async hooksHold(open) {
     const page = await open({}); await wait(300);

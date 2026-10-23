@@ -314,7 +314,9 @@ const CHECKS = {
     if (!(shown > 0)) throw new Error("a pull with the chat shut doesn't show the refresh sign (the check itself is off)");
   },
   // Every string is there in English, 中文 and 日本語, with the same codes and the same number of house rules, none empty, and the privacy
-  // note names the operator (CONTACT) in each.
+  // note names the operator (CONTACT) in each. The delete-account warning and the privacy note's "What is kept" and "How long" name the
+  // coach's reviews and their key frames in each (AI coach spec, "chat.js's texts"), and "How long" says the key frames go 30 days after
+  // the review.
   async everyLanguage(open) {
     const page = await open({}), bad = await page.evaluate(c => { const T = window.CHAT._strings, out = [], langs = ["en", "zh", "ja"];
       const text = (v, k) => { const s = typeof v === "function" ? v(...(k === "privacy" ? [c] : k === "forecastSaid" ? ["1.1 m", "1.0 m", "07:00"] : [7])) : v;
@@ -332,6 +334,10 @@ const CHECKS = {
         if (k === "privacy" && !(ts.join(" ").includes(c.name) && ts.join(" ").includes(c.email))) out.push(`${l}.privacy doesn't name ${c.name} and ${c.email}`);
       }
       for (const l of langs) for (const k of Object.keys(T[l])) if (!(k in T.en)) out.push(`${l} has ${k}, en doesn't`);
+      const coach = { en: ["coach reviews", "key frames"], zh: ["教練講評", "關鍵影格"], ja: ["コーチのレビュー", "キーフレーム"] }, after = { en: "30 days after the review", zh: "講評後 30 天", ja: "レビューの30日後" };
+      for (const l of langs) { const p = T[l].privacy(c); // p[2] is "What is kept", p[4] "How long"
+        for (const [k, t, want] of [["deleteWhat", T[l].deleteWhat, coach[l]], [p[2][0], p[2][1], coach[l]], [p[4][0], p[4][1], [...coach[l], after[l]]]])
+          for (const w of want) if (!t.toLowerCase().includes(w)) out.push(`${l}: ${k} doesn't say ${w}`); }
       return out; }, CONTACT);
     if (bad.length) throw new Error(bad.join("; "));
     if (!await page.evaluate(() => window.CHAT._strings.en.lineLogin === "Log in with LINE" && window.CHAT._strings.zh.lineLogin === "使用LINE帳號登入" && window.CHAT._strings.ja.lineLogin === "LINEでログイン"))
@@ -345,14 +351,14 @@ const CHECKS = {
       ["少しペースを落としてください · 30秒後に再試行", "少しペースを落としてください · 10分後に再試行", "少しペースを落としてください · 18時間後に再試行"]];
     if (!eq(got, want)) throw new Error(`waits read ${JSON.stringify(got)}`);
   },
-  // chat.js adds one global, window.CHAT = {spot, relang, dev}, and nothing else; and it has no HTML sinks.
+  // chat.js adds one global, window.CHAT = {spot, relang, dev, signIn, token}, and nothing else; and it has no HTML sinks.
   async noGlobals(open) {
     const names = async page => { await settle(page); await wait(300); return page.evaluate(() => Object.getOwnPropertyNames(window)); };
     const on = await open({ test: false }); await on.waitForFunction(() => !document.getElementById("nowReports").hidden);
     const a = await names(on), b = new Set(await names(await open({ test: false, chatJs: "" }))), extra = a.filter(k => !b.has(k));
     if (!eq(extra, ["CHAT"])) throw new Error(`chat.js adds ${JSON.stringify(extra)}, want only CHAT`);
     const keys = await on.evaluate(() => Object.keys(window.CHAT).sort());
-    if (!eq(keys, ["dev", "relang", "spot"])) throw new Error(`window.CHAT has ${keys.join(", ")}`);
+    if (!eq(keys, ["dev", "relang", "signIn", "spot", "token"])) throw new Error(`window.CHAT has ${keys.join(", ")}`);
     const code = CHAT_JS.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
     const sinks = code.match(/innerHTML|outerHTML|insertAdjacentHTML|document\.write|data-zh|data-ja/g);
     if (sinks) throw new Error(`chat.js uses ${[...new Set(sinks)].join(", ")}`);

@@ -160,9 +160,9 @@ html.coach-open,html.coach-open body{overflow:hidden}
 .co-body{flex:1;min-height:0;overflow-y:auto;padding:16px calc(16px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left))}
 `;
 
-// What the shell keeps: whether it has started (the page is there, with its Coach tab), the tab, the panel and its parts, whether it's
-// open and what had the focus before.
-const P = { started: false, open: false, opener: null, tab: null, el: null, title: null, x: null };
+// What the shell keeps: whether it has started (the page is there, with its Coach tab), an open() asked for before that, the tab, the
+// panel and its parts, whether it's open and what had the focus before.
+const P = { started: false, early: false, open: false, opener: null, tab: null, el: null, title: null, x: null };
 // Whether the coach shows for this visitor now: switched on (developer mode, or PUBLIC), on a Taiwan spot (html.tw, which boot() sets) and
 // with the chat there (window.CHAT), whose LINE sign-in the coach uses.
 const can = () => P.started && on() && document.documentElement.classList.contains("tw") && !!window.CHAT;
@@ -175,8 +175,10 @@ function draw() {
   if (P.title.textContent !== S("title")) P.title.textContent = S("title"); P.x.setAttribute("aria-label", S("close"));
   if (!show) close();
 }
-// Opens the panel over the Forecast view: from the map, the page goes back to Forecast first, as it does for the chat's room.
+// Opens the panel over the Forecast view: from the map, the page goes back to Forecast first, as it does for the chat's room. Asked
+// before start-up (chat.js can finish a sign-in for the coach while the page is still loading), it opens once the shell has started.
 function open() {
+  if (!P.started) { P.early = true; return; }
   if (!can()) return;
   if (VIEW !== "fc") setView("fc", true);
   if (P.open) return;
@@ -228,6 +230,7 @@ function start() {
   }), true);
   P.started = true;
   window.COACH.spot(CUR); window.COACH.dev();
+  if (P.early) { P.early = false; open(); }
 }
 if (typeof document === "object" && document) {
   if (document.readyState === "complete") guard(start)();

@@ -116,6 +116,31 @@ async function openRid(page) {
   await page.waitForFunction(() => { const i = [...document.querySelectorAll(".coachpanel .co-review img")]; return i.length === 4 && i.every(x => x.src.startsWith("blob:") && x.complete && x.naturalWidth > 0); },
     null, { timeout: 10e3 }).catch(e => { throw new Error(`waited for the review's four key frames: ${e.message.split("\n")[0]}`); });
 }
+// ---- Bryan's Drafts list (web/coach.js), offline. draftsBackend(waiting, o) is a fake backend for it: GET /coach/me as me() for the
+// admin; GET /admin/coach/drafts with st.waiting (drafted(id) gives a draft) and none handled (st.gets counts them); each POST
+// /admin/coach/drafts/<id> noted (st.acts) and answered by o.act(id) when given (a promise holds it back), else {ok}; GET /admin/where as
+// o.where (text/plain; st.wheres notes each ask's Authorization); and each key frame as a JPEG (st.frames notes `${id}:${n}`).
+const DA = "A".repeat(22), DB = "B".repeat(22), DC = "C".repeat(22);
+const SETTINGS = { autopilot: false, paused: false, stopped: false, spend: { usd: 1, stop: 78, reviews: 1 }, unchanged: { n: 0, of: 0 } };
+const drafted = (id, o = {}) => ({ id, status: "drafted", move: "top_turn", lang: "en", uid: "u-surfer", hold: 0, redos: 0, waiting_since: REVIEW_AT, handled_at: null,
+  answers: { level: "turning_well", board: "shortboard", stance: "regular", note: "" }, times: KEY_MS, frames: [], have: [2, 6, 7, 8], flags: [], warnings: [],
+  redo_note: [], draft: reviewText({}), english: null, final: null, waited_ms: 3600e3, reported: false, ...o });
+function draftsBackend(waiting, { act = null, where = { text: "room colo=NRT\ncoach colo=KIX\n" } } = {}) {
+  const st = { waiting, gets: 0, acts: [], wheres: [], frames: [] };
+  st.backend = (q, req) => {
+    const p = q.pathname, m = req.method(), a = /^\/admin\/coach\/drafts\/([\w-]{22})$/.exec(p), fr = /^\/coach\/reviews\/([\w-]{22})\/frames\/(\d+)$/.exec(p);
+    if (p === "/coach/me") return { body: me({ admin: true, account: "u-bryan" }) };
+    if (p === "/admin/coach/drafts" && m === "GET") { st.gets++; return { body: { waiting: st.waiting, handled: [], settings: SETTINGS } }; }
+    if (a && m === "POST") { st.acts.push([a[1], req.postDataJSON()]); return act ? act(a[1]) : { body: { ok: true } }; }
+    if (p === "/admin/where" && m === "GET") { st.wheres.push(req.headers().authorization || null); return where; }
+    if (fr && m === "GET") { st.frames.push(`${fr[1]}:${fr[2]}`); return { jpeg: JPEG }; }
+    return { body: { reports: [], online: 0, last_id: 0 } };
+  };
+  return st;
+}
+// Scrolls the panel so review id's key frames are at the top of its view.
+const toFrames = (page, id) => page.evaluate(id => { const b = document.querySelector(".coachpanel .co-body"), g = document.querySelector(`.coachpanel .co-dr[data-id="${id}"] .co-kfs`);
+  b.scrollTop += g.getBoundingClientRect().top - b.getBoundingClientRect().top; }, id);
 const BLOCKED = "This account can't use the coach.", BREAK = "Coach is taking a break. Try again later.";
 const inPanel = (page, what, sel, timeout = 15e3) => page.waitForSelector(".coachpanel " + sel, { timeout }).catch(e => { throw new Error(`waited for ${what}: ${e.message.split("\n")[0]}`); });
 const text = (page, sel) => page.evaluate(s => { const e = document.querySelector(".coachpanel " + s); return e && !e.closest("[hidden]") ? e.textContent : null; }, sel);
@@ -891,6 +916,25 @@ const CHECKS = {
       await soon("key frame 7 once it comes", shows(["img", "img", "img", "img"])).catch(e => { throw new Error(`${e.message}: the review shows ${JSON.stringify(got)}`); });
     } finally { release(); }
   },
+  // A key frame landing while the surfer types in Something wrong?'s line doesn't draw the line again (its keyboard would drop): the key
+  // frame shows once the line is left.
+  async frameWhileTyping(open) {
+    let release = null; const held = new Promise(r => { release = r; });
+    const st = reviewBackend(reviewText({}), { frame: n => n === 7 ? held.then(() => ({ jpeg: JPEG })) : null }), kf7 = '.co-review [data-k="shot-f7"] img[src^="blob:"]';
+    try {
+      const page = await open({ store: TOKEN, backend: st.backend });
+      await page.tap(TAB); await inPanel(page, "the ready review", `[data-k="r-${RID}"]`); await page.click(`.coachpanel [data-k="r-${RID}"]`);
+      await inPanel(page, "Something wrong?", '[data-k="wrong"]'); await page.click('.coachpanel [data-k="wrong"]');
+      await inPanel(page, "Something wrong?'s line", '[data-k="wrongline"]'); await page.type('.coachpanel [data-k="wrongline"]', "The fix is wrong");
+      await page.evaluate(() => { window.__line = document.activeElement; });
+      release(); await wait(1000);
+      const got = await page.evaluate(k => ({ same: document.activeElement === window.__line && window.__line.isConnected, value: window.__line.value, kf7: !!document.querySelector(".coachpanel " + k) }), kf7);
+      if (!eq(got, { same: true, value: "The fix is wrong", kf7: false })) throw new Error(`key frame 7 landing as the surfer typed: ${JSON.stringify(got)}`);
+      await page.evaluate(() => window.__line.blur()); await inPanel(page, "key frame 7 once the line is left", kf7, 5e3);
+      const line = await page.$eval('.coachpanel [data-k="wrongline"]', i => i.value);
+      if (line !== "The fix is wrong") throw new Error(`Something wrong?'s line reads ${JSON.stringify(line)} once drawn again`);
+    } finally { release(); }
+  },
   // GET /coach/reviews/{id} refused: 403 banned says "This account can't use the coach." with no Try again, as GET /coach/me's does; 503
   // break says the coach is taking a break, with Try again.
   async reviewRefused(open) {
@@ -900,6 +944,107 @@ const CHECKS = {
       await inPanel(page, `the review answered ${status}`, ".co-review .co-err");
       const got = await page.evaluate(() => ({ err: document.querySelector(".coachpanel .co-review .co-err").textContent, retry: !!document.querySelector('.coachpanel .co-review [data-k="retry"]') }));
       if (!eq(got, { err, retry })) throw new Error(`GET /coach/reviews/<id> answering ${status} ${error} shows ${JSON.stringify(got)}, want ${JSON.stringify({ err, retry })}`);
+    }
+  },
+  // Bryan typing in a draft's edit box, an input method still composing (中文), keeps that box, its text and its caret while answers land:
+  // another card's Approve, the list asked for again, and GET /coach/me's. The panel is drawn again once he leaves the box, with the text
+  // he composed, the approved card gone and "Published." (the focus left where he put it).
+  async draftsTyping(open) {
+    let release = null; const held = new Promise(r => { release = r; }), box = `.coachpanel [data-k="ed-${DB}-went_well.title"]`;
+    const st = draftsBackend([drafted(DA), drafted(DB)], { act: () => held.then(() => { st.waiting = [drafted(DB)]; return { body: { ok: true } }; }) });
+    try {
+      const page = await open({ skew: true, store: TOKEN, backend: st.backend });
+      await page.tap(TAB); await inPanel(page, "B's edit box", `[data-k="ed-${DB}-went_well.title"]`);
+      await page.click(`.coachpanel [data-k="act-${DA}-approve"]`); await soon("A's Approve on its way", () => st.acts.length === 1);
+      await page.focus(box);
+      await page.evaluate(s => { const t = document.querySelector(s); window.__box = t; t.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+        t.value += "ㄓㄨ"; t.setSelectionRange(t.value.length - 1, t.value.length - 1);
+        t.dispatchEvent(new InputEvent("input", { isComposing: true, data: "ㄓㄨ", inputType: "insertCompositionText" })); }, box);
+      const want = await page.evaluate(() => [window.__box.value, window.__box.selectionStart, window.__box.selectionEnd]), gets = st.gets;
+      const mes = () => page.asked.filter(a => a === "/coach/me").length, before = mes();
+      release(); await soon("the list asked for again after Approve", () => st.gets > gets);
+      await page.evaluate(() => { window.__skew(61e3); document.dispatchEvent(new Event("visibilitychange")); });
+      await soon("GET /coach/me asked again", () => mes() > before); await wait(1000);
+      const now = () => page.evaluate(s => { const t = document.querySelector(s);
+        return { same: document.activeElement === window.__box && t === window.__box, at: t && [t.value, t.selectionStart, t.selectionEnd], said: !!document.querySelector('.coachpanel [data-k="dsaid"]') }; }, box);
+      let got = await now();
+      if (!eq(got, { same: true, at: want, said: false })) throw new Error(`with 中文 composing in B's edit box as the answers landed: ${JSON.stringify(got)}, want the same box, ${JSON.stringify(want)} and no redraw`);
+      await page.evaluate(() => window.__box.dispatchEvent(new CompositionEvent("compositionend", { data: "ㄓㄨ" }))); await wait(500); got = await now();
+      if (!eq(got, { same: true, at: want, said: false })) throw new Error(`the composition done, still in the box: ${JSON.stringify(got)}`);
+      await page.evaluate(() => window.__box.blur()); await inPanel(page, "Published. once the box is left", '[data-k="dsaid"]', 5e3);
+      got = await page.evaluate(([s, a]) => ({ said: document.querySelector('.coachpanel [data-k="dsaid"]').textContent, box: (document.querySelector(s) || {}).value,
+        a: !!document.querySelector(`.coachpanel .co-dr[data-id="${a}"]`), focus: document.activeElement.getAttribute("data-k") }), [box, DA]);
+      if (!eq(got, { said: "Published.", box: want[0], a: false, focus: null })) throw new Error(`once the box was left: ${JSON.stringify(got)}`);
+    } finally { release(); }
+  },
+  // While one card's action is on its way its buttons say so (Sending… on the one tapped, the others off), and stay off until the list
+  // has answered again; another card's buttons still work meanwhile.
+  async draftsBusy(open) {
+    let release = null, list = null; const hold = new Promise(r => { release = r; }), listed = new Promise(r => { list = r; });
+    const st = draftsBackend([drafted(DA), drafted(DB)], { act: id => id === DA ? hold.then(() => ({ body: { ok: true } })) : { body: { ok: true } } }), backend = st.backend;
+    let holdList = false, held = 0;
+    st.backend = (q, req) => { if (q.pathname !== "/admin/coach/drafts" || !holdList) return backend(q, req); held++; return listed.then(() => backend(q, req)); };
+    try {
+      const page = await open({ store: TOKEN, backend: st.backend });
+      await page.tap(TAB); await inPanel(page, "A's buttons", `[data-k="act-${DA}-approve"]`);
+      const acts = id => page.evaluate(id => [...document.querySelectorAll(`.coachpanel .co-dr[data-id="${id}"] .co-dr-acts button`)].map(b => [b.textContent, b.getAttribute("aria-disabled") === "true"]), id);
+      await page.click(`.coachpanel [data-k="act-${DA}-approve"]`); await soon("A's Approve on its way", () => st.acts.length === 1); await settle(page);
+      let got = await acts(DA);
+      if (!eq(got, [["Sending…", true], ["Redo", true], ["Reject", true], ["Ban", true]])) throw new Error(`A's buttons with its Approve on its way: ${JSON.stringify(got)}`);
+      await page.click(`.coachpanel [data-k="act-${DA}-redo"]`, { force: true }); await settle(page);
+      if (await page.$(`.coachpanel [data-k="note-${DA}"]`)) throw new Error("Redo on A opened its note while A's Approve was on its way");
+      await page.click(`.coachpanel [data-k="act-${DB}-approve"]`); await soon("B's Approve done meanwhile, and the list asked for again", () => st.acts.length === 2 && st.gets === 2);
+      holdList = true; release(); await soon("A's Approve done, the list asked for again", () => held === 1); await settle(page); await wait(100);
+      got = await acts(DA);
+      if (!eq(got, [["Approve", true], ["Redo", true], ["Reject", true], ["Ban", true]])) throw new Error(`A's buttons approved, the list not yet answered: ${JSON.stringify(got)}`);
+      await page.click(`.coachpanel [data-k="act-${DA}-approve"]`, { force: true }); await wait(300);
+      if (st.acts.length !== 2) throw new Error(`a second tap on A's Approve before the list answered sent ${JSON.stringify(st.acts)}`);
+      st.waiting = []; list(); await inPanel(page, "No drafts waiting.", ".co-drafts .co-note", 5e3);
+    } finally { release(); list(); }
+  },
+  // What Bryan has typed in a draft's edit box and not sent is kept for the tab (sessionStorage): a reload shows it again. Once the review
+  // has changed (a Redo came back) it's gone, and so it is once he approves it. Where the tab won't keep it, it's kept in the panel.
+  async draftsKept(open) {
+    const st = draftsBackend([drafted(DA)]), box = `.coachpanel [data-k="ed-${DA}-went_well.title"]`, kept = `waveslave-coach-ed-${DA}`;
+    const page = await open({ store: TOKEN, backend: st.backend }), at = () => page.$eval(box, t => t.value), has = () => page.evaluate(k => sessionStorage.getItem(k) !== null, kept);
+    await page.tap(TAB); await inPanel(page, "A's edit box", `[data-k="ed-${DA}-went_well.title"]`);
+    await page.fill(box, "Kept across a reload"); await page.reload(); await settle(page);
+    await page.tap(TAB); await inPanel(page, "A's edit box after the reload", `[data-k="ed-${DA}-went_well.title"]`);
+    if (await at() !== "Kept across a reload") throw new Error(`after a reload A's edit box reads ${JSON.stringify(await at())}`);
+    st.waiting = [drafted(DA, { redos: 1, waiting_since: REVIEW_AT + 60e3 })]; await page.click('.coachpanel [data-k="drefresh"]'); await soon("the list asked for again", () => st.gets >= 3); await wait(300);
+    if (await at() !== "Low and ready going in" || await has()) throw new Error(`A changed (a Redo came back): its box reads ${JSON.stringify(await at())}, ${await has() ? "still" : "no longer"} kept`);
+    await page.fill(box, "Approved as typed"); if (!await has()) throw new Error("a new edit isn't kept for the tab");
+    await page.click(`.coachpanel [data-k="act-${DA}-approve"]`); await soon("A's Approve", () => st.acts.length === 1); await wait(300);
+    if (!eq(st.acts[0], [DA, { action: "approve", edits: { "went_well.title": "Approved as typed" } }]) || await has()) throw new Error(`Approve sent ${JSON.stringify(st.acts)}, the edit ${await has() ? "still" : "no longer"} kept`);
+    await page.evaluate(() => { for (const k of ["setItem", "getItem", "removeItem"]) { const f = Storage.prototype[k];
+      Storage.prototype[k] = function (key, ...a) { if (String(key).startsWith("waveslave-coach-ed-")) throw new Error("denied"); return f.call(this, key, ...a); }; } });
+    st.waiting = [drafted(DA, { redos: 2 })]; await page.click('.coachpanel [data-k="drefresh"]'); await soon("the list once more", () => st.gets >= 5); await wait(300);
+    await page.fill(box, "Kept in the panel"); await page.click('.coachpanel [data-k="drefresh"]'); await soon("the list again", () => st.gets >= 6); await wait(300);
+    if (await at() !== "Kept in the panel") throw new Error(`with the tab refusing to keep it, A's box reads ${JSON.stringify(await at())}`);
+  },
+  // A draft's key frames are asked for once its card comes near the panel's view (IntersectionObserver), each once; where the phone has
+  // no IntersectionObserver, all of them at once.
+  async draftsLazy(open) {
+    const all = [DA, DB, DC], frames = id => [2, 6, 7, 8].map(n => `${id}:${n}`);
+    let st = draftsBackend(all.map(id => drafted(id))), page = await open({ store: TOKEN, backend: st.backend });
+    await page.tap(TAB); await inPanel(page, "the last card", `.co-dr[data-id="${DC}"]`); await wait(1000);
+    if (st.frames.some(f => f.startsWith(DC))) throw new Error(`with the last card out of sight its key frames were asked for: ${JSON.stringify(st.frames)}`);
+    await toFrames(page, DC); await soon("the last card's key frames", () => st.frames.filter(f => f.startsWith(DC)).length === 4); await wait(500);
+    if (!eq(st.frames.filter(f => f.startsWith(DC)).sort(), frames(DC)) || new Set(st.frames).size !== st.frames.length) throw new Error(`the key frames were asked for as ${JSON.stringify(st.frames)}`);
+    st = draftsBackend(all.map(id => drafted(id))); page = await open({ store: TOKEN, backend: st.backend, init: [() => { delete window.IntersectionObserver; }] });
+    await page.tap(TAB); await soon("every key frame without IntersectionObserver", () => st.frames.length === 12);
+    if (!eq([...st.frames].sort(), all.flatMap(frames).sort())) throw new Error(`without IntersectionObserver the key frames were asked for as ${JSON.stringify(st.frames)}`);
+  },
+  // Settings' Where it runs: GET /admin/where's two lines (text/plain, "room colo=NRT" and "coach colo=KIX"), each as code on a line of its
+  // own, asked once with the session token; an answer that isn't those two lines says it couldn't ask.
+  async whereLine(open) {
+    for (const [answer, want] of [["room colo=NRT\ncoach colo=KIX\n", ["Where it runs: room colo=NRTcoach colo=KIX", ["room colo=NRT", "coach colo=KIX"]]],
+      ["room colo=nrt\n", ["Where it runs: couldn't ask. Close the panel and open it again in a minute.", []]]]) {
+      const st = draftsBackend([], { where: { text: answer } }), page = await open({ store: TOKEN, backend: st.backend });
+      await page.tap(TAB); await inPanel(page, "Where it runs", ".co-dr-where");
+      await page.waitForFunction(() => !/Loading/.test(document.querySelector(".coachpanel .co-dr-where").textContent), null, { timeout: 5e3 }).catch(() => {}); await wait(300);
+      const got = await page.evaluate(() => { const w = document.querySelector(".coachpanel .co-dr-where"); return [w.textContent, [...w.querySelectorAll("code")].map(c => c.textContent)]; });
+      if (!eq(got, want) || !eq(st.wheres, ["Bearer test-token"])) throw new Error(`GET /admin/where answering ${JSON.stringify(answer)} shows ${JSON.stringify(got)}, asked ${JSON.stringify(st.wheres)}`);
     }
   },
   // Every refusal at the start of a send, with its message from the spec's table (a money rest naming its day in Taiwan time: "16
@@ -1018,7 +1163,8 @@ if (unknown.length) { console.error(`no check called ${unknown.join(", ")}\n${US
   //   view: the saved view; test: window.__chatTest; store: localStorage entries; clock: the page's fixed time (page.clock); skew: Date.now
   //   moved on by window.__skew(ms); query: the address's ?… before #<spot>. backend(url, request) answers the fake backend's calls. ua: the
 //   browser's user agent; init: more init scripts, each a function (or [function, its argument]); tz: the phone's time zone (the
-//   machine's when null). An answer with jpeg (bytes) goes as image/jpeg; backend may answer with a promise of one, to hold it back.
+//   machine's when null). An answer with jpeg (bytes) goes as image/jpeg, one with text as text/plain; backend may answer with a promise of
+//   one, to hold it back.
   async function open({ spot = "donghe", world = true, pub = false, coachPub = false, url = CHAT, view = "fc", test = true, store = {}, chatJs = CHAT_JS, coachJs = COACH_JS,
     clock = null, skew = false, query = "", backend = () => ({ body: { reports: [], online: 0, last_id: 0 } }), ua = null, init = [], tz = null }) {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block",
@@ -1030,7 +1176,8 @@ if (unknown.length) { console.error(`no check called ${unknown.join(", ")}\n${US
       if (u.startsWith("file:") && bare.endsWith("/coach.js")) return coachJs == null ? r.abort() : r.fulfill({ contentType: "text/javascript", body: coachJs });
       if (u.startsWith(CHAT + "/")) { const q = new URL(u); asked.push(q.pathname + q.search); const a = await backend(q, r.request());
         // An answer held back may come after its context has closed: that's no failure of the page.
-        return (a ? r.fulfill({ status: a.status || 200, contentType: a.jpeg ? "image/jpeg" : "application/json", headers: { "access-control-allow-origin": "*" }, body: a.jpeg || JSON.stringify(a.body) }) : r.abort()).catch(() => {}); }
+        return (a ? r.fulfill({ status: a.status || 200, contentType: a.jpeg ? "image/jpeg" : typeof a.text === "string" ? "text/plain" : "application/json", headers: { "access-control-allow-origin": "*" },
+          body: a.jpeg || (typeof a.text === "string" ? a.text : JSON.stringify(a.body)) }) : r.abort()).catch(() => {}); }
       if (u.startsWith("https:") || u.startsWith("http:") || u.startsWith("wss:")) tried.push(u);
       return r.abort(); });
     await ctx.addInitScript(([o, lock]) => {

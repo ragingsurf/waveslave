@@ -364,10 +364,13 @@ const dcard = (page, id) => page.evaluate(id => { const c = document.querySelect
     english: Object.fromEntries([...c.querySelectorAll(".co-en")].map(e => [e.getAttribute("data-p"), e.textContent])),
     lines: [...c.querySelectorAll(".co-part p")].map(e => e.textContent), handled: !!c.closest("details.co-dr-old"),
     acts: [...c.querySelectorAll(".co-dr-acts button, .co-ask button")].map(b => b.textContent) }; }, id);
-// Waits for review id's card in the Drafts list, with what `want` says of it: blobs, that many key frames shown as blob URLs; handled,
-// among the handled ones (or waiting); warn, that red warning; err, that red line. With want.gone, waits for it to be gone.
+// Waits for review id's card in the Drafts list, with what `want` says of it: blobs, that many key frames shown as blob URLs (the panel
+// scrolled to them, as a card's key frames load only once they come near its view); handled, among the handled ones (or waiting); warn,
+// that red warning; err, that red line. With want.gone, waits for it to be gone.
 const hasCard = (page, id, what, want = {}) => until(page, what, ([id, w]) => { const c = document.querySelector(`.coachpanel .co-dr[data-id="${id}"]`);
   if (w.gone) return !c; if (!c) return false;
+  const g = w.blobs !== undefined && c.querySelector(".co-kfs"), b = document.querySelector(".coachpanel .co-body");
+  if (g) b.scrollTop += g.getBoundingClientRect().top - b.getBoundingClientRect().top - 100;
   return (w.blobs === undefined || c.querySelectorAll('.co-kf img[src^="blob:"]').length === w.blobs) && (w.handled === undefined || !!c.closest("details.co-dr-old") === w.handled)
     && (w.warn === undefined || [...c.querySelectorAll(".co-warn li")].some(l => l.textContent === w.warn)) && (w.err === undefined || (c.querySelector(".co-dr-err") || {}).textContent === w.err); },
   [id, want], 30e3);

@@ -402,7 +402,7 @@ button.co-row{cursor:pointer}
 .co-line{display:block;width:100%;box-sizing:border-box;min-height:42px;margin-top:8px;padding:8px 10px;border:1.5px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);font:16px var(--body)}
 .co-sum{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .co-link{padding:4px 0;border:0;background:none;color:var(--led-amb);font-size:15px;font-weight:700;text-decoration:underline;cursor:pointer}
-.co-btn:disabled{opacity:.45;cursor:default}
+.co-btn:disabled,.co-btn[aria-disabled="true"]{opacity:.45;cursor:default}
 .co-btn2{background:none;border:1.5px solid var(--led-amb);color:var(--led-amb)}
 .co-hold{position:fixed;left:0;top:0;width:2px;height:2px;overflow:hidden;opacity:0;pointer-events:none}
 .co-hold video{width:2px;height:2px}
@@ -603,7 +603,7 @@ const ME = { me: null, token: null, at: -Infinity, n: 0, asking: null, failed: f
 // about the review just reported or deleted (said: its key in STR, until the panel shuts). agreeErr is false, true or the refusal's code.
 // headsMove is the move of a review's heads-up tapped while a draft was waiting: Start over picks it (ruling P55), and Pick up, the panel
 // shutting, the review shutting or another account forgets it. typing is true while an input method is composing in a line (line()), when
-// later() holds off drawing the panel again.
+// the panel isn't drawn again (render).
 const V = { film: null, tick: false, adultErr: false, agreeErr: false, busy: false, focus: null, drafts: false, top: false, sent: false, said: null, headsMove: null,
   typing: false };
 // GET /coach/me's answer looks right: whole counts, a "YYYY-MM" month, a list of reviews and whose they are (account). Without the account
@@ -624,7 +624,7 @@ async function ask() {
   if (r.status === 401) { refused(t); ME.me = null; ME.token = null; ME.failed = false; }
   else if (r.status === 200 && meOk(r.json)) { ME.me = r.json; ME.token = t; ME.failed = false; }
   else { ME.failed = r.code || true; if (ME.token !== t || r.code === "banned") { ME.me = null; ME.token = t; } }
-  drawDot(); render();
+  drawDot(); later();
 }
 // Asks when the token kept isn't the one the panel last asked with: at start-up, when developer mode comes on, and after a sign-in.
 // Signed out, the panel forgets what it knew, and an answer still on its way is dropped.
@@ -656,6 +656,8 @@ function drawDot() {
 // the token changes or GET /coach/me says this isn't the admin.
 function render() {
   if (!P.started || !P.open) return;
+  if (V.typing && P.body.contains(document.activeElement)) { held = true; return; } // drawn once the input method is done (release)
+  held = false; clearTimeout(laterT); laterT = 0;
   const had = P.body.contains(document.activeElement) ? document.activeElement : null, key = V.focus || (had && had.getAttribute("data-k")), at = P.body.scrollTop;
   let caret = null; try { if (had && !V.focus && typeof had.selectionStart === "number") caret = [had.selectionStart, had.selectionEnd, had.scrollTop]; } catch (e) {}
   V.focus = null; V.typing = false;
@@ -681,12 +683,23 @@ function render() {
     if (h) { h.focus({ preventScroll: true }); reveal(h, true); }
   }
 }
-// The panel drawn again soon, once for everything that lands together (key frames, each as it comes), and not while an input method
-// is composing in the line that has the focus.
-let laterT = 0;
+// The panel drawn again soon for what the network brings (GET /coach/me, the Drafts list, an action's or a setting's answer, Where it
+// runs, each key frame of a review), once for everything that lands together. Not while a finger is on the screen (a tap would land on
+// a control drawn away), and not while a line or edit box has the focus (a Drafts edit box, Something wrong?'s line): drawing it again
+// would drop the iPhone's keyboard and any 中文 still being composed. That waits (held) until the focus leaves it or the input method is
+// done (release), unless the answer moves the focus on purpose (V.focus: the focus was still where Bryan tapped). render() itself never
+// draws over a composition.
+let laterT = 0, held = false, ptrTill = 0;
+const editing = () => { const a = document.activeElement; return !!a && P.body.contains(a) && a.classList.contains("co-line"); };
 function later() {
-  if (!laterT) laterT = setTimeout(guard(() => { laterT = 0; if (V.typing && P.body.contains(document.activeElement)) later(); else render(); }), 30);
+  if (!laterT) laterT = setTimeout(guard(() => { laterT = 0;
+    if (performance.now() < ptrTill) later(); else if (editing() && !V.focus) held = true; else render(); }), 30);
 }
+function release() { if (held) { held = false; later(); } }
+// The data-k of the control with the focus in the panel's body ("" for none), and whether it has moved from `from` to another control
+// there since: an answer moves the focus only while it hasn't.
+const focusKey = () => { const a = document.activeElement; return a && P.body.contains(a) ? a.getAttribute("data-k") || "" : ""; };
+const moved = from => { const k = focusKey(); return k !== "" && k !== from; };
 // Scrolls the panel's body (and nothing behind it) so e shows, or with top, so e is at the top.
 function reveal(e, top) {
   const b = P.body.getBoundingClientRect(), r = e.getBoundingClientRect();
@@ -966,19 +979,35 @@ function done(id, said, change) {
 // /admin/coach/settings, and the list is asked for again after each. Every word from the network, the surfer's and the coach's, goes in
 // as text (Review Focus 4). D: the list (null until it answers) and the token it's for; the number of the newest ask and the list's life
 // (g: anything that comes back for a list let go is dropped); an ask on its way, or one failed (true or the code). By review id: the edits
-// typed (ed: {ver, f: {path: text}}, forgotten once the review changes), the note typed for an action and a red line (err: {code, until}).
-// Then the action asked about (ask: {id, action}), a note missing (need: the id), the action on its way (busy: {id, action}), what was
-// just done (said: the action, or "gone"), each key frame by `${id}:${n}` (shots: "" on its way, its blob URL, false when it didn't load,
-// null when it's gone), the not-surf clips shown anyway and the handled reviews opened, GET /admin/where's lines (where: undefined until
-// asked, null on its way, false when it failed), the test email's answer (mail: {status, text}), and a setting on its way or failed.
+// typed (ed: {ver, f: {path: text}}, forgotten once the review changes, and kept for the tab: keepEd), the note typed for an action, a red
+// line (err: {code, until}) and the action on its way (busy: {action, done}; done, until the list answers again). Then the action asked
+// about (ask: {id, action}), a note missing (need: the id), what was just done (said: the action, or "gone"), each key frame by
+// `${id}:${n}` (shots: "" on its way, its blob URL, false when it didn't load, null when it's gone), the reviews whose key frames have come
+// near the panel's view (seen, by io), the not-surf clips shown anyway and the handled reviews opened, GET /admin/where's lines (where:
+// undefined until asked, null on its way, false when it failed), the test email's answer (mail: {status, text}), and the setting on its
+// way (sBusy: its button's data-k) or failed.
 const D = { g: 0, n: 0 };
 const TEXT_PATHS = ["went_well.title", "went_well.detail", "main_fix.title", "main_fix.what", "main_fix.why", "drill.title", "drill.how", "heads_up.text", "progress"];
 const EDIT_MAX = 1_000, NOTED = ["redo", "reject", "withdraw"]; // characters in a line Bryan edits (TEXT_FIELDS and EDIT_MAX in chat/src)
 // The list let go (the panel shut, signed out, another account): the key frames' blob URLs are revoked, and what's on its way is dropped.
 function dropDrafts() {
   D.g++; if (D.shots) for (const u of D.shots.values()) if (u) try { URL.revokeObjectURL(u); } catch (e) {}
+  if (D.io) D.io.disconnect();
   Object.assign(D, { list: null, byId: new Map(), tok: null, asking: false, failed: false, ed: Object.create(null), notes: Object.create(null), err: Object.create(null),
-    ask: null, need: null, busy: null, said: null, shots: new Map(), show: new Set(), open: new Set(), where: undefined, mail: null, sBusy: false, sErr: false });
+    busy: Object.create(null), ask: null, need: null, said: null, shots: new Map(), seen: new Set(), io: null, show: new Set(), open: new Set(), where: undefined,
+    mail: null, sBusy: false, sErr: false });
+}
+// Bryan's unsent edits kept for the tab (sessionStorage), so a reload or a trip to LINE keeps them: {ver, who, f} by review, read back
+// only while the review is as it was (verOf) and for his account. Where the tab won't keep them, they're kept in the panel.
+const ED_KEY = "waveslave-coach-ed-";
+function keepEd(id, e) {
+  try { if (e) sessionStorage.setItem(ED_KEY + id, JSON.stringify({ ver: e.ver, who: account(), f: e.f })); else sessionStorage.removeItem(ED_KEY + id); } catch (x) {}
+}
+function keptEd(id, ver) {
+  let o = null; try { const v = sessionStorage.getItem(ED_KEY + id); if (v === null) return null; o = JSON.parse(v); } catch (x) {}
+  if (!isObj(o) || o.ver !== ver || o.who !== account() || !isObj(o.f)) { keepEd(id, null); return null; }
+  const f = Object.create(null); for (const p of TEXT_PATHS) if (typeof o.f[p] === "string") f[p] = upTo(o.f[p], EDIT_MAX);
+  return { ver, f };
 }
 dropDrafts();
 const ownKey = (o, k) => typeof k === "string" && Object.prototype.hasOwnProperty.call(o, k) ? o[k] : null;
@@ -997,20 +1026,23 @@ async function loadDrafts() {
   D.asking = false;
   if (r.status === 401) return signOut(t);
   const j = r.json;
+  for (const id of Object.keys(D.busy)) if (D.busy[id].done) delete D.busy[id]; // an action done shows as the list has it now
   if (r.status === 200 && isObj(j) && Array.isArray(j.waiting) && Array.isArray(j.handled) && settingsOk(j.settings)) {
     D.list = { waiting: j.waiting.filter(itemOk), handled: j.handled.filter(itemOk), settings: j.settings }; D.failed = false; prune(); }
   else D.failed = r.code || true;
-  render();
+  later();
   if (D.list && D.where === undefined) return loadWhere();
 }
-// What's kept for reviews no longer in the list goes, their key frames' blob URLs revoked.
+// What's kept for reviews no longer in the list goes, their key frames' blob URLs revoked, and their edits kept for the tab.
 function prune() {
   D.byId = new Map([...D.list.waiting, ...D.list.handled].map(r => [r.id, r]));
   for (const [k, u] of [...D.shots]) { const [id, n] = k.split(":"), r = D.byId.get(id);
     if (!r || !r.have.includes(+n)) { if (u) try { URL.revokeObjectURL(u); } catch (e) {} D.shots.delete(k); } }
   for (const o of [D.ed, D.notes, D.err]) for (const id of Object.keys(o)) if (!D.byId.has(id)) delete o[id];
-  for (const s of [D.show, D.open]) for (const id of [...s]) if (!D.byId.has(id)) s.delete(id);
+  for (const s of [D.show, D.open, D.seen]) for (const id of [...s]) if (!D.byId.has(id)) s.delete(id);
   if (D.ask && !D.byId.has(D.ask.id)) D.ask = null;
+  try { for (let i = sessionStorage.length - 1; i >= 0; i--) { const k = sessionStorage.key(i);
+    if (k && k.startsWith(ED_KEY) && !D.byId.has(k.slice(ED_KEY.length))) sessionStorage.removeItem(k); } } catch (e) {}
 }
 // Where the room and the coach run (ruling P19): GET /admin/where's two lines, "room colo=NRT" and "coach colo=KIX", asked once a list.
 async function loadWhere() {
@@ -1036,6 +1068,9 @@ function draftsSection(me) {
   if (D.failed) out.push(el("p", { class: "co-err", role: "alert" }, says(D.failed) || S("failed")));
   if (!L) { if (!D.failed) out.push(el("p", { class: "co-wait" }, S("loading"))); return el("section", { class: "co-drafts" }, out); }
   if (!L.waiting.length) out.push(el("p", { class: "co-note" }, dr.none));
+  if (D.io) D.io.disconnect();
+  D.io = typeof IntersectionObserver === "function" ? new IntersectionObserver(guard(seenNow), { root: P.body, rootMargin: "600px 0px" }) : null;
+  if (!D.io) for (const id of D.byId.keys()) D.seen.add(id);
   out.push(...L.waiting.map(r => card(r, false, year)), settingsBox(L.settings));
   if (L.handled.length) out.push(el("h4", { class: "co-h co-yours" }, dr.handled), ...L.handled.map(r => {
     const d = el("details", { class: "co-dr-old" }, el("summary", { "data-k": "old-" + r.id }, `${headOf(r)} · ${stLine(r, year)}`), card(r, true, year));
@@ -1077,7 +1112,7 @@ function card(r, old, year) {
   const ns = flagged ? [] : r.have.filter(n => isFrame(n) && Number.isInteger(r.times[n])).sort((x, y) => x - y);
   if (ns.length && r.warnings.includes("not_surf") && !D.show.has(id)) out.push(el("p", { class: "co-dr-hid" }, dr.hidden),
     button(`show-${id}`, dr.show, () => { D.show.add(id); V.focus = `act-${id}-${acts[0]}`; render(); }, "co-link"));
-  else if (ns.length) out.push(el("div", { class: "co-kfs" }, ns.map(n => dshot(r, n))));
+  else if (ns.length) { const g = el("div", { class: "co-kfs", "data-v": id }, ns.map(n => dshot(r, n))); if (!D.seen.has(id) && D.io) D.io.observe(g); out.push(g); }
   if (base && !flagged && r.hold !== 1) out.push(...reviewParts(base, () => null, null, acts.includes("approve") ? fieldFor(r, base) : null));
   if (r.status === "rejected" && typeof r.surfer_note === "string" && r.surfer_note.trim()) out.push(el("p", { class: "co-dr-told" }, dr.told(r.surfer_note)));
   const e = D.err[id];
@@ -1085,15 +1120,22 @@ function card(r, old, year) {
   if (acts.length) out.push(actArea(r, acts));
   return el("article", { class: "co-dr", "data-id": id }, out);
 }
-// A key frame of review r, drawn by itself as it lands (redrawShot); its place, or Tap to try again, until then.
+// A key frame of review r, drawn by itself as it lands (redrawShot); its place, or Tap to try again, until then. It's asked for once the
+// card's key frames come within 600 px of the panel's view (seenNow), so opening the panel on 4G doesn't fetch every draft's 12 at once.
 function dshot(r, n) {
   const dr = S("dr"), base = baseOf(r), sk = `${r.id}:${n}`, ms = r.times[n];
-  if (!D.shots.has(sk)) guard(loadShot)(r.id, n);
+  if (!D.shots.has(sk) && D.seen.has(r.id)) guard(loadShot)(r.id, n);
   const u = D.shots.get(sk); if (u === null) return null;
   const marks = base ? [base.went_well.frame === n && dr.marks.well, base.main_fix.frames.includes(n) && dr.marks.fix,
     Array.isArray(base.unusable_frames) && base.unusable_frames.includes(n) && dr.marks.unusable] : [];
   const f = u === false ? { src: null, ms, again: () => { D.shots.delete(sk); redrawShot(r.id, n); } } : { src: u || null, ms };
   return shotFig(f, `${r.id}-${n}`, [COACHM.fmtTime(ms), ...marks].filter(Boolean).join(" · "), { "data-s": sk });
+}
+function seenNow(es, io) {
+  for (const x of es) { if (!x.isIntersecting) continue; const g = x.target, id = g.getAttribute("data-v"); io.unobserve(g);
+    if (io !== D.io || D.seen.has(id) || !D.byId.has(id)) continue;
+    D.seen.add(id);
+    for (const f of g.querySelectorAll("[data-s]")) { const sk = f.getAttribute("data-s"); if (!D.shots.has(sk)) guard(loadShot)(id, +sk.split(":")[1]); } }
 }
 async function loadShot(id, n) {
   const t = tokenNow(), g = D.g, sk = `${id}:${n}`;
@@ -1114,14 +1156,14 @@ function redrawShot(id, n) {
   if (had) { const b = f && f.querySelector("button"); (b || P.el).focus({ preventScroll: true }); }
 }
 // The edit box of each line, by its path, with the English copy beside it for a 中文 draft. What's typed stays while the review is as it
-// was (verOf), and is cut at 1,000 characters as the backend counts them.
+// was (verOf), kept for the tab too (keepEd), and is cut at 1,000 characters as the backend counts them.
 const verOf = r => [r.status, r.redos, r.waiting_since, r.handled_at].join("|");
 function fieldFor(r, base) {
-  let e = D.ed[r.id]; if (!e || e.ver !== verOf(r)) e = D.ed[r.id] = { ver: verOf(r), f: Object.create(null) };
+  let e = D.ed[r.id]; if (!e || e.ver !== verOf(r)) e = D.ed[r.id] = keptEd(r.id, verOf(r)) || { ver: verOf(r), f: Object.create(null) };
   for (const p of TEXT_PATHS) if (typeof e.f[p] !== "string") { const v = atPath(base, p); e.f[p] = typeof v === "string" ? v : ""; }
   const dr = S("dr"), f = e.f;
   return path => { const box = `coE-${r.id}-${path}`, en = isObj(r.english) ? atPath(r.english, path) : null;
-    const i = line(path, EDIT_MAX, { "data-k": `ed-${r.id}-${path}`, id: box, rows: String(Math.min(8, Math.max(2, Math.ceil([...f[path]].length / 40)))) }, f, () => {}, "textarea");
+    const i = line(path, EDIT_MAX, { "data-k": `ed-${r.id}-${path}`, id: box, rows: String(Math.min(8, Math.max(2, Math.ceil([...f[path]].length / 40)))) }, f, () => keepEd(r.id, e), "textarea");
     const copy = typeof en === "string" && en.trim() ? el("p", { class: "co-en", "data-p": path }, dr.english(en)) : null;
     return el("div", { class: copy ? "co-ed co-ed2" : "co-ed" }, el("label", { for: box }, dr.fields[path]), i, copy); };
 }
@@ -1133,14 +1175,16 @@ function edits(r) {
     const n = [...v].length; if (n < 1 || n > EDIT_MAX) return null; out[p] = v; }
   return out;
 }
-// The card's buttons, or the action asked about: Redo, Reject and Withdraw with their note, Ban with its question.
+// The card's buttons, or the action asked about: Redo, Reject and Withdraw with their note, Ban with its question. While the card's
+// action is on its way (Sending… on the one tapped), and once done until the list answers again, its buttons are off; other cards' still work.
 function actArea(r, acts) {
-  const dr = S("dr"), id = r.id, ask = D.ask && D.ask.id === id ? D.ask.action : null;
-  const label = a => D.busy && D.busy.id === id && D.busy.action === a ? S("sending") : dr.acts[a];
-  if (!ask) return el("div", { class: "co-acts co-dr-acts" }, acts.map(a => button(`act-${id}-${a}`, label(a), () => {
+  const dr = S("dr"), id = r.id, ask = D.ask && D.ask.id === id ? D.ask.action : null, b = D.busy[id];
+  const label = a => b && !b.done && b.action === a ? S("sending") : dr.acts[a];
+  const btn = (k, text, f, cls) => { const x = button(k, text, () => { if (!D.busy[id]) return f(); }, cls); if (b) x.setAttribute("aria-disabled", "true"); return x; };
+  if (!ask) return el("div", { class: "co-acts co-dr-acts" }, acts.map(a => btn(`act-${id}-${a}`, label(a), () => {
     if (!NOTED.includes(a) && a !== "ban") return act(r, a);
     D.ask = { id, action: a }; D.need = null; if (typeof D.notes[id] !== "string") D.notes[id] = ""; V.focus = a === "ban" ? `no-${id}` : `note-${id}`; render(); }, a === "approve" ? "co-btn" : "co-btn co-btn2")));
-  const yes = button(`yes-${id}`, label(ask), () => act(r, ask)), no = button(`no-${id}`, S("cancel"), () => { D.ask = null; D.need = null; V.focus = `act-${id}-${ask}`; render(); }, "co-btn co-btn2");
+  const yes = btn(`yes-${id}`, label(ask), () => act(r, ask)), no = btn(`no-${id}`, S("cancel"), () => { D.ask = null; D.need = null; V.focus = `act-${id}-${ask}`; render(); }, "co-btn co-btn2");
   if (ask === "ban") return el("div", { class: "co-ask" }, el("p", null, dr.asks.ban), yes, no);
   const i = line(id, NOTE_MAX, { "data-k": `note-${id}`, id: `coN-${id}`, enterkeyhint: "send" }, D.notes, () => {});
   i.addEventListener("keydown", guard(e => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); return act(r, ask); } }));
@@ -1148,37 +1192,44 @@ function actArea(r, acts) {
 }
 // One of Bryan's actions on review r: a note first where it needs one, and Approve sends only the lines changed. Done, the list says so
 // and is asked for again; refused, the card says why in red, and a review that changed meanwhile (state) or is gone shows as it is now.
+// The answer puts the focus on what it says only while the focus is still where he tapped (or nowhere in the panel); else it stays where
+// he's working, and the panel is drawn again once he leaves the box he's typing in (later()).
 async function act(r, action) {
-  const t = tokenNow(), g = D.g, id = r.id, body = { action };
-  if (!t || D.busy) return;
+  const t = tokenNow(), g = D.g, id = r.id, body = { action }, from = focusKey();
+  if (!t || D.busy[id]) return;
   if (NOTED.includes(action)) { const note = upTo((D.notes[id] || "").trim(), NOTE_MAX);
     if (!note) { D.need = id; V.focus = `note-${id}`; return render(); } body.note = note; }
   if (action === "approve") { const e = edits(r);
     if (!e) { D.err[id] = { code: "edit" }; V.focus = `act-${id}-approve`; return render(); } if (Object.keys(e).length) body.edits = e; }
-  D.busy = { id, action }; D.need = null; delete D.err[id]; D.said = null; render();
+  D.busy[id] = { action, done: false }; if (D.need === id) D.need = null; delete D.err[id]; D.said = null; render();
   const res = await call(`/admin/coach/drafts/${id}`, t, body, { wait: 45e3 });
   if (g !== D.g) return;
-  D.busy = null;
   if (res.status === 401) return signOut(t);
-  if (res.status === 200) { D.ask = null; delete D.notes[id]; delete D.ed[id]; D.said = action; V.focus = "dsaid"; render(); return loadDrafts(); }
+  const stay = !moved(from), mine = D.ask && D.ask.id === id;
+  if (res.status === 200) { D.busy[id] = { action, done: true }; if (mine) D.ask = null; delete D.notes[id]; delete D.ed[id]; keepEd(id, null);
+    D.said = action; if (stay) V.focus = "dsaid"; later(); return loadDrafts(); }
+  delete D.busy[id];
   const code = res.code || true, over = ["state", "not_found", "redo_limit"].includes(code);
   D.err[id] = { code, until: isObj(res.json) ? res.json.until : null };
-  if (over) D.ask = null;
-  V.focus = D.ask ? `yes-${id}` : over ? null : `act-${id}-${action}`;
+  if (over && mine) D.ask = null;
+  if (stay) V.focus = D.ask && D.ask.id === id ? `yes-${id}` : over ? null : `act-${id}-${action}`;
   if (code === "not_found") D.said = "gone";
-  if (code === "state" || code === "not_found") { D.open.add(id); render(); return loadDrafts(); }
-  render();
+  if (code === "state" || code === "not_found") { D.open.add(id); later(); return loadDrafts(); }
+  later();
 }
 // Settings (spec "Settings"): Coach stopped, or Paused, with Start again, else Pause; Autopilot; Send a test email with Resend's answer;
 // the credit month's spend; how many of the last approved went without changes; and where it runs.
 function settingsBox(st) {
   const dr = S("dr"), out = [el("h4", { class: "co-h" }, dr.settings)];
+  // Each setting's button: Sending… on the one on its way, and all of them off meanwhile.
+  const sb = (k, text, body, focus, cls) => { const b = button(k, D.sBusy === k ? S("sending") : text, () => setting(body, k, focus), cls);
+    if (D.sBusy) b.setAttribute("aria-disabled", "true"); return b; };
   if (st.stopped === true || st.paused === true) out.push(el("p", { class: st.stopped === true ? "co-err co-dr-stop" : "co-dr-stop co-dr-paused", role: "status" }, st.stopped === true ? dr.stopped : dr.paused),
-    button("dstart", dr.start, () => setting(st.stopped === true ? { start_again: true } : { paused: false }, "dpause")));
-  else out.push(button("dpause", dr.pause, () => setting({ paused: true }, "dstart"), "co-btn co-btn2"));
-  const auto = button("dauto", dr.autopilot(st.autopilot === true), () => setting({ autopilot: st.autopilot !== true }, "dauto"), "co-btn co-btn2");
+    sb("dstart", dr.start, st.stopped === true ? { start_again: true } : { paused: false }, "dpause"));
+  else out.push(sb("dpause", dr.pause, { paused: true }, "dstart", "co-btn co-btn2"));
+  const auto = sb("dauto", dr.autopilot(st.autopilot === true), { autopilot: st.autopilot !== true }, "dauto", "co-btn co-btn2");
   auto.setAttribute("aria-pressed", String(st.autopilot === true));
-  out.push(auto, button("dmail", dr.mail, () => setting({ test_email: true }, "dmail"), "co-btn co-btn2"));
+  out.push(auto, sb("dmail", dr.mail, { test_email: true }, "dmail", "co-btn co-btn2"));
   if (D.mail) out.push(el("p", { class: "co-mail", role: "status" }, dr.mailSaid(D.mail.status, D.mail.text)));
   if (D.sErr) out.push(el("p", { class: "co-err", role: "alert" }, says(D.sErr) || S("failed")));
   const w = D.where;
@@ -1187,20 +1238,22 @@ function settingsBox(st) {
     el("p", { class: "co-dr-where" }, dr.where, Array.isArray(w) ? w.map(l => [el("br"), el("code", null, l)]) : w === false ? dr.whereFail : S("loading")));
   return el("section", { class: "co-dset" }, out);
 }
-async function setting(body, focus) {
-  const t = tokenNow(), g = D.g;
+// A setting from button k: once it's done the focus goes to `focus` (Pause's place is Start again's), only while it's still on k.
+async function setting(body, k, focus) {
+  const t = tokenNow(), g = D.g, from = focusKey();
   if (!t || D.sBusy) return;
-  D.sBusy = true; D.sErr = false; if (body.test_email) D.mail = null; render();
+  D.sBusy = k; D.sErr = false; if (body.test_email) D.mail = null; render();
   const r = await call("/admin/coach/settings", t, body, { wait: 45e3 });
   if (g !== D.g) return;
   D.sBusy = false;
   if (r.status === 401) return signOut(t);
-  if (r.status !== 200) { D.sErr = r.code || true; return render(); }
+  const stay = !moved(from);
+  if (r.status !== 200) { D.sErr = r.code || true; return later(); }
   if (body.test_email) { const m = isObj(r.json) && isObj(r.json.email) ? r.json.email : {};
     D.mail = { status: Number.isInteger(m.status) ? m.status : 0, text: typeof m.text === "string" ? m.text : "" }; }
   const s = D.list && D.list.settings; // shown as set at once, then as the backend has it
   if (s) { if (typeof body.autopilot === "boolean") s.autopilot = body.autopilot; if (typeof body.paused === "boolean") s.paused = body.paused; if (body.start_again) s.stopped = s.paused = false; }
-  V.focus = focus; render(); return loadDrafts();
+  if (stay) V.focus = focus; later(); return loadDrafts();
 }
 
 // ---- A key frame enlarged (tapping one in a review, or in the example): over the whole panel, with its time and ✕. ✕ or Escape shuts it,
@@ -1827,6 +1880,11 @@ function start() {
     el("div", { class: "co-hd" }, P.title, P.x), P.body, big.el);
   document.head.append(el("style", null, CSS));
   document.body.append(P.el);
+  // A redraw held for a line or edit box goes once it loses the focus or the input method is done; one held for a finger, 150 ms after it
+  // lifts (the tap's click first), or after 3 s.
+  P.body.addEventListener("focusout", guard(release)); P.body.addEventListener("compositionend", guard(release));
+  addEventListener("pointerdown", guard(() => { ptrTill = performance.now() + 3e3; }), true);
+  for (const k of ["pointerup", "pointercancel"]) addEventListener(k, guard(() => { ptrTill = performance.now() + 150; }), true);
   // Escape shuts the panel and nothing else (not the map behind it), or only the key frame enlarged in it; Tab stays inside it (inside
   // the key frame enlarged, while it's open). The chat's room has Escape while it's open.
   addEventListener("keydown", guard(e => {

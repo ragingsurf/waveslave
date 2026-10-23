@@ -252,9 +252,11 @@ review back for that month, but it still counts toward the 4 sends.
   it was, without pasting it.
 - **Spending more later:** buy credit in the Console (this needs a card, so from then on it can charge), raise the workspace's
   spend limit (step 3), and tell Claude the extra monthly amount. Claude changes one setting, and the coach's two limits go up
-  by that amount. Reviews already waiting on the money then move by themselves the next time the coach checks its queue, which
-  is the daily clean-up at 04:00 Taiwan time at the latest. To wake it at once, open **Drafts** > **Settings**, select
-  **Pause the coach**, then **Start again**.
+  by that amount. Once that's deployed, reviews held at the coach's own limits move by themselves the next time the coach
+  checks its queue, which is the daily clean-up at 04:00 Taiwan time at the latest; to wake it at once, open **Drafts** >
+  **Settings**, select **Pause the coach**, then **Start again**. That doesn't end a rest from Anthropic's side: "Coach is
+  resting until 1 …" (the Console's limit) still waits for that date, and a rest because the credit ran out lifts at its next
+  6-hourly retry once the new credit is there.
 - **A block that shows nowhere:** when a surfer whose clip was flagged deletes their chat account, the block on their LINE
   account is kept for 90 days, but it isn't in **Drafts** or the email, and there's no **Clear** for it. If they sign up again
   in that time, the coach tells them "This account can't use the coach." until it lapses.

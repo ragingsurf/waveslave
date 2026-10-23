@@ -5,11 +5,11 @@
 // Prints ok / FAIL for each check, and exits 1 on any FAIL or page error.
 // Only what the real backend can't give runs here (ruling R15): every page opens in its own fresh browser context, offline. Only the page,
 // chat.js and coach.js load (page.tried lists the other web addresses it asked for), and a fake backend at https://chat.test answers
-// /reports with none (page.asked lists every call to it). A phone 390x844, dpr 2, touch, reduced motion, the intro done, English, the
-// Forecast view, on Donghe. Developer mode (World mode, its PIN in for this visit) is on unless a check says otherwise, which is how the
-// coach shows until Bryan opens it to everyone; window.__coachPublic and window.__chatPublic stay out unless a check sets them. The
-// chat is switched on the way the tests do it (window.__chatUrl and window.__chatContact), and window.__chatTest lets chat.js note each
-// time its room is asked to open (CHAT._opened).
+// /reports with none and, for the checks that give the page a session token, GET /coach/me with a stand-in answer (page.asked lists every
+// call to it). A phone 390x844, dpr 2, touch, reduced motion, the intro done, English, the Forecast view, on Donghe. Developer mode (World
+// mode, its PIN in for this visit) is on unless a check says otherwise, which is how the coach shows until Bryan opens it to everyone;
+// window.__coachPublic and window.__chatPublic stay out unless a check sets them. The chat is switched on the way the tests do it
+// (window.__chatUrl and window.__chatContact), and window.__chatTest lets chat.js note each time its room is asked to open (CHAT._opened).
 // Playwright wherever node finds it (npm install playwright), else the copy this container keeps.
 const { chromium } = (() => { try { return require("playwright"); } catch (e) { return require("/opt/node22/lib/node_modules/playwright"); } })();
 const fs = require("fs"), os = require("os"), path = require("path"), { pathToFileURL } = require("url");
@@ -45,6 +45,14 @@ const backends = page => page.tried.filter(u => /workers\.dev/.test(u));
 
 class Skip extends Error {}
 
+// GET /coach/me's answer for a signed-in surfer (getMe in chat/src/coach.js), o's fields over these; and a fake backend that gives it (or,
+// with status 401, the backend's refusal of the token) besides /reports. The token the checks give the page is a stand-in: only the fake
+// backend sees it.
+const me = o => ({ left: 2, sent_left: 4, monthly: 2, month: "2030-11", next_month: Date.UTC(2030, 10, 30, 16), full_today: false, stop: null, profile: null,
+  agreed: true, admin: false, reviews: [], ...o });
+const coachBackend = (o = {}, status = 200) => q => q.pathname === "/coach/me" ? { status, body: status === 200 ? me(o) : { error: "auth" } } : { body: { reports: [], online: 0, last_id: 0 } };
+const TOKEN = { "waveslave-chat-token": "test-token" };
+
 const CHECKS = {
   // The test clips (tests/coach/clips.js), read the way the coach will read them: picked in an <input type="file"> and played from an
   // object URL. The white box is found at 10% and at 90% of the clip, where it should be: halfway down, its left edge at (w - box) x
@@ -75,12 +83,12 @@ const CHECKS = {
     if (!b.at.every(Boolean) || !near(b.at[0].y, 639 - centre(0.1)) || !near(b.at[1].y, 639 - centre(0.9)) || !b.at.every(p => near(p.x, 180)))
       throw new Error(`in the rotate: 90 clip the box is at ${JSON.stringify(b.at)}, want (180, ${639 - centre(0.1)}) then (180, ${639 - centre(0.9)})`);
   },
-  // Developer mode off: no Coach tab, COACH.open() does nothing, and nothing is asked of any backend, at load or on coming back to the page.
-  // With the chat also off for everyone the page asks nothing at all; with the chat opened to everyone (window.__chatPublic, as it will be
-  // before the coach goes live) the chat asks for its reports and the coach still asks nothing.
+  // Developer mode off: no Coach tab, COACH.open() does nothing, and nothing is asked of any backend, at load or on coming back to the page,
+  // even signed in (a session token kept). With the chat also off for everyone the page asks nothing at all; with the chat opened to
+  // everyone (window.__chatPublic, as it will be before the coach goes live) the chat asks for its reports and the coach still asks nothing.
   async devOff(open) {
     for (const pub of [false, true]) {
-      const page = await open({ world: false, pub }); await wait(300);
+      const page = await open({ world: false, pub, store: TOKEN }); await wait(300);
       await page.evaluate(() => { window.COACH.open(); document.dispatchEvent(new Event("visibilitychange")); }); await wait(300); const l = await look(page);
       if (l.tab || l.panel || l.open) throw new Error(`developer mode off${pub ? ", the chat public" : ""}: the tab is ${l.tab ? "there" : "hidden"} and COACH.open() ${l.panel || l.open ? "opened" : "didn't open"} the panel`);
       const want = pub ? ["/reports?spot=donghe"] : [];
@@ -197,7 +205,7 @@ const CHECKS = {
     if (!(shown > 0)) throw new Error("a pull with the panel shut doesn't show the refresh sign (the check itself is off)");
   },
   // With the panel open the CHAT button does nothing: a tap where it is lands on the panel, and Tab keeps the focus inside the panel, so
-  // the room is never asked to open. Shut, the button opens the room.
+  // the room is never asked to open. Enter on the panel's ✕ shuts it; shut, the button opens the room.
   async chatButton(open) {
     const page = await open({}); await wait(300);
     const fab = await page.locator(".chatfab").boundingBox(); if (!fab) throw new Error("there's no CHAT button to check with");
@@ -205,7 +213,7 @@ const CHECKS = {
     await page.touchscreen.tap(fab.x + fab.width / 2, fab.y + fab.height / 2); await settle(page);
     for (let i = 0; i < 6; i++) { await page.keyboard.press("Tab"); const inside = await page.evaluate(() => document.querySelector(".coachpanel").contains(document.activeElement));
       if (!inside) throw new Error(`Tab ${i + 1} took the focus out of the panel, to ${await page.evaluate(() => document.activeElement && document.activeElement.outerHTML.slice(0, 80))}`); }
-    await page.keyboard.press("Enter"); await settle(page); // the one button inside is ✕: Enter on it shuts the panel
+    await page.focus(".coachpanel .co-x"); await page.keyboard.press("Enter"); await settle(page);
     let s = await page.evaluate(() => ({ opened: window.CHAT._opened.length, room: document.documentElement.classList.contains("chat-open") }));
     if (s.opened || s.room) throw new Error(`with the panel open the CHAT button opened the room (${JSON.stringify(s)})`);
     if ((await look(page)).open) throw new Error("Enter on ✕ didn't shut the panel");
@@ -222,6 +230,45 @@ const CHECKS = {
     if (!l.panel || !l.open || l.view !== "fc") throw new Error(`COACH.open() before coach.js started left ${JSON.stringify(l)}`);
     page = await open({ chatJs, world: false, pub: true }); await wait(300); l = await look(page);
     if (l.tab || l.panel || l.open) throw new Error(`with the coach off, COACH.open() before coach.js started left ${JSON.stringify(l)}`);
+  },
+  // Review Focus 3: the month the panel names is the server's, whatever the phone's clock says. At 23:59 on 31 October in Taiwan by the
+  // phone, with GET /coach/me answering for November (month "2030-11", as a review sent a minute later counts), the panel says "2 of 2
+  // reviews left in November", and 11月 in 中文.
+  async monthFromServer(open) {
+    const page = await open({ clock: Date.UTC(2030, 9, 31, 15, 59), store: TOKEN, backend: coachBackend({ month: "2030-11" }) }); await wait(300);
+    const phone = await page.evaluate(() => new Date(Date.now() + 8 * 3600e3).getUTCMonth() + 1);
+    if (phone !== 10) throw new Error(`in Taiwan the phone's clock says month ${phone}, want 10 (the check itself is off)`);
+    await page.tap(TAB); await page.waitForFunction(() => !!document.querySelector(".coachpanel .co-left"), null, { timeout: 5000 }).catch(() => {});
+    const line = () => page.evaluate(() => { const e = document.querySelector(".coachpanel .co-left"); return e && e.textContent; });
+    let l = await line();
+    if (l !== "2 of 2 reviews left in November") throw new Error(`the panel says ${JSON.stringify(l)}, want "2 of 2 reviews left in November"`);
+    await page.evaluate(() => setLang("zh")); await settle(page); l = await line();
+    if (!l || !l.includes("11月") || l.includes("10月") || !l.includes("2")) throw new Error(`in 中文 the panel says ${JSON.stringify(l)}, want 11月 and the count`);
+  },
+  // Signed in, the coach asks GET /coach/me once as the page loads, with the session token, and again on coming back to the page only
+  // once a minute has gone by, as the chat asks for its reports. A review ready since this phone last opened one (waveslave-coach-seen)
+  // puts a dot on the Coach tab with the panel shut; once opened it doesn't.
+  async meAsks(open) {
+    const T = Date.UTC(2030, 5, 1), ready = { id: "r".repeat(22), move: "top_turn", created: T - 3600e3, status: "ready", published: T, note: null }, heard = [];
+    const backend = (q, req) => { if (q.pathname === "/coach/me" && req.method() === "GET") heard.push(req.headers().authorization || null); return coachBackend({ reviews: [ready] })(q); };
+    const dot = page => page.evaluate(s => { const t = document.querySelector(s); return t.classList.contains("co-dot") && getComputedStyle(t, "::after").content !== "none"; }, TAB);
+    let page = await open({ skew: true, store: TOKEN, backend }); await wait(300);
+    if (!eq(heard, ["Bearer test-token"])) throw new Error(`at load the coach asked GET /coach/me with ${JSON.stringify(heard)}, want once with the token`);
+    if (!await dot(page) || (await look(page)).open) throw new Error(`with a review ready and not yet opened, the tab has ${await dot(page) ? "a" : "no"} dot (the panel ${(await look(page)).open ? "open" : "shut"})`);
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange"))); await wait(300);
+    if (heard.length !== 1) throw new Error(`coming back within the minute asked again (${heard.length} asks)`);
+    await page.evaluate(() => { window.__skew(61e3); document.dispatchEvent(new Event("visibilitychange")); }); await wait(300);
+    if (heard.length !== 2) throw new Error(`coming back after a minute asked ${heard.length - 1} more times, want once`);
+    page = await open({ store: { ...TOKEN, "waveslave-coach-seen": String(T) }, backend: coachBackend({ reviews: [ready] }) }); await wait(300);
+    if (await dot(page)) throw new Error("a review this phone has already opened still puts a dot on the tab");
+  },
+  // A token the backend refuses (401 auth) goes back through CHAT.token(old), which signs out quietly, and the panel shows the signed-out
+  // view with Sign in with LINE.
+  async refused(open) {
+    const page = await open({ store: TOKEN, backend: coachBackend({}, 401) }); await wait(300);
+    await page.tap(TAB); await page.waitForFunction(() => !!document.querySelector(".coachpanel .co-signin"), null, { timeout: 5000 }).catch(() => {});
+    const st = await page.evaluate(() => ({ kept: localStorage.getItem("waveslave-chat-token"), signIn: !!document.querySelector(".coachpanel .co-signin"), left: !!document.querySelector(".coachpanel .co-left") }));
+    if (st.kept !== null || !st.signIn || st.left) throw new Error(`after a 401: ${JSON.stringify(st)}, want the token gone and Sign in with LINE`);
   },
   // The page's hooks never throw, whatever they're given, and a spot the page doesn't have leaves the tab as html.tw says.
   async hooksHold(open) {
@@ -254,25 +301,28 @@ const CHECKS = {
   // A fresh context for every page. The page, chat.js (chatJs) and coach.js (coachJs) load from here, null leaving one out; the fake
   // backend answers what backend(url) gives back (null: the network fails); everything else is cut off. page.asked lists the backend calls.
   //   world: developer mode (World mode, the PIN in); pub: window.__chatPublic; coachPub: window.__coachPublic; url: window.__chatUrl;
-  //   view: the saved view; test: window.__chatTest.
+  //   view: the saved view; test: window.__chatTest; store: localStorage entries; clock: the page's fixed time (page.clock); skew: Date.now
+  //   moved on by window.__skew(ms). backend(url, request) answers the fake backend's calls.
   async function open({ spot = "donghe", world = true, pub = false, coachPub = false, url = CHAT, view = "fc", test = true, store = {}, chatJs = CHAT_JS, coachJs = COACH_JS,
-    backend = () => ({ body: { reports: [], online: 0, last_id: 0 } }) }) {
+    clock = null, skew = false, backend = () => ({ body: { reports: [], online: 0, last_id: 0 } }) }) {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block" });
     ctxs.push(ctx); const asked = [], tried = [];
     await ctx.route("**/*", r => { const u = r.request().url(), bare = u.split(/[?#]/)[0];
       if (bare === PAGE) return r.continue();
       if (u.startsWith("file:") && bare.endsWith("/chat.js")) return chatJs == null ? r.abort() : r.fulfill({ contentType: "text/javascript", body: chatJs });
       if (u.startsWith("file:") && bare.endsWith("/coach.js")) return coachJs == null ? r.abort() : r.fulfill({ contentType: "text/javascript", body: coachJs });
-      if (u.startsWith(CHAT + "/")) { const q = new URL(u); asked.push(q.pathname + q.search); const a = backend(q);
+      if (u.startsWith(CHAT + "/")) { const q = new URL(u); asked.push(q.pathname + q.search); const a = backend(q, r.request());
         return a ? r.fulfill({ status: a.status || 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(a.body) }) : r.abort(); }
       if (u.startsWith("https:") || u.startsWith("http:") || u.startsWith("wss:")) tried.push(u);
       return r.abort(); });
     await ctx.addInitScript(([o, lock]) => {
       try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", o.view); localStorage.setItem("waveslave-lang", "en"); localStorage.setItem("waveslave-world", o.world ? "1" : "0");
         for (const k in o.store) localStorage.setItem(k, o.store[k]); if (lock) sessionStorage.setItem("waveslave-unlock", lock); } catch (e) {}
-      window.__chatUrl = o.url; window.__chatContact = o.contact; if (o.test) window.__chatTest = true; if (o.pub) window.__chatPublic = true; if (o.coachPub) window.__coachPublic = true; },
-      [{ view, world, store, url, contact: CONTACT, test, pub, coachPub }, LOCK]);
+      window.__chatUrl = o.url; window.__chatContact = o.contact; if (o.test) window.__chatTest = true; if (o.pub) window.__chatPublic = true; if (o.coachPub) window.__coachPublic = true;
+      if (o.skew) { const now = Date.now; let by = 0; Date.now = () => now() + by; window.__skew = ms => { by += ms; }; } },
+      [{ view, world, store, url, contact: CONTACT, test, pub, coachPub, skew }, LOCK]);
     const page = await ctx.newPage(); page.on("pageerror", e => errs.push(String(e)));
+    if (clock != null) await page.clock.setFixedTime(clock);
     await page.goto(PAGE + "#" + spot, { waitUntil: "load" }); await settle(page);
     page.asked = asked; page.tried = tried; return page;
   }

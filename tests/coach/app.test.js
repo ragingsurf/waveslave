@@ -15,7 +15,9 @@
 //   fake LINE and the fake AI is cut off.
 // - Helpers for the steps: signIn(page) signs a page in with LINE; makeAdmin() makes the seeded account u-bryan the admin, whose session
 //   token is token("u-bryan"); pick(page, clip) gives the coach's clip picker a clip from tests/coach/clips.js (makeClip); coachTrip(page)
-//   runs the coach's sign-in (CHAT.signIn("coach")) to LINE and back, and landed(page) waits for the Coach panel with the room shut.
+//   runs the coach's sign-in (CHAT.signIn("coach"), or the panel's Sign in with LINE) to LINE and back, and landed(page) waits for the
+//   Coach panel with the room shut; coachApi(token, path, …) calls the backend as the page does, and sendReview(token) sends a review
+//   through it.
 // Playwright wherever node finds it (npm install playwright), else the copy this container keeps.
 const { chromium } = (() => { try { return require("playwright"); } catch (e) { return require("/opt/node22/lib/node_modules/playwright"); } })();
 const fs = require("fs"), path = require("path"), crypto = require("crypto"), { spawnSync } = require("child_process");
@@ -88,13 +90,13 @@ async function signIn(page) {
   await until(page, "the session token", () => !!localStorage.getItem("waveslave-chat-token") && !!document.querySelector(".chatroom .cr-in").getClientRects().length);
   await page.keyboard.press("Escape"); await until(page, "the room to shut", () => !document.documentElement.classList.contains("chat-open"));
 }
-// The coach's sign-in (CHAT.signIn("coach"), which the Coach panel's Sign in with LINE calls), to LINE (approved at once, unless
-// line.deny()) and back on the page's ?chat#c=… (or ?chat#e=… when ret says so). Resolves to where the backend sent the browser back to,
-// once the page there has loaded.
-async function coachTrip(page, ret = /\?chat#c=/) {
+// The coach's sign-in (CHAT.signIn("coach"), which the Coach panel's Sign in with LINE calls, or go() to start it another way), to LINE
+// (approved at once, unless line.deny()) and back on the page's ?chat#c=… (or ?chat#e=… when ret says so). Resolves to where the backend
+// sent the browser back to, once the page there has loaded.
+async function coachTrip(page, ret = /\?chat#c=/, go = () => page.evaluate(() => { CHAT.signIn("coach"); })) {
   let back = null; const seen = r => { if (r.url().startsWith(CHAT() + "/auth/line/callback")) back = r.headers().location || null; };
   page.on("response", seen);
-  try { await Promise.all([page.waitForURL(u => u.href.startsWith(ORIGIN()) && ret.test(back || ""), { timeout: 20e3, waitUntil: "load" }), page.evaluate(() => { CHAT.signIn("coach"); })]); }
+  try { await Promise.all([page.waitForURL(u => u.href.startsWith(ORIGIN()) && ret.test(back || ""), { timeout: 20e3, waitUntil: "load" }), go()]); }
   finally { page.off("response", seen); }
   return back;
 }
@@ -134,6 +136,31 @@ async function appTrip(s, lineIp) {
 // Gives the coach's clip picker a clip (a path from makeClip), as the phone's own picker would. (The picker comes with New review.)
 const pick = (page, clip) => page.setInputFiles('.coachpanel input[type="file"]', clip);
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+// A call to the coach's backend as the page makes it, from the page's origin with tok as the session token: body goes as JSON, text as
+// text/plain (a key frame's base64). Resolves to {status, json}.
+async function coachApi(tok, p, { method = "GET", body, text } = {}) {
+  const headers = { Origin: ORIGIN(), Authorization: "Bearer " + tok };
+  if (text !== undefined) headers["Content-Type"] = "text/plain"; else if (body !== undefined) headers["Content-Type"] = "application/json";
+  const r = await fetch(CHAT() + p, { method, headers, body: text !== undefined ? text : body !== undefined ? JSON.stringify(body) : undefined });
+  return { status: r.status, json: await r.json().catch(() => null) };
+}
+// Sends a review for tok's account straight through the backend's routes, as the New review flow does: the agreement, the start with 8
+// key frames (a stand-in 784x784 JPEG each), each frame, then send. Resolves to its id once the fake AI's draft is in (status drafted, as
+// the admin's view of it says).
+async function sendReview(tok) {
+  const { jpegB64 } = await import(path.join(ROOT, "chat", "test", "coach-fixtures.mjs"));
+  const b64 = jpegB64(), frames = [1, 2, 3, 4, 5, 6, 7, 8].map(n => ({ n, ms: 10000 + 250 * n, box: [100, 100, 360] }));
+  const must = async (what, r) => { r = await r; if (r.status !== 200) throw new Error(`${what} answered ${r.status} ${JSON.stringify(r.json)}`); return r.json; };
+  await must("POST /coach/agree", coachApi(tok, "/coach/agree", { method: "POST", body: { ver: "c1", adult: true } }));
+  const { id } = await must("POST /coach/reviews", coachApi(tok, "/coach/reviews", { method: "POST",
+    body: { lang: "en", move: "top_turn", move_other: "", level: "turning_well", board: "shortboard", stance: "regular", note: "", frames } }));
+  for (const f of frames) await must(`key frame ${f.n}`, coachApi(tok, `/coach/reviews/${id}/frames/${f.n}`, { method: "POST", text: b64 }));
+  await must("send", coachApi(tok, `/coach/reviews/${id}/send`, { method: "POST", body: {} }));
+  for (let i = 0; i < 60; i++) { const r = await coachApi(token("u-bryan"), `/coach/reviews/${id}`); if (r.json && r.json.status === "drafted") return id; await wait(500); }
+  throw new Error(`review ${id} wasn't drafted within 30 s`);
+}
+// The Coach tab's dot: there, and drawn.
+const tabDot = page => page.evaluate(t => { const b = document.querySelector(t); return b.classList.contains("co-dot") && getComputedStyle(b, "::after").content !== "none"; }, TAB);
 
 const STEPS = {
   // The fake AI answers as the backend expects (chat/src/coach-guide.js): for a request built by the backend's own buildRequest, in English
@@ -357,27 +384,160 @@ const STEPS = {
     if (![200, 502].includes(after.status) || (after.status === 200 && !/^room colo=.+\ncoach colo=.+\n$/.test(body)) || (after.status === 502 && !/"trace"/.test(body)))
       throw new Error(`after makeAdmin() /admin/where answered u-bryan ${after.status} ${body.slice(0, 200)}`);
   },
+  // ---- The Coach panel (AI coach spec, "The Coach tab"). Signed out it says what the coach does, shows the example review (Bryan's
+  // trial clip as a top-turn review: what went well, the main fix and the drill, with its four key frames and their times) and Sign in
+  // with LINE, in English and in 中文. The example's key frames are asked for only once the panel shows them, never with the page, and
+  // the coach asks the backend nothing.
+  async signedOut(s) {
+    const page = await s.open({ go: false }), coach = [], shown = [];
+    page.on("request", r => { const u = r.url(); if (u.startsWith(CHAT() + "/coach")) coach.push(u); if (u.includes("/coach-example/")) shown.push(u.slice(ORIGIN().length)); });
+    await s.go(page); await wait(500);
+    if (shown.length) throw new Error(`the page asked for ${shown.join(", ")} before the panel showed them`);
+    await page.tap(TAB); await panelOpen(page);
+    await until(page, "the example's four key frames", () => { const i = [...document.querySelectorAll(".coachpanel .co-example img")]; return i.length === 4 && i.every(x => x.complete && x.naturalWidth === 784); });
+    const want = {
+      en: { lead: "Your coach breaks your clip down frame by frame: what went well, one main fix and a drill.", signIn: "Sign in with LINE",
+        has: ["Low and ready going in", "Stay over your front foot", "Front-knee turns on the sand", "Key frame at 0:11.5", "Key frame at 0:11.7", "Key frame at 0:12.0", "Key frame at 0:12.2"] },
+      zh: { lead: "教練會逐格拆解你的影片：做得好的地方、一個主要修正，再加一個練習。", signIn: "使用LINE帳號登入",
+        has: ["壓低身體，準備好進轉向", "重心留在前腳", "沙灘上練前膝轉向", "0:11.5 的關鍵影格", "0:11.7 的關鍵影格", "0:12.0 的關鍵影格", "0:12.2 的關鍵影格"] },
+    };
+    for (const lang of ["en", "zh", "en"]) {
+      await page.evaluate(l => setLang(l), lang); await wait(100);
+      const got = await page.evaluate(() => { const q = sel => document.querySelector(".coachpanel " + sel);
+        return { lead: q(".co-lead") && q(".co-lead").textContent, signIn: q(".co-signin .co-line-w") && q(".co-signin .co-line-w").textContent, text: q(".co-example") && q(".co-example").textContent,
+          srcs: [...document.querySelectorAll(".coachpanel .co-example img")].map(i => new URL(i.src).pathname) }; });
+      const w = want[lang], missing = w.has.filter(t => !(got.text || "").includes(t));
+      if (got.lead !== w.lead || got.signIn !== w.signIn || missing.length) throw new Error(`in ${lang} the panel shows ${JSON.stringify({ lead: got.lead, signIn: got.signIn })}${missing.length ? `, without ${missing.join(", ")}` : ""}`);
+      if (!eq(got.srcs, ["/coach-example/1.jpg", "/coach-example/2.jpg", "/coach-example/3.jpg", "/coach-example/4.jpg"])) throw new Error(`in ${lang} the key frames are ${got.srcs.join(", ")}`);
+    }
+    if (coach.length) throw new Error(`signed out, the coach asked the backend for ${coach.join(", ")}`);
+  },
+  // The panel's Sign in with LINE (ruling P2) starts the coach's sign-in: through LINE and back, the known account lands on the Coach
+  // panel, signed in, and the panel shows the signed-in view.
+  async signInButton(s) {
+    s.surfer = await s.open({}); const page = s.surfer;
+    await page.tap(TAB); await panelOpen(page);
+    const back = await coachTrip(page, /\?chat#c=/, () => page.click(".coachpanel .co-signin"));
+    if (!/\?chat#c=/.test(back || "")) throw new Error(`the backend sent the browser back to ${back}`);
+    await landed(page);
+    const st = await signedInState(page);
+    if (!st.token || st.v !== null || st.room) throw new Error(`back from LINE: ${JSON.stringify(st)}`);
+    await until(page, "the signed-in panel", () => !!document.querySelector(".coachpanel .co-left") && !document.querySelector(".coachpanel .co-signin"));
+  },
+  // Signed in, before the first review: "2 of 2 reviews left in <this Taiwan month>", How to film open with the spec's list, and the coach
+  // agreement where New review goes: the spec's points, the privacy line word for word, WaveSlave and no person by name, and the 18+ tick.
+  // I agree without the tick says who the coach is for and sends nothing; with it, it sends {ver: "c1", adult: true} and New review shows.
+  // The backend keeps it: after a reload there's no agreement.
+  async agreement(s) {
+    const page = s.surfer, agrees = [];
+    page.on("request", r => { if (r.url() === CHAT() + "/coach/agree" && r.method() === "POST") agrees.push(r.postDataJSON()); });
+    const month = new Date(Date.now() + 8 * 3600e3).toLocaleString("en", { month: "long", timeZone: "UTC" });
+    const look = () => page.evaluate(() => { const q = sel => document.querySelector(".coachpanel " + sel), err = q(".co-agree .co-err");
+      return { left: q(".co-left") && q(".co-left").textContent, film: q(".co-film") && { open: q(".co-film").open, head: q(".co-film summary").textContent, n: q(".co-film").querySelectorAll("li").length },
+        agree: q(".co-agree") && q(".co-agree").textContent, err: !!err && !err.hidden && err.textContent, newReview: !!q(".co-new") && !!q(".co-new").getClientRects().length }; });
+    let st = await look();
+    if (st.left !== `2 of 2 reviews left in ${month}`) throw new Error(`the panel says ${JSON.stringify(st.left)}, want "2 of 2 reviews left in ${month}"`);
+    if (!st.film || !st.film.open || st.film.head !== "How to film" || st.film.n !== 7) throw new Error(`before the first review How to film is ${JSON.stringify(st.film)}, want open with the spec's 7 points`);
+    if (!st.agree || st.newReview) throw new Error(`before agreeing the panel has ${st.agree ? "the agreement" : "no agreement"} and ${st.newReview ? "New review" : "no New review"}`);
+    for (const t of ["Only key frames are sent. Your video never leaves your phone.", "Anthropic (USA)", "a person at WaveSlave", "Cloudflare", "I'm 18 or older, and the surfer in every clip I send is me."])
+      if (!st.agree.includes(t)) throw new Error(`the agreement doesn't say ${JSON.stringify(t)}: ${st.agree}`);
+    if (/bryan/i.test(st.agree)) throw new Error("the agreement names Bryan");
+    await page.click('.coachpanel [data-k="agree"]'); await wait(500); st = await look();
+    if (st.err !== "The coach is for surfers 18 and over, sending clips of themselves." || agrees.length || st.newReview) throw new Error(`I agree without the tick: ${JSON.stringify({ err: st.err, sent: agrees, newReview: st.newReview })}`);
+    await page.check('.coachpanel [data-k="adult"]'); st = await look();
+    if (st.err) throw new Error(`with the tick the panel still says ${JSON.stringify(st.err)}`);
+    await page.click('.coachpanel [data-k="agree"]');
+    await until(page, "New review", () => { const b = document.querySelector(".coachpanel .co-new"); return !!b && !!b.getClientRects().length && !document.querySelector(".coachpanel .co-agree"); });
+    if (!eq(agrees, [{ ver: "c1", adult: true }])) throw new Error(`I agree sent ${JSON.stringify(agrees)}`);
+    await page.reload({ waitUntil: "load" }); await page.tap(TAB); await panelOpen(page);
+    await until(page, "New review after a reload", () => !!document.querySelector(".coachpanel .co-new") && !document.querySelector(".coachpanel .co-agree"));
+  },
+  // How to film folds to its one line once there's a review, and the list shows each review with its move, date and status in the
+  // surfer's words. The review is u-bryan's (so the LINE account keeps both its reviews for the New review flow's checks), sent through
+  // the backend's routes and drafted by the fake AI: "Coach is reviewing".
+  async filmFolds(s) {
+    const t = token("u-bryan"); s.bryan = await s.open({ store: { "waveslave-chat-token": t } }); let page = s.bryan;
+    await page.tap(TAB); await panelOpen(page);
+    await until(page, "How to film open, with no reviews yet", () => { const d = document.querySelector(".coachpanel .co-film"); return !!d && d.open && !document.querySelector(".coachpanel .co-list"); });
+    s.review = await sendReview(t);
+    await page.reload({ waitUntil: "load" }); await page.tap(TAB); await panelOpen(page);
+    await until(page, "the review in the list", () => !!document.querySelector(".coachpanel .co-list li"));
+    const today = new Date(Date.now() + 8 * 3600e3), date = `${today.getUTCDate()} ${today.toLocaleString("en", { month: "long", timeZone: "UTC" })}`;
+    const st = await page.evaluate(() => { const d = document.querySelector(".coachpanel .co-film");
+      return { open: d.open, line: d.querySelector("summary").textContent, rows: [...document.querySelectorAll(".coachpanel .co-list li")].map(li => [...li.querySelectorAll(".co-mv, .co-date, .co-st")].map(e => e.textContent)) }; });
+    if (st.open || st.line !== "How to film") throw new Error(`with a review How to film is ${st.open ? "open" : "folded"}, its line ${JSON.stringify(st.line)}`);
+    if (!eq(st.rows, [["Top turn", date, "Coach is reviewing"]])) throw new Error(`the list shows ${JSON.stringify(st.rows)}, want [["Top turn", "${date}", "Coach is reviewing"]]`);
+  },
+  // The dot: once Bryan approves the review it's ready, and the next page load's GET /coach/me puts a dot on the Coach tab with the panel
+  // shut. The list says "Ready"; opening the review clears the dot, for good (waveslave-coach-seen keeps when it was published).
+  async dot(s) {
+    const t = token("u-bryan"), page = s.bryan, asks = [];
+    const ok = await coachApi(t, `/admin/coach/drafts/${s.review}`, { method: "POST", body: { action: "approve" } });
+    if (ok.status !== 200) throw new Error(`approving answered ${ok.status} ${JSON.stringify(ok.json)}`);
+    const me = await coachApi(t, "/coach/me"), published = me.json && me.json.reviews[0] && me.json.reviews[0].published;
+    page.on("request", r => { if (r.url() === CHAT() + "/coach/me" && r.method() === "GET") asks.push(r.url()); });
+    await page.reload({ waitUntil: "load" });
+    await until(page, "the dot on the Coach tab", t => { const b = document.querySelector(t); return b.classList.contains("co-dot") && getComputedStyle(b, "::after").content !== "none"; }, TAB);
+    if (asks.length !== 1 || await page.evaluate(() => document.documentElement.classList.contains("coach-open"))) throw new Error(`the page asked GET /coach/me ${asks.length} times, the panel ${await page.evaluate(() => document.documentElement.classList.contains("coach-open")) ? "open" : "shut"}`);
+    await page.tap(TAB); await panelOpen(page);
+    await until(page, "the review ready in the list", () => { const st = document.querySelector(".coachpanel .co-list .co-st"); return !!st && st.textContent === "Ready"; });
+    await page.click(".coachpanel .co-list button");
+    await page.tap(".coachpanel .co-x"); await until(page, "the panel to shut", () => !document.documentElement.classList.contains("coach-open"));
+    const seen = await page.evaluate(() => localStorage.getItem("waveslave-coach-seen"));
+    if (await tabDot(page) || seen !== String(published)) throw new Error(`after opening the review the dot is ${await tabDot(page) ? "still there" : "gone"} and waveslave-coach-seen is ${seen}, want ${published}`);
+    await page.reload({ waitUntil: "load" }); for (let i = 0; i < 100 && asks.length < 2; i++) await wait(100); await wait(500);
+    if (asks.length !== 2 || await tabDot(page)) throw new Error(`after a reload (${asks.length - 1} asks) the dot is ${await tabDot(page) ? "back" : "gone"}`);
+  },
+  // Bryan's email link, ?coach=drafts (ruling R18), out of developer mode: the address is tidied at once to the spot, the World PIN is
+  // asked for before anything, and once it's in, the panel opens at Drafts with the focus on it, which only the admin has (ruling P40).
+  // The surfer following the same link gets the panel without Drafts.
+  async draftsLink(s) {
+    const surfer = await s.surfer.evaluate(() => CHAT.token());
+    for (const [who, tok, admin] of [["u-bryan", token("u-bryan"), true], ["the surfer", surfer, false]]) {
+      const page = await s.open({ pub: false, pin: true, unlocked: false, store: { "waveslave-chat-token": tok }, at: "/?coach=drafts" }), asked = [];
+      page.on("request", r => { if (r.url().startsWith(CHAT() + "/coach")) asked.push(r.url()); });
+      await wait(500);
+      const before = await page.evaluate(() => ({ href: location.href, cur: CUR, pin: !!window.__pinAsked, open: document.documentElement.classList.contains("coach-open") }));
+      if (before.href !== `${ORIGIN()}/#${before.cur}` || !before.pin || before.open || asked.length) throw new Error(`${who}, before the PIN: ${JSON.stringify(before)}, the coach asked ${JSON.stringify(asked)}`);
+      await page.evaluate(() => { sessionStorage.setItem("waveslave-unlock", window.__lockHash); window.__pinAsked.done(); });
+      await panelOpen(page);
+      await until(page, `${who}'s panel, signed in`, () => !!document.querySelector(".coachpanel .co-left"));
+      const st = await page.evaluate(() => { const h = document.querySelector(".coachpanel .co-drafts h3"), b = document.querySelector(".coachpanel .co-body"), r = h && h.getBoundingClientRect(), br = b.getBoundingClientRect();
+        return { text: h && h.textContent, focus: !!h && document.activeElement === h, seen: !!r && r.top >= br.top && r.top < br.bottom }; });
+      if (admin && (st.text !== "Drafts" || !st.focus || !st.seen)) throw new Error(`the admin's panel at Drafts: ${JSON.stringify(st)}`);
+      if (!admin && st.text) throw new Error(`the surfer's panel has ${JSON.stringify(st.text)}`);
+    }
+  },
 };
 
 (async () => {
   let browser, bad = false, ctxs = [], errs = [];
   const s = {
     // A fresh context: the page, the backend, the fake LINE and the fake AI load, everything else is cut off. go: false leaves it on a
-    // blank page.
-    async open({ spot = "jinshan", go = true }) {
+    // blank page (s.go(page) opens it there). pub: false leaves the chat and the coach to developer mode, which is off; unlocked: false
+    // leaves the World PIN out of this visit, and pin: true puts a stand-in for its box (web/head.html's wsPin) that only notes it was
+    // asked (window.__pinAsked = {done, cancel}), as tests/chat/shell.test.js does; store is put in localStorage on every load; at is the
+    // address to open, by default /#<spot>.
+    async open({ spot = "jinshan", go = true, pub = true, unlocked = true, pin = false, store = {}, at = null }) {
       const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block", acceptDownloads: true });
       ctxs.push(ctx);
       await ctx.route("**/*", r => { const u = r.request().url(); return [ORIGIN(), CHAT(), line.url, ai.url].some(o => u.startsWith(o + "/")) ? r.continue() : r.abort(); });
       await ctx.addInitScript(([o, lock]) => {
         try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", "fc"); localStorage.setItem("waveslave-lang", "en"); localStorage.setItem("waveslave-world", "0");
-          if (lock) sessionStorage.setItem("waveslave-unlock", lock); } catch (e) {}
-        window.__chatUrl = o.url; window.__chatContact = o.contact; window.__chatPublic = true; window.__coachPublic = true; }, [{ url: CHAT(), contact: CONTACT }, LOCK]);
+          for (const k in o.store) localStorage.setItem(k, o.store[k]); if (lock && o.unlocked) sessionStorage.setItem("waveslave-unlock", lock); } catch (e) {}
+        window.__chatUrl = o.url; window.__chatContact = o.contact; if (o.pub) { window.__chatPublic = true; window.__coachPublic = true; }
+        if (o.pin) { const stub = (done, cancel) => { window.__pinAsked = { done, cancel }; };
+          Object.defineProperty(window, "wsPin", { configurable: true, get: () => stub, set: () => {} }); } },
+        [{ url: CHAT(), contact: CONTACT, pub, unlocked, pin, store }, LOCK]);
       const page = await ctx.newPage(); page.on("pageerror", e => errs.push(String(e)));
-      if (go) {
-        await page.goto(`${ORIGIN()}/#${spot}`, { waitUntil: "load" });
-        await page.waitForFunction(() => { const f = document.querySelector(".chatfab"); return !!f && getComputedStyle(f).display !== "none"; });
-      }
+      page.at = at || `/#${spot}`; page.pub = pub;
+      if (go) await s.go(page);
       return page;
+    },
+    // Opens the page's address (page.at), and waits for the CHAT button when the chat is on for everyone.
+    async go(page) {
+      await page.goto(ORIGIN() + page.at, { waitUntil: "load" });
+      if (page.pub) await page.waitForFunction(() => { const f = document.querySelector(".chatfab"); return !!f && getComputedStyle(f).display !== "none"; });
     },
   };
   let stopped = null;

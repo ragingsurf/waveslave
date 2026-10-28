@@ -188,7 +188,13 @@ describe("CORS and origin checks", () => {
   });
 
   it("answers OPTIONS the same way on every route that takes CORS", async () => {
-    for (const path of ["/auth/redeem", "/auth/signup", "/me", "/me/sessions", "/me/sessions/12", "/me/signout", "/me/export", "/admin/where"]) {
+    for (const path of [
+      "/auth/redeem", "/auth/signup", "/me", "/me/sessions", "/me/sessions/12", "/me/signout", "/me/export", "/admin/where",
+      "/coach/me", "/coach/agree", "/coach/reviews", "/coach/reviews/Ab-_0123456789xyzXYZab",
+      "/coach/reviews/Ab-_0123456789xyzXYZab/frames/12", "/coach/reviews/Ab-_0123456789xyzXYZab/send",
+      "/coach/reviews/Ab-_0123456789xyzXYZab/report", "/admin/coach/drafts", "/admin/coach/drafts/Ab-_0123456789xyzXYZab",
+      "/admin/coach/settings",
+    ]) {
       expect((await preflight(path, ORIGIN)).status, path).toBe(204);
       expect((await preflight(path, EVIL)).status, path).toBe(403);
     }
@@ -343,17 +349,28 @@ describe("Cache-Control: no-store", () => {
     ["GET", "/me/export", ORIGIN],
     ["DELETE", "/me", ORIGIN],
     ["GET", "/admin/where", null],
+    ["GET", "/coach/me", ORIGIN],
+    ["POST", "/coach/reviews", ORIGIN],
+    ["POST", "/coach/reviews/Ab-_0123456789xyzXYZab/frames/1", null],
+    ["DELETE", "/coach/reviews/Ab-_0123456789xyzXYZab", ORIGIN],
+    ["GET", "/admin/coach/drafts", ORIGIN],
     // The other answers the Worker itself gives.
     ["OPTIONS", "/me/sessions", ORIGIN],
     ["OPTIONS", "/me/sessions", EVIL],
     ["GET", "/me/sessions", EVIL],
     ["GET", "/auth/redeem", ORIGIN],
     ["PUT", "/me/sessions", ORIGIN],
-    // Paths that are under /auth and /me but are no route.
+    ["OPTIONS", "/coach/me", ORIGIN],
+    ["PUT", "/coach/me", ORIGIN],
+    ["GET", "/coach/me", EVIL],
+    // Paths that are under /auth, /me, /admin and /coach but are no route.
     ["GET", "/auth/nothing", null],
     ["POST", "/auth/nothing", ORIGIN],
     ["GET", "/me/nothing", ORIGIN],
     ["GET", "/me", ORIGIN],
+    ["GET", "/coach", null],
+    ["GET", "/coach/reviews/short", ORIGIN],
+    ["GET", "/admin/coach/nothing", ORIGIN],
   ];
   const init = (method, origin) => ({
     method,
@@ -547,6 +564,11 @@ describe("routing to the room", () => {
       ["POST", "/me/export", "GET, OPTIONS"],
       ["GET", "/me/signout", "POST, OPTIONS"],
       ["POST", "/admin/where", "GET, OPTIONS"],
+      ["PUT", "/coach/me", "GET, OPTIONS"],
+      ["GET", "/coach/reviews", "POST, OPTIONS"],
+      ["POST", "/coach/reviews/Ab-_0123456789xyzXYZab", "GET, DELETE, OPTIONS"],
+      ["DELETE", "/coach/reviews/Ab-_0123456789xyzXYZab/frames/3", "GET, POST, OPTIONS"],
+      ["GET", "/admin/coach/settings", "POST, OPTIONS"],
     ];
     for (const [method, path, allow] of cases) {
       const res = await call(fake, path, { method, headers: { Origin: ORIGIN } });
@@ -561,7 +583,10 @@ describe("routing to the room", () => {
 
 describe("an unknown path", () => {
   it("answers 404 with JSON and no CORS headers", async () => {
-    for (const path of ["/", "/anything", "/reports/", "/Reports?spot=jinshan", "/me/sessions/1/2", "/ws/x", "/r/reports?spot=jinshan", "/auth/line"]) {
+    for (const path of [
+      "/", "/anything", "/reports/", "/Reports?spot=jinshan", "/me/sessions/1/2", "/ws/x", "/r/reports?spot=jinshan", "/auth/line",
+      "/coach", "/coach/reviews/short", "/coach/reviews/Ab-_0123456789xyzXYZab/frames/13", "/admin/coach/drafts/short",
+    ]) {
       const res = await SELF.fetch(BASE + path);
       expect(res.status, path).toBe(404);
       expect(await res.json(), path).toEqual({ error: "not found" });

@@ -1,0 +1,356 @@
+// The coach's maths block (COACHM) in web/coach.js, loaded on its own: it is plain functions with no page state.
+// Run: node --test tests/coach/coachmath.test.js
+const test = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path"), vm = require("node:vm");
+
+const FILE = path.join(__dirname, "..", "..", "web", "coach.js");
+function load() {
+  const src = fs.readFileSync(FILE, "utf8");
+  const a = src.indexOf("// ---- Coach maths"), b = src.indexOf("// ---- end coach maths");
+  assert.ok(a >= 0 && b > a, "web/coach.js has no Coach maths block (// ---- Coach maths ... // ---- end coach maths)");
+  // Strict, as it runs inside coach.js.
+  return new Function('"use strict";\n' + src.slice(a, b) + "\nreturn COACHM;")();
+}
+const M = load();
+const near = (a, b, tol = 1e-9) => assert.ok(Math.abs(a - b) <= tol, `${a} is not ${b}`);
+const STEPS = [-1.5, -1.25, -1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1, 1.25];
+
+// mulberry32: the same noise on every run.
+function rng(seed) {
+  return () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+// Twelve key frames of a W x H clip as the page gets them for tracking: each drawn at quarter size (every quarter pixel the mean of the
+// 4 x 4 displayed pixels under it), then through grey(). Every frame has its own noise (0-255 grey); a white square of side S sits over it
+// with its top-left at at(i), or is gone where at(i) is null. Where under(i, x, y) gives a grey, that is drawn in place of the noise (the
+// square still on top). W and H are multiples of 4.
+function clip({W, H, S, at, n = 12, seed = 1, under = null}) {
+  const r = rng(seed), w = W / 4, h = H / 4, out = [];
+  for (let i = 0; i < n; i++) {
+    const p = at(i), rgba = new Uint8ClampedArray(w * h * 4), sum = new Float64Array(w * h);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const u = under && under(i, x, y);
+      sum[(y >> 2) * w + (x >> 2)] += p && x >= p.x && x < p.x + S && y >= p.y && y < p.y + S ? 255 : u != null ? u : Math.floor(r() * 256); }
+    for (let k = 0; k < w * h; k++) { rgba[4 * k] = rgba[4 * k + 1] = rgba[4 * k + 2] = sum[k] / 16; rgba[4 * k + 3] = 255; }
+    out.push(M.grey(rgba, w, h));
+  }
+  return out;
+}
+// Twelve key frames where the scenery outweighs the surfer in his box, as in real clips, built straight at quarter size (w x h, as grey()
+// gives them): sky down to a horizon, then a coherent sea (smooth random value noise in 12 px cells, 70-130 grey) that swells down by
+// `swell` px a frame and slides left by `pan` px a frame (the camera following him), a little sensor noise, and a dark surfer of 10 x 18
+// px with his top-left at at(i).
+function scene({w = 270, h = 480, horizon = 300, pan = 0, swell = 0, at, seed = 1}) {
+  const r = rng(seed), cell = 12, W = w + 11 * pan + 2 * cell, H = h + 11 * swell + 2 * cell, gw = Math.ceil(W / cell) + 2, gh = Math.ceil(H / cell) + 2;
+  const g = Float32Array.from({length: gw * gh}, () => r()), sea = new Float32Array(W * H), out = [];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const fx = x / cell, fy = y / cell, x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx - x0, ty = fy - y0, k = y0 * gw + x0;
+    sea[y * W + x] = 70 + 60 * ((g[k] * (1 - tx) + g[k + 1] * tx) * (1 - ty) + (g[k + gw] * (1 - tx) + g[k + gw + 1] * tx) * ty); }
+  for (let i = 0; i < 12; i++) { const px = new Float32Array(w * h), s = at(i), ox = pan * i, oy = 11 * swell - swell * i;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++)
+      px[y * w + x] = (x >= s.x && x < s.x + 10 && y >= s.y && y < s.y + 18 ? 25 : y < horizon ? 200 - 0.05 * y : sea[(y + oy) * W + x + ox]) + 4 * (r() - 0.5);
+    out.push({w, h, px}); }
+  return out;
+}
+// A scene at 8 and 12 px a frame (move(v) gives its pan and at), with the sea still and swelling, over 10 seeds, tapped on the 8th frame:
+// across those runs, the frames (not the tapped ones) kept with him inside the box, lost, and kept with him outside it.
+function scenes(move) {
+  const t = {on: 0, lost: 0, wrong: 0, n: 0};
+  for (const v of [8, 12]) for (const swell of [0, 3]) for (let seed = 1; seed <= 10; seed++) {
+    const o = move(v), from = 7, s = o.at(from), box = M.startBox(4 * s.x + 20, 4 * s.y + 36, 1080, 1920), got = M.track(scene({...o, swell, seed}), from, box);
+    got.forEach((b, i) => { if (i === from) return; const c = o.at(i), cx = 4 * c.x + 20, cy = 4 * c.y + 36;
+      t.n++; t[b.lost ? "lost" : cx >= b.x && cx < b.x + b.side && cy >= b.y && cy < b.y + b.side ? "on" : "wrong"]++; });
+  }
+  return t;
+}
+// Every frame's box is the tapped box moved as the square moved, to within 2 px, with the same side and a good score.
+function followed(got, want, side) {
+  assert.equal(got.length, want.length);
+  got.forEach((b, i) => {
+    assert.ok(Math.abs(b.x - want[i].x) <= 2 && Math.abs(b.y - want[i].y) <= 2, `frame ${i}: box at ${b.x},${b.y}, square's at ${want[i].x},${want[i].y}`);
+    assert.ok(Number.isInteger(b.x) && Number.isInteger(b.y), `frame ${i}: box at ${b.x},${b.y} is not whole pixels`);
+    assert.equal(b.side, side, `frame ${i}: side`);
+    assert.ok(b.score >= 0.8, `frame ${i}: score ${b.score}`);
+    assert.equal(b.lost, false, `frame ${i}: lost`);
+  });
+}
+
+// A bare page: no document and none of the page's state, only console and window. coachUrl sets window.__chatUrl.
+function runBare(coachUrl) {
+  const logged = [], note = (...a) => logged.push(a);
+  const page = { console: { error: note, warn: note, log: note, info: note } }; page.window = page; page.self = page; page.globalThis = page;
+  if (coachUrl !== undefined) page.__chatUrl = coachUrl;
+  const ctx = vm.createContext(page), before = Object.getOwnPropertyNames(ctx);
+  vm.runInContext(fs.readFileSync(FILE, "utf8"), ctx, { filename: "coach.js" });
+  return { ctx, logged, added: Object.getOwnPropertyNames(ctx).filter(k => !before.includes(k)).sort() };
+}
+
+test("coach.js runs on a page with no coach markup, logs nothing and adds only window.COACH, whose hooks do nothing there", () => {
+  const { ctx, logged, added } = runBare();
+  assert.deepEqual(added, ["COACH"]);
+  assert.deepEqual(Object.keys(ctx.COACH).sort(), ["dev", "open", "relang", "spot"]);
+  for (const k of ["dev", "relang", "spot", "open"]) assert.equal(ctx.COACH[k]("donghe"), undefined);
+  assert.deepEqual(logged, []);
+});
+
+test("coach.js with the backend address empty adds nothing at all", () => {
+  const { logged, added } = runBare("");
+  assert.deepEqual(added, []);
+  assert.deepEqual(logged, []);
+});
+
+test("COACHM has exactly the maths the page uses", () => {
+  assert.deepEqual(Object.keys(M).sort(), ["clampBox", "fmtTime", "grey", "keyTimes", "nextQuality", "resize", "startBox", "track"]);
+});
+
+test("keyTimes: 12 key frames every 0.25 s from 1.5 s before Here to 1.25 s after", () => {
+  assert.deepEqual(M.keyTimes(5, 20), [3.5, 3.75, 4, 4.25, 4.5, 4.75, 5, 5.25, 5.5, 5.75, 6, 6.25]);
+});
+
+test("keyTimes: moved to start at 0 near the clip's start", () => {
+  assert.deepEqual(M.keyTimes(0.4, 20), [0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75]);
+  assert.deepEqual(M.keyTimes(0, 20), M.keyTimes(0.4, 20));
+  assert.equal(M.keyTimes(1.5, 20)[0], 0);
+});
+
+test("keyTimes: moved to end 0.05 s before the clip's end", () => {
+  assert.deepEqual(M.keyTimes(12, 13.023), [10.223, 10.473, 10.723, 10.973, 11.223, 11.473, 11.723, 11.973, 12.223, 12.473, 12.723, 12.973]);
+  assert.deepEqual(M.keyTimes(30, 20), [17.2, 17.45, 17.7, 17.95, 18.2, 18.45, 18.7, 18.95, 19.2, 19.45, 19.7, 19.95]);
+});
+
+test("keyTimes: always 12 distinct times 0.25 s apart, inside the clip", () => {
+  for (const [here, dur] of [[5, 20], [0.4, 20], [12, 13.023], [0, 3], [3, 3], [1.6, 3], [7.3333, 9.1], [119.99, 120], [60.123, 120]]) {
+    const t = M.keyTimes(here, dur);
+    assert.equal(t.length, 12, `${here}, ${dur}`);
+    assert.equal(new Set(t).size, 12, `${here}, ${dur}: not distinct`);
+    assert.ok(t[0] >= 0 && t[11] <= dur - 0.05 + 1e-9, `${here}, ${dur}: ${t[0]} … ${t[11]}`);
+    t.forEach((s, i) => i && near(s - t[i - 1], 0.25, 1e-6));
+    // Unmoved when there's room, to the ms: Here is the 7th key frame.
+    if (here >= 1.5 && here + 1.25 <= dur - 0.05) t.forEach((s, i) => near(s, here + STEPS[i], 5e-4));
+    assert.ok(t.every(s => Number.isInteger(Math.round(s * 1e6) / 1e3)), `${here}, ${dur}: not whole ms`);
+  }
+});
+
+test("startBox: a third of the short side, centred on the tap", () => {
+  assert.deepEqual(M.startBox(540, 960, 1080, 1920), {x: 360, y: 780, side: 360});
+  assert.deepEqual(M.startBox(320, 180, 640, 360), {x: 260, y: 120, side: 120});
+  assert.deepEqual(M.startBox(100.6, 50.2, 640, 360), {x: 41, y: 0, side: 120});
+});
+
+test("startBox: kept inside the frame near its edges", () => {
+  assert.deepEqual(M.startBox(10, 10, 1080, 1920), {x: 0, y: 0, side: 360});
+  assert.deepEqual(M.startBox(1075, 1915, 1080, 1920), {x: 720, y: 1560, side: 360});
+  assert.deepEqual(M.startBox(-30, 400, 640, 360), {x: 0, y: 240, side: 120});
+});
+
+test("resize: x 1.2 bigger or smaller, about the same centre", () => {
+  const b = M.startBox(540, 960, 1080, 1920);
+  assert.deepEqual(M.resize(b, 1, 1080, 1920), {x: 324, y: 744, side: 432});
+  assert.deepEqual(M.resize(b, -1, 1080, 1920), {x: 390, y: 810, side: 300});
+  assert.deepEqual(b, {x: 360, y: 780, side: 360}, "the box passed in is left alone");
+});
+
+test("resize: stops at the short side and at an eighth of it", () => {
+  let b = M.startBox(540, 960, 1080, 1920), sides = [];
+  for (let i = 0; i < 20; i++) { b = M.resize(b, 1, 1080, 1920); sides.push(b.side); }
+  assert.equal(b.side, 1080);
+  assert.ok(sides.every(s => s <= 1080 && Number.isInteger(s)));
+  assert.ok(b.x === 0 && b.y >= 0 && b.y + b.side <= 1920, `box at ${b.x},${b.y}`);
+  assert.deepEqual(M.resize(b, 1, 1080, 1920), b);
+  for (let i = 0; i < 40; i++) b = M.resize(b, -1, 1080, 1920);
+  assert.equal(b.side, 135);
+  assert.deepEqual(M.resize(b, -1, 1080, 1920), b);
+  // An eighth that isn't whole: 766 / 8 is 95.75, so the smallest whole side is 96.
+  b = M.startBox(683, 383, 1366, 766);
+  for (let i = 0; i < 40; i++) b = M.resize(b, -1, 1366, 766);
+  assert.equal(b.side, 96);
+});
+
+test("resize: a box grown at the edge stays inside", () => {
+  let b = M.startBox(1075, 1915, 1080, 1920);
+  b = M.resize(b, 1, 1080, 1920);
+  assert.deepEqual(b, {x: 648, y: 1488, side: 432});
+});
+
+test("clampBox: moves a box that's outside back in, side kept", () => {
+  assert.deepEqual(M.clampBox({x: -50, y: 2000, side: 360}, 1080, 1920), {x: 0, y: 1560, side: 360});
+  assert.deepEqual(M.clampBox({x: 900, y: -1, side: 360}, 1080, 1920), {x: 720, y: 0, side: 360});
+  assert.deepEqual(M.clampBox({x: 100, y: 200, side: 360}, 1080, 1920), {x: 100, y: 200, side: 360});
+  assert.deepEqual(M.clampBox({x: 700, y: 300, side: 120}, 640, 360), {x: 520, y: 240, side: 120});
+});
+
+test("nextQuality: 0.1 lower while over 100 KB, down to 0.25", () => {
+  assert.equal(M.nextQuality(), 0.85, "the first try");
+  assert.equal(M.nextQuality(0.85, 150_000), 0.75);
+  assert.equal(M.nextQuality(0.25, 150_000), null);
+  assert.equal(M.nextQuality(0.85, 90_000), null);
+  assert.equal(M.nextQuality(0.85, 102_400), null);
+  assert.equal(M.nextQuality(0.85, 102_401), 0.75);
+  const tries = [];
+  for (let q = M.nextQuality(); q != null; q = M.nextQuality(q, 500_000)) tries.push(q);
+  assert.deepEqual(tries, [0.85, 0.75, 0.65, 0.55, 0.45, 0.35, 0.25]);
+});
+
+test("grey: luminance of each pixel, no resizing", () => {
+  const rgba = new Uint8ClampedArray([255, 255, 255, 255, 0, 0, 0, 255, 255, 0, 0, 255, 0, 255, 0, 0, 0, 0, 255, 128, 128, 128, 128, 255]);
+  const g = M.grey(rgba, 3, 2);
+  assert.equal(g.w, 3); assert.equal(g.h, 2);
+  assert.ok(g.px instanceof Float32Array);
+  assert.equal(g.px.length, 6);
+  [255, 0, 76.245, 149.685, 29.07, 128].forEach((v, i) => near(g.px[i], v, 1e-3));
+});
+
+// A known limit, not tested: bright whitewater beside his path, inside his box, can take the box and still count as found; the check
+// screen is the net for that.
+test("track: follows the surfer frame by frame from the tapped one, each way", () => {
+  const W = 640, H = 360, S = 60, at = i => ({x: 41 + 24 * i, y: 151});
+  const greys = clip({W, H, S, at, seed: 7});
+  for (const from of [5, 0, 11]) {
+    const p = at(from), box = M.startBox(p.x + S / 2, p.y + S / 2, W, H), got = M.track(greys, from, box);
+    assert.deepEqual(got[from], {...box, score: 1, lost: false}, "the tapped frame keeps the tap's box");
+    followed(got, greys.map((g, i) => ({x: box.x + 24 * (i - from), y: box.y})), box.side);
+  }
+});
+
+test("track: a portrait phone clip, the surfer moving down", () => {
+  const W = 1080, H = 1920, S = 180, at = i => ({x: 451, y: 601 + 24 * i});
+  const greys = clip({W, H, S, at, seed: 11}), from = 3, p = at(from), box = M.startBox(p.x + S / 2, p.y + S / 2, W, H);
+  assert.equal(box.side, 360);
+  const t0 = performance.now(), got = M.track(greys, from, box), ms = performance.now() - t0;
+  followed(got, greys.map((g, i) => ({x: box.x, y: box.y + 24 * (i - from)})), 360);
+  // Quick enough for a phone: a full search of every place in the window takes seconds.
+  assert.ok(ms < 1000, `track took ${ms.toFixed(0)} ms`);
+});
+
+test("track: marks the frames where the surfer is gone lost, keeping the last place", () => {
+  const W = 640, H = 360, S = 60, from = 5, pos = i => ({x: 41 + 24 * i, y: 151}), at = i => i === 0 || i >= 10 ? null : pos(i);
+  const greys = clip({W, H, S, at, seed: 3}), p = pos(from), box = M.startBox(p.x + S / 2, p.y + S / 2, W, H);
+  const got = M.track(greys, from, box), want = greys.map((g, i) => ({x: box.x + 24 * (i - from), y: box.y}));
+  followed(got.slice(1, 10), want.slice(1, 10), box.side);
+  for (const [i, last] of [[0, 1], [10, 9], [11, 9]]) {
+    assert.equal(got[i].lost, true, `frame ${i} is lost (score ${got[i].score})`);
+    assert.ok(got[i].score >= 0 && got[i].score <= 1, `frame ${i}: score ${got[i].score}`);
+    assert.deepEqual({x: got[i].x, y: got[i].y, side: got[i].side}, {x: got[last].x, y: got[last].y, side: got[last].side}, `frame ${i} keeps frame ${last}'s place`);
+  }
+});
+
+test("track: a surfer running out of the frame leaves every box inside it", () => {
+  // The tap's box starts against the top edge; the square leaves the right edge after frame 9.
+  const W = 640, H = 360, S = 60, at = i => ({x: 400 + 24 * i, y: 20 + 12 * i});
+  const greys = clip({W, H, S, at, seed: 5}), p = at(0), box = M.startBox(p.x + S / 2, p.y + S / 2, W, H);
+  assert.deepEqual(box, {x: 370, y: 0, side: 120});
+  const got = M.track(greys, 0, box);
+  assert.equal(got.length, 12);
+  got.forEach((b, i) => assert.ok(b.x >= 0 && b.y >= 0 && b.x + b.side <= W && b.y + b.side <= H && b.side === 120, `frame ${i}: ${JSON.stringify(b)}`));
+  followed(got.slice(0, 7), got.slice(0, 7).map((b, i) => ({x: 370 + 24 * i, y: 12 * i})), 120);
+  assert.ok(got[10].lost && got[11].lost, "gone from the frame");
+});
+
+test("track: no slow drift at speeds that aren't a multiple of 4 px a frame", () => {
+  // 25-27 px a frame is 6.25-6.75 quarter pixels: following only the last patch, the rounding adds up over 11 frames. It's
+  // placed to the whole quarter pixel, so it may end up to 12 px (3 quarter pixels) off, no more.
+  const W = 640, H = 360, S = 60;
+  for (const v of [25, 26, 27]) for (const from of [0, 11]) {
+    const at = i => ({x: 61 + v * i, y: 151}), greys = clip({W, H, S, at, seed: 9}), p = at(from);
+    const box = M.startBox(p.x + S / 2, p.y + S / 2, W, H), got = M.track(greys, from, box), end = 11 - from;
+    got.forEach((b, i) => assert.equal(b.lost, false, `${v} px a frame from ${from}: frame ${i} lost`));
+    const off = got[end].x - (box.x + v * (end - from));
+    assert.ok(Math.abs(off) <= 12 && Math.abs(got[end].y - box.y) <= 12, `${v} px a frame from ${from}: frame ${end} is ${off} px off`);
+  }
+});
+
+test("track: a surfer half past the frame's edge is still found, the box clamped against that edge", () => {
+  // The square slides right (or left) until, in the last frame, half of it is past the edge; the box can't follow it out, so it stays
+  // clamped against the edge, but the frames are not lost.
+  const W = 640, H = 360, S = 60;
+  for (const [x0, v] of [[346, 24], [234, -24]]) for (const seed of [1, 2]) {
+    const at = i => ({x: x0 + v * i, y: 150}), greys = clip({W, H, S, at, seed}), p = at(0), box = M.startBox(p.x + S / 2, p.y + S / 2, W, H);
+    assert.equal(at(11).x + S / 2, v > 0 ? W : 0, "half the square is past the edge in the last frame");
+    const got = M.track(greys, 0, box);
+    got.forEach((b, i) => {
+      const x = Math.max(0, Math.min(box.x + v * i, W - box.side)), what = `${v > 0 ? "right" : "left"}, seed ${seed}, frame ${i}`;
+      assert.equal(b.lost, false, `${what}: lost (score ${b.score.toFixed(2)})`);
+      assert.ok(Math.abs(b.x - x) <= 2 && Math.abs(b.y - box.y) <= 2, `${what}: box at ${b.x},${b.y}, want ${x},${box.y}`);
+      assert.ok(b.x >= 0 && b.x + b.side <= W && b.side === 120, `${what}: ${JSON.stringify(b)}`);
+    });
+  }
+});
+
+test("track: a surfer just over half past the left or top edge for a frame is found again as he comes back", () => {
+  // Portrait, boxes of 180, 360 and 720 (half the coarsest patch past the edge rounds to a pixel more than half): the square, half the
+  // box's side, runs in to the edge, its centre a twentieth of the box past it in frame 6, then back out. No frame may be lost, and
+  // from frame 7 the box keeps within an eighth of its side of the box centred on him.
+  const W = 1080, H = 1920;
+  for (const side of [180, 360, 720]) for (const edge of ["left", "top"]) {
+    const S = side / 2, c = [1, 0.8, 0.6, 0.45, 0.3, 0.15, -0.05, 0.15, 0.3, 0.45, 0.6, 0.8].map(u => Math.round(u * side) - S / 2);
+    const at = edge === "left" ? i => ({x: c[i], y: H / 2 - S / 2}) : i => ({x: W / 2 - S / 2, y: c[i]}), p = at(0);
+    const box = M.clampBox({x: p.x + S / 2 - side / 2, y: p.y + S / 2 - side / 2, side}, W, H), got = M.track(clip({W, H, S, at, seed: 3}), 0, box);
+    got.forEach((b, i) => {
+      const q = at(i), want = M.clampBox({x: q.x + S / 2 - side / 2, y: q.y + S / 2 - side / 2, side}, W, H), what = `${edge}, box ${side}, frame ${i}`;
+      assert.equal(b.lost, false, `${what}: lost (score ${b.score.toFixed(2)})`);
+      if (i >= 7) assert.ok(Math.abs(b.x - want.x) <= side / 8 && Math.abs(b.y - want.y) <= side / 8, `${what}: box at ${b.x},${b.y}, want ${want.x},${want.y}`);
+    });
+  }
+});
+
+test("track: a frame's score is its likeness without the edge's handicap, and at most 1", () => {
+  // Frame 1 is frame 0 again; frame 2 is frame 0 moved 40 quarter pixels right, so the box tapped at the right edge is 40 of its 90
+  // past it, the rest an exact match.
+  const w = 270, h = 480, d = 40, r = rng(5), a = Float32Array.from({length: w * h}, () => 255 * r()), b = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) b[y * w + x] = x >= d ? a[y * w + x - d] : 255 * r();
+  const greys = [a, a, b].map(px => ({w, h, px})), got = M.track(greys, 0, {x: 720, y: 600, side: 360});
+  for (const i of [1, 2]) assert.ok(!got[i].lost && got[i].score >= 0.999 && got[i].score <= 1, `frame ${i}: ${JSON.stringify(got[i])}`);
+  assert.deepEqual([got[2].x, got[2].y], [720, 600]);
+});
+
+test("track: after a frame it lost, it finds the surfer again round the last good place", () => {
+  const W = 640, H = 360, S = 60, from = 5, pos = i => ({x: 41 + 24 * i, y: 151}), at = i => i === 8 || i === 2 ? null : pos(i);
+  const greys = clip({W, H, S, at, seed: 4}), p = pos(from), box = M.startBox(p.x + S / 2, p.y + S / 2, W, H), got = M.track(greys, from, box);
+  const want = greys.map((g, i) => ({x: box.x + 24 * (i - from), y: box.y}));
+  for (const [i, last] of [[8, 7], [2, 3]]) {
+    assert.equal(got[i].lost, true, `frame ${i} is lost`);
+    assert.deepEqual([got[i].x, got[i].y], [got[last].x, got[last].y], `frame ${i} keeps frame ${last}'s place`);
+  }
+  const kept = got.map((b, i) => i).filter(i => i !== 8 && i !== 2);
+  followed(kept.map(i => got[i]), kept.map(i => want[i]), box.side);
+});
+
+test("track: 12 portrait key frames (270 x 480 at quarter size) in well under a third of a second", () => {
+  const W = 1080, H = 1920, S = 180, at = i => ({x: 301 + 26 * i, y: 501 + 26 * i});
+  const greys = clip({W, H, S, at, seed: 13}), from = 7, p = at(from), box = M.startBox(p.x + S / 2, p.y + S / 2, W, H);
+  const t0 = performance.now(), got = M.track(greys, from, box), ms = performance.now() - t0;
+  assert.ok(ms < 300, `track took ${ms.toFixed(0)} ms`);
+  got.forEach((b, i) => assert.ok(!b.lost && Math.abs(b.x - (box.x + 26 * (i - from))) <= 6 && Math.abs(b.y - (box.y + 26 * (i - from))) <= 6,
+    `frame ${i}: ${JSON.stringify(b)}`));
+});
+
+test("track: a lookalike half past the frame's edge doesn't beat the surfer in full view", () => {
+  // A second white square sits still with half of it past the right edge, inside the search window; it matches the patch's left half
+  // as well as the surfer matches all of it.
+  const W = 640, H = 360, S = 60, at = i => ({x: 430 + 6 * i, y: 150});
+  for (const seed of [1, 2, 3]) {
+    const under = (i, x, y) => x >= W - S / 2 && y >= 150 && y < 150 + S ? 255 : null, p = at(0), box = M.startBox(p.x + S / 2, p.y + S / 2, W, H);
+    const greys = clip({W, H, S, at, seed, under}), got = M.track(greys, 0, box);
+    got.forEach((b, i) => assert.ok(!b.lost && Math.abs(b.x - (box.x + 6 * i)) <= 6 && Math.abs(b.y - box.y) <= 6,
+      `seed ${seed}, frame ${i}: box at ${b.x},${b.y}, the square's at ${box.x + 6 * i},${box.y} (lost ${b.lost}, score ${b.score.toFixed(2)})`));
+  }
+});
+
+test("track: a small surfer in front of a fixed camera, the sea outweighing him in his box", () => {
+  const t = scenes(v => ({pan: 0, at: i => ({x: 60 + v * i, y: 362 - (v >> 2) * i})}));
+  assert.ok(t.on >= 0.9 * t.n && t.wrong <= 0.08 * t.n, `${t.on} of ${t.n} frames on him, ${t.lost} lost, ${t.wrong} kept off him`);
+});
+
+test("track: a small surfer filmed by a camera following him, the sea sliding past behind him", () => {
+  // The camera lags him a little: he drifts 2 px right and 1 px up a frame while the sea slides 8 or 12 px.
+  const t = scenes(v => ({pan: v, at: i => ({x: 130 + 2 * i, y: 362 - i})}));
+  assert.ok(t.on >= 0.9 * t.n && t.wrong <= 0.08 * t.n, `${t.on} of ${t.n} frames on him, ${t.lost} lost, ${t.wrong} kept off him`);
+});
+
+test("fmtTime: m:ss.s, rounded through hundredths as the coach's labels are", () => {
+  assert.equal(M.fmtTime(7_500), "0:07.5");
+  assert.equal(M.fmtTime(11_973), "0:12.0");
+  assert.equal(M.fmtTime(10_247), "0:10.3");
+  assert.equal(M.fmtTime(0), "0:00.0");
+  assert.equal(M.fmtTime(65_000), "1:05.0");
+  assert.equal(M.fmtTime(59_960), "1:00.0");
+  assert.equal(M.fmtTime(119_950), "2:00.0");
+  assert.equal(M.fmtTime(83_240), "1:23.2");
+});

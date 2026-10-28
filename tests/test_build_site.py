@@ -1,13 +1,14 @@
-# build-site.sh puts chat.js's version in the page's address for it, so a reload never pairs a new page with the chat.js before it from the
-# browser's cache (GitHub Pages lets the browser keep both files 10 minutes, and a reload fetches only the page again). refresh.sh is stood
-# in for, writing template.html as the built page, so this runs with no network and no CWA key.
+# build-site.sh puts chat.js's and coach.js's versions in the page's addresses for them, so a reload never pairs a new page with a script
+# before it from the browser's cache (GitHub Pages lets the browser keep every file 10 minutes, and a reload fetches only the page again).
+# refresh.sh is stood in for, writing template.html as the built page, so this runs with no network and no CWA key.
 # Run: python3 -m unittest discover -s tests -v
 import os, re, shutil, subprocess, tempfile, unittest
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
+SCRIPTS = ('chat', 'coach')  # the page's versioned scripts, web/<name>.js
 
 
-def read(path):
-    with open(path, encoding='utf-8') as f: return f.read()
+def read(path, mode='r'):
+    with open(path, mode, **({} if 'b' in mode else {'encoding': 'utf-8'})) as f: return f.read()
 
 
 class BuildSite(unittest.TestCase):
@@ -22,22 +23,41 @@ class BuildSite(unittest.TestCase):
                        env=dict(os.environ, RUNNER_TEMP=self.tmp))
         return read(os.path.join(self.tmp, out, 'index.html'))
 
-    def address(self, page):
-        found = re.findall(r'<script src="(chat\.js[^"]*)" defer></script>', page)
+    def address(self, page, name='chat'):
+        found = re.findall(r'<script src="(%s\.js[^"]*)" defer></script>' % name, page)
         self.assertEqual(len(found), 1, found); return found[0]
 
-    def test_chat_js_address_carries_its_version(self):
-        page = self.build('site'); addr = self.address(page)
-        self.assertRegex(addr, r'^chat\.js\?v=\w+$')
-        # the page is web/head.html and the built page as they were but for that address, and chat.js goes next to it as it is
-        self.assertEqual(page, read(os.path.join(ROOT, 'web', 'head.html')) + read(os.path.join(ROOT, 'template.html')).replace('src="chat.js"', 'src="%s"' % addr))
-        self.assertEqual(read(os.path.join(self.tmp, 'site', 'chat.js')), read(os.path.join(ROOT, 'web', 'chat.js')))
+    def test_script_addresses_carry_their_versions(self):
+        page = self.build('site'); addr = {n: self.address(page, n) for n in SCRIPTS}
+        for n in SCRIPTS: self.assertRegex(addr[n], r'^%s\.js\?v=\w+$' % n)
+        # the page is web/head.html and the built page as they were but for those two addresses, coach.js's tag before chat.js's
+        want = read(os.path.join(ROOT, 'web', 'head.html')) + read(os.path.join(ROOT, 'template.html'))
+        for n in SCRIPTS: want = want.replace('src="%s.js"' % n, 'src="%s"' % addr[n])
+        self.assertEqual(page, want)
+        self.assertLess(page.index('src="%s"' % addr['coach']), page.index('src="%s"' % addr['chat']))
+        # and each script goes next to it as it is
+        for n in SCRIPTS: self.assertEqual(read(os.path.join(self.tmp, 'site', n + '.js')), read(os.path.join(ROOT, 'web', n + '.js')))
 
-    def test_address_changes_with_chat_js(self):
-        # the half-hourly rebuilds keep the address while chat.js stays the same, so the browser keeps its copy; a changed chat.js gets a new one
-        a = self.address(self.build('a')); self.assertEqual(self.address(self.build('b')), a)
-        with open(os.path.join(self.tmp, 'web', 'chat.js'), 'a', encoding='utf-8') as f: f.write('\n// changed\n')
-        self.assertNotEqual(self.address(self.build('c')), a)
+    def test_coach_example_is_copied(self):
+        # the signed-out example's key frames (web/coach-example/1.jpg ...), byte for byte, and nothing else
+        self.build('site'); src, out = os.path.join(ROOT, 'web', 'coach-example'), os.path.join(self.tmp, 'site', 'coach-example')
+        names = sorted(os.listdir(src))
+        self.assertTrue(2 <= len(names) <= 4 and all(re.fullmatch(r'[1-4]\.jpg', n) for n in names), names)
+        self.assertEqual(sorted(os.listdir(out)), names)
+        for n in names: self.assertEqual(read(os.path.join(out, n), 'rb'), read(os.path.join(src, n), 'rb'))
+
+    def test_address_changes_with_its_script(self):
+        # the half-hourly rebuilds keep the addresses while the scripts stay the same, so the browser keeps its copies; a changed script
+        # gets a new address, and the other keeps its own
+        a = self.build('a'); self.assertEqual(self.build('b'), a)
+        last = {n: self.address(a, n) for n in SCRIPTS}
+        for i, n in enumerate(SCRIPTS):
+            with open(os.path.join(self.tmp, 'web', n + '.js'), 'a', encoding='utf-8') as f: f.write('\n// changed\n')
+            page = self.build('c%d' % i)
+            self.assertNotEqual(self.address(page, n), last[n])
+            for m in SCRIPTS:
+                if m != n: self.assertEqual(self.address(page, m), last[m])
+            last = {m: self.address(page, m) for m in SCRIPTS}
 
     def test_link_preview_card_is_near_the_top(self):
         # iMessage, LINE and the rest read only the start of a page this big to build the link card, so its tags sit in the first 4 KB,

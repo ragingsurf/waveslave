@@ -608,7 +608,7 @@ const STEPS = {
       throw new Error(`after makeAdmin() /admin/where answered u-bryan ${after.status} ${body.slice(0, 200)}`);
   },
   // ---- The Coach panel (AI coach spec, "The Coach tab"). Signed out it says what the coach does, shows the example review (Bryan's
-  // trial clip as a top-turn review: what went well, the main fix and the drill, with its four key frames and their times) and Sign in
+  // trial clip as a cutback review: what went well, the main fix and the drill, with its four key frames and their times) and Sign in
   // with LINE, in English and in 中文. The example's key frames are asked for only once the panel shows them, never with the page, and
   // the coach asks the backend nothing.
   async signedOut(s) {
@@ -620,9 +620,9 @@ const STEPS = {
     await until(page, "the example's four key frames", () => { const i = [...document.querySelectorAll(".coachpanel .co-example img")]; return i.length === 4 && i.every(x => x.complete && x.naturalWidth === 784); });
     const want = {
       en: { lead: "Your coach breaks your clip down frame by frame: what went well, one main fix and a drill.", signIn: "Sign in with LINE",
-        has: ["Low and ready going in", "Stay over your front foot", "Front-knee turns on the sand", "Key frame at 0:11.5", "Key frame at 0:11.7", "Key frame at 0:12.0", "Key frame at 0:12.2"] },
+        has: ["Low and ready going in", "Stay over your front foot", "Front-knee cutbacks on the sand", "Key frame at 0:11.5", "Key frame at 0:11.7", "Key frame at 0:12.0", "Key frame at 0:12.2"] },
       zh: { lead: "教練會逐格拆解你的影片：做得好的地方、一個主要修正，再加一個練習。", signIn: "使用LINE帳號登入",
-        has: ["壓低身體，準備好進轉向", "重心留在前腳", "沙灘上練前膝轉向", "0:11.5 的關鍵影格", "0:11.7 的關鍵影格", "0:12.0 的關鍵影格", "0:12.2 的關鍵影格"] },
+        has: ["壓低身體，準備好進轉向", "重心留在前腳", "沙灘上練前膝回切", "0:11.5 的關鍵影格", "0:11.7 的關鍵影格", "0:12.0 的關鍵影格", "0:12.2 的關鍵影格"] },
     };
     for (const lang of ["en", "zh", "en"]) {
       await page.evaluate(l => setLang(l), lang); await wait(100);

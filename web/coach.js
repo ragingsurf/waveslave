@@ -175,7 +175,7 @@ const MONTHS = ["January", "February", "March", "April", "May", "June", "July", 
 const STR = {
   en: { tab: "Coach", title: "COACH", close: "Close", tabReady: "Coach: a review is ready",
     lead: "Your coach breaks your clip down frame by frame: what went well, one main fix and a drill.",
-    signIn: "Sign in with LINE", example: "Example review · Top turn",
+    signIn: "Sign in with LINE", example: "Example review · Cutback",
     wentWell: "What went well", mainFix: "The main fix", drill: "Your drill", happening: "What's happening: ", matters: "Why it matters: ",
     keyFrameAt: t => `Key frame at ${t}`,
     loading: "Loading…", failed: "Couldn't reach the coach.", retry: "Try again",
@@ -273,7 +273,7 @@ const STR = {
     blocked: "This account can't use the coach.", inProgress: "Your last review is still with the coach.", tooMany: "Too many tries today. Try again tomorrow." },
   zh: { tab: "教練", title: "教練", close: "關閉", tabReady: "教練：有講評可以看了",
     lead: "教練會逐格拆解你的影片：做得好的地方、一個主要修正，再加一個練習。",
-    signIn: "使用LINE帳號登入", example: "教練講評範例 · 頂部轉向",
+    signIn: "使用LINE帳號登入", example: "教練講評範例 · 回切",
     wentWell: "做得好的地方", mainFix: "主要修正", drill: "你的練習", happening: "發生了什麼：", matters: "為什麼重要：",
     keyFrameAt: t => `${t} 的關鍵影格`,
     loading: "載入中…", failed: "連不上教練。", retry: "再試一次",
@@ -575,18 +575,19 @@ const SEEN = "waveslave-coach-seen";
 const TW = 8 * 3600e3; // Taiwan is UTC+8 all year: the backend's months and days are Taiwan's
 const STATUS = ["reviewing", "ready", "not_reviewed"]; // a review's status in the surfer's words, as GET /coach/me gives it
 
-// The example the signed-out panel shows: the owner's trial clip redone as a one-move review of his last turn, a top turn, which he OK'd with
-// no changes (the owner, Oct 23), in the reply's shape (chat/src/coach-guide.js). Its key frames are web/coach-example/1.jpg to 4.jpg: key
+// The example the signed-out panel shows: the owner's trial clip redone as a one-move review of his last turn, which he OK'd (the
+// owner, Oct 23), then made a cutback, the move he was going for (a roundhouse cutback, the owner, Oct 28), in the reply's shape
+// (chat/src/coach-guide.js). Its key frames are web/coach-example/1.jpg to 4.jpg: key
 // frame 6 (what went well), then 7, 8 and 9 (the main fix), each with its time in the clip in ms.
 const EXAMPLE_REVIEW = {
   en: {
     went_well: { frame: 6, title: "Low and ready going in",
       detail: "Going into the turn, both knees are bent and your head is up, looking ahead. The board is flat on the face under you. That's a good, balanced start." },
     main_fix: { frames: [7, 8, 9], title: "Stay over your front foot",
-      what: "As you hit the top, your weight slides back onto the tail. Your front leg goes straight and you sit down over your back foot (key frame at 0:11.7). The board shoots out ahead of you and you fall off the back (key frames at 0:12.0 and 0:12.2).",
-      why: "With your weight on the tail, the board runs away from under you and the turn ends in a fall. Keep your front knee bent and your chest over it, and the board stays under you and comes back down the wave with you." },
-    drill: { title: "Front-knee turns on the sand",
-      how: "Stand in your surf stance on the beach with your knees bent. Turn your head and shoulders as if you're at the top of the wave. As you turn, push your front knee forward, bring your chest over it and hold for three seconds. If you feel your weight in your back heel, reset and go again. Do 10 slow ones before you paddle out." },
+      what: "As you swing back toward the whitewater, your weight slides back onto the tail. Your front leg goes straight and you sit down over your back foot (key frame at 0:11.7). The board shoots out ahead of you and you fall off the back (key frames at 0:12.0 and 0:12.2).",
+      why: "With your weight on the tail, the board runs away from under you and the turn ends in a fall. Keep your front knee bent and your chest over it, and the board stays under you and carries you round into the whitewater and back down the line." },
+    drill: { title: "Front-knee cutbacks on the sand",
+      how: "Stand in your surf stance on the beach with your knees bent. Turn your head and shoulders back the way you came, as if you're swinging round toward the whitewater. As you turn, push your front knee forward, bring your chest over it and hold for three seconds. If you feel your weight in your back heel, reset and go again. Do 10 slow ones before you paddle out." },
     heads_up: { text: "", move: "" },
     progress: "",
   },
@@ -594,10 +595,10 @@ const EXAMPLE_REVIEW = {
     went_well: { frame: 6, title: "壓低身體，準備好進轉向",
       detail: "進入轉向前，你兩個膝蓋都彎著，頭抬高、看著前方。板子平穩地貼在浪壁上，這個起步又穩又好。" },
     main_fix: { frames: [7, 8, 9], title: "重心留在前腳",
-      what: "衝上浪頂時，你的重心往後滑到板尾。前腿打直，整個人坐到後腳上（0:11.7 的關鍵影格）。板子往前衝出去，你就往後摔下來（0:12.0 和 0:12.2 的關鍵影格）。",
-      why: "重心在板尾，板子會從你腳下溜走，轉到一半就摔下來。前膝保持彎曲、胸口壓在前膝上方，板子就會留在你腳下，帶著你從浪頂滑回浪壁。" },
-    drill: { title: "沙灘上練前膝轉向",
-      how: "在沙灘上用衝浪站姿站好，膝蓋彎曲。轉頭、轉肩膀，想像自己正在浪頂。轉的同時把前膝往前推，胸口帶到前膝上方，停三秒。如果覺得重心跑到後腳跟，就重新站好再來一次。下水前慢慢做 10 次。" },
+      what: "往回切向白浪時，你的重心往後滑到板尾。前腿打直，整個人坐到後腳上（0:11.7 的關鍵影格）。板子往前衝出去，你就往後摔下來（0:12.0 和 0:12.2 的關鍵影格）。",
+      why: "重心在板尾，板子會從你腳下溜走，轉到一半就摔下來。前膝保持彎曲、胸口壓在前膝上方，板子就會留在你腳下，帶著你繞回白浪、再滑回浪壁。" },
+    drill: { title: "沙灘上練前膝回切",
+      how: "在沙灘上用衝浪站姿站好，膝蓋彎曲。轉頭、轉肩膀往回看，想像自己正繞回白浪。轉的同時把前膝往前推，胸口帶到前膝上方，停三秒。如果覺得重心跑到後腳跟，就重新站好再來一次。下水前慢慢做 10 次。" },
     heads_up: { text: "", move: "" },
     progress: "",
   },

@@ -117,7 +117,8 @@ export function bannedWords(text) {
 
 // ---- The coaching guide ----------------------------------------------------------------------
 
-// Bryan's trial clip redone as a one-move review of his last turn, a top turn: the worked example in the guide. He OK'd it on
+// Bryan's trial clip redone as a one-move review of his last turn: the worked example in the guide. It was a top turn; on
+// Oct 28 he said he was going for a roundhouse cutback, so it is a cutback now, its wording changed only to match. He OK'd it on
 // Oct 23 ("Yes you can use it as a guide") and asked for no changes, so its wording is his, word for word (Bryan, Oct 23): the
 // detail of "what went well" runs to three sentences, which the guide allows (one to three short ones, Ruling P54), and it stays
 // as he OK'd it.
@@ -130,7 +131,7 @@ export function bannedWords(text) {
 //   notes     what the example shows that its words don't say
 export const EXAMPLE = {
   answers: {
-    move: "top_turn", move_other: "", level: "starting_turns", board: "shortboard", stance: "goofy",
+    move: "cutback", move_other: "", level: "starting_turns", board: "shortboard", stance: "goofy",
     note: "Trying to make my carve better.",
   },
   times: [10_223, 10_473, 10_723, 10_973, 11_223, 11_473, 11_723, 11_973, 12_223, 12_473, 12_723, 12_973],
@@ -149,16 +150,18 @@ export const EXAMPLE = {
     main_fix: {
       frames: [7, 8, 9],
       title: "Stay over your front foot",
-      what: "As you hit the top, your weight slides back onto the tail. Your front leg goes straight and you sit down over " +
-        "your back foot (key frame at 0:11.7). The board shoots out ahead of you and you fall off the back (key frames at " +
+      what: "As you swing back toward the whitewater, your weight slides back onto the tail. Your front leg goes straight " +
+        "and you sit down over your back foot (key frame at 0:11.7). The board shoots out ahead of you and you fall off the back (key frames at " +
         "0:12.0 and 0:12.2).",
       why: "With your weight on the tail, the board runs away from under you and the turn ends in a fall. Keep your front " +
-        "knee bent and your chest over it, and the board stays under you and comes back down the wave with you.",
+        "knee bent and your chest over it, and the board stays under you and carries you round into the whitewater " +
+        "and back down the line.",
     },
     drill: {
-      title: "Front-knee turns on the sand",
-      how: "Stand in your surf stance on the beach with your knees bent. Turn your head and shoulders as if you're at the " +
-        "top of the wave. As you turn, push your front knee forward, bring your chest over it and hold for three seconds. " +
+      title: "Front-knee cutbacks on the sand",
+      how: "Stand in your surf stance on the beach with your knees bent. Turn your head and shoulders back the way you came, " +
+        "as if you're swinging round toward the whitewater. As you turn, push your front knee forward, bring your chest " +
+        "over it and hold for three seconds. " +
         "If you feel your weight in your back heel, reset and go again. Do 10 slow ones before you paddle out.",
     },
     heads_up: { text: "", move: "" },
@@ -166,7 +169,7 @@ export const EXAMPLE = {
   },
   notes: [
     "Key frame 6 shows what went well as the turn starts: both knees bent, head up, the board flat on the face. The main " +
-      "fix is that same shape lost at the top, in key frames 7 to 9.",
+      "fix is that same shape lost as they swing back, in key frames 7 to 9.",
     "Key frames 11 and 12 are in unusable_frames: the surfer is down in the whitewater after the fall, mostly hidden by " +
       "foam, with only their head and the board showing.",
     "Another surfer shows out the back in key frames 10 and 11. The review doesn't mention them.",

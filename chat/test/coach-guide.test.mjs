@@ -548,9 +548,9 @@ function pageExample() {
 
 const textOf = (reply) => TEXT_FIELDS.map((path) => path.split(".").reduce((v, k) => v?.[k], reply) ?? "");
 
-test("EXAMPLE: Bryan's top turn, with his answers and the 12 key frames' times", () => {
+test("EXAMPLE: Bryan's cutback, with his answers and the 12 key frames' times", () => {
   assert.deepEqual(EXAMPLE.answers, {
-    move: "top_turn", move_other: "", level: "starting_turns", board: "shortboard", stance: "goofy",
+    move: "cutback", move_other: "", level: "starting_turns", board: "shortboard", stance: "goofy",
     note: "Trying to make my carve better.",
   });
   // Every 0.25 s from 10.223 s, 1.5 s before his "Here" at 12.0 s to 1.25 s after.
@@ -584,16 +584,17 @@ test("EXAMPLE: Bryan's OK'd wording, word for word", () => {
     "That's a good, balanced start."); // three sentences, which the guide allows (one to three): he OK'd it as it is (Oct 23)
   assert.equal(r.main_fix.title, "Stay over your front foot");
   assert.equal(r.main_fix.what,
-    "As you hit the top, your weight slides back onto the tail. Your front leg goes straight and you sit down over your " +
-    "back foot (key frame at 0:11.7). The board shoots out ahead of you and you fall off the back (key frames at 0:12.0 " +
+    "As you swing back toward the whitewater, your weight slides back onto the tail. Your front leg goes straight and " +
+    "you sit down over your back foot (key frame at 0:11.7). The board shoots out ahead of you and you fall off the back (key frames at 0:12.0 " +
     "and 0:12.2).");
   assert.equal(r.main_fix.why,
     "With your weight on the tail, the board runs away from under you and the turn ends in a fall. Keep your front knee " +
-    "bent and your chest over it, and the board stays under you and comes back down the wave with you.");
-  assert.equal(r.drill.title, "Front-knee turns on the sand");
+    "bent and your chest over it, and the board stays under you and carries you round into the " +
+    "whitewater and back down the line.");
+  assert.equal(r.drill.title, "Front-knee cutbacks on the sand");
   assert.equal(r.drill.how,
-    "Stand in your surf stance on the beach with your knees bent. Turn your head and shoulders as if you're at the top of " +
-    "the wave. As you turn, push your front knee forward, bring your chest over it and hold for three seconds. If you " +
+    "Stand in your surf stance on the beach with your knees bent. Turn your head and shoulders back the way you came, as " +
+    "if you're swinging round toward the whitewater. As you turn, push your front knee forward, bring your chest over it and hold for three seconds. If you " +
     "feel your weight in your back heel, reset and go again. Do 10 slow ones before you paddle out.");
 });
 

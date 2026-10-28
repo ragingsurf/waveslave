@@ -17,8 +17,9 @@ for s in S:
 print(','.join(u.quote(str(x),safe='') for x in v))" "$HERE/spots.json" "$1"; }
 # --retry-max-time: a busy server can answer 503 with "Retry-After: 600", which curl obeys over --retry-delay, so one
 # NOWPHAS outage held every build for 30 minutes (Oct 22). Past 3 minutes curl gives up instead of sleeping.
-# Taiwan only for now (Bryan, Oct 23): the other countries' buoys, wind, tides and map grids aren't fetched, so a slow or broken feed
-# abroad can't hold up Taiwan's; their spots keep the Open-Meteo forecast only. Each country's id helper (jpids, noaaids, ...) then lists
+# Taiwan only for now (Bryan, Oct 23): the other countries' buoys, wind and tides aren't fetched, so a slow or broken feed
+# abroad can't hold up Taiwan's; their spots keep the Open-Meteo forecast only. The map grids are still fetched for every region
+# (Bryan, Oct 28), so the map isn't left showing an old forecast when panned away from Taiwan. Each country's id helper (jpids, noaaids, ...) then lists
 # no spots, so its block is skipped. TW_ONLY= sh refresh.sh (empty) fetches them all again.
 TW_ONLY=${TW_ONLY-1}
 get(){ curl -fsSL --retry 3 --retry-max-time 180 --retry-all-errors --retry-delay 5 -m 120 -o "$W/dl/$1.json" "$2"; }
@@ -251,7 +252,6 @@ fi
 # calls down.
 # Open-Meteo refuses longitudes past 180, so those are asked for as west ones (182 as -178), as pacific.sh does; the grid keeps them east.
 regrid(){ C=$1; AGE=$2; shift 2
-  [ -z "$TW_ONLY" ] || return 0
   [ -n "$(python3 -I -c "import json,sys;print(any(s.get('country')==sys.argv[2] for s in json.load(open(sys.argv[1]))) or '')" "$HERE/spots.json" $C)" ] && [ -z "$(find "$G/grid-$C.json" -mmin -$AGE 2>/dev/null)" ] || return 0
   LA=$(python3 -I -c "import sys;a0,da,na,o0,do,no=map(float,sys.argv[1:]);print(','.join(str(round(a0+i*da,4)) for i in range(int(na)) for j in range(int(no))))" "$@") || return 0
   LO=$(python3 -I -c "import sys;a0,da,na,o0,do,no=map(float,sys.argv[1:]);print(','.join(str(round((o0+j*do+180)%360-180,4)) for i in range(int(na)) for j in range(int(no))))" "$@") || return 0
@@ -272,7 +272,7 @@ regrid pg 350 -10 2 7 136 2 11
 regrid vu 350 -24 2 7 164 2 6
 regrid bj 350 21 1 15 -119 1 12
 # The whole Pacific, 5° apart (50°S–65°N, 100°E–110°W), by pacific.sh: refetched only every ~6 h, and never in a run that refetched the West Pacific grid, so the two biggest requests don't land together.
-[ -n "$TW_ONLY" ] || [ -n "$WPNEW" ] || [ -n "$(find "$G/grid-pac.json" -mmin -350 2>/dev/null)" ] || sh "$HERE/pacific.sh" "$G" || echo "pacific grid fetch failed, keeping last grid" >&2
+[ -n "$WPNEW" ] || [ -n "$(find "$G/grid-pac.json" -mmin -350 2>/dev/null)" ] || sh "$HERE/pacific.sh" "$G" || echo "pacific grid fetch failed, keeping last grid" >&2
 GJ="$G/grid.json"; [ -f "$GJ" ] || { echo null > "$W/gridnull.json"; GJ="$W/gridnull.json"; }
 GC="$G/grid-ca.json"; [ -f "$GC" ] || { echo null > "$W/gridnull.json"; GC="$W/gridnull.json"; }
 GH="$G/grid-hi.json"; [ -f "$GH" ] || { echo null > "$W/gridnull.json"; GH="$W/gridnull.json"; }

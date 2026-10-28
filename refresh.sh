@@ -229,14 +229,19 @@ for C in pi mi pg vu bj; do
   [ -z "$(piids $C mlat)" ] || get tide$C "https://marine-api.open-meteo.com/v1/marine?latitude=$(piids $C mlat)&longitude=$(piids $C mlon)&hourly=sea_level_height_msl&timezone=GMT&past_days=6&forecast_days=10" || echo "tide$C fetch failed" >&2
   python3 -I "$HERE/pi.py" "$W/dl" "$W/snap.json" "$HERE/spots.json" $C || echo "$C skipped" >&2
 done
-WPNEW=
+# Open-Meteo answers "429 too many requests" once a run asks for more than about 1,300 grid points in a minute (Oct 28: the West Pacific,
+# California and Hawaii went through, then four regions failed). Each grid's wind and wave requests count its points twice. slot <points>
+# waits out the minute before a grid that would take the run past 1,200, at most twice a run; a grid that would need a third wait is left
+# for the next run, where it is still stale and so goes early.
+USED=0; WAITS=0
+slot(){ [ $((USED+$1)) -le 1200 ] || [ "$USED" -eq 0 ] || { [ "$WAITS" -lt 2 ] || return 1; sleep 61; WAITS=$((WAITS+1)); USED=0; }; USED=$((USED+$1)); }
 # West Pacific wind + wave grid for the Map tab (3-hourly model, so refetched only every ~3 h; a failed fetch keeps the last grid).
-if [ -z "$(find "$G/grid.json" -mmin -170 2>/dev/null)" ]; then
+if [ -z "$(find "$G/grid.json" -mmin -170 2>/dev/null)" ] && slot 672; then
   GLA=$(python3 -I -c "print(','.join(str(a) for a in range(0,46,3) for o in range(100,161,3)))")
   GLO=$(python3 -I -c "print(','.join(str(o) for a in range(0,46,3) for o in range(100,161,3)))")
   { curl -fsSL --retry 3 --retry-max-time 180 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwind.json" "https://api.open-meteo.com/v1/forecast?latitude=$GLA&longitude=$GLO&hourly=wind_speed_10m,wind_direction_10m,pressure_msl,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
     curl -fsSL --retry 3 --retry-max-time 180 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwave.json" "https://marine-api.open-meteo.com/v1/marine?latitude=$GLA&longitude=$GLO&hourly=wave_height,wave_direction,swell_wave_height,swell_wave_direction,swell_wave_period&models=meteofrance_wave&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
-    python3 -I "$HERE/grid.py" "$G/gwind.json" "$G/gwave.json" "$G/grid.new" 0 3 16 100 3 21 && mv "$G/grid.new" "$G/grid.json" && WPNEW=1; } || echo "grid fetch failed, keeping last grid" >&2
+    python3 -I "$HERE/grid.py" "$G/gwind.json" "$G/gwave.json" "$G/grid.new" 0 3 16 100 3 21 && mv "$G/grid.new" "$G/grid.json"; } || echo "grid fetch failed, keeping last grid" >&2
 fi
 # Wind + wave grids for the other map regions, the same way; only when the country has spots. regrid <country> <minutes> <grid>.
 # California 1° apart (30–42°N, 128–116°W); Hawaii 1° apart (15–26°N, 162–152°W), wide enough to frame the whole chain on a phone;
@@ -253,11 +258,15 @@ fi
 # Open-Meteo refuses longitudes past 180, so those are asked for as west ones (182 as -178), as pacific.sh does; the grid keeps them east.
 regrid(){ C=$1; AGE=$2; shift 2
   [ -n "$(python3 -I -c "import json,sys;print(any(s.get('country')==sys.argv[2] for s in json.load(open(sys.argv[1]))) or '')" "$HERE/spots.json" $C)" ] && [ -z "$(find "$G/grid-$C.json" -mmin -$AGE 2>/dev/null)" ] || return 0
+  slot $(($3*$6*2)) || { echo "$C grid left for the next run" >&2; return 0; }
   LA=$(python3 -I -c "import sys;a0,da,na,o0,do,no=map(float,sys.argv[1:]);print(','.join(str(round(a0+i*da,4)) for i in range(int(na)) for j in range(int(no))))" "$@") || return 0
   LO=$(python3 -I -c "import sys;a0,da,na,o0,do,no=map(float,sys.argv[1:]);print(','.join(str(round((o0+j*do+180)%360-180,4)) for i in range(int(na)) for j in range(int(no))))" "$@") || return 0
   { curl -fsSL --retry 3 --retry-max-time 180 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwind-$C.json" "https://api.open-meteo.com/v1/forecast?latitude=$LA&longitude=$LO&hourly=wind_speed_10m,wind_direction_10m,pressure_msl,precipitation&wind_speed_unit=kn&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
     curl -fsSL --retry 3 --retry-max-time 180 --retry-all-errors --retry-delay 5 -m 120 -o "$G/gwave-$C.json" "https://marine-api.open-meteo.com/v1/marine?latitude=$LA&longitude=$LO&hourly=wave_height,wave_direction,swell_wave_height,swell_wave_direction,swell_wave_period&models=meteofrance_wave&timezone=Asia%2FTaipei&forecast_days=10&temporal_resolution=hourly_3" &&
     python3 -I "$HERE/grid.py" "$G/gwind-$C.json" "$G/gwave-$C.json" "$G/grid-$C.new" "$@" && mv "$G/grid-$C.new" "$G/grid-$C.json"; } || echo "$C grid fetch failed, keeping last grid" >&2; }
+# Taiwan up close, 1° apart (15–33°N, 115–140°E), every ~3 h like the West Pacific grid it sits in: its 3° points are too far apart to
+# ring a typhoon's core, so near Taiwan the map's colours and pressure lines come from this one (Bryan, Oct 28).
+regrid tw 170 15 1 19 115 1 26
 regrid ca 170 30 1 13 -128 1 13
 regrid hi 170 15 1 12 -162 1 11
 regrid nw 170 41 1 11 -129 1 8
@@ -271,8 +280,8 @@ regrid hk 350 21.5 0.125 14 113.5 0.125 11
 regrid pg 350 -10 2 7 136 2 11
 regrid vu 350 -24 2 7 164 2 6
 regrid bj 350 21 1 15 -119 1 12
-# The whole Pacific, 5° apart (50°S–65°N, 100°E–110°W), by pacific.sh: refetched only every ~6 h, and never in a run that refetched the West Pacific grid, so the two biggest requests don't land together.
-[ -n "$WPNEW" ] || [ -n "$(find "$G/grid-pac.json" -mmin -350 2>/dev/null)" ] || sh "$HERE/pacific.sh" "$G" || echo "pacific grid fetch failed, keeping last grid" >&2
+# The whole Pacific, 5° apart (50°S–65°N, 100°E–110°W), by pacific.sh: refetched only every ~6 h, in a minute of its own (slot).
+[ -n "$(find "$G/grid-pac.json" -mmin -350 2>/dev/null)" ] || ! slot 1488 || sh "$HERE/pacific.sh" "$G" || echo "pacific grid fetch failed, keeping last grid" >&2
 GJ="$G/grid.json"; [ -f "$GJ" ] || { echo null > "$W/gridnull.json"; GJ="$W/gridnull.json"; }
 GC="$G/grid-ca.json"; [ -f "$GC" ] || { echo null > "$W/gridnull.json"; GC="$W/gridnull.json"; }
 GH="$G/grid-hi.json"; [ -f "$GH" ] || { echo null > "$W/gridnull.json"; GH="$W/gridnull.json"; }
@@ -287,6 +296,7 @@ GHK="$G/grid-hk.json"; [ -f "$GHK" ] || { echo null > "$W/gridnull.json"; GHK="$
 GPG="$G/grid-pg.json"; [ -f "$GPG" ] || { echo null > "$W/gridnull.json"; GPG="$W/gridnull.json"; }
 GVU="$G/grid-vu.json"; [ -f "$GVU" ] || { echo null > "$W/gridnull.json"; GVU="$W/gridnull.json"; }
 GBJ="$G/grid-bj.json"; [ -f "$GBJ" ] || { echo null > "$W/gridnull.json"; GBJ="$W/gridnull.json"; }
+GTW="$G/grid-tw.json"; [ -f "$GTW" ] || { echo null > "$W/gridnull.json"; GTW="$W/gridnull.json"; }
 GP="$G/grid-pac.json"; [ -f "$GP" ] || { echo null > "$W/gridnull.json"; GP="$W/gridnull.json"; }
 # The last 5 days for the Forecast tab: buoy and wind station readings from the log, past tides kept in cache/; never blocks the build.
 python3 -I "$HERE/history.py" "$W/snap.json" "$HERE/log" "$G" tw || echo "history skipped" >&2
@@ -349,5 +359,5 @@ python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-pg" pg || echo "papua ne
 python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-vu" vu || echo "vanuatu corrections skipped" >&2
 python3 -I "$HERE/correct.py" "$W/snap.json" "$HERE/log-bj" bj || echo "baja corrections skipped" >&2
 # Wave of the week photo (wotw.jpg) is embedded inline.
-python3 -I -c "import sys,base64;t=open(sys.argv[1]).read();d=open(sys.argv[2]).read();img='data:image/jpeg;base64,'+base64.b64encode(open(sys.argv[4],'rb').read()).decode();open(sys.argv[3],'w').write(t.replace('__DATA__',d).replace('__WOTW__',img).replace('__GRIDCA__',open(sys.argv[6]).read()).replace('__GRIDHI__',open(sys.argv[7]).read()).replace('__GRIDAU__',open(sys.argv[8]).read()).replace('__GRIDPAC__',open(sys.argv[9]).read()).replace('__GRIDNW__',open(sys.argv[10]).read()).replace('__GRIDID__',open(sys.argv[11]).read()).replace('__GRIDNZ__',open(sys.argv[12]).read()).replace('__GRIDPI__',open(sys.argv[13]).read()).replace('__GRIDAK__',open(sys.argv[14]).read()).replace('__GRIDMI__',open(sys.argv[15]).read()).replace('__GRIDHK__',open(sys.argv[16]).read()).replace('__GRIDPG__',open(sys.argv[17]).read()).replace('__GRIDVU__',open(sys.argv[18]).read()).replace('__GRIDBJ__',open(sys.argv[19]).read()).replace('__GRID__',open(sys.argv[5]).read()))" "$HERE/template.html" "$W/snap.json" "$W/taitung-surf.html" "$HERE/wotw.jpg" "$GJ" "$GC" "$GH" "$GA" "$GP" "$GN" "$GI" "$GZ" "$GS" "$GK" "$GM" "$GHK" "$GPG" "$GVU" "$GBJ"
+python3 -I -c "import sys,base64;t=open(sys.argv[1]).read();d=open(sys.argv[2]).read();img='data:image/jpeg;base64,'+base64.b64encode(open(sys.argv[4],'rb').read()).decode();open(sys.argv[3],'w').write(t.replace('__DATA__',d).replace('__WOTW__',img).replace('__GRIDCA__',open(sys.argv[6]).read()).replace('__GRIDHI__',open(sys.argv[7]).read()).replace('__GRIDAU__',open(sys.argv[8]).read()).replace('__GRIDPAC__',open(sys.argv[9]).read()).replace('__GRIDNW__',open(sys.argv[10]).read()).replace('__GRIDID__',open(sys.argv[11]).read()).replace('__GRIDNZ__',open(sys.argv[12]).read()).replace('__GRIDPI__',open(sys.argv[13]).read()).replace('__GRIDAK__',open(sys.argv[14]).read()).replace('__GRIDMI__',open(sys.argv[15]).read()).replace('__GRIDHK__',open(sys.argv[16]).read()).replace('__GRIDPG__',open(sys.argv[17]).read()).replace('__GRIDVU__',open(sys.argv[18]).read()).replace('__GRIDBJ__',open(sys.argv[19]).read()).replace('__GRIDTW__',open(sys.argv[20]).read()).replace('__GRID__',open(sys.argv[5]).read()))" "$HERE/template.html" "$W/snap.json" "$W/taitung-surf.html" "$HERE/wotw.jpg" "$GJ" "$GC" "$GH" "$GA" "$GP" "$GN" "$GI" "$GZ" "$GS" "$GK" "$GM" "$GHK" "$GPG" "$GVU" "$GBJ" "$GTW"
 echo "built $W/taitung-surf.html"

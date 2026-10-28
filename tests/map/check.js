@@ -49,6 +49,7 @@ const HKG = /\bhk: \{"/.test(fs.readFileSync(file, "utf8"));
 const PGG = /\bpg: \{"/.test(fs.readFileSync(file, "utf8"));
 const VUG = /\bvu: \{"/.test(fs.readFileSync(file, "utf8"));
 const BJG = /\bbj: \{"/.test(fs.readFileSync(file, "utf8"));
+const TWG = /\btw: \{"/.test(fs.readFileSync(file, "utf8"));
 // A site build (web/head.html on top) opens on the passcode screen; each fresh context starts unlocked with the page's own code hash.
 const LOCK = (fs.readFileSync(file, "utf8").match(/\bH="([0-9a-f]{64})"/) || [])[1];
 // The Taiwan chat's script, served for the page's chat.js in the chatOff check (tests/chat/shell.test.js has the rest of its checks).
@@ -169,13 +170,13 @@ const CHECKS = {
   // Every grid is made, finest first, with the Pacific layer last when the page carries it.
   async gridsLoaded(open) {
     const page = await open(home("tw")), got = JSON.stringify(await page.evaluate(() => window.__ws.grids()));
-    const want = JSON.stringify([...(HKG ? ["hk"] : []), ...(NWG ? ["nw"] : []), "hi", "ca", ...(BJG ? ["bj"] : []), ...(AKG ? ["ak"] : []), "au", ...(IDG ? ["id"] : []), ...(NZG ? ["nz"] : []), ...(PIG ? ["pi"] : []), ...(MIG ? ["mi"] : []), ...(PGG ? ["pg"] : []), ...(VUG ? ["vu"] : []), "wp", ...(PAC ? ["pac"] : [])]);
+    const want = JSON.stringify([...(HKG ? ["hk"] : []), ...(TWG ? ["tw"] : []), ...(NWG ? ["nw"] : []), "hi", "ca", ...(BJG ? ["bj"] : []), ...(AKG ? ["ak"] : []), "au", ...(IDG ? ["id"] : []), ...(NZG ? ["nz"] : []), ...(PIG ? ["pi"] : []), ...(MIG ? ["mi"] : []), ...(PGG ? ["pg"] : []), ...(VUG ? ["vu"] : []), "wp", ...(PAC ? ["pac"] : [])]);
     if (got !== want) throw new Error(`grids() is ${got}, want ${want}`);
   },
-  // The Taiwan home view sits inside the West Pacific grid, so its pressure lines come from that grid; zoomed out they come from the Pacific layer (none without it).
+  // The Taiwan home view sits inside Taiwan's 1° grid (15–33°N, 115–140°E), so its pressure lines come from that grid (the West Pacific's on a page without it); zoomed out they come from the Pacific layer (none without it).
   async isoSource(open) {
-    const page = await open(home("tw")), src = await page.evaluate(() => window.__ws.iso());
-    if (src !== "wp") throw new Error(`iso() is ${src}, want wp`);
+    const page = await open(home("tw")), src = await page.evaluate(() => window.__ws.iso()), near = TWG ? "tw" : "wp";
+    if (src !== near) throw new Error(`iso() is ${src}, want ${near}`);
     await zoomOut(page); const out = await page.evaluate(() => window.__ws.iso()), want = PAC ? "pac" : null;
     if (out !== want) throw new Error(`zoomed out, iso() is ${out}, want ${want}`);
   },

@@ -14,7 +14,7 @@ const [file, ...only] = process.argv.slice(2);
 if (!file) { console.error("usage: node tests/dreamwave/check.js <page.html> [check…]"); process.exit(2); }
 const PAGE = pathToFileURL(path.resolve(file)).href, HTML = fs.readFileSync(file, "utf8"), WEB = path.join(__dirname, "..", "..", "web");
 const LOCK = (HTML.match(/\bH="([0-9a-f]{64})"/) || [])[1];
-const PARTS = ["shell", "flow", "view", "panel"];
+const PARTS = ["shell", "flow", "surfer", "view", "panel"];
 const settle = page => page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -38,6 +38,13 @@ const sheet = async (page, s) => { await page.evaluate(s => { const b = document
 const sliders = page => page.evaluate(() => Object.fromEntries([...document.querySelectorAll("#viewDw .dw-sliders input")].map(i => [i.dataset.k, +i.value])));
 const slide = (page, k, v) => page.evaluate(([k, v]) => { const i = document.querySelector(`#viewDw .dw-sliders input[data-k="${k}"]`); i.value = v; i.dispatchEvent(new Event("input", { bubbles: true })); }, [k, v]);
 const pressed = page => page.evaluate(() => { const b = document.querySelector('#viewDw .dw-chip[aria-pressed="true"]'); return b ? b.dataset.id : null; });
+// Hold the wave at t seconds; where the surfer's head is on the canvas (fx, fy as shares of it).
+const still = (page, t) => page.evaluate(t => { const v = window.DREAMWAVE._view; v.play(false); v.setTime(t); v.render(); }, t);
+const headAt = page => page.evaluate(() => { const v = window.DREAMWAVE._view, c = v.surfer.getObjectByName("head").getWorldPosition(new THREE.Vector3()).project(v.camera);
+  return { fx: (c.x + 1) / 2, fy: (1 - c.y) / 2, on: Math.abs(c.x) < 1 && Math.abs(c.y) < 1 && c.z < 1 }; });
+// The surfer's mesh count; tap a maker choice and wait a frame.
+const meshes = page => page.evaluate(() => { let n = 0; window.DREAMWAVE._view.surfer.traverse(o => { if (o.isMesh) n++; }); return n; });
+const pick = async (page, k, v) => { await page.evaluate(([k, v]) => document.querySelector(`#viewDw .dw-maker button[data-k="${k}"][data-v="${v}"]`).click(), [k, v]); await settle(page); };
 const closeTab = page => page.evaluate(() => document.querySelector("#viewDw .dw-x").click());
 
 const CHECKS = {
@@ -209,6 +216,52 @@ const CHECKS = {
     if (words.join(" ") !== "浪型 形狀 衝浪手 場景 鏡頭 拍照") throw new Error(words.join(" "));
     await sheet(page, "styles"); const chips = await page.evaluate(() => [...document.querySelectorAll("#viewDw .dw-chip")].map(b => b.textContent).join(" "));
     if (chips !== "A字浪 厚板浪 礁岩管浪 長牆浪 軟浪 關門浪 重設") throw new Error(chips);
+  },
+  // The surfer shows: the pixels around their head change when they are hidden.
+  async surferShows(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page); await still(page, 6);
+    const h = await headAt(page); if (!h.on) throw new Error("the head is off screen: " + JSON.stringify(h));
+    const a = await pixels(page, h.fx, h.fy, 16); await page.evaluate(() => { window.DREAMWAVE._view.surfer.visible = false; });
+    const b = await pixels(page, h.fx, h.fy, 16); await page.evaluate(() => { window.DREAMWAVE._view.surfer.visible = true; });
+    let d = 0; for (let i = 0; i < a.length; i++) d = Math.max(d, Math.abs(a[i] - b[i]));
+    if (d < 40) throw new Error(`hiding the surfer changed the pixels at the head by at most ${d}`);
+  },
+  // On the left side the surfer moves along with the curl: their x falls as t goes from 5 to 7 s.
+  async ridesWithTheCurl(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page);
+    const x = await page.evaluate(() => { const v = window.DREAMWAVE._view; v.play(false); v.setSpot({ side: "left", u: 0.35, h: 0.2 }); const out = [];
+      for (const t of [5, 6, 7]) { v.setTime(t); v.render(); out.push(v.surfer.position.x); } return out; });
+    if (!(x[0] > x[1] && x[1] > x[2])) throw new Error(`x at 5, 6, 7 s: ${x.map(v => v.toFixed(2))}`);
+  },
+  // A drag from the surfer toward the opening (away from the peak) moves them out: u goes up; the camera stays put.
+  async dragMovesTheSpot(open) {
+    const page = await open({ world: true, touch: false }); await openTab(page); await ready(page); await still(page, 6);
+    const s = await page.evaluate(() => { const v = window.DREAMWAVE._view, r = v.canvas.getBoundingClientRect(), p = v.surfer.position.clone();
+      const at = q => { const c = q.clone().project(v.camera); return [r.left + (c.x + 1) / 2 * r.width, r.top + (1 - c.y) / 2 * r.height]; };
+      const mid = v.surfer.getObjectByName("head").getWorldPosition(p.clone()).lerp(p, 0.5);
+      return { from: at(mid), to: at(mid.clone().add({ x: -2.5, y: 0, z: 0 })), u: v.spot().u, az: v.orbit.az }; });
+    await page.mouse.move(...s.from); await page.mouse.down(); for (let i = 1; i <= 10; i++) await page.mouse.move(s.from[0] + (s.to[0] - s.from[0]) * i / 10, s.from[1] + (s.to[1] - s.from[1]) * i / 10);
+    await page.mouse.up(); await wait(100);
+    const e = await page.evaluate(() => ({ u: window.DREAMWAVE._view.spot().u, az: window.DREAMWAVE._view.orbit.az, saved: JSON.parse(localStorage.getItem("waveslave-dreamwave")).spot }));
+    if (!(e.u > s.u + 0.1)) throw new Error(`u went from ${s.u} to ${e.u}`);
+    if (e.az !== s.az) throw new Error("the drag also orbited the camera");
+    if (!e.saved || Math.abs(e.saved.u - e.u) > 1e-9) throw new Error(`saved spot ${JSON.stringify(e.saved)}`);
+  },
+  // A drag anywhere else still orbits the camera and leaves the spot alone.
+  async dragElsewhereOrbits(open) {
+    const page = await open({ world: true, touch: false }); await openTab(page); await ready(page); await still(page, 6);
+    const a = await page.evaluate(() => ({ u: window.DREAMWAVE._view.spot().u, az: window.DREAMWAVE._view.orbit.az }));
+    await page.mouse.move(200, 120); await page.mouse.down(); for (let i = 1; i <= 8; i++) await page.mouse.move(200 + 10 * i, 120); await page.mouse.up();
+    const b = await page.evaluate(() => ({ u: window.DREAMWAVE._view.spot().u, az: window.DREAMWAVE._view.orbit.az }));
+    if (b.u !== a.u || b.az === a.az) throw new Error(`${JSON.stringify(a)} → ${JSON.stringify(b)}`);
+  },
+  // The spot is remembered across a reload.
+  async spotRemembered(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page);
+    await page.evaluate(() => window.DREAMWAVE._view.setSpot({ side: "right", u: 1.2, h: 0.4 }));
+    await page.reload({ waitUntil: "load" }); await settle(page); await openTab(page); await ready(page);
+    const s = await page.evaluate(() => window.DREAMWAVE._view.spot());
+    if (!eq(s, { side: "right", u: 1.2, h: 0.4 })) throw new Error(JSON.stringify(s));
   },
 };
 

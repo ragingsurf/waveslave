@@ -107,5 +107,7 @@
     showValues();
   }
   P.refresh = refresh;
+  // The surfer's spot in the wave: restored on mount, saved when a drag ends.
+  PARTS.spot = { take: s => DW.surfer.clampSpot(s), mounted(view, state) { view.setSpot(state.spot); view.on('spot', s => { state.spot = s; save(); }); } };
   DW.panel = P;
 })(window.DW = window.DW || {});

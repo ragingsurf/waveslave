@@ -15,7 +15,7 @@ const PUBLIC = false;
 const on = () => PUBLIC || (typeof WORLD === "boolean" && WORLD);
 const TEST = !!window.__dwTest;
 // The parts, in the order they run (each may use the ones before it).
-const PARTS = ["shell", "flow", "view", "panel"];
+const PARTS = ["shell", "flow", "surfer", "view", "panel"];
 const ME = document.currentScript && document.currentScript.src || "", VER = (ME.match(/[?&]v=(\w+)/) || [])[1] || "0";
 
 // ---- Strings: every word the tab shows, in English and 中文 (Taiwan). The 中文 names are proposals Bryan checks after the build.
@@ -92,6 +92,13 @@ css.textContent = `
 .dwview .dw-lab{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:13px}
 .dwview .dw-lab b{font:400 20px/1 "VT323",monospace;color:#ffcf5c;text-shadow:0 0 6px rgba(255,140,0,.7);white-space:nowrap}
 .dwview .dw-row input{width:100%;height:28px;margin:0;accent-color:#ff8a00}
+.dwview .dw-hint{margin:0 0 8px;color:#ffcf5c;font-size:13px}
+.dwview .dw-mrow{margin-top:10px}
+.dwview .dw-mname{font-size:12px;color:#8aa6ad;margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em}
+.dwview .dw-maker .dw-chip{flex:0 1 auto;min-height:36px;font-size:12px}
+.dwview .dw-swatches{display:flex;flex-wrap:wrap;gap:8px}
+.dwview .dw-swatch{width:36px;height:36px;border-radius:50%;border:2px solid #1d3a44;cursor:pointer;touch-action:manipulation;padding:0}
+.dwview .dw-swatch[aria-pressed="true"]{border-color:#ffb347;box-shadow:0 0 0 2px #07171d,0 0 10px rgba(255,140,0,.8)}
 .dwview .dw-ends{display:flex;justify-content:space-between;font-size:11px;color:#8aa6ad}
 .dwview .dw-play{width:40px;height:40px;border:0;border-radius:8px;background:transparent;color:#ffcf5c;font:600 16px/1 "Public Sans",system-ui,sans-serif;cursor:pointer;touch-action:manipulation}
 .dwview .dw-scrub{flex:1;min-width:60px;height:32px;margin:0;accent-color:#ff8a00;background:transparent}

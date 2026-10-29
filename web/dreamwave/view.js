@@ -11,6 +11,8 @@
     const stage = layer.querySelector('.dw-stage') || layer;
     const phone = () => Math.min(innerWidth, innerHeight) < 600;
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let running = false, raf = 0, prev = 0, lastBuild = 0;
+    const subs = {};   // listeners by event name (on / emit below)
     const canvas = document.createElement('canvas'); canvas.setAttribute('aria-label', DW.t('tab'));
     stage.appendChild(canvas);
     const R = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: false });
@@ -135,12 +137,58 @@
     // Safari's own pinch gestures would zoom the page under the layer.
     for (const k of ['gesturestart', 'gesturechange']) canvas.addEventListener(k, e => e.preventDefault());
 
+    // The free camera circles a point that follows the surfer along the beach (the peak when there is no surfer), so the surfer stays in
+    // the picture as the curl peels away from the peak.
+    function follow(dt) {
+      if (dragId !== null) return;   // the picture holds still while the surfer is being dragged
+      const x = holder.visible ? holder.position.x : S.peakX, k = dt > 0 ? 1 - Math.exp(-dt * 3) : 1;
+      if (Math.abs(O.target.x - x) < 1e-4) return; O.target.x += (x - O.target.x) * k; place();
+    }
     function resize() {
       const w = stage.clientWidth, h = stage.clientHeight; if (!w || !h) return;
       R.setSize(w, h, false); cam.aspect = w / h; place(); if (!running) render();
     }
     const ro = window.ResizeObserver ? new ResizeObserver(() => resize()) : null;
     if (ro) ro.observe(stage); else addEventListener('resize', resize);
+
+    // ---- The surfer, riding the barrel (spec "Riding"): each frame they are put on the face at their spot, so they move with the curl.
+    const holder = new THREE.Group(); holder.name = 'surfer'; scene.add(holder);
+    let rider = null, spot = DW.surfer.clampSpot(null), riderOpts = DW.surfer.DEFAULT;
+    function setSurfer(o) {
+      if (rider) { holder.remove(rider); DW.surfer.dispose(rider); }
+      riderOpts = DW.surfer.clean(o); rider = DW.surfer.make(riderOpts, view.look); holder.add(rider); ride(); if (!running) render();
+    }
+    const bx = new THREE.Vector3(), by = new THREE.Vector3(), bz = new THREE.Vector3(), M4 = new THREE.Matrix4();
+    function ride() {
+      const p = view.lastA && DW.surfer.place(S, view.lastA, spot);
+      holder.visible = !!p && holder.userData.show !== false; if (!p) return;
+      bx.set(p.dir[0], 0, p.dir[1]);
+      by.set(0, Math.cos(p.tilt), Math.sin(p.tilt)); by.addScaledVector(bx, -by.dot(bx)).normalize();   // up, tilted the way the face looks
+      bz.crossVectors(bx, by);
+      M4.makeBasis(bx, by, bz); holder.quaternion.setFromRotationMatrix(M4);
+      holder.position.set(p.x, p.y, p.z).addScaledVector(by, 0.05);
+      holder.updateMatrixWorld(true); view.riding = p;
+    }
+    on('build', ride);
+    // Dragging the surfer moves their spot: a pointer that goes down on them follows the wave's surface under it.
+    const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+    const cast = e => { const r = canvas.getBoundingClientRect(); ndc.set((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1); ray.setFromCamera(ndc, cam); return ray; };
+    let dragId = null;
+    handlers.push(e => {
+      if (!holder.visible || !rider || e.button > 0) return false;
+      if (!cast(e).intersectObject(holder, true).length) return false;
+      dragId = e.pointerId; try { canvas.setPointerCapture(e.pointerId); } catch (err) {} return true;
+    });
+    canvas.addEventListener('pointermove', e => {
+      if (e.pointerId !== dragId || !view.lastA) return;
+      const hit = cast(e).intersectObject(mesh, false)[0]; if (!hit) return;
+      const A = view.lastA, x = hit.point.x, sec = DW.shell.section(S, DW.shell.stage(S, x, A), A.g);
+      let top = 0; for (const q of sec) if (q[1] > top) top = q[1];
+      spot = DW.surfer.clampSpot({ side: x < S.peakX ? 'left' : 'right', u: (Math.abs(x - S.peakX) - Math.max(0, A.d)) / A.Lt, h: top > 0 ? hit.point.y / top : 0.2 });
+      ride(); if (!running) render();
+    });
+    const drop = e => { if (e.pointerId !== dragId) return; dragId = null; emit('spot', spot); };
+    canvas.addEventListener('pointerup', drop); canvas.addEventListener('pointercancel', drop);
 
     // The play button and the time bar.
     const bar = document.createElement('div'); bar.className = 'dw-time';
@@ -152,15 +200,13 @@
     function showPlay() { playBtn.textContent = playing ? '❚❚' : '▶'; const k = playing ? 'pause' : 'play'; playBtn.setAttribute('aria-label', DW.t(k)); playBtn.title = DW.t(k); scrub.setAttribute('aria-label', DW.t('tab')); }
     function setPlaying(p) { playing = !!p; showPlay(); emit('play', playing); }
     playBtn.addEventListener('click', () => setPlaying(!playing));
-    scrub.addEventListener('input', () => { t = +scrub.value; build(t); showTime(); if (!running) render(); });
+    scrub.addEventListener('input', () => { t = +scrub.value; build(t); showTime(); follow(0); if (!running) render(); });
     function showTime() { scrub.max = S.loopTime; scrub.value = t; timeEl.textContent = t.toFixed(1) + ' s'; }
 
     // Listeners: 'frame' (each frame drawn), 'build' (the wave rebuilt), 'play', and later parts' own events.
-    const subs = {};
     function on(ev, fn) { (subs[ev] = subs[ev] || []).push(fn); }
     function emit(ev, ...a) { (subs[ev] || []).forEach(fn => { try { fn(...a); } catch (e) { if (window.__dwTest) console.error(e); } }); }
 
-    let running = false, raf = 0, prev = 0, lastBuild = 0;
     function render() { R.render(scene, cam); view.frames++; }
     function frame(now) {
       raf = 0; if (!running) return;
@@ -168,7 +214,7 @@
       if (playing) { t = (t + dt) % S.loopTime; if (now - lastBuild > 32 || !view.lastA) { build(t); lastBuild = now; } showTime(); }
       else if (!view.lastA) build(t);
       if (flowOn && trails.visible && (playing || !reduce)) { DW.flow.step(flow, F, playing ? dt : 0); drawFlow(); }
-      emit('frame', dt);
+      follow(dt); emit('frame', dt);
       render(); raf = requestAnimationFrame(frame);
     }
     function resume() { if (running) return; running = true; prev = 0; resize(); raf = requestAnimationFrame(frame); }
@@ -178,15 +224,18 @@
     const view = {
       S, F, lastA: null, frames: 0, canvas, scene, camera: cam, renderer: R, mesh, geo, mat, sea, hemi, sun: L1, fill: L2, neon, orbit: O, camMode: 'free',
       time: () => t,
-      setTime(v) { t = cl(+v, 0, S.loopTime); build(t); showTime(); if (!running) render(); },
+      setTime(v) { t = cl(+v, 0, S.loopTime); build(t); showTime(); if (!running || !playing) follow(0); if (!running) render(); },
       play(p) { setPlaying(p); }, playing: () => playing,
+      surfer: holder, look: 'toon',
+      setSurfer, surferOptions: () => riderOpts,
+      setSpot(s) { spot = DW.surfer.clampSpot(s); ride(); if (!playing) follow(0); if (!running) render(); emit('spot', spot); }, spot: () => Object.assign({}, spot),
       shape(k, v) { applyShape(S, k, v); fitLoop(S); if (t > S.loopTime) t = 0; build(t); showTime(); if (!running) render(); emit('shape', k, v); },
       pause, resume, running: () => running, render, build: () => build(t), paint,
       power(on) { showPower = !!on; paint(); }, flow(on) { flowOn = !!on; trails.visible = heads.visible = beads.visible = flowOn; },
       lift(v) { lift = v || 0; applyLift(); if (!running) render(); }, place, phone, on, emit, grab: h => handlers.push(h),
       relang() { showPlay(); canvas.setAttribute('aria-label', DW.t('tab')); emit('relang'); }
     };
-    place(); showPlay(); build(t); showTime(); resize();
+    place(); showPlay(); setSurfer(DW.surfer.DEFAULT); build(t); showTime(); resize();
     return view;
   }
   DW.view = { create, NEON };

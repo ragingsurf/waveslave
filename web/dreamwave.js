@@ -15,7 +15,7 @@ const PUBLIC = false;
 const on = () => PUBLIC || (typeof WORLD === "boolean" && WORLD);
 const TEST = !!window.__dwTest;
 // The parts, in the order they run (each may use the ones before it).
-const PARTS = ["shell", "flow", "view"];
+const PARTS = ["shell", "flow", "view", "panel"];
 const ME = document.currentScript && document.currentScript.src || "", VER = (ME.match(/[?&]v=(\w+)/) || [])[1] || "0";
 
 // ---- Strings: every word the tab shows, in English and 中文 (Taiwan). The 中文 names are proposals Bryan checks after the build.
@@ -129,6 +129,7 @@ function load() {
 function start() {
   if (!window.THREE || !DW.shell) return fail();
   view = DW.view.create(layer, DW.shell.fresh());
+  DW.panel.mount(layer, view);
   msg.textContent = ""; state = "ready";
   if (showing) resume();
 }
@@ -154,7 +155,7 @@ function hide() {
   if (!showing) return; showing = false; layer.hidden = true; lock(false);
   if (state === "ready") pause();
 }
-function relang() { relangNow(); x.setAttribute("aria-label", DW.t("back")); x.title = DW.t("back"); if (view) view.relang(); if (state === "loading") msg.textContent = DW.t("loading"); else if (state === "failed") msg.textContent = DW.t("failed"); }
+function relang() { relangNow(); x.setAttribute("aria-label", DW.t("back")); x.title = DW.t("back"); if (view) { view.relang(); DW.panel.relang(); } if (state === "loading") msg.textContent = DW.t("loading"); else if (state === "failed") msg.textContent = DW.t("failed"); }
 const guard = f => (...a) => { try { return f(...a); } catch (e) { if (TEST) console.error(e); } };
 window.DREAMWAVE = { dev: guard(dev), relang: guard(relang), show: guard(show), hide: guard(hide) };
 if (TEST) Object.defineProperties(window.DREAMWAVE, { _loaded: { get: () => loaded.slice() }, _frames: { value: () => view && view.frames || 0 }, _view: { get: () => view } });

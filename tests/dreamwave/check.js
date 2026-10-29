@@ -14,7 +14,7 @@ const [file, ...only] = process.argv.slice(2);
 if (!file) { console.error("usage: node tests/dreamwave/check.js <page.html> [check…]"); process.exit(2); }
 const PAGE = pathToFileURL(path.resolve(file)).href, HTML = fs.readFileSync(file, "utf8"), WEB = path.join(__dirname, "..", "..", "web");
 const LOCK = (HTML.match(/\bH="([0-9a-f]{64})"/) || [])[1];
-const PARTS = ["shell", "flow", "view"];
+const PARTS = ["shell", "flow", "view", "panel"];
 const settle = page => page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -157,10 +157,11 @@ const CHECKS = {
   // Tap Slab: every slider glides there; after 900 ms they read Size 3.0, Lip throw 4.0, Steepness 105, Peel 5.0, and Slab is pressed.
   async styleGlides(open) {
     const page = await open({ world: true }); await openTab(page); await ready(page); await sheet(page, "styles");
-    await page.evaluate(() => document.querySelector('#viewDw .dw-chip[data-id="slab"]').click()); await wait(120);
-    const mid = await sliders(page);
-    if (mid.height === 3 || mid.height === 2.6) throw new Error(`no glide: Size is ${mid.height} 120 ms in`);
-    await wait(900); const s = await sliders(page), want = { height: 3, lipThrow: 4, faceSteepness: 105, peelSpeed: 5 };
+    await page.evaluate(() => document.querySelector('#viewDw .dw-chip[data-id="slab"]').click());
+    const seen = await page.evaluate(() => new Promise(r => { const out = [], t0 = performance.now(), i = document.querySelector('#viewDw .dw-sliders input[data-k="height"]');
+      (function look() { out.push(+i.value); if (performance.now() - t0 < 650) requestAnimationFrame(look); else r(out); })(); }));
+    if (!seen.some(h => h > 2.6 + 1e-6 && h < 3 - 1e-6)) throw new Error(`no glide: Size read ${seen.join(", ")} during the first 650 ms`);
+    await wait(500); const s = await sliders(page), want = { height: 3, lipThrow: 4, faceSteepness: 105, peelSpeed: 5 };
     for (const k in want) if (Math.abs(s[k] - want[k]) > 1e-6) throw new Error(`after the glide ${k} reads ${s[k]}, want ${want[k]}`);
     if (await pressed(page) !== "slab") throw new Error(`the pressed chip is ${await pressed(page)}`);
   },

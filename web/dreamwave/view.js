@@ -102,9 +102,10 @@
     const O = { target: new THREE.Vector3(S.peakX, 1.1, 0.5), az: 34, el: 15, r: 30, fov: 40 };
     let lift = 0;   // share of the screen height the picture is lifted by, so the wave stays above an open sheet
     function place() {
-      const a = cam.aspect, az = O.az * Math.PI / 180, el = O.el * Math.PI / 180;
+      // A tall phone screen comes in closer, so the wave fills its width rather than sitting small in the middle.
+      const a = cam.aspect, az = O.az * Math.PI / 180, el = O.el * Math.PI / 180, r = O.r * (a < 1 ? 0.62 + 0.38 * a : 1);
       cam.fov = Math.min(80, O.fov / Math.min(1, a) ** 0.5);
-      cam.position.set(O.target.x + O.r * Math.cos(el) * Math.sin(az), O.target.y + O.r * Math.sin(el), O.target.z + O.r * Math.cos(el) * Math.cos(az));
+      cam.position.set(O.target.x + r * Math.cos(el) * Math.sin(az), O.target.y + r * Math.sin(el), O.target.z + r * Math.cos(el) * Math.cos(az));
       cam.lookAt(O.target);
       applyLift();
     }

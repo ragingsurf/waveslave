@@ -76,7 +76,7 @@ css.textContent = `
   display:flex;flex-direction:column;gap:6px;max-width:640px;margin:0 auto;pointer-events:none}
 .dwview .dw-bottom>*{pointer-events:auto}
 .dwview .dw-bottom .dw-time{position:static;width:auto;box-sizing:border-box}
-.dwview .dw-sheet{max-height:min(55vh,55dvh);overflow:auto;overscroll-behavior:contain;touch-action:pan-y;background:#0d232b;border:1px solid #1d3a44;border-radius:14px;padding:10px 12px;box-sizing:border-box}
+.dwview .dw-sheet{max-height:calc(min(55vh,55dvh) - 128px);overflow:auto;overscroll-behavior:contain;touch-action:pan-y;background:#0d232b;border:1px solid #1d3a44;border-radius:14px;padding:10px 12px;box-sizing:border-box}
 .dwview .dw-sheet[hidden],.dwview .dw-sheet>[hidden]{display:none}
 .dwview .dw-bar{display:flex;gap:4px;background:#0d232b;border:1px solid #1d3a44;border-radius:14px;padding:4px}
 .dwview .dw-tab{flex:1 1 0;min-width:0;min-height:44px;padding:0 2px;border:0;border-radius:10px;background:none;color:#8aa6ad;font:600 12px/1.1 "Public Sans",system-ui,sans-serif;cursor:pointer;touch-action:manipulation;overflow:hidden;text-overflow:ellipsis}
@@ -105,7 +105,7 @@ css.textContent = `
 .dwview .dw-swatch[aria-pressed="true"]{border-color:#ffb347;box-shadow:0 0 0 2px #07171d,0 0 10px rgba(255,140,0,.8)}
 .dwview .dw-snapsheet{display:flex;flex-direction:column;gap:8px;align-items:stretch}
 .dwview .dw-preview{display:flex;justify-content:center}
-.dwview .dw-preview canvas{height:min(30vh,30dvh);width:auto;aspect-ratio:9/16;border-radius:8px;border:1px solid #1d3a44}
+.dwview .dw-preview canvas{height:min(23vh,23dvh);width:auto;aspect-ratio:9/16;border-radius:8px;border:1px solid #1d3a44}
 .dwview .dw-name{min-height:40px;border-radius:10px;border:1px solid #1d3a44;background:#07171d;color:#ffcf5c;font:400 20px/1 "VT323",monospace;padding:0 10px;box-sizing:border-box}
 .dwview .dw-snaprow{display:flex;gap:8px}
 .dwview .dw-snaprow .dw-chip{flex:1 1 0;min-height:44px;font-size:15px}

@@ -423,7 +423,64 @@ const CHECKS = {
     const s = await page.evaluate(() => ({ id: window.DREAMWAVE._view.sceneId, pressed: document.querySelector('#viewDw .dw-scene[data-scene="golden"]').getAttribute("aria-pressed") }));
     if (s.id !== "golden" || s.pressed !== "true") throw new Error(JSON.stringify(s));
   },
+  // ---- Phones (plan Task 13): iPhone 390 x 844 at 3x and Android 412 x 915 at 2.625x, with touch.
+  // Nothing scrolls sideways, every bar button is at least 40 x 40, an open sheet leaves the top 45% of the wave showing, the three tabs fit.
+  async fitsThePhone(open) {
+    for (const d of PHONES) {
+      const page = await open({ world: true, ...d });
+      const tabs = await page.evaluate(() => { const bar = document.querySelector(".tabs"), r = bar.getBoundingClientRect();
+        return [...bar.querySelectorAll("button[data-v]")].filter(b => !b.hidden).map(b => { const q = b.getBoundingClientRect(); return { v: b.dataset.v, in: q.left >= r.left - 1 && q.right <= r.right + 1, clip: b.scrollWidth > b.clientWidth + 1 }; }); });
+      if (tabs.length !== 3 || tabs.some(t => !t.in || t.clip)) throw new Error(`${d.name}: tabs ${JSON.stringify(tabs)}`);
+      await openTab(page); await ready(page);
+      const side = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth); if (side > 0) throw new Error(`${d.name}: scrolls sideways by ${side}px`);
+      const small = await page.evaluate(() => [...document.querySelectorAll("#viewDw .dw-bar button, #viewDw .dw-x, #viewDw .dw-play")].map(b => { const r = b.getBoundingClientRect(); return [b.dataset.s || b.className, Math.round(r.width), Math.round(r.height)]; }).filter(x => x[1] < 40 || x[2] < 40));
+      if (small.length) throw new Error(`${d.name}: small buttons ${JSON.stringify(small)}`);
+      for (const s of ["styles", "shape", "surfer", "look", "camera", "snap"]) {
+        await sheet(page, s); await wait(200);
+        const top = await page.evaluate(() => document.querySelector("#viewDw .dw-bottom").getBoundingClientRect().top / innerHeight);
+        if (top < 0.45) throw new Error(`${d.name}: the ${s} sheet starts at ${(top * 100).toFixed(0)}% of the screen`);
+        const wide = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth); if (wide > 0) throw new Error(`${d.name}: the ${s} sheet scrolls sideways`);
+      }
+      await page.context().close();
+    }
+  },
+  // Two fingers pinch the free camera in, not the page; one finger on the surfer moves them.
+  async pinchAndDragWork(open) {
+    for (const d of PHONES) {
+      const page = await open({ world: true, ...d }); await openTab(page); await ready(page); await still(page, 6);
+      const cdp = await page.context().newCDPSession(page), T = (type, pts) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: pts.map(([x, y], id) => ({ x, y, id })) });
+      const r0 = await page.evaluate(() => window.DREAMWAVE._view.orbit.r), cx = d.vw / 2, cy = d.vh * 0.35;
+      await T("touchStart", [[cx - 40, cy], [cx + 40, cy]]);
+      for (let i = 1; i <= 8; i++) await T("touchMove", [[cx - 40 - 12 * i, cy], [cx + 40 + 12 * i, cy]]);
+      await T("touchEnd", []); await wait(100);
+      const z = await page.evaluate(() => ({ r: window.DREAMWAVE._view.orbit.r, scale: visualViewport.scale }));
+      if (!(z.r < r0 * 0.8)) throw new Error(`${d.name}: pinch out left the camera at ${z.r} (was ${r0})`);
+      if (Math.abs(z.scale - 1) > 1e-3) throw new Error(`${d.name}: the page zoomed to ${z.scale}`);
+      await still(page, 6);
+      const s = await page.evaluate(() => { const v = window.DREAMWAVE._view, r = v.canvas.getBoundingClientRect(), p = v.surfer.position.clone();
+        const at = q => { const c = q.clone().project(v.camera); return [r.left + (c.x + 1) / 2 * r.width, r.top + (1 - c.y) / 2 * r.height]; };
+        const mid = v.surfer.getObjectByName("head").getWorldPosition(p.clone()).lerp(p, 0.5);
+        return { from: at(mid), to: at(mid.clone().add({ x: -2.5, y: 0, z: 0 })), u: v.spot().u }; });
+      await T("touchStart", [s.from]);
+      for (let i = 1; i <= 10; i++) await T("touchMove", [[s.from[0] + (s.to[0] - s.from[0]) * i / 10, s.from[1] + (s.to[1] - s.from[1]) * i / 10]]);
+      await T("touchEnd", []); await wait(100);
+      const u = await page.evaluate(() => window.DREAMWAVE._view.spot().u);
+      if (!(u > s.u + 0.1)) throw new Error(`${d.name}: a finger drag moved u from ${s.u} to ${u}`);
+      await page.context().close();
+    }
+  },
+  // The story picture is 1080 x 1920 on a phone too, whatever the screen's size and pixel ratio.
+  async snapshotOnPhone(open) {
+    for (const d of PHONES) {
+      const page = await open({ world: true, ...d }); await openTab(page); await ready(page); await sheet(page, "snap");
+      await page.waitForFunction(() => document.querySelector("#viewDw .dw-preview canvas"), null, { timeout: 15000 });
+      const c = await page.evaluate(() => { const c = document.querySelector("#viewDw .dw-preview canvas"), v = window.DREAMWAVE._view; return { w: c.width, h: c.height, back: [v.canvas.width, v.canvas.height], css: [v.canvas.clientWidth, v.canvas.clientHeight] }; });
+      if (c.w !== 1080 || c.h !== 1920) throw new Error(`${d.name}: the picture is ${c.w}x${c.h}`);
+      await page.context().close();
+    }
+  },
 };
+const PHONES = [{ name: "iPhone", vw: 390, vh: 844, dpr: 3, touch: true }, { name: "Android", vw: 412, vh: 915, dpr: 2.625, touch: true }];
 
 class Skip extends Error {}
 (async () => {

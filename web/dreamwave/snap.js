@@ -47,7 +47,7 @@
     g.fillText('waveslave.tw', L.link.x, L.link.y); g.restore();
     // the bottom band, caption and name
     const b = g.createLinearGradient(0, L.band.y0, 0, L.band.y1); b.addColorStop(0, 'rgba(0,0,0,0)'); b.addColorStop(1, 'rgba(0,0,0,.55)');
-    g.fillStyle = b; g.fillRect(0, L.band.y0, L.w, L.band.y1 - L.band.y0);
+    g.fillStyle = b; g.fillRect(0, L.band.y0, L.w, L.h - L.band.y0);   // dark from the band's bottom to the picture's bottom, no hard edge
     if (cap) { g.font = `${L.caption.size}px "Metal Mania", fantasy`; const ls = lines(g, cap, L.caption.maxW);
       if (ls.length === 1) flame(g, ls[0], L.w / 2, L.caption.y, L.caption.size, 'center');
       else { flame(g, ls[0], L.w / 2, L.caption.y2, L.caption.size, 'center'); flame(g, ls[1], L.w / 2, L.caption.y, L.caption.size, 'center'); } }

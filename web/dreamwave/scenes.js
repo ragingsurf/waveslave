@@ -77,7 +77,7 @@
     const half = view.phone() ? 0.5 : 1;
     k.NS = Math.round(SPRAY * half); k.NR = Math.round(RAIN * half);
     const sp = new THREE.BufferGeometry(); sp.setAttribute('position', new THREE.BufferAttribute(new Float32Array(k.NS * 3), 3));
-    k.spray = new THREE.Points(sp, new THREE.PointsMaterial({ color: 0xffffff, size: 0.16, transparent: true, opacity: 0.8, depthWrite: false }));
+    k.spray = new THREE.Points(sp, new THREE.PointsMaterial({ color: 0xffffff, size: 0.35, transparent: true, opacity: 0.85, depthWrite: false }));
     k.spray.frustumCulled = false; k.group.add(k.spray);
     k.sv = new Float32Array(k.NS * 3); k.life = new Float32Array(k.NS);
     for (let i = 0; i < k.NS; i++) { k.life[i] = 0; sp.attributes.position.array[i * 3 + 1] = -50; }

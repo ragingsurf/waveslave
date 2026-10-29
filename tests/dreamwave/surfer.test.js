@@ -63,3 +63,11 @@ test("place rides with the curl", () => {
   const S = fresh(), at = t => place(S, timeState(S, t), { side: "left", u: 0.35, h: 0.2 }).x;
   assert.ok(at(7) < at(5) - 1, `x at 5 s ${at(5)}, at 7 s ${at(7)}`);
 });
+
+test("wire surfer has only lines", () => {
+  const g = make(DEFAULT, "wire"); let mesh = 0, lines = 0;
+  g.traverse(o => { if (o.isLineSegments) lines++; else if (o.isMesh) mesh++; });
+  assert.equal(mesh, 0); assert.ok(lines > 20, `${lines} line parts`);
+  assert.ok(named(g, "head") && named(g, "handFront") && named(g, "board"), "named parts kept");
+  let additive = true; g.traverse(o => { if (o.isLineSegments && o.material.blending !== THREE.AdditiveBlending) additive = false; }); assert.ok(additive);
+});

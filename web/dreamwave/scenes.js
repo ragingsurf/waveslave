@@ -17,6 +17,32 @@
       land: { sand: '#3d4240', rock: '#353a39', hill: ['#3a4a44', '#2b3632'] }, clouds: 16, cloud: '#4a5157', streaks: true, rain: '#c8d3d8' }
   };
   const C = c => new THREE.Color(c);
+  const SPRAY = 600, RAIN = 1200;   // on a computer; a phone gets half
+
+  // One step of the spray (blown back off the lip where it pitches, falling) and the rain (falling around the camera's target, slanted).
+  function step(k, view, dt) {
+    const F = view.F, M = F.M, pos = F.pos, J = DW.shell.J, sa = k.spray.geometry.attributes.position, a = sa.array, v = k.sv;
+    for (let i = 0; i < k.NS; i++) {
+      k.life[i] -= dt;
+      if (k.life[i] <= 0) {   // a waiting drop leaves the lip at a random place where it pitches, a few times a second
+        const c = Math.floor(Math.random() * F.NX), st = F.st[c];
+        if (Math.random() < 4 * dt && st && st.p > 0.3) {
+          const n = (c * M + J.inner) * 3; a[i * 3] = pos[n]; a[i * 3 + 1] = pos[n + 1]; a[i * 3 + 2] = pos[n + 2];
+          v[i * 3] = (Math.random() - 0.5) * 1.2; v[i * 3 + 1] = 1 + Math.random() * 2.2; v[i * 3 + 2] = -1.5 - Math.random() * 2.5; k.life[i] = 0.6 + Math.random() * 0.8;
+        } else { a[i * 3 + 1] = -50; continue; }
+      }
+      v[i * 3 + 1] -= 6 * dt; a[i * 3] += v[i * 3] * dt; a[i * 3 + 1] += v[i * 3 + 1] * dt; a[i * 3 + 2] += v[i * 3 + 2] * dt;
+    }
+    sa.needsUpdate = true;
+    if (!k.rain.visible) return;
+    const ra = k.rain.geometry.attributes.position, r = ra.array, cx = view.orbit.target.x, fall = 18 * dt, side = 3 * dt;
+    for (let i = 0; i < k.NR; i++) {
+      const o = i * 6; r[o + 1] -= fall; r[o + 4] -= fall; r[o] -= side; r[o + 3] -= side;
+      if (r[o + 1] < 0) { const x = cx + (Math.random() - 0.5) * 120, y = 40, z = (Math.random() - 0.5) * 120; r.set([x, y, z, x + 0.15, y + 0.9, z], o); }
+    }
+    ra.needsUpdate = true;
+  }
+  const particles = view => { const k = view._kit; return k && k.group.visible ? { spray: k.spray.visible ? k.NS : 0, rain: k.rain.visible ? k.NR : 0 } : { spray: 0, rain: 0 }; };
 
   // The pieces a realistic scene adds, built once per view and recoloured per scene.
   function kit(view) {
@@ -47,6 +73,19 @@
     k.hemi = new THREE.HemisphereLight(0xffffff, 0x334455, 0.6); k.group.add(k.hemi);
     k.water = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0, side: THREE.DoubleSide });
     k.seaMat = new THREE.MeshStandardMaterial({ color: 0x0b3b4a, roughness: 0.6, metalness: 0 });
+    // Spray off the lip and, in Stormy, rain: a phone gets half of each.
+    const half = view.phone() ? 0.5 : 1;
+    k.NS = Math.round(SPRAY * half); k.NR = Math.round(RAIN * half);
+    const sp = new THREE.BufferGeometry(); sp.setAttribute('position', new THREE.BufferAttribute(new Float32Array(k.NS * 3), 3));
+    k.spray = new THREE.Points(sp, new THREE.PointsMaterial({ color: 0xffffff, size: 0.16, transparent: true, opacity: 0.8, depthWrite: false }));
+    k.spray.frustumCulled = false; k.group.add(k.spray);
+    k.sv = new Float32Array(k.NS * 3); k.life = new Float32Array(k.NS);
+    for (let i = 0; i < k.NS; i++) { k.life[i] = 0; sp.attributes.position.array[i * 3 + 1] = -50; }
+    const rg = new THREE.BufferGeometry(), rp = new Float32Array(k.NR * 6); rg.setAttribute('position', new THREE.BufferAttribute(rp, 3));
+    for (let i = 0; i < k.NR; i++) { const x = (Math.random() - 0.5) * 120, y = Math.random() * 40, z = (Math.random() - 0.5) * 120; rp.set([x, y, z, x + 0.15, y + 0.9, z], i * 6); }
+    k.rain = new THREE.LineSegments(rg, new THREE.LineBasicMaterial({ color: 0xc8d3d8, transparent: true, opacity: 0.45, depthWrite: false }));
+    k.rain.frustumCulled = false; k.group.add(k.rain);
+    view.on('frame', dt => { if (k.group.visible && view.playing()) step(k, view, dt); });
     return k;
   }
 
@@ -79,8 +118,9 @@
     const sg = k.sky.geometry, pos = sg.attributes.position, col = sg.attributes.color, stops = P.sky.map(C), c = new THREE.Color();
     for (let i = 0; i < pos.count; i++) {
       const e = Math.max(0, pos.getY(i) / 2500);   // 0 at the horizon, 1 straight up
-      if (stops.length === 3) { if (e < 0.18) c.copy(stops[2]).lerp(stops[1], e / 0.18); else c.copy(stops[1]).lerp(stops[0], Math.min(1, (e - 0.18) / 0.5)); }
-      else c.copy(stops[1]).lerp(stops[0], Math.min(1, Math.pow(e, 0.6) * 1.2));
+      // the top colour is reached about 16° up, so the top of the screen (the camera sees up to about 20° on a tall phone) shows the sky's own colour
+      if (stops.length === 3) { if (e < 0.07) c.copy(stops[2]).lerp(stops[1], e / 0.07); else c.copy(stops[1]).lerp(stops[0], Math.min(1, (e - 0.07) / 0.17)); }
+      else c.copy(stops[1]).lerp(stops[0], Math.min(1, Math.pow(e / 0.28, 0.6)));
       col.setXYZ(i, c.r, c.g, c.b);
     }
     col.needsUpdate = true;
@@ -130,8 +170,11 @@
       view.renderer.setClearColor(hz); view.scene.fog = new THREE.Fog(hz, 180, 1400);
       view.paintWater = painter(P);
     }
+    if (!neon) { k.spray.visible = true; k.rain.visible = !!PAL[id].rain; if (PAL[id].rain) k.rain.material.color.set(PAL[id].rain); }
+    // the surfer: wireframe in Neon, the toon cartoon in the realistic scenes
+    const look = neon ? 'wire' : 'toon'; if (view.look !== look) { view.look = look; view.setSurfer(view.surferOptions()); }
     view.paint(); view.sceneId = id;
     view.render();
   }
-  DW.scenes = { LIST, PAL, apply };
+  DW.scenes = { LIST, PAL, apply, particles };
 })(window.DW = window.DW || {});

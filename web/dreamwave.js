@@ -97,6 +97,10 @@ css.textContent = `
 .dwview .dw-mname{font-size:12px;color:#8aa6ad;margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em}
 .dwview .dw-maker .dw-chip{flex:0 1 auto;min-height:36px;font-size:12px}
 .dwview .dw-swatches{display:flex;flex-wrap:wrap;gap:8px}
+.dwview .dw-scenes{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}
+.dwview .dw-scene{display:flex;flex-direction:column;align-items:stretch;gap:6px;min-height:44px;padding:6px;border:1px solid #1d3a44;border-radius:10px;background:#07171d;color:#e3f0f0;font:600 12px/1.2 "Public Sans",system-ui,sans-serif;cursor:pointer;touch-action:manipulation}
+.dwview .dw-scene i{display:block;height:34px;border-radius:6px}
+.dwview .dw-scene[aria-pressed="true"]{border-color:#ffb347;color:#ffb347;box-shadow:0 0 8px rgba(255,140,0,.45)}
 .dwview .dw-swatch{width:36px;height:36px;border-radius:50%;border:2px solid #1d3a44;cursor:pointer;touch-action:manipulation;padding:0}
 .dwview .dw-swatch[aria-pressed="true"]{border-color:#ffb347;box-shadow:0 0 0 2px #07171d,0 0 10px rgba(255,140,0,.8)}
 .dwview .dw-snapsheet{display:flex;flex-direction:column;gap:8px;align-items:stretch}

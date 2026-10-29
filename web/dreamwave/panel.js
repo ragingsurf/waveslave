@@ -16,7 +16,7 @@
 
   function mount(layer, view) {
     P.view = view; const saved = read();
-    P.state = { shape: {}, scene: 'neon', name: '' };
+    P.state = { shape: {}, scene: 'eastcoast', name: '' };
     for (const c of SLIDERS) if (okNum(c, saved.shape && saved.shape[c.k])) { P.state.shape[c.k] = saved.shape[c.k]; view.shape(c.k, saved.shape[c.k]); }
     for (const k in PARTS) { const v = PARTS[k].take(saved[k]); if (v !== null) P.state[k] = v; }
     if (typeof saved.name === 'string') P.state.name = saved.name.slice(0, 30);
@@ -32,7 +32,7 @@
       b.addEventListener('click', () => sheet(P.open === s ? null : s)); bar.appendChild(b); P.buttons[s] = b;
     }
     P.sheets.styles = stylesSheet(); P.sheets.shape = shapeSheet();
-    for (const k in PARTS) if (PARTS[k].sheet) P.sheets[k === 'snapshot' ? 'snap' : k] = PARTS[k].sheet();
+    for (const k in PARTS) if (PARTS[k].sheet) P.sheets[PARTS[k].as || k] = PARTS[k].sheet();
     for (const s of SHEETS) { if (!P.sheets[s]) P.sheets[s] = { el: el('div', 'dw-empty') }; P.sheets[s].el.hidden = true; sheetBox.appendChild(P.sheets[s].el); }
     for (const k in PARTS) if (PARTS[k].mounted) PARTS[k].mounted(view, P.state);
     relang(); refresh(); save();
@@ -139,7 +139,7 @@
   };
   // ---- Snapshot: the wave pauses on the moment they saw; a preview of the story picture, their name or IG handle, Share and Save.
   PARTS.snapshot = {
-    take: () => null,
+    as: 'snap', take: () => null,
     sheet() {
       const box = el('div', 'dw-snapsheet'), prev = el('div', 'dw-preview'), name = el('input', 'dw-name'), row = el('div', 'dw-snaprow'),
         share = el('button', 'dw-chip dw-share'), saveBtn = el('button', 'dw-chip dw-save'), err = el('p', 'dw-snaperr'), hold = el('div', 'dw-hold'), holdImg = el('img'), holdHint = el('p');
@@ -173,6 +173,20 @@
       const mark = () => { for (const c of CAMS) P.camChips[c].setAttribute('aria-pressed', String(view.camMode === c)); };
       view.on('camera', c => { state.camera = c; save(); mark(); }); view.setCamera(state.camera); mark(); },
     relang() { for (const c of CAMS) P.camChips[c].textContent = DW.t('cam_' + c); }
+  };
+  // ---- Look: the five scenes, each a button with its sky and water as a little picture. Taiwan east coast opens first (Bryan, Oct 29).
+  PARTS.scene = {
+    as: 'look', take: s => DW.scenes.LIST.includes(s) ? s : 'eastcoast',
+    sheet() { const box = el('div', 'dw-scenes'), btns = {};
+      for (const id of DW.scenes.LIST) { const b = el('button', 'dw-scene'), sw = el('i'), name = el('span'); b.type = 'button'; b.dataset.scene = id;
+        const P2 = DW.scenes.PAL[id], sky = P2 ? P2.sky : ['#05010d', '#1a0630'], w = P2 ? P2.water : ['#07021a', '#5a6a8a', '#ff1fd1'];
+        sw.style.background = `linear-gradient(${sky[0]}, ${sky[sky.length - 1]} 50%, ${w[1]} 50%, ${w[0]})`;
+        b.append(sw, name); b.addEventListener('click', () => P.view.setScene(id)); box.appendChild(b); btns[id] = { b, name }; }
+      P.sceneBtns = btns; return { el: box }; },
+    mounted(view, state) {
+      const mark = () => { for (const id in P.sceneBtns) P.sceneBtns[id].b.setAttribute('aria-pressed', String(view.sceneId === id)); };
+      view.on('scene', id => { state.scene = id; save(); mark(); }); view.setScene(state.scene); mark(); },
+    relang() { for (const id in P.sceneBtns) P.sceneBtns[id].name.textContent = DW.t('scene_' + id); }
   };
   // The surfer's spot in the wave: restored on mount, saved when a drag ends.
   PARTS.spot = { take: s => DW.surfer.clampSpot(s), mounted(view, state) { view.setSpot(state.spot); view.on('spot', s => { state.spot = s; save(); }); } };

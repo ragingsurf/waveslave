@@ -180,7 +180,23 @@ DW.surfer = (function () {
   // A surfer with only known values: anything missing or no longer offered takes the default.
   function clean(o) { const out = {}; for (const k in DEFAULT) out[k] = o && OPTIONS[k].includes(o[k]) ? o[k] : DEFAULT[k]; return out; }
   const mirror = (J, mz) => mz > 0 ? J : Object.fromEntries(Object.entries(J).map(([k, v]) => [k, V(v.x, v.y, -v.z)]));
-  function make(o) {
+  // The Neon scene's surfer: the same body drawn as glowing lines, each part's wireframe in its own colour, brightened, additive.
+  function wire(g) {
+    const swap = [];
+    g.traverse(k => { if (k.isMesh) swap.push(k); });
+    for (const m of swap) {
+      const parent = m.parent, mat = [].concat(m.material)[m.material.length > 1 ? 1 : 0];
+      if (mat !== lineMat) {
+        const c = new THREE.Color(mat.color || 0xffffff), hsl = {}; c.getHSL(hsl); c.setHSL(hsl.h, Math.min(1, hsl.s + 0.2), Math.min(0.75, 0.45 + hsl.l * 0.5));
+        const ln = new THREE.LineSegments(new THREE.WireframeGeometry(m.geometry), new THREE.LineBasicMaterial({ color: c, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
+        ln.name = m.name; ln.position.copy(m.position); ln.quaternion.copy(m.quaternion); ln.scale.copy(m.scale); parent.add(ln);
+      }
+      parent.remove(m); m.geometry.dispose(); for (const x of [].concat(m.material)) if (!x.userData.keep) { if (x.map && !x.map.userData.keep) x.map.dispose(); x.dispose(); }
+    }
+    return g;
+  }
+  function make(o, look = 'toon') {
+    if (look === 'wire') return wire(make(o, 'toon'));
     o = clean(o); mats = new Map();
     const mz = o.stance === 'goofy' ? 1 : -1;
     const g = new THREE.Group(), skin = toon(o.skin), suit = toon(o.suit), acc = toon(o.accent), hairM = toon(o.hairColor);

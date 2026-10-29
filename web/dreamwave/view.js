@@ -247,7 +247,7 @@
       setTime(v) { t = cl(+v, 0, S.loopTime); build(t); showTime(); if (!running || !playing) follow(0); if (!running) render(); },
       play(p) { setPlaying(p); }, playing: () => playing,
       surfer: holder, look: 'toon', seaNeon: sea.material, paintWater: null, sceneId: 'neon',
-      setScene(id) { DW.scenes.apply(view, id); emit('scene', view.sceneId); },
+      setScene(id) { DW.scenes.apply(view, id); emit('scene', view.sceneId); }, particles: () => DW.scenes.particles(view),
       setSurfer, surferOptions: () => riderOpts, setCamera,
       setSpot(s) { spot = DW.surfer.clampSpot(s); ride(); if (!playing) follow(0); if (!running) render(); emit('spot', spot); }, spot: () => Object.assign({}, spot),
       shape(k, v) { applyShape(S, k, v); fitLoop(S); if (t > S.loopTime) t = 0; build(t); showTime(); if (!running) render(); emit('shape', k, v); },

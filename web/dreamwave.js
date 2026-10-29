@@ -15,7 +15,7 @@ const PUBLIC = false;
 const on = () => PUBLIC || (typeof WORLD === "boolean" && WORLD);
 const TEST = !!window.__dwTest;
 // The parts, in the order they run (each may use the ones before it).
-const PARTS = ["shell", "flow", "surfer", "scenes", "view", "panel"];
+const PARTS = ["shell", "flow", "surfer", "scenes", "view", "snap", "panel"];
 const ME = document.currentScript && document.currentScript.src || "", VER = (ME.match(/[?&]v=(\w+)/) || [])[1] || "0";
 
 // ---- Strings: every word the tab shows, in English and 中文 (Taiwan). The 中文 names are proposals Bryan checks after the build.
@@ -99,6 +99,17 @@ css.textContent = `
 .dwview .dw-swatches{display:flex;flex-wrap:wrap;gap:8px}
 .dwview .dw-swatch{width:36px;height:36px;border-radius:50%;border:2px solid #1d3a44;cursor:pointer;touch-action:manipulation;padding:0}
 .dwview .dw-swatch[aria-pressed="true"]{border-color:#ffb347;box-shadow:0 0 0 2px #07171d,0 0 10px rgba(255,140,0,.8)}
+.dwview .dw-snapsheet{display:flex;flex-direction:column;gap:8px;align-items:stretch}
+.dwview .dw-preview{display:flex;justify-content:center}
+.dwview .dw-preview canvas{height:min(30vh,30dvh);width:auto;aspect-ratio:9/16;border-radius:8px;border:1px solid #1d3a44}
+.dwview .dw-name{min-height:40px;border-radius:10px;border:1px solid #1d3a44;background:#07171d;color:#ffcf5c;font:400 20px/1 "VT323",monospace;padding:0 10px;box-sizing:border-box}
+.dwview .dw-snaprow{display:flex;gap:8px}
+.dwview .dw-snaprow .dw-chip{flex:1 1 0;min-height:44px;font-size:15px}
+.dwview .dw-share{border-color:#ffb347;color:#ffb347}
+.dwview .dw-snaperr{margin:0;color:#ff8a7a;font-size:13px}
+.dwview .dw-hold{text-align:center}
+.dwview .dw-hold img{width:100%;height:auto;border-radius:8px;-webkit-touch-callout:default;-webkit-user-select:auto;user-select:auto;touch-action:auto}
+.dwview .dw-hold p{margin:6px 0 0;color:#ffcf5c;font-size:13px}
 .dwview .dw-ends{display:flex;justify-content:space-between;font-size:11px;color:#8aa6ad}
 .dwview .dw-play{width:40px;height:40px;border:0;border-radius:8px;background:transparent;color:#ffcf5c;font:600 16px/1 "Public Sans",system-ui,sans-serif;cursor:pointer;touch-action:manipulation}
 .dwview .dw-scrub{flex:1;min-width:60px;height:32px;margin:0;accent-color:#ff8a00;background:transparent}

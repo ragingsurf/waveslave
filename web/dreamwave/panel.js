@@ -18,7 +18,7 @@
     P.view = view; const saved = read();
     P.state = { shape: {}, scene: 'neon', name: '' };
     for (const c of SLIDERS) if (okNum(c, saved.shape && saved.shape[c.k])) { P.state.shape[c.k] = saved.shape[c.k]; view.shape(c.k, saved.shape[c.k]); }
-    for (const k in PARTS) P.state[k] = PARTS[k].take(saved[k]);
+    for (const k in PARTS) { const v = PARTS[k].take(saved[k]); if (v !== null) P.state[k] = v; }
     if (typeof saved.name === 'string') P.state.name = saved.name.slice(0, 30);
 
     // Layout: [time bar][open sheet][bar] stacked at the bottom.
@@ -32,7 +32,7 @@
       b.addEventListener('click', () => sheet(P.open === s ? null : s)); bar.appendChild(b); P.buttons[s] = b;
     }
     P.sheets.styles = stylesSheet(); P.sheets.shape = shapeSheet();
-    for (const k in PARTS) if (PARTS[k].sheet) P.sheets[k] = PARTS[k].sheet();
+    for (const k in PARTS) if (PARTS[k].sheet) P.sheets[k === 'snapshot' ? 'snap' : k] = PARTS[k].sheet();
     for (const s of SHEETS) { if (!P.sheets[s]) P.sheets[s] = { el: el('div', 'dw-empty') }; P.sheets[s].el.hidden = true; sheetBox.appendChild(P.sheets[s].el); }
     for (const k in PARTS) if (PARTS[k].mounted) PARTS[k].mounted(view, P.state);
     relang(); refresh(); save();
@@ -136,6 +136,31 @@
       for (const k of ROWS) { const r = P.makerRows[k]; r.name.textContent = DW.t('row_' + k); r.opts.setAttribute('aria-label', DW.t('row_' + k));
         if (LABEL[k]) for (const v in r.btns) r.btns[v].textContent = DW.t(LABEL[k] + '_' + v); }
     }
+  };
+  // ---- Snapshot: the wave pauses on the moment they saw; a preview of the story picture, their name or IG handle, Share and Save.
+  PARTS.snapshot = {
+    take: () => null,
+    sheet() {
+      const box = el('div', 'dw-snapsheet'), prev = el('div', 'dw-preview'), name = el('input', 'dw-name'), row = el('div', 'dw-snaprow'),
+        share = el('button', 'dw-chip dw-share'), saveBtn = el('button', 'dw-chip dw-save'), err = el('p', 'dw-snaperr'), hold = el('div', 'dw-hold'), holdImg = el('img'), holdHint = el('p');
+      name.type = 'text'; name.maxLength = 30; name.autocomplete = 'off'; name.spellcheck = false; share.type = saveBtn.type = 'button';
+      err.hidden = true; hold.hidden = true; hold.append(holdImg, holdHint); row.append(share, saveBtn); box.append(prev, name, row, err, hold);
+      let pic = null, shot = null, was = false, gen = 0, typing = 0;
+      const draw = async () => { const g = ++gen, c = await DW.snap.compose(shot, { caption: DW.snap.caption(P.view.S), name: P.state.name });
+        if (g !== gen || P.open !== 'snap') return; pic = c; prev.replaceChildren(c); };
+      const busy = on => { share.disabled = saveBtn.disabled = on; };
+      share.addEventListener('click', async () => { if (!pic) return; busy(true); err.hidden = true;
+        try { await DW.snap.share(pic); } catch (e) { err.hidden = false; err.textContent = DW.t('failed'); } busy(false); });
+      saveBtn.addEventListener('click', () => { if (!pic) return; try { DW.snap.save(pic); } catch (e) {} });
+      name.addEventListener('input', () => { P.state.name = name.value.slice(0, 30); save(); clearTimeout(typing); typing = setTimeout(draw, 250); });
+      DW.snap.onHold = url => { holdImg.src = url; holdImg.alt = DW.t('tab'); holdHint.textContent = DW.t('hold'); hold.hidden = false; prev.hidden = true; };
+      P.snapEls = { share, save: saveBtn, name };
+      return { el: box,
+        open() { was = P.view.playing(); P.view.play(false); hold.hidden = true; prev.hidden = false; err.hidden = true; name.value = P.state.name || '';
+          pic = null; prev.replaceChildren(); shot = P.view.snapshot(DW.snap.LAYOUT.w, DW.snap.LAYOUT.h); draw(); },
+        close() { gen++; pic = shot = null; prev.replaceChildren(); hold.hidden = true; holdImg.removeAttribute('src'); if (was) P.view.play(true); } };
+    },
+    relang() { const s = P.snapEls; s.share.textContent = DW.t('share'); s.save.textContent = DW.t('save'); s.name.placeholder = DW.t('name'); s.name.setAttribute('aria-label', DW.t('name')); }
   };
   // ---- Camera: Free, GoPro nose cam, GoPro head cam.
   const CAMS = ['free', 'nose', 'head'];

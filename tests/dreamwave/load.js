@@ -14,8 +14,11 @@ function three() {
   new Function("self", "globalThis", "window", "document", "exports", "module", "define", src)(w, w, w, w.document, undefined, undefined, undefined);
   global.document = global.document || w.document; THREE = w.THREE; return THREE;
 }
+// With strings: true, web/dreamwave.js runs first on a stub page (no tab in it, so it stops after the strings), giving the real DW.t.
 function load(parts, opts = {}) {
   const window = { DW: { t: k => k, lang: "en" } }, T = opts.three ? three() : undefined;
+  if (opts.strings) { delete window.DW.t; const doc = { currentScript: null, createElement: () => ({ style: {} }), head: { appendChild() {} }, getElementById: () => null, querySelector: () => null };
+    new Function("window", "document", "location", fs.readFileSync(path.join(WEB, "dreamwave.js"), "utf8"))(window, doc, { hash: "" }); }
   for (const p of parts) new Function("window", "THREE", "document", fs.readFileSync(path.join(WEB, "dreamwave", p + ".js"), "utf8"))(window, T, opts.three ? global.document : undefined);
   return window.DW;
 }

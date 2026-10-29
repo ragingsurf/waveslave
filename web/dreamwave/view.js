@@ -253,7 +253,15 @@
       shape(k, v) { applyShape(S, k, v); fitLoop(S); if (t > S.loopTime) t = 0; build(t); showTime(); if (!running) render(); emit('shape', k, v); },
       pause, resume, running: () => running, render, build: () => build(t), paint,
       power(on) { showPower = !!on; paint(); }, flow(on) { flowOn = !!on; trails.visible = heads.visible = beads.visible = flowOn; },
-      lift(v) { lift = v || 0; applyLift(); if (!running) render(); }, place, phone, on, emit, grab: h => handlers.push(h),
+      lift(v) { lift = v || 0; applyLift(); if (!running) render(); },
+      // The current camera rendered at w x h, pixel ratio 1, copied to a 2D canvas straight away; the view goes back as it was.
+      snapshot(w, h) {
+        const pr = R.getPixelRatio(), size = R.getSize(new THREE.Vector2()), asp = cam.aspect, lf = lift;
+        R.setPixelRatio(1); R.setSize(w, h, false); cam.aspect = w / h; lift = 0; place(); R.render(scene, cam);
+        const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(canvas, 0, 0, w, h);
+        R.setPixelRatio(pr); R.setSize(size.x, size.y, false); cam.aspect = asp; lift = lf; place(); render();
+        return c;
+      }, place, phone, on, emit, grab: h => handlers.push(h),
       relang() { showPlay(); canvas.setAttribute('aria-label', DW.t('tab')); emit('relang'); }
     };
     place(); showPlay(); setSurfer(DW.surfer.DEFAULT); build(t); showTime(); resize();

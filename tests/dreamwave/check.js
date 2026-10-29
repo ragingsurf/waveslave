@@ -14,7 +14,7 @@ const [file, ...only] = process.argv.slice(2);
 if (!file) { console.error("usage: node tests/dreamwave/check.js <page.html> [check…]"); process.exit(2); }
 const PAGE = pathToFileURL(path.resolve(file)).href, HTML = fs.readFileSync(file, "utf8"), WEB = path.join(__dirname, "..", "..", "web");
 const LOCK = (HTML.match(/\bH="([0-9a-f]{64})"/) || [])[1];
-const PARTS = ["shell", "flow", "surfer", "scenes", "view", "panel"];
+const PARTS = ["shell", "flow", "surfer", "scenes", "view", "snap", "panel"];
 const settle = page => page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -28,7 +28,8 @@ const look = page => page.evaluate(() => { const b = document.querySelector('.ta
     fc: vis(fc), msg: l ? (l.querySelector(".dw-msg") || {}).textContent || "" : "", scroll: getComputedStyle(document.documentElement).overflow,
     meta: document.querySelector('meta[name="viewport"]').content }; });
 const openTab = async page => { await page.evaluate(() => document.querySelector('.tabs button[data-v="dw"]').click()); await page.waitForTimeout(400); await settle(page); };
-const ready = page => page.waitForFunction(() => window.DREAMWAVE && window.DREAMWAVE._view, null, { timeout: 30000 });
+const ready = page => page.waitForFunction(() => window.DREAMWAVE && window.DREAMWAVE._view, null, { timeout: 30000 })
+  .catch(async e => { throw new Error(`the tab didn't start: "${await page.evaluate(() => (document.querySelector("#viewDw .dw-msg") || {}).textContent).catch(() => "?")}"`); });
 // The picture's pixels (RGBA) in a size x size block centred at (fx, fy) of the canvas, read right after a render.
 const pixels = (page, fx, fy, size) => page.evaluate(([fx, fy, n]) => { const v = window.DREAMWAVE._view, gl = v.renderer.getContext();
   v.renderer.render(v.scene, v.camera); const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, out = new Uint8Array(n * n * 4);
@@ -168,7 +169,8 @@ const CHECKS = {
     const seen = await page.evaluate(() => new Promise(r => { const out = [], t0 = performance.now(), i = document.querySelector('#viewDw .dw-sliders input[data-k="height"]');
       (function look() { out.push(+i.value); if (performance.now() - t0 < 650) requestAnimationFrame(look); else r(out); })(); }));
     if (!seen.some(h => h > 2.6 + 1e-6 && h < 3 - 1e-6)) throw new Error(`no glide: Size read ${seen.join(", ")} during the first 650 ms`);
-    await wait(500); const s = await sliders(page), want = { height: 3, lipThrow: 4, faceSteepness: 105, peelSpeed: 5 };
+    await page.waitForFunction(() => window.DREAMWAVE._view.S.height === 3, null, { timeout: 5000 }).catch(() => {});
+    const s = await sliders(page), want = { height: 3, lipThrow: 4, faceSteepness: 105, peelSpeed: 5 };
     for (const k in want) if (Math.abs(s[k] - want[k]) > 1e-6) throw new Error(`after the glide ${k} reads ${s[k]}, want ${want[k]}`);
     if (await pressed(page) !== "slab") throw new Error(`the pressed chip is ${await pressed(page)}`);
   },
@@ -183,7 +185,8 @@ const CHECKS = {
   // Reset goes back to the A-frame.
   async resetGoesToAFrame(open) {
     const page = await open({ world: true }); await openTab(page); await ready(page); await sheet(page, "shape"); await slide(page, "height", 5);
-    await sheet(page, "styles"); await page.evaluate(() => document.querySelector("#viewDw .dw-reset").click()); await wait(900);
+    await sheet(page, "styles"); await page.evaluate(() => document.querySelector("#viewDw .dw-reset").click());
+    await page.waitForFunction(() => window.DREAMWAVE._view.S.height === 2.6, null, { timeout: 5000 }).catch(() => {});
     if (await pressed(page) !== "aframe" || (await sliders(page)).height !== 2.6) throw new Error(`after Reset: ${await pressed(page)}, Size ${(await sliders(page)).height}`);
   },
   // The wave is remembered: Size 4.2 survives a reload.
@@ -325,6 +328,100 @@ const CHECKS = {
     await page.reload({ waitUntil: "load" }); await settle(page); await openTab(page); await ready(page);
     const c = await page.evaluate(() => ({ mode: window.DREAMWAVE._view.camMode, pressed: document.querySelector('#viewDw .dw-chip[data-cam="head"]').getAttribute("aria-pressed") }));
     if (c.mode !== "head" || c.pressed !== "true") throw new Error(JSON.stringify(c));
+  },
+  // The snapshot is 1080 x 1920, from the current camera.
+  async snapshotIs1080x1920(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page);
+    const s = await page.evaluate(() => { const v = window.DREAMWAVE._view, c = v.snapshot(1080, 1920), w = v.canvas.width, h = v.canvas.height; return { w: c.width, h: c.height, back: [w, h], aspect: v.camera.aspect }; });
+    if (s.w !== 1080 || s.h !== 1920) throw new Error(`the shot is ${s.w}x${s.h}`);
+    const after = await page.evaluate(() => [window.DREAMWAVE._view.canvas.width, window.DREAMWAVE._view.canvas.height]);
+    if (!eq(after, s.back) || Math.abs(s.aspect - 390 / 844) > 0.01) throw new Error(`the view didn't go back: ${after}, aspect ${s.aspect}`);
+  },
+  // The composed picture carries the wordmark, the link and the caption, and leaves the story's top 280 and bottom 280 rows as the shot.
+  async snapshotHasBranding(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page);
+    const r = await page.evaluate(async () => { const v = window.DREAMWAVE._view, shot = v.snapshot(1080, 1920), pic = await DW.snap.compose(shot, { caption: DW.snap.caption(v.S), name: "@surfer" });
+      const a = shot.getContext("2d").getImageData(0, 0, 1080, 1920).data, b = pic.getContext("2d").getImageData(0, 0, 1080, 1920).data;
+      const diff = (x0, y0, x1, y1) => { let n = 0; for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const i = (y * 1080 + x) * 4; if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 30) n++; } return n; };
+      return { w: pic.width, h: pic.height, mark: diff(64, 340, 560, 450), link: diff(72, 470, 400, 520), cap: diff(100, 1430, 980, 1520), name: diff(380, 1560, 700, 1615), top: diff(0, 0, 1080, 280), bottom: diff(0, 1641, 1080, 1920) }; });
+    if (r.w !== 1080 || r.h !== 1920) throw new Error(`the picture is ${r.w}x${r.h}`);
+    for (const k of ["mark", "link", "cap", "name"]) if (r[k] < 200) throw new Error(`nothing drawn for the ${k}: ${JSON.stringify(r)}`);
+    if (r.top || r.bottom) throw new Error(`drawn outside the safe area: ${JSON.stringify(r)}`);
+  },
+  // Tapping Snapshot pauses the wave (the picture is the moment they saw) and shows the preview; closing it plays on.
+  async snapshotPausesTheWave(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page);
+    if (!await page.evaluate(() => window.DREAMWAVE._view.playing())) throw new Error("not playing at first");
+    await sheet(page, "snap"); await page.waitForFunction(() => document.querySelector("#viewDw .dw-preview img, #viewDw .dw-preview canvas"), null, { timeout: 10000 });
+    const a = await page.evaluate(() => ({ p: window.DREAMWAVE._view.playing(), t: window.DREAMWAVE._view.time() })); await wait(300);
+    if (a.p || await page.evaluate(() => window.DREAMWAVE._view.time()) !== a.t) throw new Error("the wave kept playing behind the snapshot");
+    await sheet(page, "snap"); await page.evaluate(() => document.querySelector('#viewDw .dw-bar button[data-s="snap"]').click()); await wait(200);
+    if (!await page.evaluate(() => window.DREAMWAVE._view.playing())) throw new Error("closing the snapshot didn't play on");
+  },
+  // Share hands the phone's share menu one PNG and the link.
+  async shareSendsPng(open) {
+    const page = await open({ world: true, init: () => { window.__shared = []; Object.defineProperty(navigator, "canShare", { value: d => !!(d && d.files) });
+      Object.defineProperty(navigator, "share", { value: async d => { window.__shared.push({ files: d.files.map(f => [f.name, f.type, f.size]), text: d.text }); } }); } });
+    await openTab(page); await ready(page); await sheet(page, "snap"); await page.waitForSelector("#viewDw .dw-share");
+    await page.evaluate(() => document.querySelector("#viewDw .dw-share").click()); await page.waitForFunction(() => window.__shared.length, null, { timeout: 10000 });
+    const s = await page.evaluate(() => window.__shared[0]);
+    if (s.files.length !== 1 || s.files[0][0] !== "dream-wave.png" || s.files[0][1] !== "image/png" || !(s.files[0][2] > 1000) || s.text !== "https://waveslave.tw/#dreamwave") throw new Error(JSON.stringify(s));
+  },
+  // No file sharing: a download named dream-wave.png. A cancelled share: no error, the sheet stays. An iPhone: the full-size picture with the hint.
+  async shareFallsBackToSave(open) {
+    let page = await open({ world: true, init: () => { Object.defineProperty(navigator, "canShare", { value: undefined }); } });
+    await openTab(page); await ready(page); await sheet(page, "snap"); await page.waitForSelector("#viewDw .dw-share");
+    const [dl] = await Promise.all([page.waitForEvent("download", { timeout: 10000 }), page.evaluate(() => document.querySelector("#viewDw .dw-share").click())]);
+    if (dl.suggestedFilename() !== "dream-wave.png") throw new Error(`downloaded ${dl.suggestedFilename()}`);
+    await page.context().close();   // one WebGL page at a time: SwiftShader runs out of contexts with several open
+    page = await open({ world: true, init: () => { Object.defineProperty(navigator, "canShare", { value: () => true });
+      Object.defineProperty(navigator, "share", { value: async () => { throw new DOMException("cancelled", "AbortError"); } }); } });
+    await openTab(page); await ready(page); await sheet(page, "snap"); await page.waitForSelector("#viewDw .dw-share");
+    await page.evaluate(() => document.querySelector("#viewDw .dw-share").click()); await wait(800);
+    const s = await page.evaluate(() => ({ open: !document.querySelector("#viewDw .dw-sheet").hidden, err: document.querySelector("#viewDw .dw-snaperr") && document.querySelector("#viewDw .dw-snaperr").textContent }));
+    if (!s.open || s.err) throw new Error(`after a cancelled share: ${JSON.stringify(s)}`);
+    await page.context().close();
+    page = await open({ world: true, ua: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+      init: () => { Object.defineProperty(navigator, "canShare", { value: undefined }); } });
+    await openTab(page); await ready(page); await sheet(page, "snap"); await page.waitForSelector("#viewDw .dw-save");
+    await page.evaluate(() => document.querySelector("#viewDw .dw-save").click()); await wait(800);
+    const h = await page.evaluate(() => { const i = document.querySelector("#viewDw .dw-hold img"), p = document.querySelector("#viewDw .dw-hold p"); return { src: i && i.src.slice(0, 22), w: i && i.naturalWidth, hint: p && p.textContent }; });
+    if (h.src !== "data:image/png;base64," || h.w !== 1080 || h.hint !== "Press and hold the picture to save it") throw new Error(JSON.stringify(h));
+  },
+  // Every scene draws with no page error, the top of the picture in the scene's sky colour (Neon: its dark background).
+  async everySceneDraws(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page);
+    const tops = { neon: "#05010d", tropical: "#2f8fe0", eastcoast: "#6d8fae", golden: "#3a2a6a", stormy: "#3b4248" };
+    for (const s in tops) {
+      await page.evaluate(s => { const v = window.DREAMWAVE._view; v.setScene(s); v.play(false); v.setTime(6); }, s);
+      const px = await pixels(page, 0.5, 0.01, 2), want = [1, 3, 5].map(i => parseInt(tops[s].slice(i, i + 2), 16));
+      if (want.some((w, i) => Math.abs(px[i] - w) > 40)) throw new Error(`${s}: the top of the picture is ${px.slice(0, 3)}, want about ${want}`);
+    }
+  },
+  // Neon shows the power colours and the flow, with the wireframe surfer; the realistic scenes hide the flow and show the toon surfer.
+  async neonShowsFlowRealHidesIt(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page);
+    const look = s => page.evaluate(s => { const v = window.DREAMWAVE._view; v.setScene(s); let mesh = 0, lines = 0;
+      v.surfer.traverse(o => { if (o.isLineSegments) lines++; else if (o.isMesh) mesh++; });
+      return { flow: v.neon.trails.visible, grid: v.neon.grid.visible, mesh, lines, look: v.look }; }, s);
+    const n = await look("neon"); if (!n.flow || !n.grid || n.mesh || !n.lines) throw new Error(`neon: ${JSON.stringify(n)}`);
+    for (const s of ["tropical", "eastcoast", "golden", "stormy"]) { const r = await look(s); if (r.flow || r.grid || !r.mesh) throw new Error(`${s}: ${JSON.stringify(r)}`); }
+  },
+  // Spray in the realistic scenes, rain in Stormy; a phone gets half the particles of a computer.
+  async phoneHalvesParticles(open) {
+    const count = async (vw, vh, touch) => { const page = await open({ world: true, vw, vh, touch }); await openTab(page); await ready(page);
+      const c = await page.evaluate(() => { const v = window.DREAMWAVE._view; v.setScene("stormy"); return v.particles(); }); await page.context().close(); return c; };
+    const phone = await count(390, 844, true), big = await count(1280, 800, false);
+    if (!(phone.spray > 0 && phone.rain > 0) || phone.spray * 2 !== big.spray || phone.rain * 2 !== big.rain) throw new Error(`phone ${JSON.stringify(phone)}, computer ${JSON.stringify(big)}`);
+  },
+  // The scene picked in the Look sheet is remembered; a first visit opens on Taiwan east coast (Bryan, Oct 29).
+  async sceneRemembered(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page);
+    if (await page.evaluate(() => window.DREAMWAVE._view.sceneId) !== "eastcoast") throw new Error(`a first visit opens on ${await page.evaluate(() => window.DREAMWAVE._view.sceneId)}`);
+    await sheet(page, "look"); await page.evaluate(() => document.querySelector('#viewDw .dw-scene[data-scene="golden"]').click());
+    await page.reload({ waitUntil: "load" }); await settle(page); await openTab(page); await ready(page);
+    const s = await page.evaluate(() => ({ id: window.DREAMWAVE._view.sceneId, pressed: document.querySelector('#viewDw .dw-scene[data-scene="golden"]').getAttribute("aria-pressed") }));
+    if (s.id !== "golden" || s.pressed !== "true") throw new Error(JSON.stringify(s));
   },
 };
 

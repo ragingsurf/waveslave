@@ -56,11 +56,14 @@
     return c;
   }
   const blob = c => new Promise((ok, no) => { try { c.toBlob(b => b ? ok(b) : no(new Error('no picture')), 'image/png'); } catch (e) { no(e); } });
-  const iosOrLine = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) || /\bLine\//i.test(navigator.userAgent);
+  // iPhone and iPad, LINE's browser, and Android's in-app browsers (Instagram, Facebook), none of which can save a data: download
+  const holdToSave = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) || /\bLine\/|; wv\)|FBAN|FBAV|Instagram/i.test(navigator.userAgent);
+  // The picture's file, made with the preview so Share can call the share menu straight from the tap (Safari refuses it after a wait).
+  async function prepare(c) { try { c._file = new File([await blob(c)], 'dream-wave.png', { type: 'image/png' }); } catch (e) {} return c; }
   // The phone's share menu with the picture and the link; where files can't be shared, Save. A cancelled share is just that, quietly.
   async function share(c) {
-    let file = null;
-    try { file = new File([await blob(c)], 'dream-wave.png', { type: 'image/png' }); } catch (e) { return save(c); }
+    let file = c._file || null;
+    if (!file) try { file = new File([await blob(c)], 'dream-wave.png', { type: 'image/png' }); } catch (e) { return save(c); }
     if (navigator.canShare && navigator.share) {
       let can = false; try { can = navigator.canShare({ files: [file] }); } catch (e) {}
       if (can) {
@@ -70,12 +73,12 @@
     }
     return save(c);
   }
-  // On iPhone and iPad, and in LINE's browser, the picture shows full size to press and hold; elsewhere it downloads.
+  // On iPhone and iPad, in LINE's browser and in Android's in-app browsers, the picture shows full size to press and hold; elsewhere it downloads.
   function save(c) {
     const url = c.toDataURL('image/png');
-    if (iosOrLine()) { if (DW.snap.onHold) DW.snap.onHold(url); return 'saved'; }
+    if (holdToSave()) { if (DW.snap.onHold) DW.snap.onHold(url); return 'saved'; }
     const a = document.createElement('a'); a.href = url; a.download = 'dream-wave.png'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
     return 'saved';
   }
-  DW.snap = { LAYOUT, LINK, caption, compose, share, save, onHold: null };
+  DW.snap = { LAYOUT, LINK, caption, compose, prepare, share, save, onHold: null };
 })(window.DW = window.DW || {});

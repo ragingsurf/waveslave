@@ -388,6 +388,27 @@ const CHECKS = {
     const h = await page.evaluate(() => { const i = document.querySelector("#viewDw .dw-hold img"), p = document.querySelector("#viewDw .dw-hold p"); return { src: i && i.src.slice(0, 22), w: i && i.naturalWidth, hint: p && p.textContent }; });
     if (h.src !== "data:image/png;base64," || h.w !== 1080 || h.hint !== "Press and hold the picture to save it") throw new Error(JSON.stringify(h));
   },
+  // Android's in-app browsers (Instagram, Facebook) can't save a data: download, so Save shows the picture to press and hold there too.
+  async androidAppSaveHolds(open) {
+    const page = await open({ world: true, ua: "Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/AP1A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.0.0 Mobile Safari/537.36 Instagram 330.0.0.0 Android",
+      init: () => { Object.defineProperty(navigator, "canShare", { value: undefined }); } });
+    await openTab(page); await ready(page); await sheet(page, "snap"); await page.waitForSelector("#viewDw .dw-preview canvas");
+    await page.evaluate(() => document.querySelector("#viewDw .dw-save").click()); await wait(800);
+    const h = await page.evaluate(() => { const i = document.querySelector("#viewDw .dw-hold img"); return { shown: !document.querySelector("#viewDw .dw-hold").hidden, w: i && i.naturalWidth }; });
+    if (!h.shown || h.w !== 1080) throw new Error(JSON.stringify(h));
+  },
+  // Share calls the phone's share menu straight from the tap (Safari refuses it once the tap's moment has passed), so the picture's file
+  // is made with the preview, not after the tap.
+  async shareRightFromTheTap(open) {
+    const page = await open({ world: true, init: () => {
+      document.addEventListener("click", () => { window.__inTap = true; setTimeout(() => { window.__inTap = false; }, 0); }, true);
+      Object.defineProperty(navigator, "canShare", { value: () => true });
+      Object.defineProperty(navigator, "share", { value: async d => { window.__shared = { inTap: window.__inTap, files: d.files.length }; } }); } });
+    await openTab(page); await ready(page); await sheet(page, "snap"); await page.waitForSelector("#viewDw .dw-preview canvas"); await wait(300);
+    await page.evaluate(() => document.querySelector("#viewDw .dw-share").click()); await wait(500);
+    const r = await page.evaluate(() => window.__shared);
+    if (!r || !r.inTap || r.files !== 1) throw new Error(JSON.stringify(r));
+  },
   // Every scene draws with no page error, the top of the picture in the scene's sky colour (Neon: its dark background).
   async everySceneDraws(open) {
     const page = await open({ world: true }); await openTab(page); await ready(page);

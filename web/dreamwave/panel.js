@@ -146,7 +146,7 @@
       name.type = 'text'; name.maxLength = 30; name.autocomplete = 'off'; name.spellcheck = false; share.type = saveBtn.type = 'button';
       err.hidden = true; hold.hidden = true; hold.append(holdImg, holdHint); row.append(share, saveBtn); box.append(prev, name, row, err, hold);
       let pic = null, shot = null, was = false, gen = 0, typing = 0;
-      const draw = async () => { const g = ++gen, c = await DW.snap.compose(shot, { caption: DW.snap.caption(P.view.S), name: P.state.name });
+      const draw = async () => { const g = ++gen, c = await DW.snap.prepare(await DW.snap.compose(shot, { caption: DW.snap.caption(P.view.S), name: P.state.name }));
         if (g !== gen || P.open !== 'snap') return; pic = c; prev.replaceChildren(c); };
       const busy = on => { share.disabled = saveBtn.disabled = on; };
       share.addEventListener('click', async () => { if (!pic) return; busy(true); err.hidden = true;

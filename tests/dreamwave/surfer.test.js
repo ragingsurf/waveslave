@@ -41,7 +41,9 @@ test("spotOnFace finds the height", () => {
   assert.equal(spotOnFace(sec, J, 3), null);
 });
 test("spotStaysOnFaceAtExtremes", () => {
-  const waves = STYLES.map(s => [s.id, s.v]).concat([["extreme", { ...STYLES[0].v, height: 6, lipThrow: 6, faceSteepness: 115, faceHollowness: -1, length: 5, peelSpeed: 10 }]]);
+  const waves = STYLES.map(s => [s.id, s.v]).concat([["extreme", { ...STYLES[0].v, height: 6, lipThrow: 6, faceSteepness: 115, faceHollowness: -1, length: 5, peelSpeed: 10 }]]).concat(
+    // shapes the final review found where the surfer vanished: Slab and Reef barrel at Size 1, Long wall and Mushy with the heaviest lip
+    [["slab", { height: 1 }], ["reef", { height: 1 }], ["longwall", { lipThickness: 0.8 }], ["mushy", { lipThickness: 0.8 }]].map(([id, o]) => [id + "+", { ...STYLES.find(s => s.id === id).v, ...o }]));
   for (const [id, v] of waves) { const S = fresh(); for (const k in v) applyShape(S, k, v[k]); fitLoop(S);
     for (let t = 0; t <= S.loopTime + 1e-9; t += 0.1) { const A = timeState(S, t);
       for (const u of [0.15, 0.35, 1, 1.6]) for (const h of [0.08, 0.2, 0.6]) for (const side of ["left", "right"]) {

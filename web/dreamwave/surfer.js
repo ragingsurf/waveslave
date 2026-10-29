@@ -253,8 +253,13 @@ DW.surfer = (function () {
     const { stage, section, J } = DW.shell, sp = clampSpot(spot), s = sp.side === 'left' ? -1 : 1;
     const x = S.peakX + s * (Math.max(0, A.d) + sp.u * A.Lt), sec = section(S, stage(S, x, A), A.g);
     let top = 0; for (const q of sec) if (q[1] > top) top = q[1];
-    const y = sp.h * top, hit = spotOnFace(sec, J, y);
-    if (!hit || !(top > 0)) return null;
+    if (!(top > 0)) return null;
+    let y = sp.h * top, hit = spotOnFace(sec, J, y);
+    if (!hit) {   // the face doesn't reach that height here (a small Slab, a heavy lip): ride the face point nearest it instead of vanishing
+      let best = J.face; for (let j = J.face; j <= J.front; j++) if (Math.abs(sec[j][1] - y) < Math.abs(sec[best][1] - y)) best = j;
+      const a = sec[Math.min(best, J.front - 1)], b = sec[Math.min(best, J.front - 1) + 1];
+      y = sec[best][1]; hit = { z: sec[best][0], slope: Math.max(0, Math.atan2(a[1] - b[1], b[0] - a[0])) };
+    }
     const dx = (x - S.peakX) / 15, z = hit.z + S.crestZ + S.bend * dx * dx, b = 2 * S.bend * (x - S.peakX) / 225, l = Math.hypot(1, b);
     return { x, y, z, dir: [s / l, s * b / l], tilt: Math.min(hit.slope, 0.55) };
   }

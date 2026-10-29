@@ -10,8 +10,9 @@
 //   those); relang() redraws in the new language instead.
 (() => { "use strict"; try {
 
-// Who sees it: only developer mode (the W in the logo) until Bryan says "go live"; then PUBLIC goes to true (spec, "What Bryan decided").
-const PUBLIC = false;
+// Who sees it: everyone, since Bryan picked "Show it to everyone now" (Oct 29). Tests set window.__dwPublic = false to see it as it was
+// before, in developer mode only (the W in the logo); setting PUBLIC back to false hides it again.
+const PUBLIC = window.__dwPublic !== false;
 const on = () => PUBLIC || (typeof WORLD === "boolean" && WORLD);
 const TEST = !!window.__dwTest;
 // The parts, in the order they run (each may use the ones before it).

@@ -49,9 +49,15 @@ const pick = async (page, k, v) => { await page.evaluate(([k, v]) => document.qu
 const closeTab = page => page.evaluate(() => document.querySelector("#viewDw .dw-x").click());
 
 const CHECKS = {
-  // Taiwan mode, as everyone sees the site until Bryan says "go live": no Dream Wave button and no layer.
-  async hiddenInTaiwanMode(open) {
+  // Live for everyone since Oct 29 (Bryan picked "Show it to everyone now"): Taiwan mode has the Dream Wave button, and it opens the tab.
+  async showsForEveryone(open) {
     const page = await open({}), l = await look(page);
+    if (!l.btn || l.word !== "Dream Wave") throw new Error(`in Taiwan mode the button ${l.btn ? "shows" : "is hidden"} and reads "${l.word}"`);
+    await openTab(page); await ready(page);
+  },
+  // With the switch off (window.__dwPublic = false, as before go-live): Taiwan mode has no Dream Wave button and no layer.
+  async hiddenInTaiwanMode(open) {
+    const page = await open({ hidden: true }), l = await look(page);
     if (l.btn || l.layer) throw new Error(`in Taiwan mode the button ${l.btn ? "shows" : "is hidden"} and the layer ${l.layer ? "shows" : "is hidden"}`);
   },
   // Developer mode: the third tab reads Dream Wave, and 夢幻浪 in 中文.
@@ -102,12 +108,16 @@ const CHECKS = {
   async linkOpensTab(open) {
     let page = await open({ world: true, hash: "dreamwave" }); await wait(400); let l = await look(page);
     if (!l.layer) throw new Error("in developer mode #dreamwave didn't open the tab");
+    await page.context().close();   // one WebGL page at a time
     page = await open({ hash: "dreamwave" }); await wait(400); l = await look(page);
-    if (l.layer || !l.fc) throw new Error("in Taiwan mode #dreamwave hid Forecast");
+    if (!l.layer) throw new Error("now it's public, #dreamwave didn't open the tab in Taiwan mode");
+    await page.context().close();
+    page = await open({ hash: "dreamwave", hidden: true }); await wait(400); l = await look(page);
+    if (l.layer || !l.fc) throw new Error("with the switch off, in Taiwan mode #dreamwave hid Forecast");
   },
   // Developer mode switched off with the tab open: Forecast shows and the button hides.
   async devOffLeavesTab(open) {
-    const page = await open({ world: true }); await openTab(page);
+    const page = await open({ world: true, hidden: true }); await openTab(page);
     await page.evaluate(() => setWorld(false)); await wait(400); const l = await look(page);
     if (l.layer || !l.fc || l.btn) throw new Error(`after leaving developer mode: layer ${l.layer}, Forecast ${l.fc}, button ${l.btn}`);
     if (l.scroll === "hidden") throw new Error("the page is still locked");
@@ -136,7 +146,7 @@ const CHECKS = {
   },
   // The loop stops when the tab is hidden (✕, or developer mode switched off) and starts again on reopening.
   async pausesWhenHidden(open) {
-    const page = await open({ world: true }); await openTab(page); await ready(page);
+    const page = await open({ world: true, hidden: true }); await openTab(page); await ready(page);
     const f = () => page.evaluate(() => window.DREAMWAVE._frames());
     const rises = async (why) => { const a = await f(); await page.waitForFunction(a => window.DREAMWAVE._frames() > a + 2, a, { timeout: 8000 }).catch(() => { throw new Error(why); }); };
     const holds = async (why) => { await wait(150); const a = await f(); await wait(600); if (await f() !== a) throw new Error(why); };
@@ -507,7 +517,7 @@ class Skip extends Error {}
 (async () => {
   const browser = await chromium.launch({ args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
   let bad = false, ctxs = [], errs = [];
-  async function open({ hash = "donghe", world = false, lang = "en", view = "fc", store = {}, abort = null, vw = 390, vh = 844, dpr = 2, touch = true, ua = null, reduce = false, init = null }) {
+  async function open({ hash = "donghe", world = false, lang = "en", view = "fc", store = {}, abort = null, vw = 390, vh = 844, dpr = 2, touch = true, ua = null, reduce = false, init = null, hidden = false }) {
     const ctx = await browser.newContext({ viewport: { width: vw, height: vh }, deviceScaleFactor: dpr, hasTouch: touch, reducedMotion: reduce ? "reduce" : "no-preference", serviceWorkers: "block", ...(ua ? { userAgent: ua } : {}), acceptDownloads: true });
     ctxs.push(ctx); const loads = [];
     await ctx.route("**/*", r => { const u = r.request().url(), bare = u.split(/[?#]/)[0];
@@ -521,7 +531,7 @@ class Skip extends Error {}
     await ctx.addInitScript(([o, lock]) => {
       try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", o.view); localStorage.setItem("waveslave-lang", o.lang); localStorage.setItem("waveslave-world", o.world ? "1" : "0");
         for (const k in o.store) localStorage.setItem(k, o.store[k]); if (lock) sessionStorage.setItem("waveslave-unlock", lock); } catch (e) {}
-      window.__chatUrl = ""; window.__dwTest = true; }, [{ view, world, store, lang }, LOCK]);
+      window.__chatUrl = ""; window.__dwTest = true; if (o.hidden) window.__dwPublic = false; }, [{ view, world, store, lang, hidden }, LOCK]);
     if (init) await ctx.addInitScript(init);
     const page = await ctx.newPage(); page.on("pageerror", e => errs.push(String(e)));
     await page.goto(PAGE + "#" + hash, { waitUntil: "load" }); await settle(page);

@@ -15,7 +15,7 @@ const PUBLIC = false;
 const on = () => PUBLIC || (typeof WORLD === "boolean" && WORLD);
 const TEST = !!window.__dwTest;
 // The parts, in the order they run (each may use the ones before it).
-const PARTS = ["shell", "flow"];
+const PARTS = ["shell", "flow", "view"];
 const ME = document.currentScript && document.currentScript.src || "", VER = (ME.match(/[?&]v=(\w+)/) || [])[1] || "0";
 
 // ---- Strings: every word the tab shows, in English and 中文 (Taiwan). The 中文 names are proposals Bryan checks after the build.
@@ -70,6 +70,32 @@ css.textContent = `
 .dwview .dw-stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
 .dwview .dw-msg{position:absolute;left:16px;right:16px;top:45%;text-align:center;font:400 24px/1.2 "VT323",monospace;color:#ffcf5c;text-shadow:0 0 6px rgba(255,140,0,.7)}
 .dwview .dw-msg:empty{display:none}
+.dwview .dw-time{position:absolute;z-index:3;left:calc(10px + env(safe-area-inset-left));right:calc(10px + env(safe-area-inset-right));bottom:calc(10px + env(safe-area-inset-bottom));
+  display:flex;align-items:center;gap:8px;background:rgba(13,35,43,.92);border:1px solid #1d3a44;border-radius:12px;padding:4px 10px 4px 4px;max-width:560px;margin:0 auto}
+.dwview .dw-bottom{position:absolute;z-index:3;left:calc(8px + env(safe-area-inset-left));right:calc(8px + env(safe-area-inset-right));bottom:calc(8px + env(safe-area-inset-bottom));
+  display:flex;flex-direction:column;gap:6px;max-width:640px;margin:0 auto;pointer-events:none}
+.dwview .dw-bottom>*{pointer-events:auto}
+.dwview .dw-bottom .dw-time{position:static;width:auto;box-sizing:border-box}
+.dwview .dw-sheet{max-height:min(55vh,55dvh);overflow:auto;overscroll-behavior:contain;touch-action:pan-y;background:#0d232b;border:1px solid #1d3a44;border-radius:14px;padding:10px 12px;box-sizing:border-box}
+.dwview .dw-sheet[hidden],.dwview .dw-sheet>[hidden]{display:none}
+.dwview .dw-bar{display:flex;gap:4px;background:#0d232b;border:1px solid #1d3a44;border-radius:14px;padding:4px}
+.dwview .dw-tab{flex:1 1 0;min-width:0;min-height:44px;padding:0 2px;border:0;border-radius:10px;background:none;color:#8aa6ad;font:600 12px/1.1 "Public Sans",system-ui,sans-serif;cursor:pointer;touch-action:manipulation;overflow:hidden;text-overflow:ellipsis}
+.dwview .dw-tab[aria-pressed="true"]{color:#ffb347;background:#07171d;text-shadow:0 0 6px rgba(255,140,0,.7)}
+.dwview .dw-snapbtn{flex:1.5 1 0;color:#200300;font:400 18px/1 "Metal Mania",fantasy;background:linear-gradient(#fff7b0,#ffd400 28%,#ff8a00 55%,#ff3d00 78%,#b80000);box-shadow:0 0 10px rgba(255,60,0,.7)}
+.dwview .dw-snapbtn[aria-pressed="true"]{color:#200300;background:linear-gradient(#fff7b0,#ffd400 28%,#ff8a00 55%,#ff3d00 78%,#b80000);outline:2px solid #ffcf5c}
+.dwview .dw-chips{display:flex;flex-wrap:wrap;gap:6px}
+.dwview .dw-chip{flex:1 1 auto;min-height:40px;padding:0 12px;border:1px solid #1d3a44;border-radius:99px;background:#07171d;color:#e3f0f0;font:600 13px/1 "Public Sans",system-ui,sans-serif;cursor:pointer;touch-action:manipulation}
+.dwview .dw-chip[aria-pressed="true"]{border-color:#ffb347;color:#ffb347;box-shadow:0 0 8px rgba(255,140,0,.45)}
+.dwview .dw-reset{flex:0 0 auto;color:#8aa6ad}
+.dwview .dw-row{margin-top:8px}
+.dwview .dw-row:first-child{margin-top:0}
+.dwview .dw-lab{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:13px}
+.dwview .dw-lab b{font:400 20px/1 "VT323",monospace;color:#ffcf5c;text-shadow:0 0 6px rgba(255,140,0,.7);white-space:nowrap}
+.dwview .dw-row input{width:100%;height:28px;margin:0;accent-color:#ff8a00}
+.dwview .dw-ends{display:flex;justify-content:space-between;font-size:11px;color:#8aa6ad}
+.dwview .dw-play{width:40px;height:40px;border:0;border-radius:8px;background:transparent;color:#ffcf5c;font:600 16px/1 "Public Sans",system-ui,sans-serif;cursor:pointer;touch-action:manipulation}
+.dwview .dw-scrub{flex:1;min-width:60px;height:32px;margin:0;accent-color:#ff8a00;background:transparent}
+.dwview .dw-clock{font:400 20px/1 "VT323",monospace;color:#ffcf5c;text-shadow:0 0 6px rgba(255,140,0,.7);min-width:52px;text-align:right}
 .dwview .dw-x{position:absolute;z-index:5;top:calc(10px + env(safe-area-inset-top));right:calc(10px + env(safe-area-inset-right));width:40px;height:40px;border-radius:10px;
   border:1px solid #ffb347;background:#0a0f12;color:#ffb347;font:600 20px/1 "Public Sans",system-ui,sans-serif;text-shadow:0 0 6px rgba(255,140,0,.8);box-shadow:0 0 8px rgba(255,140,0,.4);cursor:pointer;touch-action:manipulation}
 `;
@@ -102,12 +128,12 @@ function load() {
 // The parts are in: build what exists so far.
 function start() {
   if (!window.THREE || !DW.shell) return fail();
+  view = DW.view.create(layer, DW.shell.fresh());
   msg.textContent = ""; state = "ready";
-  view = { stage };
-  if (!showing) pause();
+  if (showing) resume();
 }
-function pause() {}
-function resume() {}
+function pause() { view && view.pause(); }
+function resume() { view && view.resume(); }
 
 // ---- The page's hooks.
 // The page locks behind the layer: no scroll and no zoom (as the map's full screen does), without asking for real full screen.
@@ -128,7 +154,7 @@ function hide() {
   if (!showing) return; showing = false; layer.hidden = true; lock(false);
   if (state === "ready") pause();
 }
-function relang() { relangNow(); x.setAttribute("aria-label", DW.t("back")); x.title = DW.t("back"); if (state === "loading") msg.textContent = DW.t("loading"); else if (state === "failed") msg.textContent = DW.t("failed"); }
+function relang() { relangNow(); x.setAttribute("aria-label", DW.t("back")); x.title = DW.t("back"); if (view) view.relang(); if (state === "loading") msg.textContent = DW.t("loading"); else if (state === "failed") msg.textContent = DW.t("failed"); }
 const guard = f => (...a) => { try { return f(...a); } catch (e) { if (TEST) console.error(e); } };
 window.DREAMWAVE = { dev: guard(dev), relang: guard(relang), show: guard(show), hide: guard(hide) };
 if (TEST) Object.defineProperties(window.DREAMWAVE, { _loaded: { get: () => loaded.slice() }, _frames: { value: () => view && view.frames || 0 }, _view: { get: () => view } });

@@ -14,7 +14,7 @@ const [file, ...only] = process.argv.slice(2);
 if (!file) { console.error("usage: node tests/dreamwave/check.js <page.html> [check…]"); process.exit(2); }
 const PAGE = pathToFileURL(path.resolve(file)).href, HTML = fs.readFileSync(file, "utf8"), WEB = path.join(__dirname, "..", "..", "web");
 const LOCK = (HTML.match(/\bH="([0-9a-f]{64})"/) || [])[1];
-const PARTS = ["shell", "flow"];
+const PARTS = ["shell", "flow", "view"];
 const settle = page => page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -29,6 +29,15 @@ const look = page => page.evaluate(() => { const b = document.querySelector('.ta
     meta: document.querySelector('meta[name="viewport"]').content }; });
 const openTab = async page => { await page.evaluate(() => document.querySelector('.tabs button[data-v="dw"]').click()); await page.waitForTimeout(400); await settle(page); };
 const ready = page => page.waitForFunction(() => window.DREAMWAVE && window.DREAMWAVE._view, null, { timeout: 30000 });
+// The picture's pixels (RGBA) in a size x size block centred at (fx, fy) of the canvas, read right after a render.
+const pixels = (page, fx, fy, size) => page.evaluate(([fx, fy, n]) => { const v = window.DREAMWAVE._view, gl = v.renderer.getContext();
+  v.renderer.render(v.scene, v.camera); const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, out = new Uint8Array(n * n * 4);
+  gl.readPixels(Math.round(w * fx - n / 2), Math.round(h * (1 - fy) - n / 2), n, n, gl.RGBA, gl.UNSIGNED_BYTE, out); return [...out]; }, [fx, fy, size]);
+// Open a sheet from the bar; read the Shape sliders; move one by hand; the pressed style chip (null for none).
+const sheet = async (page, s) => { await page.evaluate(s => { const b = document.querySelector(`#viewDw .dw-bar button[data-s="${s}"]`); if (b.getAttribute("aria-pressed") !== "true") b.click(); }, s); await wait(100); };
+const sliders = page => page.evaluate(() => Object.fromEntries([...document.querySelectorAll("#viewDw .dw-sliders input")].map(i => [i.dataset.k, +i.value])));
+const slide = (page, k, v) => page.evaluate(([k, v]) => { const i = document.querySelector(`#viewDw .dw-sliders input[data-k="${k}"]`); i.value = v; i.dispatchEvent(new Event("input", { bubbles: true })); }, [k, v]);
+const pressed = page => page.evaluate(() => { const b = document.querySelector('#viewDw .dw-chip[aria-pressed="true"]'); return b ? b.dataset.id : null; });
 const closeTab = page => page.evaluate(() => document.querySelector("#viewDw .dw-x").click());
 
 const CHECKS = {
@@ -109,6 +118,96 @@ const CHECKS = {
     if (!l.fc || l.layer) throw new Error("without dreamwave.js Forecast doesn't show");
     const n = await page.evaluate(() => document.querySelectorAll("#viewFc .day, #viewFc section").length);
     if (!n) throw new Error("Forecast is empty");
+  },
+  // The wave draws: the middle of the picture is not one flat colour.
+  async drawsTheWave(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page); await wait(300);
+    const px = await pixels(page, 0.5, 0.5, 20);
+    const first = px.slice(0, 3), same = px.every((v, i) => v === first[i % 4] || i % 4 === 3);
+    if (same) throw new Error(`the middle of the picture is all ${first}`);
+  },
+  // The loop stops when the tab is hidden (✕, or developer mode switched off) and starts again on reopening.
+  async pausesWhenHidden(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page);
+    const f = () => page.evaluate(() => window.DREAMWAVE._frames());
+    const rises = async (why) => { const a = await f(); await page.waitForFunction(a => window.DREAMWAVE._frames() > a + 2, a, { timeout: 8000 }).catch(() => { throw new Error(why); }); };
+    const holds = async (why) => { await wait(150); const a = await f(); await wait(600); if (await f() !== a) throw new Error(why); };
+    await rises("not drawing while open");
+    await closeTab(page); await holds("still drawing after ✕");
+    await openTab(page); await rises("not drawing after reopening");
+    await page.evaluate(() => setWorld(false)); await holds("still drawing after developer mode went off");
+  },
+  // Open and close five times: one canvas, and the same number of geometries after the 2nd and the 5th opening.
+  async reopenKeepsOneRenderer(open) {
+    const page = await open({ world: true }); const counts = [];
+    for (let i = 1; i <= 5; i++) { await openTab(page); await ready(page); await wait(200);
+      counts.push(await page.evaluate(() => ({ c: document.querySelectorAll("#viewDw canvas").length, g: window.DREAMWAVE._view.renderer.info.memory.geometries })));
+      await closeTab(page); await wait(100); }
+    if (counts.some(c => c.c !== 1)) throw new Error(`canvases ${counts.map(c => c.c)}`);
+    if (counts[1].g !== counts[4].g) throw new Error(`geometries ${counts.map(c => c.g)}`);
+  },
+  // Pause holds the time; play moves it.
+  async playPause(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page); await wait(200);
+    await page.evaluate(() => document.querySelector("#viewDw .dw-play").click()); const a = await page.evaluate(() => window.DREAMWAVE._view.time()); await wait(400);
+    if (await page.evaluate(() => window.DREAMWAVE._view.time()) !== a) throw new Error("paused, the time moved");
+    await page.evaluate(() => document.querySelector("#viewDw .dw-play").click()); await wait(400);
+    if (!(await page.evaluate(() => window.DREAMWAVE._view.time()) !== a)) throw new Error("playing, the time held");
+  },
+  // Tap Slab: every slider glides there; after 900 ms they read Size 3.0, Lip throw 4.0, Steepness 105, Peel 5.0, and Slab is pressed.
+  async styleGlides(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page); await sheet(page, "styles");
+    await page.evaluate(() => document.querySelector('#viewDw .dw-chip[data-id="slab"]').click()); await wait(120);
+    const mid = await sliders(page);
+    if (mid.height === 3 || mid.height === 2.6) throw new Error(`no glide: Size is ${mid.height} 120 ms in`);
+    await wait(900); const s = await sliders(page), want = { height: 3, lipThrow: 4, faceSteepness: 105, peelSpeed: 5 };
+    for (const k in want) if (Math.abs(s[k] - want[k]) > 1e-6) throw new Error(`after the glide ${k} reads ${s[k]}, want ${want[k]}`);
+    if (await pressed(page) !== "slab") throw new Error(`the pressed chip is ${await pressed(page)}`);
+  },
+  // Moving a slider by hand turns the style chip off.
+  async handMoveTurnsStyleOff(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page); await sheet(page, "shape");
+    if (await pressed(page) !== "aframe") throw new Error(`at first ${await pressed(page)} is pressed`);
+    await slide(page, "height", 3.3);
+    if (await pressed(page) !== null) throw new Error(`after a hand move ${await pressed(page)} is pressed`);
+    if (await page.evaluate(() => window.DREAMWAVE._view.S.height) !== 3.3) throw new Error("the slider didn't move the wave");
+  },
+  // Reset goes back to the A-frame.
+  async resetGoesToAFrame(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page); await sheet(page, "shape"); await slide(page, "height", 5);
+    await sheet(page, "styles"); await page.evaluate(() => document.querySelector("#viewDw .dw-reset").click()); await wait(900);
+    if (await pressed(page) !== "aframe" || (await sliders(page)).height !== 2.6) throw new Error(`after Reset: ${await pressed(page)}, Size ${(await sliders(page)).height}`);
+  },
+  // The wave is remembered: Size 4.2 survives a reload.
+  async remembersTheWave(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page); await sheet(page, "shape"); await slide(page, "height", 4.2);
+    await page.reload({ waitUntil: "load" }); await settle(page); await openTab(page); await ready(page);
+    const h = await page.evaluate(() => window.DREAMWAVE._view.S.height);
+    if (h !== 4.2) throw new Error(`after a reload Size is ${h}`);
+  },
+  // What the phone kept is broken ("{oops"), or localStorage throws: the tab opens on the A-frame with no page error.
+  async brokenStorageUsesDefaults(open) {
+    for (const o of [{ store: { "waveslave-dreamwave": "{oops" } }, { init: () => { const g = Storage.prototype.getItem, s = Storage.prototype.setItem;
+        Storage.prototype.getItem = function (k) { if (k === "waveslave-dreamwave") throw new Error("denied"); return g.call(this, k); };
+        Storage.prototype.setItem = function (k, v) { if (k === "waveslave-dreamwave") throw new Error("denied"); return s.call(this, k, v); }; } }]) {
+      const page = await open({ world: true, ...o }); await openTab(page); await ready(page);
+      const s = await page.evaluate(() => ({ h: window.DREAMWAVE._view.S.height, bar: document.querySelectorAll("#viewDw .dw-bar button").length }));
+      if (s.h !== 2.6 || s.bar !== 6) throw new Error(`${JSON.stringify(o.store || "throwing")}: Size ${s.h}, ${s.bar} bar buttons`);
+    }
+  },
+  // Saved from an older build: unknown keys and values no longer offered are dropped, the rest kept.
+  async oldSavedStateFillsGaps(open) {
+    const page = await open({ world: true, store: { "waveslave-dreamwave": JSON.stringify({ shape: { height: 4.2, wobble: 3, lipThrow: "far" } }) } }); await openTab(page); await ready(page);
+    const s = await page.evaluate(() => { const S = window.DREAMWAVE._view.S; return { h: S.height, lt: S.lipThrow, w: "wobble" in S }; });
+    if (s.h !== 4.2 || s.lt !== 2.1 || s.w) throw new Error(JSON.stringify(s));
+  },
+  // In 中文 the bar reads 浪型 形狀 衝浪手 場景 鏡頭 拍照.
+  async panelsInChinese(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page); await page.evaluate(() => setLang("zh")); await wait(100);
+    const words = await page.evaluate(() => [...document.querySelectorAll("#viewDw .dw-bar button")].map(b => b.textContent));
+    if (words.join(" ") !== "浪型 形狀 衝浪手 場景 鏡頭 拍照") throw new Error(words.join(" "));
+    await sheet(page, "styles"); const chips = await page.evaluate(() => [...document.querySelectorAll("#viewDw .dw-chip")].map(b => b.textContent).join(" "));
+    if (chips !== "A字浪 厚板浪 礁岩管浪 長牆浪 軟浪 關門浪 重設") throw new Error(chips);
   },
 };
 

@@ -15,7 +15,7 @@ const PUBLIC = false;
 const on = () => PUBLIC || (typeof WORLD === "boolean" && WORLD);
 const TEST = !!window.__dwTest;
 // The parts, in the order they run (each may use the ones before it).
-const PARTS = ["shell", "flow", "surfer", "view", "panel"];
+const PARTS = ["shell", "flow", "surfer", "scenes", "view", "panel"];
 const ME = document.currentScript && document.currentScript.src || "", VER = (ME.match(/[?&]v=(\w+)/) || [])[1] || "0";
 
 // ---- Strings: every word the tab shows, in English and 中文 (Taiwan). The 中文 names are proposals Bryan checks after the build.

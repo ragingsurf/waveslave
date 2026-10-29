@@ -14,7 +14,7 @@ const [file, ...only] = process.argv.slice(2);
 if (!file) { console.error("usage: node tests/dreamwave/check.js <page.html> [check…]"); process.exit(2); }
 const PAGE = pathToFileURL(path.resolve(file)).href, HTML = fs.readFileSync(file, "utf8"), WEB = path.join(__dirname, "..", "..", "web");
 const LOCK = (HTML.match(/\bH="([0-9a-f]{64})"/) || [])[1];
-const PARTS = ["shell", "flow", "surfer", "view", "panel"];
+const PARTS = ["shell", "flow", "surfer", "scenes", "view", "panel"];
 const settle = page => page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);

@@ -38,6 +38,7 @@
     const tmp = new THREE.Color();
     function ramp(v, c) { const s = cl(v, 0, 1) * 5, k = Math.min(4, Math.floor(s)); return c.copy(RAMP[k]).lerp(RAMP[k + 1], s - k); }
     function paint() {
+      if (view.paintWater) { view.paintWater(F, col, S); geo.attributes.color.needsUpdate = true; return; }   // a realistic scene's water
       const pos = F.pos, pw = F.pw;
       for (let n = 0; n < NX * M; n++) {
         const y = pos[n * 3 + 1], w = sm(cl(y / (0.12 * S.height), 0, 1));
@@ -245,7 +246,8 @@
       time: () => t,
       setTime(v) { t = cl(+v, 0, S.loopTime); build(t); showTime(); if (!running || !playing) follow(0); if (!running) render(); },
       play(p) { setPlaying(p); }, playing: () => playing,
-      surfer: holder, look: 'toon',
+      surfer: holder, look: 'toon', seaNeon: sea.material, paintWater: null, sceneId: 'neon',
+      setScene(id) { DW.scenes.apply(view, id); emit('scene', view.sceneId); },
       setSurfer, surferOptions: () => riderOpts, setCamera,
       setSpot(s) { spot = DW.surfer.clampSpot(s); ride(); if (!playing) follow(0); if (!running) render(); emit('spot', spot); }, spot: () => Object.assign({}, spot),
       shape(k, v) { applyShape(S, k, v); fitLoop(S); if (t > S.loopTime) t = 0; build(t); showTime(); if (!running) render(); emit('shape', k, v); },

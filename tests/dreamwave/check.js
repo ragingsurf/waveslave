@@ -37,7 +37,7 @@ const pixels = (page, fx, fy, size) => page.evaluate(([fx, fy, n]) => { const v 
 const sheet = async (page, s) => { await page.evaluate(s => { const b = document.querySelector(`#viewDw .dw-bar button[data-s="${s}"]`); if (b.getAttribute("aria-pressed") !== "true") b.click(); }, s); await wait(100); };
 const sliders = page => page.evaluate(() => Object.fromEntries([...document.querySelectorAll("#viewDw .dw-sliders input")].map(i => [i.dataset.k, +i.value])));
 const slide = (page, k, v) => page.evaluate(([k, v]) => { const i = document.querySelector(`#viewDw .dw-sliders input[data-k="${k}"]`); i.value = v; i.dispatchEvent(new Event("input", { bubbles: true })); }, [k, v]);
-const pressed = page => page.evaluate(() => { const b = document.querySelector('#viewDw .dw-chip[aria-pressed="true"]'); return b ? b.dataset.id : null; });
+const pressed = page => page.evaluate(() => { const b = document.querySelector('#viewDw .dw-chip[data-id][aria-pressed="true"]'); return b ? b.dataset.id : null; });
 // Hold the wave at t seconds; where the surfer's head is on the canvas (fx, fy as shares of it).
 const still = (page, t) => page.evaluate(t => { const v = window.DREAMWAVE._view; v.play(false); v.setTime(t); v.render(); }, t);
 const headAt = page => page.evaluate(() => { const v = window.DREAMWAVE._view, c = v.surfer.getObjectByName("head").getWorldPosition(new THREE.Vector3()).project(v.camera);
@@ -214,7 +214,7 @@ const CHECKS = {
     const page = await open({ world: true }); await openTab(page); await ready(page); await page.evaluate(() => setLang("zh")); await wait(100);
     const words = await page.evaluate(() => [...document.querySelectorAll("#viewDw .dw-bar button")].map(b => b.textContent));
     if (words.join(" ") !== "浪型 形狀 衝浪手 場景 鏡頭 拍照") throw new Error(words.join(" "));
-    await sheet(page, "styles"); const chips = await page.evaluate(() => [...document.querySelectorAll("#viewDw .dw-chip")].map(b => b.textContent).join(" "));
+    await sheet(page, "styles"); const chips = await page.evaluate(() => [...document.querySelectorAll("#viewDw .dw-chip[data-id], #viewDw .dw-reset")].map(b => b.textContent).join(" "));
     if (chips !== "A字浪 厚板浪 礁岩管浪 長牆浪 軟浪 關門浪 重設") throw new Error(chips);
   },
   // The surfer shows: the pixels around their head change when they are hidden.
@@ -262,6 +262,69 @@ const CHECKS = {
     await page.reload({ waitUntil: "load" }); await settle(page); await openTab(page); await ready(page);
     const s = await page.evaluate(() => window.DREAMWAVE._view.spot());
     if (!eq(s, { side: "right", u: 1.2, h: 0.4 })) throw new Error(JSON.stringify(s));
+  },
+  // Picking curly hair rebuilds the surfer (the mesh count changes) and saves hair: "curly".
+  async makerChangesSurfer(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page); await sheet(page, "surfer");
+    const a = await meshes(page); await pick(page, "hair", "curly"); const b = await meshes(page);
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("waveslave-dreamwave")).surfer);
+    if (a === b) throw new Error(`curly hair left ${a} meshes`);
+    if (saved.hair !== "curly") throw new Error(`saved ${JSON.stringify(saved)}`);
+    if (await page.evaluate(() => document.querySelector('#viewDw .dw-chip[data-k="hair"][data-v="curly"]').getAttribute("aria-pressed")) !== "true") throw new Error("the Curly chip isn't pressed");
+  },
+  // A reload keeps the surfer.
+  async makerRemembers(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page); await sheet(page, "surfer");
+    await pick(page, "skin", "#4a2c18"); await pick(page, "board", "long");
+    await page.reload({ waitUntil: "load" }); await settle(page); await openTab(page); await ready(page);
+    const o = await page.evaluate(() => window.DREAMWAVE._view.surferOptions());
+    if (o.skin !== "#4a2c18" || o.board !== "long") throw new Error(JSON.stringify(o));
+  },
+  // A saved surfer from an older build: a hair no longer offered falls back to spiky, the rest stays.
+  async makerIgnoresUnknownSaved(open) {
+    const page = await open({ world: true, store: { "waveslave-dreamwave": JSON.stringify({ surfer: { hair: "mohawk", skin: "#8d5a35" } }) } }); await openTab(page); await ready(page);
+    const o = await page.evaluate(() => window.DREAMWAVE._view.surferOptions());
+    if (o.hair !== "spiky" || o.skin !== "#8d5a35") throw new Error(JSON.stringify(o));
+  },
+  // The maker in 中文.
+  async makerInChinese(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page); await page.evaluate(() => setLang("zh")); await sheet(page, "surfer");
+    const s = await page.evaluate(() => ({ hint: document.querySelector("#viewDw .dw-hint").textContent, rows: [...document.querySelectorAll("#viewDw .dw-mname")].map(e => e.textContent).join(" "),
+      hair: document.querySelector('#viewDw .dw-chip[data-k="hair"][data-v="curly"]').textContent }));
+    if (s.hint !== "拖曳衝浪手到浪上你想要的位置" || s.rows !== "膚色 體型 髮型 髮色 服裝 主色 配色 衝浪板 板色 圖案 站姿 姿勢 表情 配件" || s.hair !== "捲髮") throw new Error(JSON.stringify(s));
+  },
+  // Twenty changes leave the renderer's geometries and textures within 5 of where they started.
+  async rebuildKeepsMemorySteady(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page); await sheet(page, "surfer"); await wait(300);
+    const mem = () => page.evaluate(() => { const m = window.DREAMWAVE._view.renderer.info.memory; return [m.geometries, m.textures]; });
+    const a = await mem(), picks = [["hair", "curly"], ["hair", "long"], ["board", "fish"], ["graphic", "checker"], ["outfit", "bikini"], ["extra", "shades"], ["pose", "shaka"], ["face", "scream"], ["board", "soft"], ["graphic", "stripes"]];
+    for (const p of picks.concat(picks.map(([k]) => [k, k === "hair" ? "spiky" : null]).filter(p => p[1]), picks.slice(0, 9))) { await pick(page, ...p); await wait(30); }
+    const b = await mem();
+    if (Math.abs(b[0] - a[0]) > 5 || Math.abs(b[1] - a[1]) > 5) throw new Error(`geometries ${a[0]} → ${b[0]}, textures ${a[1]} → ${b[1]}`);
+  },
+  // The GoPro nose cam keeps the surfer's head in the middle 60% of the picture as the wave peels.
+  async noseCamSeesSurfer(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page);
+    await sheet(page, "camera"); await page.evaluate(() => document.querySelector('#viewDw .dw-chip[data-cam="nose"]').click()); await sheet(page, "camera");
+    for (const t of [5, 6, 7]) { await still(page, t); const h = await headAt(page);
+      if (!(h.fx > 0.2 && h.fx < 0.8 && h.fy > 0.2 && h.fy < 0.8)) throw new Error(`at ${t} s the head is at ${h.fx.toFixed(2)}, ${h.fy.toFixed(2)}`); }
+  },
+  // The head cam looks out the way the surfer travels, on both sides of the peak.
+  async headCamLooksOut(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page);
+    for (const side of ["left", "right"]) {
+      const d = await page.evaluate(side => { const v = window.DREAMWAVE._view; v.setCamera("head"); v.setSpot({ side, u: 0.5, h: 0.2 }); v.play(false); v.setTime(6); v.render();
+        const f = v.camera.getWorldDirection(new THREE.Vector3()); return { cam: f.x, dir: v.riding.dir[0], fov: v.camera.fov, down: f.y }; }, side);
+      if (Math.sign(d.cam) !== Math.sign(d.dir) || d.fov !== 100 || !(d.down < 0)) throw new Error(`${side}: ${JSON.stringify(d)}`);
+    }
+  },
+  // The camera picked is remembered.
+  async cameraRemembered(open) {
+    const page = await open({ world: true }); await openTab(page); await ready(page); await sheet(page, "camera");
+    await page.evaluate(() => document.querySelector('#viewDw .dw-chip[data-cam="head"]').click());
+    await page.reload({ waitUntil: "load" }); await settle(page); await openTab(page); await ready(page);
+    const c = await page.evaluate(() => ({ mode: window.DREAMWAVE._view.camMode, pressed: document.querySelector('#viewDw .dw-chip[data-cam="head"]').getAttribute("aria-pressed") }));
+    if (c.mode !== "head" || c.pressed !== "true") throw new Error(JSON.stringify(c));
   },
 };
 

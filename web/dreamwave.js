@@ -129,8 +129,9 @@ function fail() { state = "failed"; msg.textContent = DW.t("failed"); }
 function load() {
   state = "loading"; msg.textContent = DW.t("loading");
   if (!glOk()) return fail();
-  Promise.all([script("vendor/three.min.js?v=149"), ...PARTS.map(p => script(`dreamwave/${p}.js?v=${VER}`))])
-    .then(() => { try { start(); } catch (e) { fail(); } }, fail);
+  // three.js first: the parts build three.js things as they load, so none runs without it.
+  script("vendor/three.min.js?v=149").then(() => Promise.all(PARTS.map(p => script(`dreamwave/${p}.js?v=${VER}`))))
+    .then(() => { try { start(); } catch (e) { if (TEST) console.error(e); fail(); } }, fail);
 }
 // The parts are in: build what exists so far.
 function start() {

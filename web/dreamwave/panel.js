@@ -107,6 +107,36 @@
     showValues();
   }
   P.refresh = refresh;
+  // ---- Surfer: the maker. Colours are swatches, other choices chips; every change rebuilds the surfer at once and is saved.
+  const ROWS = ['skin', 'build', 'hair', 'hairColor', 'outfit', 'suit', 'accent', 'board', 'boardColor', 'graphic', 'stance', 'pose', 'face', 'extra'];
+  const SWATCH = { skin: 1, hairColor: 1, suit: 1, accent: 1, boardColor: 1 };
+  const LABEL = { build: 'build', hair: 'hair', outfit: 'outfit', board: 'board', graphic: 'graphic', stance: 'stance', pose: 'pose', face: 'face', extra: 'extra' };
+  PARTS.surfer = {
+    take: s => DW.surfer.clean(s),
+    sheet() {
+      const box = el('div', 'dw-maker'), hint = el('p', 'dw-hint'), rows = {}; box.appendChild(hint);
+      for (const k of ROWS) {
+        const row = el('div', 'dw-mrow'), name = el('div', 'dw-mname'), opts = el('div', SWATCH[k] ? 'dw-swatches' : 'dw-chips');
+        opts.setAttribute('role', 'group'); row.append(name, opts); box.appendChild(row); const btns = {};
+        for (const v of DW.surfer.OPTIONS[k]) {
+          const b = el('button', SWATCH[k] ? 'dw-swatch' : 'dw-chip'); b.type = 'button'; b.dataset.k = k; b.dataset.v = v;
+          if (SWATCH[k]) { b.style.background = v; b.setAttribute('aria-label', v); }
+          b.addEventListener('click', () => { P.state.surfer = Object.assign({}, P.state.surfer, { [k]: v }); P.view.setSurfer(P.state.surfer); save(); mark(); });
+          opts.appendChild(b); btns[v] = b;
+        }
+        rows[k] = { name, opts, btns };
+      }
+      const mark = () => { for (const k of ROWS) for (const v in rows[k].btns) rows[k].btns[v].setAttribute('aria-pressed', String(P.state.surfer[k] === v)); };
+      P.makerRows = rows; P.makerHint = hint; P.makerMark = mark;
+      return { el: box };
+    },
+    mounted(view, state) { view.setSurfer(state.surfer); P.makerMark(); },
+    relang() {
+      P.makerHint.textContent = DW.t('dragHint');
+      for (const k of ROWS) { const r = P.makerRows[k]; r.name.textContent = DW.t('row_' + k); r.opts.setAttribute('aria-label', DW.t('row_' + k));
+        if (LABEL[k]) for (const v in r.btns) r.btns[v].textContent = DW.t(LABEL[k] + '_' + v); }
+    }
+  };
   // The surfer's spot in the wave: restored on mount, saved when a drag ends.
   PARTS.spot = { take: s => DW.surfer.clampSpot(s), mounted(view, state) { view.setSpot(state.spot); view.on('spot', s => { state.spot = s; save(); }); } };
   DW.panel = P;

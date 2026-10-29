@@ -16,7 +16,7 @@
 
   function mount(layer, view) {
     P.view = view; const saved = read();
-    P.state = { shape: {}, scene: 'neon', camera: 'free', name: '' };
+    P.state = { shape: {}, scene: 'neon', name: '' };
     for (const c of SLIDERS) if (okNum(c, saved.shape && saved.shape[c.k])) { P.state.shape[c.k] = saved.shape[c.k]; view.shape(c.k, saved.shape[c.k]); }
     for (const k in PARTS) P.state[k] = PARTS[k].take(saved[k]);
     if (typeof saved.name === 'string') P.state.name = saved.name.slice(0, 30);
@@ -136,6 +136,18 @@
       for (const k of ROWS) { const r = P.makerRows[k]; r.name.textContent = DW.t('row_' + k); r.opts.setAttribute('aria-label', DW.t('row_' + k));
         if (LABEL[k]) for (const v in r.btns) r.btns[v].textContent = DW.t(LABEL[k] + '_' + v); }
     }
+  };
+  // ---- Camera: Free, GoPro nose cam, GoPro head cam.
+  const CAMS = ['free', 'nose', 'head'];
+  PARTS.camera = {
+    take: c => CAMS.includes(c) ? c : 'free',
+    sheet() { const box = el('div', 'dw-chips'), chips = {};
+      for (const c of CAMS) { const b = el('button', 'dw-chip'); b.type = 'button'; b.dataset.cam = c; b.addEventListener('click', () => P.view.setCamera(c)); box.appendChild(b); chips[c] = b; }
+      P.camChips = chips; return { el: box }; },
+    mounted(view, state) {
+      const mark = () => { for (const c of CAMS) P.camChips[c].setAttribute('aria-pressed', String(view.camMode === c)); };
+      view.on('camera', c => { state.camera = c; save(); mark(); }); view.setCamera(state.camera); mark(); },
+    relang() { for (const c of CAMS) P.camChips[c].textContent = DW.t('cam_' + c); }
   };
   // The surfer's spot in the wave: restored on mount, saved when a drag ends.
   PARTS.spot = { take: s => DW.surfer.clampSpot(s), mounted(view, state) { view.setSpot(state.spot); view.on('spot', s => { state.spot = s; save(); }); } };

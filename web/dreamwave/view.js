@@ -104,6 +104,7 @@
     const O = { target: new THREE.Vector3(S.peakX, 1.1, 0.5), az: 34, el: 15, r: 30, fov: 40 };
     let lift = 0;   // share of the screen height the picture is lifted by, so the wave stays above an open sheet
     function place() {
+      if (view && view.camMode !== 'free') return gopro();
       // A tall phone screen comes in closer, so the wave fills its width rather than sitting small in the middle.
       const a = cam.aspect, az = O.az * Math.PI / 180, el = O.el * Math.PI / 180, r = O.r * (a < 1 ? 0.62 + 0.38 * a : 1);
       cam.fov = Math.min(80, O.fov / Math.min(1, a) ** 0.5);
@@ -167,9 +168,27 @@
       bz.crossVectors(bx, by);
       M4.makeBasis(bx, by, bz); holder.quaternion.setFromRotationMatrix(M4);
       holder.position.set(p.x, p.y, p.z).addScaledVector(by, 0.05);
-      holder.updateMatrixWorld(true); view.riding = p;
+      holder.updateMatrixWorld(true); view.riding = p; emit('ride', p);
     }
     on('build', ride);
+    // The GoPro cameras ride with the surfer: the nose cam just ahead of the board on the chest side, looking back at them (the barrel
+    // selfie); the head cam at their head, looking out along the nose and a little down.
+    const lp = new THREE.Vector3(), la = new THREE.Vector3();
+    function gopro() {
+      if (view.camMode === 'free' || !rider || !holder.visible) return;
+      const mz = rider.userData.mz, head = rider.userData.headAt;
+      if (view.camMode === 'nose') {
+        cam.position.copy(holder.localToWorld(lp.set(1.7, 0.55, -0.45 * mz)));
+        cam.lookAt(holder.localToWorld(la.set(head.x, head.y - 0.25, head.z))); cam.fov = 88;
+      } else {
+        cam.position.copy(holder.localToWorld(lp.set(head.x + 0.3, head.y, head.z)));   // just in front of the face (the head is 0.22 m round)
+        const f = la.set(Math.cos(10 * Math.PI / 180), -Math.sin(10 * Math.PI / 180), 0).applyQuaternion(holder.quaternion);
+        cam.lookAt(lp.copy(cam.position).add(f)); cam.fov = 100;
+      }
+      applyLift();
+    }
+    on('ride', gopro);
+    function setCamera(m) { view.camMode = m === 'nose' || m === 'head' ? m : 'free'; if (view.camMode === 'free') place(); else gopro(); if (!running) render(); emit('camera', view.camMode); }
     // Dragging the surfer moves their spot: a pointer that goes down on them follows the wave's surface under it.
     const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
     const cast = e => { const r = canvas.getBoundingClientRect(); ndc.set((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1); ray.setFromCamera(ndc, cam); return ray; };
@@ -227,7 +246,7 @@
       setTime(v) { t = cl(+v, 0, S.loopTime); build(t); showTime(); if (!running || !playing) follow(0); if (!running) render(); },
       play(p) { setPlaying(p); }, playing: () => playing,
       surfer: holder, look: 'toon',
-      setSurfer, surferOptions: () => riderOpts,
+      setSurfer, surferOptions: () => riderOpts, setCamera,
       setSpot(s) { spot = DW.surfer.clampSpot(s); ride(); if (!playing) follow(0); if (!running) render(); emit('spot', spot); }, spot: () => Object.assign({}, spot),
       shape(k, v) { applyShape(S, k, v); fitLoop(S); if (t > S.loopTime) t = 0; build(t); showTime(); if (!running) render(); emit('shape', k, v); },
       pause, resume, running: () => running, render, build: () => build(t), paint,

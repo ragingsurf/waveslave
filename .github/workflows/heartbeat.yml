@@ -1,8 +1,12 @@
 name: Hourly heartbeat
 
 # GitHub drops most of refresh.yml's own scheduled runs, so this workflow keeps the hourly refresh going by itself.
-# One run stays awake for about 5.5 hours, checks every 5 minutes, and starts refresh.yml whenever the last refresh
-# (from any trigger: schedule, push, a manual or Claude start) began 55+ minutes ago. Before it ends it starts the
+# One run stays awake for about 5.5 hours, checks every 2 minutes, and starts refresh.yml once an hour just after :30.
+# CWA puts each buoy's new hourly reading on its open data at about half past (the 8:00 reading at 8:30; the log from
+# Oct 25 to Nov 7 shows every Taiwan buoy flipping at :30), so a refresh at :31 shows it within a few minutes. The old
+# rule (every 55 minutes) let the start time drift round the clock, and a refresh at :10 kept the site an hour behind
+# CWA until the next one (Bryan, Nov 8). A refresh from any trigger (schedule, push, a manual or Claude start) that
+# began after this hour's :30 counts, so a merge just after half past doesn't start a second one. Before it ends it starts the
 # next heartbeat, so the chain never needs Claude or a token. The schedule below only restarts the chain if it ever
 # breaks; the concurrency group keeps at most one heartbeat awake and one waiting.
 on:
@@ -32,19 +36,22 @@ jobs:
             last=$(gh run list --workflow refresh.yml --limit 1 --json createdAt,status \
                      --jq '.[0] | "\(.createdAt) \(.status)"' 2>/dev/null || true)
             started=${last%% *}; status=${last##* }
-            age=99999
-            [ -n "$started" ] && age=$(( ( $(date +%s) - $(date -d "$started" +%s) ) / 60 ))
+            began=0
+            [ -n "$started" ] && began=$(date -d "$started" +%s)
+            # This hour's slot is HH:30 (Taiwan and UTC share the minutes); before :31 it is the last hour's.
+            now=$(date +%s); slot=$(( now - now % 3600 + 30*60 ))
+            [ $(( now % 3600 )) -lt $(( 31*60 )) ] && slot=$(( slot - 3600 ))
             case "$status" in
               queued|in_progress|pending|waiting|requested) echo "$(date -u +%H:%M) refresh already running" ;;
               *)
-                if [ "$age" -ge 55 ]; then
-                  echo "$(date -u +%H:%M) last refresh ${age}m ago, starting one"
+                if [ "$began" -lt "$slot" ]; then
+                  echo "$(date -u +%H:%M) no refresh since $(date -u -d @$slot +%H:%M), starting one"
                   gh workflow run refresh.yml --ref main || echo "start failed, will retry" >&2
                 else
-                  echo "$(date -u +%H:%M) last refresh ${age}m ago"
+                  echo "$(date -u +%H:%M) refreshed at $(date -u -d @$began +%H:%M)"
                 fi ;;
             esac
-            sleep 300
+            sleep 120
           done
       - name: Hand over to the next heartbeat
         if: always()

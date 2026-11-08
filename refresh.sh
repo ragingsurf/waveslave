@@ -28,6 +28,14 @@ get coastal "https://opendata.cwa.gov.tw/fileapi/v1/opendataapi/F-D0047-095?Auth
 get tide "$A/F-A0021-001?Authorization=$K&LocationId=$(ids tide)&timeFrom=${TODAY}T00:00:00"
 get sun "$A/A-B0062-001?Authorization=$K&CountyName=$(ids county)&timeFrom=$PAST&timeTo=$END"
 get buoy "$A/O-B0075-001?Authorization=$K&StationID=$(ids buoy)"
+# CWA adds each hour's buoy readings at about half past (the 8:00 reading at 8:30), and the heartbeat starts this build at :31.
+# If none of the buoys has this hour's reading yet (CWA running a few minutes late), ask again each minute until :45, so the
+# site doesn't sit an hour behind until the next build (Bryan, Nov 8). buoywait.py says "wait" or "ok"; any error counts as ok.
+n=0
+while [ $n -lt 14 ] && [ "$(python3 -I "$HERE/buoywait.py" "$W/dl/buoy.json" 2>/dev/null || echo ok)" = wait ]; do
+  n=$((n+1)); echo "CWA buoys not at this hour's reading yet, asking again in a minute ($n)" >&2; sleep 60
+  get buoy-new "$A/O-B0075-001?Authorization=$K&StationID=$(ids buoy)" && mv "$W/dl/buoy-new.json" "$W/dl/buoy.json" || rm -f "$W/dl/buoy-new.json"
+done
 get obs "$A/O-A0001-001?Authorization=$K&StationId=$(ids station)"
 get typhoon "$A/W-C0034-005?Authorization=$K"
 get openwave "https://marine-api.open-meteo.com/v1/marine?latitude=$(ids lat)&longitude=$(ids lon)&hourly=wave_height,wave_period,wave_direction,swell_wave_height,swell_wave_period,swell_wave_direction,wind_wave_height,wind_wave_period,secondary_swell_wave_height,secondary_swell_wave_period,secondary_swell_wave_direction&models=meteofrance_wave&timezone=Asia%2FTaipei&forecast_days=10&past_days=5"

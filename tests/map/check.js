@@ -52,8 +52,10 @@ const BJG = /\bbj: \{"/.test(fs.readFileSync(file, "utf8"));
 const TWG = /\btw: \{"/.test(fs.readFileSync(file, "utf8"));
 // A site build (web/head.html on top) opens on the passcode screen; each fresh context starts unlocked with the page's own code hash.
 const LOCK = (fs.readFileSync(file, "utf8").match(/\bH="([0-9a-f]{64})"/) || [])[1];
-// The Taiwan chat's script, served for the page's chat.js in the chatOff check (tests/chat/shell.test.js has the rest of its checks).
+// The Taiwan chat's script and the AI coach's, served for the page's chat.js and coach.js in the chatOff and coachOff checks
+// (tests/chat/shell.test.js and tests/coach/shell.test.js have the rest of their checks).
 const CHAT_JS = (() => { try { return fs.readFileSync(path.join(__dirname, "..", "..", "web", "chat.js"), "utf8"); } catch (e) { return null; } })();
+const COACH_JS = (() => { try { return fs.readFileSync(path.join(__dirname, "..", "..", "web", "coach.js"), "utf8"); } catch (e) { return null; } })();
 
 class Skip extends Error {}
 const skip = why => { throw new Skip(why); };
@@ -794,6 +796,24 @@ const CHECKS = {
     if (down.strip) throw new Error("with the backend unreachable the report strip shows");
     if (down.h === "–" || !down.facts || !down.days || !down.chart) throw new Error(`with the backend unreachable the page didn't draw: ${JSON.stringify(down)}`);
   },
+  // The AI coach (the real web/coach.js, with chat.js) leaves the page as it was while it's off. On Donghe's Forecast view in developer
+  // mode (World mode, its PIN in), where it would show: with the backend address empty (window.__chatUrl "") there's no page error
+  // (step() fails on one), no Coach tab and no window.COACH. Given an address (unreachable: only the page and the two scripts load here),
+  // the tab shows, so coach.js did run, and the page still draws.
+  async coachOff(open) {
+    if (!CHAT_JS || !COACH_JS) skip("no web/chat.js or web/coach.js");
+    const at = { spot: "donghe", world: true, store: { "waveslave-view": "fc" } };
+    const tab = page => page.evaluate(() => { const b = document.querySelector('.tabs button[data-v="coach"]'); return b && { shown: !b.hidden && !!b.getClientRects().length, coach: !!window.COACH }; });
+    let page = await open({ ...at, chat: { url: "" } }); await page.waitForTimeout(300);
+    const off = await tab(page);
+    if (!off) skip("the page has no Coach tab: build it from this branch's template");
+    if (off.shown || off.coach) throw new Error(`with the backend address empty the Coach tab is ${off.shown ? "there" : "hidden"} and window.COACH ${off.coach ? "is set" : "isn't"}`);
+    page = await open({ ...at, chat: { url: "https://chat.invalid" } }); await page.waitForTimeout(800); await settle(page);
+    if (!(await tab(page)).shown) throw new Error("given a backend address, developer mode on a Taiwan spot shows no Coach tab (so coach.js never ran)");
+    const drew = await page.evaluate(() => ({ h: document.getElementById("nowH1").textContent, facts: document.querySelectorAll("#nowFacts .fact").length,
+      days: document.querySelectorAll("#days .day").length, chart: document.querySelectorAll("#chart path").length }));
+    if (drew.h === "–" || !drew.facts || !drew.days || !drew.chart) throw new Error(`with the coach on and its backend unreachable the page didn't draw: ${JSON.stringify(drew)}`);
+  },
   // A pin dropped east of 180° asks Open-Meteo for a longitude in -180..180: 200°E goes out as -160.
   // A pin dragged with the mouse lands where it's let go (its flag is drawn over a copy of the map on the way, Oct 23).
   async pinDrag(open) {
@@ -826,13 +846,14 @@ const CHECKS = {
   fs.mkdirSync(outdir, { recursive: true });
   const browser = await chromium.launch(); let bad = false, ctxs = [], errs = [];
   // A fresh context for every page, so saved views and storage never carry over; the page itself is the only request let through.
-  // chat: serve the real web/chat.js for the page's chat.js (cut off like everything else otherwise), with window.__chatUrl and
-  // __chatContact set when it gives a url ("" switches the chat off).
+  // chat: serve the real web/chat.js and web/coach.js for the page's chat.js and coach.js (cut off like everything else otherwise), with
+  // window.__chatUrl and __chatContact set when it gives a url ("" switches the chat and the coach off).
   async function open({ spot, saved, hook = true, size, world = true, store = null, chat = null }) {
     const ctx = await browser.newContext({ viewport: size || (land ? { width: 844, height: 390 } : { width: 390, height: 844 }), deviceScaleFactor: 2, hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block" });
     ctxs.push(ctx);
     await ctx.route("**/*", r => { const u = r.request().url();
       if (chat && u.startsWith("file:") && u.split(/[?#]/)[0].endsWith("/chat.js")) return r.fulfill({ contentType: "text/javascript", body: CHAT_JS });
+      if (chat && COACH_JS && u.startsWith("file:") && u.split(/[?#]/)[0].endsWith("/coach.js")) return r.fulfill({ contentType: "text/javascript", body: COACH_JS });
       return u.split("#")[0] === PAGE ? r.continue() : r.abort(); });
     await ctx.addInitScript(([saved, now, lock, world, store, chat]) => { Date.now = () => now; try { sessionStorage.setItem("waveslave-intro", "1"); localStorage.setItem("waveslave-view", "ws"); localStorage.setItem("waveslave-lang", "en");
       if (world) localStorage.setItem("waveslave-world", "1"); for (const k in store || {}) localStorage.setItem(k, store[k]);

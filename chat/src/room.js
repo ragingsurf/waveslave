@@ -17,15 +17,20 @@
 //   onFlag, flagger()          the report button, and when a flag counts (spec "Moderation", step 4)
 //   onAdmin                    Bryan's claim to the admin role (step 7)
 //   onBan ... onHiddenList     Bryan's tools (step 5), plus his Delete in onDelete
-//   where                      GET /admin/where: which Cloudflare data centre the room lives in
+//   where                      GET /admin/where: which Cloudflare data centres the room and the coach live in
 //   mySessions ... deleteAccount   the /me routes: the surf diary, the user's own data, and deleting the account
 //   shareSession, onShare      a log from the diary as a session card in the room, and out of it again (onUnshare)
 //   rest()                     the free-plan guard: past 90% of a daily limit the chat rests until 00:00 UTC
+//   whoIs, banAccount, isBanned   the coach's calls over RPC (AI coach spec, "Backend"): who a token stands for, a ban
+//                              with no message, and whether a LINE account is banned
+//   coachStub()                the coach's stub (stubs.js), which tests replace
 //
-// Times are epoch milliseconds. The Worker calls the room as https://room/<route> with a JSON body.
+// Times are epoch milliseconds. The Worker calls the room as https://room/<route> with a JSON body, or over RPC for the
+// coach's calls.
 import { DurableObject } from "cloudflare:workers";
 import { hmacB64u, pin6, randomB64u, readToken, sameText, sha256b64u, signToken, subHash } from "./auth.js";
 import { blocked, checkNick, normalise, REASONS, SPOTS, validReport, validSession } from "./mod.js";
+import { coach, colo } from "./stubs.js";
 import BLOCKLIST from "../blocklist.json";
 
 const SECOND = 1000;
@@ -179,8 +184,6 @@ const CLAIM_TRIES_ALL = 10; // ...and wrong codes in all that stop everyone, unt
 // "/admin <code>" as typed, with either slash, in front of the code in an admin frame; and any slash command.
 const ADMIN_COMMAND = /^[/／]admin\s+/iu;
 const SLASH = /^[/／]/u;
-const TRACE_URL = "https://www.cloudflare.com/cdn-cgi/trace"; // Cloudflare's own page, which says where it was served
-const COLO = /^colo=[A-Z]{3}$/;
 
 // A message's columns as the room reads them to send it out (toPublic()).
 const MSG_COLS = "id, ts, uid, kind, spot, body, reply_to, likes";
@@ -708,6 +711,52 @@ export class Room extends DurableObject {
     }
   }
 
+  // ---- Calls from the Worker and the coach (RPC) ---------------------------------------------------------------
+  //
+  // The coach's routes and its alarm call these on the room's stub (AI coach spec, "Backend": "New Room RPC methods").
+  // A call over RPC skips fetch(), where every other request is counted, so each one counts itself as a room request
+  // against the free plan's daily limit, refused or not.
+
+  // Who a session token stands for, for the Worker's coach routes: {uid, sub_hash, role}, or {error}: "auth" or "banned"
+  // as signedIn() says, or "resting" while the chat rests (rest()). Bryan never gets "resting", so his Pause and his
+  // Drafts always work. The sign-in is checked first, since only it tells Bryan apart.
+  async whoIs(token) {
+    this.usage("req");
+    const { user, error } = await this.signedIn(token);
+    if (error) return { error };
+    if (user.role !== "admin" && this.rest()) return { error: "resting" };
+    return { uid: user.id, sub_hash: user.sub_hash, role: user.role };
+  }
+
+  // Drafts' Ban: the chat's ban (onBan) once it has found the author, with no message to go by (banWrites() and
+  // banAfter()). The LINE account is marked banned in subs, with a row made for it when the room has none, so the ban
+  // holds whether or not it has an account here. When it has one, tv goes up, so its tokens stop working; its sockets
+  // close with 4403; and its messages from the last 24 hours are hidden ("ban"). It shows in Bryan's Unban list like
+  // any other ban. Bryan's own account can't be banned: {error: "admin"}, and nothing changes. Otherwise {ok: true}.
+  async banAccount(sub_hash) {
+    this.usage("req");
+    const banned = this.ctx.storage.transactionSync(() => {
+      const target = this.one("SELECT id, role FROM users WHERE sub_hash = ?", sub_hash);
+      if (target?.role === "admin") return null;
+      const uid = target?.id ?? null;
+      return { uid, hidden: this.banWrites(sub_hash, uid) };
+    });
+    if (!banned) return { error: "admin" };
+    this.banAfter(banned.uid, banned.hidden);
+    return { ok: true };
+  }
+
+  // Whether a LINE account (its sub_hash) is banned. The coach's alarm asks before each AI call.
+  async isBanned(sub_hash) {
+    this.usage("req");
+    return this.bannedSub(sub_hash);
+  }
+
+  // The coach's stub (stubs.js). Tests replace it, as they replace now().
+  coachStub() {
+    return coach(this.env);
+  }
+
   // ---- Signing in (spec "Login (LINE, web flow)") -----------------------------------------------------------
   //
   // The Worker talks to LINE; the room keeps the rows. Every answer is JSON, and a refusal is {error} with one of:
@@ -761,7 +810,7 @@ export class Room extends DurableObject {
     const codeHash = await sha256b64u(code);
     const pin = pin6();
     const net = await this.netHash(body.ip);
-    if (this.isBanned(account)) return refuse(403, "banned");
+    if (this.bannedSub(account)) return refuse(403, "banned");
     const created = this.now();
     this.all(
       `INSERT INTO handoffs (code_hash, h, sub_hash, line_name, pin, created, tries, net) VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
@@ -875,7 +924,7 @@ export class Room extends DurableObject {
   // last_seen comes up to now (signing in is what keeps an account from the 24-month clean-up). Returns "banned", the
   // user {id, tv}, or null for a new person, whose handoff stays.
   signInKnown(row) {
-    if (this.isBanned(row.sub_hash)) {
+    if (this.bannedSub(row.sub_hash)) {
       this.all("DELETE FROM handoffs WHERE code_hash = ?", row.code_hash);
       return "banned";
     }
@@ -893,7 +942,8 @@ export class Room extends DurableObject {
     return Response.json({ token: await this.tokenFor(known, this.now()) });
   }
 
-  isBanned(account) {
+  // Whether LINE account `account` (its sub_hash) is banned. The coach asks through isBanned(), which counts the call.
+  bannedSub(account) {
     return Boolean(this.one("SELECT banned FROM subs WHERE sub_hash = ?", account)?.banned);
   }
 
@@ -1532,17 +1582,30 @@ export class Room extends DurableObject {
     );
     if (!target) return "gone";
     if (target.role === "admin") return "invalid";
-    const hidden = this.ctx.storage.transactionSync(() => {
-      this.all("INSERT INTO subs (sub_hash, banned) VALUES (?, 1) ON CONFLICT (sub_hash) DO UPDATE SET banned = 1", target.sub_hash);
-      this.all("UPDATE users SET tv = tv + 1 WHERE id = ?", target.id);
-      return this.all(
-        `UPDATE messages SET hidden_by = 'ban' WHERE uid = ? AND hidden_by IS NULL AND (ts > ? OR id = ?) RETURNING ${MSG_COLS}`,
-        target.id, this.now() - BAN_HIDES, frame.msg_id,
-      );
-    });
-    this.closeUser(target.id, CLOSE_BANNED);
-    this.announceHidden(hidden, "ban");
+    const hidden = this.ctx.storage.transactionSync(() => this.banWrites(target.sub_hash, target.id, frame.msg_id));
+    this.banAfter(target.id, hidden);
     this.send(ws, { type: "ok", for: "ban", msg_id: frame.msg_id, sub_hash: target.sub_hash });
+  }
+
+  // A ban's writes, for onBan and the coach's banAccount, inside the caller's transaction. LINE account `sub` is marked
+  // banned in subs (a row is made when the room has none). When it has an account here (uid, else null), tv goes up and
+  // its messages from the last 24 hours are hidden ("ban"), and so is message msgId whatever its age (null for none:
+  // "id = NULL" matches nothing). Returns the rows it hid, as MSG_COLS reads them, for banAfter().
+  banWrites(sub, uid, msgId = null) {
+    this.all("INSERT INTO subs (sub_hash, banned) VALUES (?, 1) ON CONFLICT (sub_hash) DO UPDATE SET banned = 1", sub);
+    if (uid === null) return [];
+    this.all("UPDATE users SET tv = tv + 1 WHERE id = ?", uid);
+    return this.all(
+      `UPDATE messages SET hidden_by = 'ban' WHERE uid = ? AND hidden_by IS NULL AND (ts > ? OR id = ?) RETURNING ${MSG_COLS}`,
+      uid, this.now() - BAN_HIDES, msgId,
+    );
+  }
+
+  // What a ban does once banWrites() is stored: the account's sockets close with 4403 (uid null: it has none), and
+  // everyone hears that the rows it hid are hidden.
+  banAfter(uid, hidden) {
+    if (uid !== null) this.closeUser(uid, CLOSE_BANNED);
+    this.announceHidden(hidden, "ban");
   }
 
   // unban {sub_hash}: lifts a LINE account's ban. Its hidden messages stay hidden until Bryan restores them, and its old
@@ -1632,22 +1695,29 @@ export class Room extends DurableObject {
     });
   }
 
-  // GET /admin/where (Bryan only): where the room lives. It asks Cloudflare's trace page, served by the data centre the
-  // room runs in, and answers its colo= line as text ("colo=NRT"), and nothing else from it. 401 {error: "auth"}
-  // without a good token, 403 {error: "admin"} for anyone but Bryan, and 502 {error: "trace"} when the page can't be
-  // read.
+  // GET /admin/where (Bryan only): where the room and the coach live, as two lines of text, "room colo=NRT" and
+  // "coach colo=KIX" (AI coach spec, "Placement"; ruling R4). Each asks Cloudflare's trace page from where it runs
+  // (colo() in stubs.js). When the coach can't say (it is down, or its trace failed), its line is "coach colo=?", and
+  // the room's still shows. 401 {error: "auth"} without a good token, 403 {error: "admin"} for anyone but Bryan, and
+  // 502 {error: "trace"} when the room's own trace can't be read, without asking the coach.
   async where(request) {
     const user = await this.userFromToken(bearer(request));
     if (!user) return refuse(401, "auth");
     if (user.role !== "admin") return refuse(403, "admin");
+    let line = null;
     try {
-      const res = await fetch(TRACE_URL);
-      const line = res.ok ? (await res.text()).split("\n").map((l) => l.trim()).find((l) => COLO.test(l)) : undefined;
-      if (line) return new Response(`${line}\n`, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+      line = await colo();
     } catch (err) {
       console.error("chat: the trace failed:", err?.name ?? "error");
     }
-    return refuse(502, "trace");
+    if (!line) return refuse(502, "trace");
+    let coachLine = "colo=?";
+    try {
+      coachLine = await this.coachStub().where();
+    } catch (err) {
+      console.error("chat: the coach's where failed:", err?.name ?? "error");
+    }
+    return new Response(`room ${line}\ncoach ${coachLine}\n`, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }
 
   // Stores a new message from `user` and sends it to every socket as msg.
@@ -1704,6 +1774,8 @@ export class Room extends DurableObject {
   //   slow:<s>   429  past the 20 logs a day, with the seconds until the next one goes
   //   full       429  1,000 logs kept already: one has to be deleted first
   //   not found  404  DELETE /me/sessions/<id> for a log that isn't this user's
+  //   coach      503  DELETE /me and GET /me/export, when the coach couldn't forget or export the account (AI coach
+  //                   spec, "Accounts"; ruling R5)
   //
   //   GET    /me/sessions       mySessions()
   //   POST   /me/sessions       logSession()
@@ -1771,14 +1843,26 @@ export class Room extends DurableObject {
     return Response.json({ ok: true });
   }
 
-  // GET /me/export ("Download my data"): what the room keeps about the user, as {nick, created, messages, reports,
-  // sessions}. messages are their text messages and session cards, and reports their reports, each {id, ts, kind,
-  // spot, body, reply_to, likes, hidden}, oldest first; hidden ones are there too, marked, without why. sessions are
-  // their logs as GET /me/sessions gives them. A report over 30 days old no longer says who posted it (retention), so
-  // it isn't theirs any more. No user id or LINE account code is in it.
+  // GET /me/export ("Download my data"): what the room and the coach keep about the user, as {nick, created, messages,
+  // reports, sessions, coach}. messages are their text messages and session cards, and reports their reports, each {id,
+  // ts, kind, spot, body, reply_to, likes, hidden}, oldest first; hidden ones are there too, marked, without why.
+  // sessions are their logs as GET /me/sessions gives them. A report over 30 days old no longer says who posted it
+  // (retention), so it isn't theirs any more. coach is their coach reviews as Coach.exportFor gives them (AI coach
+  // spec, "Accounts"): the published text and the key frames' times, never a key frame. No user id or LINE account
+  // code is in it. When the coach throws, it is 503 {error: "coach"} (ruling R5). The coach is asked first, and the
+  // account read again after it (it may have gone meanwhile: 401), so the room's part is read with no await between.
   async exportMine(request) {
-    const user = await this.userFromToken(bearer(request));
-    if (!user) return refuse(401, "auth");
+    const signedIn = await this.userFromToken(bearer(request));
+    if (!signedIn) return refuse(401, "auth");
+    let coach;
+    try {
+      coach = await this.coachStub().exportFor(signedIn.id);
+    } catch (err) {
+      console.error("chat: the coach's export failed:", err?.name ?? "error");
+      return refuse(503, "coach");
+    }
+    const user = this.account(signedIn.id, signedIn.tv);
+    if (!user || user.banned) return refuse(401, "auth");
     const posted = this.all(
       "SELECT id, ts, kind, spot, body, reply_to, likes, hidden_by FROM messages WHERE uid = ? ORDER BY ts, id",
       user.id,
@@ -1789,19 +1873,34 @@ export class Room extends DurableObject {
       messages: posted.filter((msg) => msg.kind !== "report"),
       reports: posted.filter((msg) => msg.kind === "report"),
       sessions: this.sessionsOf(user.id),
+      coach,
     });
   }
 
-  // DELETE /me ("Delete my account"; spec "Deleting an account"): everything of the account goes, in one transaction
-  // (forgetAccount()). Then every open screen is told: their text messages and session cards go (update {id, deleted:
+  // DELETE /me ("Delete my account"; spec "Deleting an account"): first the coach forgets the account (Coach.forget:
+  // its reviews, key frames and saved answers; AI coach spec, "Accounts"), then everything of it here goes, in one
+  // transaction (forgetAccount()). When the coach throws or doesn't confirm, it is 503 {error: "coach"} and nothing here
+  // is deleted, so the account and its token still work and the surfer can try again. The account is read again after
+  // the coach, as another request may have signed it out everywhere, banned or deleted it meanwhile: then 401 auth, and
+  // nothing more goes. Then every open screen is told: their text messages and session cards go (update {id, deleted:
   // true}), and each message they liked has its new count (update {id, likes}); for a message hidden since, only
   // Bryan's screens are told, as only they show it. Their sockets close with 4401, as on signing out everywhere. A
   // locked room doesn't stop it (canWrite()). {ok: true}.
   async deleteAccount(request) {
-    const user = await this.userFromToken(bearer(request));
-    if (!user) return refuse(401, "auth");
-    const refused = this.canWrite(user, "account");
+    const signedIn = await this.userFromToken(bearer(request));
+    if (!signedIn) return refuse(401, "auth");
+    const refused = this.canWrite(signedIn, "account");
     if (refused) return refuseWrite(refused);
+    let forgot;
+    try {
+      forgot = await this.coachStub().forget(signedIn.id, signedIn.sub_hash);
+    } catch (err) {
+      console.error("chat: the coach's forget failed:", err?.name ?? "error");
+      return refuse(503, "coach");
+    }
+    if (forgot?.ok !== true) return refuse(503, "coach");
+    const user = this.account(signedIn.id, signedIn.tv);
+    if (!user || user.banned) return refuse(401, "auth");
     const { gone, liked } = this.forgetAccount(user, this.now());
     this.closeUser(user.id, CLOSE_SIGNED_OUT);
     this.announceDeleted(gone);
@@ -1973,7 +2072,8 @@ export class Room extends DurableObject {
   // The one alarm. Expired sign-ins go first, then retention runs once it's past next_retention, then the keepalive
   // tick goes out while sockets are open, or, while the chat rests, the sockets are closed instead (rest()). Whatever
   // happened before, the alarm is counted as a request, the usage counts are saved and the next alarm is set: the
-  // next retention or tick, or sooner when a handoff still waiting runs out before them.
+  // next retention or tick, or sooner when a handoff still waiting runs out before them. Retention waits on the coach
+  // (deleteStaleAccounts()), and the room takes other requests meanwhile.
   async alarm() {
     const now = this.now();
     let handoffsDue = Infinity;
@@ -1986,7 +2086,13 @@ export class Room extends DurableObject {
       if (now >= this.nextRetention()) {
         // The next run is set first, so a run that fails waits until tomorrow instead of retrying in a loop.
         this.setNextRetention(now);
-        this.retention(now);
+        try {
+          await this.retention(now);
+        } finally {
+          // A sign-in may have started while retention waited on the coach: its handoff's time is read too, or the
+          // alarm set below would put it off until tomorrow's run.
+          handoffsDue = this.handoffsDue();
+        }
       }
       if (!this.rest()) this.tick();
     } finally {
@@ -2024,8 +2130,10 @@ export class Room extends DurableObject {
 
   // ---- Retention -------------------------------------------------------------------------------------------
 
-  // The daily clean-up, in the spec's order ("Retention (daily)"). Every step runs in batches of 1,000 rows.
-  retention(now) {
+  // The daily clean-up, in the spec's order ("Retention (daily)"). Every step runs in batches of 1,000 rows. It waits on
+  // the coach for the accounts not seen for 24 months (deleteStaleAccounts()), and the room takes other requests
+  // meanwhile; every other step is one statement at a time with no await, as before.
+  async retention(now) {
     // Text messages and shared session cards after 30 days.
     this.batched(
       `DELETE FROM messages WHERE id IN (
@@ -2042,8 +2150,10 @@ export class Room extends DurableObject {
          SELECT id FROM messages WHERE kind = 'report' AND ts < ? AND uid IS NOT NULL LIMIT ${BATCH})`,
       now - KEEP_REPORT_POSTER,
     );
-    // Accounts not seen for 24 months, with their logs.
-    this.deleteStaleAccounts(now - KEEP_ACCOUNT, now);
+    // Accounts not seen for 24 months, with their logs, once the coach has forgotten them. The room takes other
+    // requests while it waits on the coach, so the memory copies follow the messages deleted so far first.
+    this.messagesChanged();
+    await this.deleteStaleAccounts(now - KEEP_ACCOUNT, now);
     // What pointed at messages that are gone now: shared session cards, likes and flags.
     this.batched(
       `UPDATE sessions SET shared_msg = NULL WHERE id IN (
@@ -2081,26 +2191,56 @@ export class Room extends DurableObject {
     this.batched(`DELETE FROM handoffs WHERE rowid IN (SELECT rowid FROM handoffs WHERE created < ? LIMIT ${BATCH})`, now - LOGIN_TTL);
   }
 
-  // Deletes the accounts last seen before `cutoff`: their private logs go, their LINE account's row is marked
-  // deleted (it goes 30 days later unless banned), no message keeps their user id, and meta forgets them as
-  // DELETE /me does (forgetAdmin()), so a stale admin_uid can't lock Bryan out of the role. Their text messages,
-  // session cards and likes went long before (texts after 30 days, and a like needs a recent sign-in), and the
-  // earlier steps already took them off their reports.
-  deleteStaleAccounts(cutoff, now) {
-    for (;;) {
-      const stale = this.all(`SELECT id, sub_hash FROM users WHERE last_seen < ? LIMIT ${BATCH}`, cutoff);
-      for (const { id, sub_hash } of stale) {
-        this.batched(`DELETE FROM sessions WHERE id IN (SELECT id FROM sessions WHERE uid = ? LIMIT ${BATCH})`, id);
-        this.batched(`UPDATE messages SET uid = NULL WHERE id IN (SELECT id FROM messages WHERE uid = ? LIMIT ${BATCH})`, id);
-        this.all(
-          `INSERT INTO subs (sub_hash, deleted_at) VALUES (?, ?)
-           ON CONFLICT (sub_hash) DO UPDATE SET deleted_at = excluded.deleted_at`,
-          sub_hash, now,
+  // Deletes the accounts last seen before `cutoff`, each once the coach has forgotten it (Coach.forget, AI coach spec
+  // "Accounts"): their private logs go, their LINE account's row is marked deleted (it goes 30 days later unless
+  // banned), no message keeps their user id, and meta forgets them as DELETE /me does (forgetAdmin()), so a stale
+  // admin_uid can't lock Bryan out of the role. Their text messages, session cards and
+  // likes went long before (texts after 30 days, and a like needs a recent sign-in), and the earlier steps already
+  // took them off their reports.
+  //
+  // The coach is asked one account at a time. One it didn't confirm (it threw, or answered anything but {ok: true}) is
+  // kept for the next day's run. The pages go by id (ruling R6), so such an account is passed over, not read again in
+  // this run, and the run ends however many the coach failed. Each account is read again after the coach: one that
+  // signed in meanwhile (last_seen) or went (DELETE /me) is left as it is. A coach that fails is logged once a run, by
+  // the first error's name.
+  async deleteStaleAccounts(cutoff, now) {
+    let after = "";
+    let failed = null;
+    try {
+      for (;;) {
+        const stale = this.all(
+          `SELECT id, sub_hash FROM users WHERE last_seen < ? AND id > ? ORDER BY id LIMIT ${BATCH}`,
+          cutoff, after,
         );
-        this.forgetAdmin(id, sub_hash);
-        this.all("DELETE FROM users WHERE id = ?", id);
+        for (const { id, sub_hash } of stale) {
+          let forgot = null;
+          try {
+            forgot = await this.coachStub().forget(id, sub_hash);
+          } catch (err) {
+            failed ??= err?.name ?? "error";
+          }
+          if (forgot?.ok !== true || !this.one("SELECT 1 FROM users WHERE id = ? AND last_seen < ?", id, cutoff)) continue;
+          this.deleteStaleAccount(id, sub_hash, now);
+        }
+        if (stale.length < BATCH) return;
+        after = stale.at(-1).id;
       }
-      if (stale.length < BATCH) return;
+    } finally {
+      if (failed !== null) console.error("chat: the coach's forget failed:", failed);
     }
+  }
+
+  // One account of deleteStaleAccounts(), once the coach has forgotten it. Nothing here awaits, so no other request
+  // runs between its steps.
+  deleteStaleAccount(id, sub_hash, now) {
+    this.batched(`DELETE FROM sessions WHERE id IN (SELECT id FROM sessions WHERE uid = ? LIMIT ${BATCH})`, id);
+    this.batched(`UPDATE messages SET uid = NULL WHERE id IN (SELECT id FROM messages WHERE uid = ? LIMIT ${BATCH})`, id);
+    this.all(
+      `INSERT INTO subs (sub_hash, deleted_at) VALUES (?, ?)
+       ON CONFLICT (sub_hash) DO UPDATE SET deleted_at = excluded.deleted_at`,
+      sub_hash, now,
+    );
+    this.forgetAdmin(id, sub_hash);
+    this.all("DELETE FROM users WHERE id = ?", id);
   }
 }

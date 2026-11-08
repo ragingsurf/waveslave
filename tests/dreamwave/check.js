@@ -65,7 +65,7 @@ const CHECKS = {
     const page = await open({ world: true }); let l = await look(page);
     if (!l.btn || l.word !== "Dream Wave") throw new Error(`in developer mode the button ${l.btn ? "shows" : "is hidden"} and reads "${l.word}"`);
     const order = await page.evaluate(() => [...document.querySelectorAll(".tabs button")].map(b => b.dataset.v));
-    if (!eq(order, ["fc", "ws", "dw"])) throw new Error(`the tabs are ${order}`);
+    if (!eq(order, ["fc", "ws", "dw", "coach"])) throw new Error(`the tabs are ${order}`);
     await page.evaluate(() => setLang("zh")); l = await look(page);
     if (l.word !== "夢幻浪") throw new Error(`in 中文 the button reads "${l.word}"`);
   },

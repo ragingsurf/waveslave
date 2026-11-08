@@ -1,8 +1,11 @@
-// The servers the Taiwan chat's browser checks run against (tests/chat/room.test.js and tests/chat/flow.test.js), in one copy so the
-// two stay in step: `python3 -m http.server` serves a built page as index.html with web/chat.js next to it, as the site does, and
-// `wrangler dev` runs the Worker and the room (chat/) with test secrets, ALLOWED_ORIGINS and APP_URL set to the page's origin.
-// - start({file, name, line}) makes a scratch folder (chat-<name>-…), starts the page server and writes the test secrets; line is a
-//   started tests/chat/fake-line.mjs, or null to point LINE at a closed port. It resolves to a servers object:
+// The servers the Taiwan chat's and the AI coach's browser checks run against (tests/chat/room.test.js, tests/chat/flow.test.js and
+// tests/coach/app.test.js), in one copy so they stay in step: `python3 -m http.server` serves a built page as index.html with web/chat.js,
+// web/coach.js and web/coach-example/ next to it, as the site does, and `wrangler dev` runs the Worker, the room and the coach (chat/)
+// with test secrets, ALLOWED_ORIGINS and APP_URL set to the page's origin.
+// - start({file, name, line, ai}) makes a scratch folder (chat-<name>-…), starts the page server and writes the test secrets; line is a
+//   started tests/chat/fake-line.mjs, or null to point LINE at a closed port; ai is a started tests/coach/fake-ai.mjs, which the coach's
+//   COACH_API_URL and COACH_MAIL_URL then point at with the stand-in keys (COACH_KEYS), or null for empty keys and a closed port, so the
+//   coach rests and never calls out. It resolves to a servers object:
 //     origin, chat           the page's and the backend's http://127.0.0.1:<port>
 //     tmp                    the scratch folder (wrangler.log, the room's state)
 //     startWrangler()        starts wrangler dev and waits until it answers; stopWrangler() stops it
@@ -16,6 +19,8 @@ const ROOT = path.join(__dirname, "..", ".."), CHAT_DIR = path.join(ROOT, "chat"
 // The test values; the real ones are the deploy's secrets. Session tokens for seeded accounts are signed with SESSION_SECRET.
 const SECRETS = { LINE_CHANNEL_ID: "1234567890", LINE_CHANNEL_SECRET: "test-line-secret", SESSION_SECRET: "test-session-secret-0123456789abcdef",
   SUB_PEPPER: "test-pepper", ADMIN_CODE: "test-admin-code-0123456789abcdefghijklmnop" };
+// The coach's stand-in keys, which tests/coach/fake-ai.mjs checks for (its KEYS), given only with a fake AI.
+const COACH_KEYS = { ANTHROPIC_API_KEY: "test-only-anthropic-key", RESEND_API_KEY: "test-only-resend-key" };
 
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const freePort = () => new Promise((ok, no) => { const s = net.createServer().once("error", no).listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => ok(port)); }); });
@@ -33,14 +38,17 @@ async function stop(child) {
   try { process.kill(-child.pid, "SIGKILL"); } catch (e) {} await gone;
 }
 
-async function start({ file, name, line = null }) {
+async function start({ file, name, line = null, ai = null }) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), `chat-${name}-`)), [pagePort, chatPort] = [await freePort(), await freePort()];
   const s = { tmp, origin: `http://127.0.0.1:${pagePort}`, chat: `http://127.0.0.1:${chatPort}`, wrangler: null, site: null };
   const dir = path.join(tmp, "site"), log = path.join(tmp, "wrangler.log"); fs.mkdirSync(dir);
-  fs.copyFileSync(file, path.join(dir, "index.html")); fs.copyFileSync(path.join(ROOT, "web", "chat.js"), path.join(dir, "chat.js"));
-  const lineUrl = line ? line.url : "http://127.0.0.1:9";
+  fs.copyFileSync(file, path.join(dir, "index.html"));
+  for (const f of ["chat.js", "coach.js"]) fs.copyFileSync(path.join(ROOT, "web", f), path.join(dir, f));
+  fs.cpSync(path.join(ROOT, "web", "coach-example"), path.join(dir, "coach-example"), { recursive: true });
+  const lineUrl = line ? line.url : "http://127.0.0.1:9", aiUrl = ai ? ai.url : "http://127.0.0.1:9";
   fs.writeFileSync(path.join(tmp, "dev.env"), [`APP_URL=${s.origin}/`, `ALLOWED_ORIGINS=${s.origin}`, `LINE_AUTH_URL=${lineUrl}/authorize`, `LINE_TOKEN_URL=${lineUrl}/token`,
-    ...Object.entries(SECRETS).map(([k, v]) => `${k}=${v}`), ""].join("\n"));
+    `COACH_API_URL=${aiUrl}/v1/messages`, `COACH_MAIL_URL=${aiUrl}/emails`, ...Object.entries(SECRETS).map(([k, v]) => `${k}=${v}`),
+    ...Object.entries(COACH_KEYS).map(([k, v]) => `${k}=${ai ? v : ""}`), ""].join("\n"));
   s.startWrangler = () => {
     const out = fs.openSync(log, "a");
     s.wrangler = spawn(path.join(CHAT_DIR, "node_modules", ".bin", "wrangler"), ["dev", "--ip", "127.0.0.1", "--port", String(chatPort), "--env-file", path.join(tmp, "dev.env"),
@@ -57,4 +65,4 @@ async function start({ file, name, line = null }) {
   return s;
 }
 
-module.exports = { SECRETS, wait, freePort, start };
+module.exports = { SECRETS, COACH_KEYS, wait, freePort, start };

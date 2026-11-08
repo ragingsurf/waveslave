@@ -112,6 +112,9 @@ screenshot or the repo. Claude never needs them.
     | `SUB_PEPPER` | 9 |
     | `ADMIN_CODE` | 9 |
 
+    Two more secrets, `ANTHROPIC_API_KEY` and `RESEND_API_KEY`, are for the AI coach. The chat doesn't need them: it deploys
+    without them. Their steps are in [Setting up the AI coach](coach-setup.md).
+
     GitHub never shows a secret again once it's saved. If you get one wrong, select the pencil (edit) button next to it and
     paste the value again.
 

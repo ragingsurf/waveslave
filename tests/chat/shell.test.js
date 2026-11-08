@@ -347,7 +347,10 @@ const CHECKS = {
     if (w.y !== 1500 || w.body !== at) throw new Error(`closed, the page is at ${w.y} (body ${w.body}), want 1500 (body ${at}) where it was`);
   },
   // Every string is there in English, 中文 and 日本語, with the same codes and the same number of house rules, none empty, and the privacy
-  // note names the operator (CONTACT) in each.
+  // note names the operator (CONTACT) in each. The delete-account warning and the privacy note's "What is kept" and "How long" name the
+  // coach's reviews and their key frames in each (AI coach spec, "chat.js's texts"), and "How long" says the key frames go 30 days after
+  // the review. "Why" names the coach too, and "Where, and who handles it" says the key frames go to Anthropic (ruling P32); no part of
+  // the note names Bryan.
   async everyLanguage(open) {
     const page = await open({}), bad = await page.evaluate(c => { const T = window.CHAT._strings, out = [], langs = ["en", "zh", "ja"];
       const text = (v, k) => { const s = typeof v === "function" ? v(...(k === "privacy" ? [c] : k === "forecastSaid" ? ["1.1 m", "1.0 m", "07:00"] : [7])) : v;
@@ -365,6 +368,18 @@ const CHECKS = {
         if (k === "privacy" && !(ts.join(" ").includes(c.name) && ts.join(" ").includes(c.email))) out.push(`${l}.privacy doesn't name ${c.name} and ${c.email}`);
       }
       for (const l of langs) for (const k of Object.keys(T[l])) if (!(k in T.en)) out.push(`${l} has ${k}, en doesn't`);
+      const coach = { en: ["coach reviews", "key frames"], zh: ["教練講評", "關鍵影格"], ja: ["コーチのレビュー", "キーフレーム"] }, after = { en: "30 days after the review", zh: "講評後 30 天", ja: "レビューの30日後" };
+      const named = { en: "coach", zh: "教練", ja: "コーチ" }, frames = { en: "key frames", zh: "關鍵影格", ja: "キーフレーム" };
+      // With the key frames go the answers and note, the earlier reviews of the move and other surfers' edited reviews without names, and
+      // "How long" has Cloudflare's request logs (ruling P69).
+      const along = { en: ["your answers and note", "your earlier reviews of that move", "without names, edited reviews of other surfers"],
+        zh: ["你的回答和補充說明", "你之前這個動作的講評", "不具名、經過修改的其他衝浪者講評"], ja: ["あなたの回答とメモ", "その技の過去のレビュー", "名前を除いて編集した他のサーファーのレビュー"] };
+      const logs = { en: "cloudflare keeps request logs (time, page asked for) for 3 days", zh: "請求紀錄（時間、要求的頁面）保留 3 天", ja: "リクエストのログ（時刻、要求されたページ）を3日間保存" };
+      for (const l of langs) { const p = T[l].privacy(c); // p[1] is "Why", p[2] "What is kept", p[3] "Where, and who handles it", p[4] "How long"
+        for (const [k, t, want] of [["deleteWhat", T[l].deleteWhat, coach[l]], [p[1][0], p[1][1], [named[l]]], [p[2][0], p[2][1], coach[l]],
+          [p[3][0], p[3][1], ["anthropic", frames[l], "waveslave", ...along[l]]], [p[4][0], p[4][1], [...coach[l], after[l], logs[l]]]])
+          for (const w of want) if (!t.toLowerCase().includes(w)) out.push(`${l}: ${k} doesn't say ${w}`);
+        if (/bryan/i.test(JSON.stringify(p))) out.push(`${l}: the privacy note names Bryan`); }
       return out; }, CONTACT);
     if (bad.length) throw new Error(bad.join("; "));
     if (!await page.evaluate(() => window.CHAT._strings.en.lineLogin === "Log in with LINE" && window.CHAT._strings.zh.lineLogin === "使用LINE帳號登入" && window.CHAT._strings.ja.lineLogin === "LINEでログイン"))
@@ -378,14 +393,14 @@ const CHECKS = {
       ["少しペースを落としてください · 30秒後に再試行", "少しペースを落としてください · 10分後に再試行", "少しペースを落としてください · 18時間後に再試行"]];
     if (!eq(got, want)) throw new Error(`waits read ${JSON.stringify(got)}`);
   },
-  // chat.js adds one global, window.CHAT = {spot, relang, dev}, and nothing else; and it has no HTML sinks.
+  // chat.js adds one global, window.CHAT = {spot, relang, dev, signIn, token}, and nothing else; and it has no HTML sinks.
   async noGlobals(open) {
     const names = async page => { await settle(page); await wait(300); return page.evaluate(() => Object.getOwnPropertyNames(window)); };
     const on = await open({ test: false }); await on.waitForFunction(() => !document.getElementById("nowReports").hidden);
     const a = await names(on), b = new Set(await names(await open({ test: false, chatJs: "" }))), extra = a.filter(k => !b.has(k));
     if (!eq(extra, ["CHAT"])) throw new Error(`chat.js adds ${JSON.stringify(extra)}, want only CHAT`);
     const keys = await on.evaluate(() => Object.keys(window.CHAT).sort());
-    if (!eq(keys, ["dev", "relang", "spot"])) throw new Error(`window.CHAT has ${keys.join(", ")}`);
+    if (!eq(keys, ["dev", "relang", "signIn", "spot", "token"])) throw new Error(`window.CHAT has ${keys.join(", ")}`);
     const code = CHAT_JS.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
     const sinks = code.match(/innerHTML|outerHTML|insertAdjacentHTML|document\.write|data-zh|data-ja/g);
     if (sinks) throw new Error(`chat.js uses ${[...new Set(sinks)].join(", ")}`);

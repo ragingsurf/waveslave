@@ -30,9 +30,10 @@ class BuildSite(unittest.TestCase):
     def test_script_addresses_carry_their_versions(self):
         page = self.build('site'); addr = {n: self.address(page, n) for n in SCRIPTS}
         for n in SCRIPTS: self.assertRegex(addr[n], r'^%s\.js\?v=\w+$' % n)
-        # the page is web/head.html and the built page as they were but for those two addresses, coach.js's tag before chat.js's
+        # the page is web/head.html and the built page as they were but for those addresses (and Dream Wave's), coach.js's tag before chat.js's
         want = read(os.path.join(ROOT, 'web', 'head.html')) + read(os.path.join(ROOT, 'template.html'))
         for n in SCRIPTS: want = want.replace('src="%s.js"' % n, 'src="%s"' % addr[n])
+        want = want.replace('src="dreamwave.js"', 'src="%s"' % self.dw_address(page))
         self.assertEqual(page, want)
         self.assertLess(page.index('src="%s"' % addr['coach']), page.index('src="%s"' % addr['chat']))
         # and each script goes next to it as it is
@@ -68,6 +69,25 @@ class BuildSite(unittest.TestCase):
         img = re.search(r'property="og:image" content="https://waveslave\.tw/([^"?]+)', top).group(1)
         with open(os.path.join(self.tmp, 'site', img), 'rb') as f: head = f.read(24)
         self.assertEqual(head[:8], b'\x89PNG\r\n\x1a\n'); self.assertEqual((int.from_bytes(head[16:20], 'big'), int.from_bytes(head[20:24], 'big')), (1200, 630))
+
+    def dw_address(self, page):
+        found = re.findall(r'<script src="(dreamwave\.js[^"]*)" defer></script>', page)
+        self.assertEqual(len(found), 1, found); return found[0]
+
+    def test_dreamwave_address_carries_its_version(self):
+        self.assertRegex(self.dw_address(self.build('site')), r'^dreamwave\.js\?v=\w+$')
+
+    def test_dreamwave_files_copied(self):
+        # the Dream Wave tab's loader, its parts and three.js go out next to the page as they are, so the tab loads from the site itself
+        self.build('site')
+        for rel in ('dreamwave.js', 'dreamwave/shell.js', 'dreamwave/flow.js', 'vendor/three.min.js'):
+            with open(os.path.join(self.tmp, 'site', rel), 'rb') as a, open(os.path.join(ROOT, 'web', rel), 'rb') as b: self.assertEqual(a.read(), b.read(), rel)
+
+    def test_address_changes_with_a_dreamwave_part(self):
+        # the loader asks for its parts with its own version, so a changed part changes the loader's address too
+        a = self.dw_address(self.build('a')); self.assertEqual(self.dw_address(self.build('b')), a)
+        with open(os.path.join(self.tmp, 'web', 'dreamwave', 'shell.js'), 'a', encoding='utf-8') as f: f.write('\n// changed\n')
+        self.assertNotEqual(self.dw_address(self.build('c')), a)
 
 
 if __name__ == '__main__':

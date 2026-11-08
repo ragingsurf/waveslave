@@ -10,8 +10,11 @@ mkdir -p "$OUT"
 # could otherwise run the chat.js or coach.js before it.
 V=$(cksum < "$HERE/web/chat.js" | cut -d' ' -f1)
 C=$(cksum < "$HERE/web/coach.js" | cut -d' ' -f1)
-sed -e "s|src=\"chat.js\"|src=\"chat.js?v=$V\"|" -e "s|src=\"coach.js\"|src=\"coach.js?v=$C\"|" "$HERE/web/head.html" "$W/taitung-surf.html" > "$OUT/index.html"
-cp "$HERE/web/manifest.webmanifest" "$HERE/web/sw.js" "$HERE/web/chat.js" "$HERE/web/coach.js" "$HERE"/web/*.png "$OUT/"
+# The Dream Wave tab's loader is versioned the same way, by a checksum over it and its parts (it asks for its parts with its own version).
+VD=$(cat "$HERE/web/dreamwave.js" "$HERE"/web/dreamwave/*.js | cksum | cut -d' ' -f1)
+sed -e "s|src=\"chat.js\"|src=\"chat.js?v=$V\"|" -e "s|src=\"coach.js\"|src=\"coach.js?v=$C\"|" -e "s|src=\"dreamwave.js\"|src=\"dreamwave.js?v=$VD\"|" "$HERE/web/head.html" "$W/taitung-surf.html" > "$OUT/index.html"
+cp "$HERE/web/manifest.webmanifest" "$HERE/web/sw.js" "$HERE/web/chat.js" "$HERE/web/coach.js" "$HERE/web/dreamwave.js" "$HERE"/web/*.png "$OUT/"
+mkdir -p "$OUT/dreamwave" "$OUT/vendor"; cp "$HERE"/web/dreamwave/*.js "$OUT/dreamwave/"; cp "$HERE"/web/vendor/*.js "$OUT/vendor/"
 # The coach's signed-out example: its key frames, web/coach-example/1.jpg ...
 cp -R "$HERE/web/coach-example" "$OUT/"
 touch "$OUT/.nojekyll"

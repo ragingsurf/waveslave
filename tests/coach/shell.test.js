@@ -263,13 +263,13 @@ const CHECKS = {
       if (!eq(page.asked, want) || backends(page).length) throw new Error(`developer mode off${pub ? ", the chat public" : ""}: the page asked the backend for ${JSON.stringify(page.asked)} and tried ${backends(page).join(", ") || "no other"}`);
     }
   },
-  // Developer mode on, on a Taiwan spot: the tab is there, after Forecast and Map, reading Coach, unpicked, with no data-zh or data-ja
+  // Developer mode on, on a Taiwan spot: the tab is there, after Forecast, Map and Dream Wave, reading Coach, unpicked, with no data-zh or data-ja
   // (coach.js writes its words itself). In 中文 it reads 教練; in 日本語, which the coach doesn't carry, Coach. It asks the backend nothing.
   async devOn(open) {
     const page = await open({}); await wait(300); let l = await look(page);
     if (!l.tab || l.text !== "Coach" || l.picked.join() !== "fc") throw new Error(`in developer mode the tab is ${l.tab ? "there" : "hidden"}, reads ${JSON.stringify(l.text)}, picked ${l.picked}`);
     const order = await page.evaluate(() => [...document.querySelectorAll(".tabs button")].map(b => b.dataset.v));
-    if (!eq(order, ["fc", "ws", "coach"])) throw new Error(`the tabs are ${order}, want fc, ws, coach`);
+    if (!eq(order, ["fc", "ws", "dw", "coach"])) throw new Error(`the tabs are ${order}, want fc, ws, dw, coach`);
     const tagged = await page.evaluate(s => { const t = document.querySelector(s); return [...t.attributes].map(a => a.name).filter(n => /^data-(zh|ja)/.test(n)); }, TAB);
     if (tagged.length) throw new Error(`the tab carries ${tagged.join(", ")}`);
     for (const [lang, want] of [["zh", "教練"], ["ja", "Coach"], ["en", "Coach"]]) {

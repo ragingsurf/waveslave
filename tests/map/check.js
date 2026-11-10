@@ -659,7 +659,7 @@ const CHECKS = {
     await zoomOut(page); await reopen("Taiwan, left zoomed all the way out");
     const tag = await page.evaluate(() => window.__ws.tags().find(t => t[4] === "jinshan")); await tapAt(page, [tag[0] + tag[2]/2, tag[1] + tag[3]/2]); await settle(page);
     if (!(await at()).card) throw new Error("a tap on Jinshan's tag opened no forecast card"); await reopen("Taiwan, Jinshan's card left open");
-    await tapAt(page, await page.evaluate(() => { const v = window.__ws.view(); return [v.W*0.1, v.H*0.42]; })); await settle(page); // open sea west of Taiwan
+    await tapAt(page, await page.evaluate(() => { const v = window.__ws.view(); return [v.W*0.1, v.H*0.42]; })); await page.waitForTimeout(400); // open sea west of Taiwan (the pin waits out a double tap)
     if (!(await at()).pin) throw new Error("a tap on open sea at Taiwan's home view dropped no pin"); await reopen("Taiwan, a pin left dropped");
     await reopen("Hawaii, picked on Forecast", () => { sessionStorage.setItem("waveslave-unlock", window.__lockHash); setWorld(true); switchCountry("hi"); }); // leaving World mode forgot the code
     await zoomOut(page); await reopen("Hawaii, left zoomed all the way out");
@@ -723,6 +723,27 @@ const CHECKS = {
     if (r.mark !== 1) throw new Error("the page reloaded (window.__mark is gone)");
     if (r.cur !== "pipeline") throw new Error(`CUR is ${r.cur}, want pipeline`);
     if (r.shut) throw new Error("#wsSheet is hidden: Pipeline's table did not open");
+  },
+  // A double tap zooms in twice as close about the place tapped (Bryan, Nov 10), like Google Maps: with a finger on open sea (no pin dropped,
+  // the page itself not zoomed) and with a double click on a laptop. A single tap on open sea still drops a pin, and on a spot still opens its card.
+  async doubleTapZoom(open) {
+    const tap2 = async (page, [x, y]) => { const b = await page.locator("#wsFx").boundingBox(), s = await page.context().newCDPSession(page);
+      for (let i = 0; i < 2; i++) { await s.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: b.x + x, y: b.y + y }] });
+        await page.waitForTimeout(40); await s.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }); await page.waitForTimeout(80); } };
+    const sea = page => page.evaluate(() => { const v = window.__ws.view(); return [v.W*0.15, v.H*0.42]; }); // open sea west of Taiwan
+    for (const [name, size, dbl] of [["phone", null, tap2], ["laptop", { width: 1440, height: 900 }, async (page, [x, y]) => { const b = await page.locator("#wsFx").boundingBox(); await page.mouse.dblclick(b.x + x, b.y + y); }]]) {
+      const page = await open({ ...home("tw"), size }), at = await sea(page), a = await page.evaluate(at => ({ ...window.__ws.view(), ll: window.__ws.ll(...at) }), at);
+      await dbl(page, at); await page.waitForTimeout(500);
+      const b = await page.evaluate(ll => ({ ...window.__ws.view(), p: window.__ws.px(...ll), pin: !!window.__ws.pin(), scale: visualViewport.scale }), a.ll);
+      if (!near(b.z, a.z*2, 1e-6)) throw new Error(`${name}: after a double tap z is ${b.z}, want ${a.z*2} (twice ${a.z})`);
+      if (Math.hypot(b.p[0]-at[0], b.p[1]-at[1]) > 1) throw new Error(`${name}: the place double tapped moved from ${at} to ${b.p.map(Math.round)}, want it to stay under the finger`);
+      if (b.pin) throw new Error(`${name}: the double tap dropped a pin`);
+      if (b.scale !== 1) throw new Error(`${name}: the page zoomed to ${b.scale}x`);
+    }
+    const page = await open(home("tw")), z = (await page.evaluate(() => window.__ws.view())).z;
+    await tapAt(page, await sea(page)); await page.waitForTimeout(450);
+    if (!await page.evaluate(() => !!window.__ws.pin())) throw new Error("a single tap on open sea dropped no pin");
+    if ((await page.evaluate(() => window.__ws.view())).z !== z) throw new Error("a single tap zoomed the map");
   },
   // The lit country does what the home button did: from Taiwan's old home view one tap goes all the way out with Taiwan still on screen
   // (the view a pinch out ends on), and a second tap comes to Taiwan's home view (straight there, with reduced motion).
@@ -819,7 +840,7 @@ const CHECKS = {
   async pinDrag(open) {
     const page = await open({ ...home("tw"), size: { width: 1440, height: 900 } }); await zoomOut(page);
     const b = await page.locator("#wsFx").boundingBox(), at = await page.evaluate(() => window.__ws.px(178, 32));
-    await page.route("**/api.open-meteo.com/**", r => r.abort()); await page.mouse.click(b.x + at[0], b.y + at[1]); await settle(page);
+    await page.route("**/api.open-meteo.com/**", r => r.abort()); await page.mouse.click(b.x + at[0], b.y + at[1]); await page.waitForTimeout(400); // the pin waits out a double tap
     if (!await page.evaluate(() => window.__ws.pin())) throw new Error("no pin dropped");
     let got; const asked = new Promise(r => { got = r; }), wait = setTimeout(() => got(null), 3000);
     await page.unroute("**/api.open-meteo.com/**"); await page.route("**/api.open-meteo.com/**", r => { got(r.request().url()); return r.abort(); });

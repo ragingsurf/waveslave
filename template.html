@@ -1688,11 +1688,13 @@ const WS = (() => {
     hold = true; try { switchCountry(c); } finally { hold = false; } const to = [cx, cy, z]; [cx, cy, z] = from; fly(...to); }
   // The + and − buttons: zoom about the middle of the map, eased out over 300 ms like the country glide (Bryan, Oct 21). A tap while it is still
   // moving zooms on from where that zoom was going, so quick taps add up smoothly. With reduced motion, a jump.
-  let zt = 0; function zoomBy(f) { const to = Math.max(zmin, Math.min(homeZ(HOME)*10, (gl && zt ? zt : z)*f)); unglide();
-    if (matchMedia("(prefers-reduced-motion: reduce)").matches) { z = to; moved(); return; }
+  // at = [x, y] (a double tap, below) zooms about that point instead, so the place tapped stays under the finger, as Google Maps does.
+  let zt = 0; function zoomBy(f, at) { const to = Math.max(zmin, Math.min(homeZ(HOME)*10, (gl && zt ? zt : z)*f)); unglide();
+    const [lon, lat] = at ? ll(...at) : [], hold = () => { if (!at) return; const [nx, ny] = px(lon, lat); cx += (nx-at[0])/z; cy = iy(my(cy) - (ny-at[1])/z); };
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) { z = to; clampView(); hold(); moved(); return; }
     const zs = z, t0 = performance.now(); zt = to;
     const step = now => { const p = Math.min(1, Math.max(0, now - t0)/300), e = 1 - Math.pow(1 - p, 3);
-      z = zs*Math.pow(to/zs, e); clampView(); if (p < 1) { liveMoved(); gl = requestAnimationFrame(step); } else { gl = zt = 0; settled(); } }; // stretched as fingers stretch it
+      z = zs*Math.pow(to/zs, e); clampView(); hold(); if (p < 1) { liveMoved(); gl = requestAnimationFrame(step); } else { gl = zt = 0; settled(); } }; // stretched as fingers stretch it
     gl = requestAnimationFrame(step); }
   function zoomAt(f, x, y, live) { unglide(); const [lon,lat] = ll(x, y); z *= f; clampView(); const [nx,ny] = px(lon, lat); cx += (nx-x)/z; cy = iy(my(cy) - (ny-y)/z); live ? liveMoved() : moved(); }
   function legend() { const L = LAY[layer], el = document.getElementById("wsLegend");
@@ -1749,6 +1751,9 @@ const WS = (() => {
     if (window.ResizeObserver) new ResizeObserver(() => sec.style.setProperty("--ctryr", ctry.offsetLeft + ctry.offsetWidth + "px")).observe(ctry);
     // Zoom and pan: scroll wheel or the +/− buttons; pinch with two fingers; drag sideways with one (up/down still scrolls the page).
     const P = new Map(); let downAt = null, pinch = null, drag = null;
+    // Double tap (or double click) zooms in twice as close about the place tapped, like Google Maps (Bryan, Nov 10). A tap on open sea waits
+    // DBL ms before dropping its pin, so a double tap there zooms without dropping one; a tap on a spot opens it at once, as before.
+    const DBL = 300; let lastTap = null, pinLater = 0;
     const onPin = ([x, y]) => PIN && PINBOX && !(PINX && Math.hypot(x-PINX[0], y-PINX[1]) < 16) && !(PINBTN && Math.hypot(x-PINBTN[0], y-PINBTN[1]) < 20)
       && ((x >= PINBOX[0] && x <= PINBOX[0]+PINBOX[2] && y >= PINBOX[1] && y <= PINBOX[1]+PINBOX[3]) || Math.hypot(x-PINBOX[4], y-PINBOX[5]) < 16);
     // A finger on the pin readout moves the pin instead of scrolling the page.
@@ -1766,12 +1771,16 @@ const WS = (() => {
     const up = e => { const was = P.get(e.pointerId); P.delete(e.pointerId); pinch = null; if (settle && !P.size) settled();
       if (drag && drag.moved) { drag = null; downAt = null; dropPin(PIN.lon, PIN.lat); return; } drag = null;
       if (downAt && was && e.type === "pointerup" && Math.hypot(was[0]-downAt[0], was[1]-downAt[1]) < 14) { let best = null, bd = 44;
-        if (PIN && PINX && Math.hypot(was[0]-PINX[0], was[1]-PINX[1]) < 16) { PIN = null; PINBTN = PINX = null; document.getElementById("wsSheet").hidden = true; drawBase(); if (!P.size) downAt = null; return; }
-        if (PIN && PINBTN && Math.hypot(was[0]-PINBTN[0], was[1]-PINBTN[1]) < 20) { pinOpen(!PIN.open); if (!P.size) downAt = null; return; }
+        if (PIN && PINX && Math.hypot(was[0]-PINX[0], was[1]-PINX[1]) < 16) { lastTap = null; PIN = null; PINBTN = PINX = null; document.getElementById("wsSheet").hidden = true; drawBase(); if (!P.size) downAt = null; return; }
+        if (PIN && PINBTN && Math.hypot(was[0]-PINBTN[0], was[1]-PINBTN[1]) < 20) { lastTap = null; pinOpen(!PIN.open); if (!P.size) downAt = null; return; }
+        // The second tap of a double tap, close in time and place to the first: zoom in there (and the first tap's pin, still waiting, is never dropped).
+        const t = performance.now();
+        if (!P.size && lastTap && t - lastTap.t < DBL && Math.hypot(was[0]-lastTap.at[0], was[1]-lastTap.at[1]) < 40) { lastTap = null; clearTimeout(pinLater); pinLater = 0; downAt = null; zoomBy(2, was); return; }
+        lastTap = P.size ? null : {t, at: was};
         const tag = TAGHIT.find(b => was[0] >= b[0] && was[0] <= b[0]+b[2] && was[1] >= b[1] && was[1] <= b[1]+b[3]); if (tag) { bd = 0; best = SP.find(s => s.id===tag[4]); }
         // A tap on a spot opens it; anywhere else in the Pacific box drops a pin there (outside the box there is no map, so nothing to ask about).
         for (const s of SP) { if (!onMap(s)) continue; const [sx,sy] = px(s.lon, s.lat), dd = Math.hypot(sx-was[0], sy-was[1]); if (dd < bd) { bd = dd; best = s; } } if (best) { PIN = null; PINBTN = PINX = null; switchSpot(best.id); openSheet(best.id); }
-        else { const [lon, lat] = ll(was[0], was[1]), B = MAPM.PBOX; if (lon >= B.l && lon <= B.r && lat >= B.s && lat <= B.n) dropPin(lon, lat); } }
+        else { const [lon, lat] = ll(was[0], was[1]), B = MAPM.PBOX; clearTimeout(pinLater); if (lon >= B.l && lon <= B.r && lat >= B.s && lat <= B.n) pinLater = setTimeout(() => { pinLater = 0; dropPin(lon, lat); }, DBL); } }
       if (!P.size) downAt = null; };
     fx.onpointerup = up; fx.onpointercancel = up;
     // Wheel and trackpad: a mouse notch zooms about a fifth; a trackpad pinch (sent as ctrl+wheel with small steps) follows the fingers.

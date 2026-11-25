@@ -402,6 +402,21 @@ const CHECKS = {
   async baja(open) {
     await twoParts(open, "bj", 248.5, { w: { spot: "kthirtyeight", mate: "puntabaja", cx: 245.27, cy: 29.3, span: 7.6, wide: 5.6 }, e: { spot: "sanpedrito", mate: "cerritos", cx: 249.81, cy: 23.35, span: 1.0, wide: 1.6 } });
   },
+  // What to wear under the water temperature: by the water alone (24/20/16/12 °C) in warm still air, one suit warmer when the air is under
+  // 25 °C or the wind is 15 kt or more, never pushed past a 4/3 by that; and Taiwan in late November (26 °C water, 22 °C air, light wind) is no
+  // longer boardshorts. The card at Donghe names the suit its water alone gives, or the one warmer.
+  async waterSuit(open) {
+    const page = await open({ spot: "donghe" });
+    const got = await page.evaluate(() => [[26,28,5],[22,28,5],[18,28,5],[14,28,5],[10,28,5],[26,24,5],[26,28,15],[26,null,null],[22,20,20],[14,10,25],[10,10,25]].map(a => suitFor(...a)));
+    const want = [0,1,2,3,4,1,1,0,2,3,4];
+    if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`suitFor gives ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+    await page.evaluate(() => setView("fc", true)); await settle(page);
+    const t = await page.evaluate(() => document.getElementById("nowFacts").textContent);
+    if (!/Water · /.test(t)) skip("Donghe's buoy sends no water temperature now");
+    const k = await page.evaluate(() => { const B = ALL.spots.donghe.buoy, b = B[B.length-1]; return b[4] == null ? null : suitFor(b[4], 30, 0); }); // the water alone
+    const names = ["boardshorts","springsuit","3/2 wetsuit","4/3 wetsuit","5/4 wetsuit and hood"];
+    if (k != null && !t.includes("Water · " + names[k]) && !t.includes("Water · " + names[Math.min(k+1, 4)])) throw new Error(`Donghe's card reads "${t}", want ${names[k]}`);
+  },
   // On the Forecast page the tide line says "Model tide" at a South Pacific spot that takes the tide model (Salani), and not at one that takes
   // NOAA's tides (Cloudbreak), at Papua New Guinea's and Vanuatu's spots, which all take the model (Lido, Pango Point), and in Baja at a spot
   // south of Ensenada (Cerritos) but not at one that takes NOAA's (K-38).

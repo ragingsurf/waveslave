@@ -1884,6 +1884,11 @@ function setView(v, instant){ if(v==="dw" && !window.DREAMWAVE) v="fc"; VIEW=v; 
 // The Coach tab (web/coach.js shows it) opens the Coach panel over the forecast and is never picked: the Forecast/Map pill and the saved view stay as they are.
 { const later = afterGlide(), bs = document.querySelectorAll(".tabs button"); bs.forEach(b=>b.onclick=()=>{ if (b.dataset.v === "coach") { window.COACH && COACH.open(); return; } pressOnly(bs, b, "aria-selected"); later(()=>setView(b.dataset.v)); }); }
 addEventListener("hashchange", () => switchSpot(location.hash.slice(1)));
+// What to wear (the Right now card's water line): 0 boardshorts, 1 springsuit, 2 3/2, 3 4/3, 4 5/4 and hood, from the water temperature (24/20/16/12 °C), one suit warmer
+// when the air is under 25 °C or the wind is 15 kt or more (a warm Kuroshio sea under the winter monsoon still chills you), never past a 4/3
+// on that account. Taiwan used to say boardshorts all year whatever the water.
+function suitFor(water, air, kt) { const k = [24,20,16,12,-99].findIndex(c => water >= c);
+  return k < 3 && (air != null && air < 25 || kt != null && kt >= 15) ? k+1 : k; }
 function boot(SPOT){
 const DATA = Object.assign({updated:ALL.updated}, ALL.spots[SPOT]);
 const TZ = (DATA.tz||8)*3600e3; // the spot's own clock for display: UTC+8 Taiwan, UTC+9 Japan
@@ -1987,6 +1992,9 @@ function boardPath(w,h,p){ const X=x=>(w/2+x*(w-1.8)).toFixed(2), Y=y=>(.9+y*(h-
     + (p.tail==="swallow" ? `L${X(0)},${Y(yt-p.notch)}L${X(-tw)},${Y(yt)}` : `Q${X(0)},${Y(yt+2*bu)} ${X(-tw)},${Y(yt)}`)
     + `C${X(-b2x)},${Y(b2y)} ${X(-.5)},${Y(b1y)} ${X(-.5)},${Y(p.wide)}C${X(-.5)},${Y(a2y)} ${X(-a1x)},${Y(a1y)} ${X(0)},${Y(0)}Z`; }
 
+// The spot's Open-Meteo air temperature for the hour nearest now (within 2 h), or null.
+function airNow() { let best = null, bd = 2*36e5; for (const r of DATA.wx||[]) { const d = Math.abs(tp(r[0])-nowMs); if (r[1] != null && d <= bd) { bd = d; best = r[1]; } } return best; }
+
 // ---- right now
 (() => {
   const b = DATA.buoy[DATA.buoy.length-1], bt = b ? tp(b[0]) : nowMs;
@@ -2045,7 +2053,7 @@ function boardPath(w,h,p){ const X=x=>(w/2+x*(w-1.8)).toFixed(2), Y=y=>(.9+y*(h-
     w ? [`<span style="color:${k[1]}">${Math.round(w.kt)} kt</span>`, isZh() ? `${bare ? "" : compass(w.from)}${k[0]} · ${SPT(DATA,"stationName")}測站 ${hhmm(tp(dw[0]))}` : isJa() ? `${bare ? "" : compass(w.from)+"の"}${k[0]} · ${SPT(DATA,"stationName")}観測所 ${hhmm(tp(dw[0]))}` : `${k[0]}${bare ? "" : " from "+compass(w.from)} · ${DATA.stationName} station ${hhmm(tp(dw[0]))}`] : null,
     t ? [`${Math.round(t.cm)} cm`, (["au", "kr", "ph", "id", "hn", "vn"].includes(DATA.country) || DATA.tideModel ? (isZh() ? "模式潮汐 · " : isJa() ? "モデル潮汐 · " : "Model tide · ") : "") + (isZh() ? `${t.rising?"漲潮中":"退潮中"} · ${hhmm(t.next.t)} ${t.next.type==="H"?"滿潮":"乾潮"}` : isJa() ? `${t.rising?"上げ潮":"下げ潮"} · ${hhmm(t.next.t)} ${t.next.type==="H"?"満潮":"干潮"}` : `Tide ${t.rising?"rising":"falling"} · ${t.next.type==="H"?"high":"low"} at ${hhmm(t.next.t)}`)] : null,
     b && b[4]!=null ? [`${r1(b[4])}°C`, (k => isZh() ? "水溫 · "+["穿海灘褲就好","短袖防寒衣","3/2 防寒衣","4/3 防寒衣","5/4 防寒衣加頭套"][k] : isJa() ? "水温 · "+["サーフパンツでOK","スプリング","3/2 フルスーツ","4/3 フルスーツ","5/4 フルスーツとフード"][k]
-      : "Water · "+["boardshorts","springsuit","3/2 wetsuit","4/3 wetsuit","5/4 wetsuit and hood"][k])(DATA.country==="tw" ? 0 : [24,20,16,12,-99].findIndex(c => b[4]>=c))] : null,
+      : "Water · "+["boardshorts","springsuit","3/2 wetsuit","4/3 wetsuit","5/4 wetsuit and hood"][k])(suitFor(b[4], airNow(), w && w.kt))] : null,
     DATA.sun[todayKey] ? [DATA.sun[todayKey].rise, isZh() ? `日出 · 天亮 ${DATA.sun[todayKey].first}` : isJa() ? `日の出 · 薄明 ${DATA.sun[todayKey].first}` : `Sunrise · first light ${DATA.sun[todayKey].first}`] : null,
   ].filter(Boolean);
   document.getElementById("nowFacts").innerHTML = facts.map(([v,s])=>`<div class="fact"><div class="v mono">${v}</div><div class="s">${s}</div></div>`).join("");
